@@ -18,6 +18,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -289,8 +290,8 @@ expect_contains "…it resolves to the id the ROSTER carries" "a567bd5c6d1e03d67
 expect_absent_ci "…and nothing is called ambiguous" "ambiguous" "$OUT"
 
 # (c5) A TYPED AGENT ID RECORDS THE OBSERVATION FOR THE ROW IT NAMES, NEVER THE LAST ROW OF
-# ITS NAME (T32; A-T31.2 — hooks/stop-guard.sh:507-509 carries the identical fix, T31 delta
-# review D1). `ROW_WITH_ID` above is the last confirmed/identified row of the NAME, which is
+# ITS NAME (`stop_guard` in payload/scripts/lib/stop.sh keeps the row an id names the same way).
+# `ROW_WITH_ID` above is the last confirmed/identified row of the NAME, which is
 # right for a bare name and wrong for an id, which names ONE row by construction. Before this
 # fix, an observation typed as either twin's id recorded `target=` off whichever row is last
 # — so `stop-check <id A>` and `stop-check <id B>` produced the SAME machine line, and the
@@ -530,23 +531,10 @@ expect_regex "a deliverable named alongside --progress is still reported" \
 expect_absent_ci "the flag itself is never reported as a deliverable" "  --progress —" "$OUT6_BOTH"
 expect_absent_ci "the flag's value is never reported as a deliverable" "w6.progress — " "$OUT6_BOTH"
 
-# (f) TARGET FIRST — the grammar is the one the RECORDER can parse.
-#
-# This command's run is observed by hooks/stop-guard.sh's Bash arm, which
-# re-parses the same command line to decide WHICH agent was examined. That
-# recorder skips leading `-*` tokens one at a time and takes the first non-flag
-# token; it does not know that `--progress` consumes the token after it. So a
-# leading `--progress <path> <agent>` makes the two halves disagree about the
-# target — the operator looks at <agent> while the record says <path> — and a
-# record naming an agent nobody examined is the wall opening on a look that was
-# never taken (Step-6 review F-1, proven with a two-agent fixture).
-#
-# The producer is therefore narrowed to exactly what the recorder already reads:
-# the target is the FIRST argument, `--progress <path>` may follow it, and any
-# other `-`-leading token anywhere is a usage error rather than a silent
-# deliverable. That last part is also F-2: `--progres` (one `s`) used to be
-# reported as an ABSENT deliverable while the reader believed they had asked for
-# a progress channel.
+# (f) TARGET FIRST: the target is the FIRST argument, `--progress <path>` may follow it, and any
+# other `-`-leading token anywhere is a usage error rather than a silent deliverable.
+# `--progres` (one `s`) used to be reported as an ABSENT deliverable while the reader believed
+# they had asked for a progress channel.
 
 OUT6_LEAD=$(run_check "$H6" "$R6" --progress "$PROG" "long-runner"); ST=$?
 expect_status "--progress BEFORE the target exits 1" 1 "$ST"
@@ -778,15 +766,8 @@ sleep 0.3 2>/dev/null || true
 # this session's own attestation. Both are fixtures of the WRITER's
 # preconditions, never of the value under test — the row itself is lifted from
 # the brief by the real extractor.
-mkdir -p "$R8/.bionic/docs/plans/epic-99"
-{
-  printf -- '---\n'
-  printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-  printf 'intent: build\nrigor: double\nscale: wave\n'
-  printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
-  # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
-  printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n'
-} > "$R8/.bionic/docs/plans/epic-99/wave-01.md"
+# The run's page is at 15 and its log holds step 4 and the approval the writer's wall asks for.
+plan_fixture "$R8/.bionic/docs/plans/epic-99/wave-01.plan.md" wave > /dev/null
 printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8}.state"
 # …and this session's Patrol stamp, the third writer precondition since epic-17 W5 4/4: the
 # start gate refuses a dispatch whose session has no fresh one, and this case needs the gate
@@ -800,18 +781,17 @@ chmod 600 "$R8/.bionic/tmp/patrol-${OWN8}.state"
 # to actually JOURNAL a row. A fixture of the writer's preconditions, never of the value
 # under test. BOUND to the fixture plan (wave-23-fixit-1810, REQ-1, D1): an unbound
 # session's writer is refused with the bind instruction and journals nothing.
-bound_marker "$R8" "$OWN8" "$R8/.bionic/docs/plans/epic-99/wave-01.md"
+bound_marker "$R8" "$OWN8" "$R8/.bionic/docs/plans/epic-99/wave-01.plan.md"
 
 echo "progress line" > "$R8/prog-g.progress"
-# THE `Suites:` LINE IS A WRITER PRECONDITION, not part of the value under test (S13,
-# spec AC-20): the start gate refuses a brief that declares neither `Files:` nor `Suites:`,
-# and this case needs the dispatch to actually JOURNAL a row. The DECLARED spelling,
-# because this fixture repo configures no `impact-command:`.
+# Each field stands under its own label on a line of its own: the wall reads no label inside a sentence.
+# `Suites:` is a writer precondition, not the value under test: a brief naming no Files: nor Suites: journals nothing.
 BRIEF_G="Canonical-sdlc Step 4, task 4/12 of epic-99 wave-01; build · double · wave.
 Expected artifact: $R8/deliv-a.md
-Expected duration: ~30 minutes. Progress: $R8/prog-g.progress, cadence ~6m.
+Expected duration: ~30 minutes.
+Progress artifact: $R8/prog-g.progress
+Cadence: ~6m.
 Subprocess claim: \`$MARKER2\` → $H8/claims-out.log
-Exit condition: the artifact exists.
 Suites: tests/widget.test.sh"
 # THE PLANTED LINEAGE IS LANDED FIRST (T22). `make_agent` journals an `identified` row for
 # this name, and since the name-in-flight arm a dispatch cannot reuse a name whose row is
@@ -848,7 +828,8 @@ expect_contains "the real start gate journalled the dispatch this case reads" \
   "name=ours-claims" "$W8G_ROW"
 expect_contains "…and the row it wrote carries the claimed pattern the brief declared" \
   "claims=$MARKER2" "$W8G_ROW"
-expect_contains "…and the cadence declared beside the progress path" "cadence=~6m." "$W8G_ROW"
+expect_contains "…and the progress path its own line declares" "progress=$R8/prog-g.progress|" "$W8G_ROW"
+expect_contains "…and the cadence declared beside the progress path, to its full stop" "cadence=~6m|" "$W8G_ROW"
 
 OUT8H=$(run_check_as "$OWN8" "$H8" "$R8" "ours-claims")
 expect_contains "P2 roster-sourced: a live matching process reports live: yes" "live:     yes" "$OUT8H"

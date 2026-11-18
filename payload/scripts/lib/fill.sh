@@ -5,17 +5,17 @@
 #
 # WHAT IT OWNS. The one computation of "which rows may be dispatched now", and the one
 # predicate for "is this run's ledger live". Three verbs, all pure functions of the plan
-# file (and, for the third, of the session's roster):
+# and its run's log (and, for the third, of the session's roster):
 #
-#   fill_ledger_live <plan>            0 when the plan's `## SDLC State` carries a non-blank
-#                                      `approved-by:` line and its `current:` is 4 or later,
+#   fill_ledger_live <plan>            0 when the run's log holds the Step-3 approval and a
+#                                      step of 4 or later,
 #                                      1 otherwise. The cheap gate a caller asks BEFORE
 #                                      paying for a table read.
-#   fill_order_open <plan>             0, printing it, while the user's order stands under
-#                                      the plan's `## SDLC State`; the fill offers no row.
-#   fill_step_token <plan>             the step the ready set is asked at: the numeric
-#                                      `current:` with its sub-step letter stripped, or
-#                                      empty when the field is not a step number. It decides
+#   fill_order_open <plan>             0, printing it, while the user's order stands in
+#                                      the run's log; the fill offers no row.
+#   fill_step_token <plan>             the step the ready set is asked at: the run's
+#                                      step with its sub-step letter stripped, or
+#                                      empty when it is not a step number. It decides
 #                                      only the gate acts (integrate, close); a work row is
 #                                      ready at any step (wave-20 Δ1).
 #   fill_ready_set <plan> <rung> <open>
@@ -127,25 +127,9 @@ fi
 
 # ── THE LEDGER'S OWN FIELD ────────────────────────────────────────────────────
 #
-# _fill_current_field <plan> -> the RAW `current:` value (whitespace stripped), or "" when
-# there is no plan, no `## SDLC State` section, or no `current:` line inside it.
-#
-# THE ONE READER OF THE FIELD (wave-19 REQ-6, D7; AC-6.1). `hooks/session-poker.sh`'s
-# `_sched_plan_current_field` is a one-line wrapper over this function (the tick sources this
-# file), and §CG of tests/cross-gate-agreement.test.sh, which extracts the poker's wrapper as
-# text, sources this file beside it — so the grammar §CG binds to `run.sh`'s `run_open` is
-# this parser's. §32 of tests/session-poker.test.sh drives the wrapper and this function over
-# one table of shapes and pins that the wrapper parses nothing itself.
-#
-# FENCE-AWARE, and the line endings are translated rather than deleted, for the reason every
-# other plan read in this tree gives: a plan documenting its own `## SDLC State` inside a
-# fence is prose, and a CR-only file that collapsed to one record would read as "no section"
-# — the fail-dangerous direction. TWO PROCESSES, NOT SIX: the translation is its own `awk`
-# (the same program `normalize_newlines` runs, because splitting a record on CR inside the
-# reader would be a second spelling of it), and the section walk, the first `current:` line,
-# the prefix strip and the whitespace strip are one pass after it. The pass reads to the end
-# of its input rather than exiting at the match, so the translating `awk` upstream is never
-# cut off mid-write.
+# _fill_current_field <plan> -> the run's step as the reader answers it, its sub-step letter kept, or "" when the run
+# has none or its place cannot be read (`fill_place_unread`). The poker's `_sched_plan_current_field` is a one-line
+# wrapper over it. The answer is lib/proof.sh `proof_step_held`'s, so the step a run's log alone holds is this one.
 #
 # READ ONCE PER PROCESS (AC-6.2). One Stop asks this field three times — `fill_ledger_live`
 # at the gate, then `fill_step_token` and `fill_ledger_live` again inside `fill_ready_set` —
@@ -155,62 +139,85 @@ fi
 # and the tick both ask in their own shell before any `$( )` reader runs, and every subshell
 # after that inherits the answer. The key is the path alone. The stop wall and the tick never
 # write a plan, so for them the path is the whole identity. ONE READER WRITES: `card.sh step3`
-# rewrites one projection path per batch, each with a different `current:`, and asks the ready
-# set in its own shell — so its writer, `_card_project`, calls `fill_current_forget` after
-# every write (wave-19 critic C2: a Step-5 batch answered at the Step-4 projection's step read
-# `0 of <rung>`). A key on mtime and size would not have caught it — the step-4 and step-5
-# projections are the same size and land in the same second — and a content hash is a fork on
+# holds one copy of the page, a run of its own, and between batches moves that run's step and
+# landings in the copy's log, then asks the ready set in its own shell — so its writer,
+# `_card_project`, calls `fill_current_forget` after every write (a batch answered at the
+# previous batch's step would read `0 of <rung>`). The path as a key cannot see it — the copy's
+# path stands while its log moves — and a key on the log's content is a fork on
 # every read, the cost this memo exists to remove. So the contract is the writer's: a process
-# that rewrites a plan it has read through this file forgets it after the write. A path that
+# that moves a run it has read through this file forgets it after the write. A path that
 # is not a file is answered "" and never memoised, so a plan created later in the same process
 # is still read. Sourcing this file resets the memo.
 #
-# AND THE APPROVAL, IN THE SAME PASS (wave-26 T13; D3, AC-6.2). The ledger is live on the plan's
-# `approved-by:` line, which only the user's act writes, together with `current:`, so the one read
-# of `## SDLC State` that finds `current:` finds that line too: `_FILL_APPROVED` is 1 when a
-# non-blank `approved-by:` sits in the section.
+# AND THE APPROVAL, IN THE SAME ASK. The ledger is live on the Step-3 approval, which only the user's act writes,
+# together with the step, so the one ask of the run's place answers both: `_FILL_APPROVED` is 1 when an approval of
+# step3 stands.
 _FILL_CURRENT_PLAN=""
 _FILL_CURRENT_VALUE=""
 _FILL_APPROVED=0
+_FILL_ORDER_PLAN=""
+_FILL_ORDER=""
+_FILL_REVIEW_AT=""
+_FILL_UNREAD=""
 fill_current_forget() {  # -> drops the memo; the next reader parses whatever path it names
   _FILL_CURRENT_PLAN=""
   _FILL_CURRENT_VALUE=""
   _FILL_APPROVED=0
+  _FILL_ORDER_PLAN=""
+  _FILL_ORDER=""
+  _FILL_REVIEW_AT=""
+  _FILL_UNREAD=""
 }
-_fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE and _FILL_APPROVED; parses at most once
+
+# fill_facts_load <plan> -> the same memo, and the order's, taken from the run's facts (lib/reader.sh: its step, the
+# Step-3 approval and the standing order), so a fact the run's log alone holds is the fill's fact too; rc 1, the memo
+# untouched, when the reader cannot be loaded. Every reader of this file in the shell that calls it then answers from
+# the facts: the step and the approval through `_fill_current_load`, which keeps a memo it did not parse, the order
+# through `fill_order_open`, and the newest review proof's instant through `fill_review_at`. The facts are
+# lib/proof.sh's kept fold, one fold however many callers ask, so the tick and the stop wall load them alike.
+fill_facts_load() {
+  local plan="${1:-}" got
+  if [ -z "$plan" ] || [ ! -f "$plan" ]; then fill_current_forget; return 0; fi
+  declare -F _proof_ask >/dev/null 2>&1 || . "$_FILL_LIB_DIR/proof.sh" >/dev/null 2>&1
+  declare -F _proof_ask >/dev/null 2>&1 || return 1
+  got="$(_proof_ask "$plan" _fill_facts "$plan")" || return 1
+  _FILL_CURRENT_VALUE="$(printf '%s\n' "$got" | sed -n 's/^n=//p')"
+  _FILL_APPROVED="$(printf '%s\n' "$got" | sed -n 's/^approved=//p')"
+  _FILL_ORDER="$(printf '%s\n' "$got" | sed -n 's/^given=//p')"
+  _FILL_REVIEW_AT="$(printf '%s\n' "$got" | sed -n 's/^review_at=//p')"
+  _FILL_CURRENT_PLAN="$plan"; _FILL_ORDER_PLAN="$plan"
+}
+_fill_facts() {  # <plan> -> n=<step>, approved=1|0, given=<as gate_order_plan prints it> while an order stands, review_at=
+  reader_q_step "$1" | grep '^n='
+  if reader_q_approved "$1" step3 >/dev/null; then echo approved=1; else echo approved=0; fi
+  reader_q_order "$1" | awk -F= '{ v[$1] = substr($0, length($1) + 2) } END { if (v["order"] == "given") printf "given=given %s \"%s\"\n", v["at"], v["said"] }'
+  reader_q_reviews "$1" | awk -F'|' "$_READER_AWK"'
+    ev() == "proof" && line_kv("kind") == "review" && line_kv("at") > m { m = line_kv("at") } END { print "review_at=" m }'
+}
+
+# fill_review_at <plan> -> the instant of the newest review proof of any question, or nothing when the run holds none;
+# rc 1 when this shell has not loaded <plan>'s facts, so no caller reads an instant the reader did not give.
+fill_review_at() {
+  [ -n "${1:-}" ] && [ "$1" = "$_FILL_CURRENT_PLAN" ] && [ "$1" = "$_FILL_ORDER_PLAN" ] || return 1
+  printf '%s' "$_FILL_REVIEW_AT"
+}
+_fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE and _FILL_APPROVED; reads at most once; 1 when the run's place cannot be read
   local plan="${1:-}" got
   if [ -n "$plan" ] && [ "$plan" = "$_FILL_CURRENT_PLAN" ]; then
     return 0
   fi
-  if [ -z "$plan" ] || [ ! -f "$plan" ]; then
-    _FILL_CURRENT_VALUE=""
-    _FILL_APPROVED=0
-    _FILL_CURRENT_PLAN=""
-    return 0
-  fi
-  got="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { flag = 1; next }
-    /^## / { flag = 0 }
-    flag && !got && /^[[:space:]]*current[[:space:]]*:/ {
-      v = $0
-      sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, "", v)
-      gsub(/[[:space:]]/, "", v)
-      cur = v
-      got = 1
-    }
-    flag && /^[[:space:]]*-?[[:space:]]*approved-by[[:space:]]*:/ {
-      v = $0
-      sub(/^[[:space:]]*-?[[:space:]]*approved-by[[:space:]]*:/, "", v)
-      if (v ~ /[^[:space:]]/) appr = 1
-    }
-    END { printf "%s\037%d", cur, appr }')"
-  _FILL_CURRENT_VALUE="${got%$'\037'*}"
-  _FILL_APPROVED="${got##*$'\037'}"
-  case "$_FILL_APPROVED" in 1) : ;; *) _FILL_APPROVED=0 ;; esac
+  _FILL_CURRENT_VALUE=""; _FILL_APPROVED=0; _FILL_CURRENT_PLAN=""; _FILL_UNREAD=""
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+  # The step and the approval are the reader's (lib/proof.sh `proof_step_held`), never the plan's lines read here. A place
+  # that cannot be read is no step and no approval, named by `fill_place_unread` so a caller refuses by name.
+  declare -F proof_step_held >/dev/null 2>&1 || . "$_FILL_LIB_DIR/proof.sh" >/dev/null 2>&1
+  if ! declare -F proof_step_held >/dev/null 2>&1 || ! got="$(proof_step_held "$plan")"; then _FILL_UNREAD="$plan"; return 1; fi
+  _FILL_CURRENT_VALUE="$(printf '%s\n' "$got" | sed -n 's/^n=//p')"
+  case "$got" in *approved=1*) _FILL_APPROVED=1 ;; esac
   _FILL_CURRENT_PLAN="$plan"
 }
+# fill_place_unread <plan> -> 0 when the last read of <plan>'s place in this shell failed
+fill_place_unread() { [ -n "${1:-}" ] && [ "$1" = "${_FILL_UNREAD:-}" ]; }
 _fill_current_field() {  # <plan path> -> the raw current: value, or ""
   _fill_current_load "${1:-}"
   printf '%s' "$_FILL_CURRENT_VALUE"
@@ -239,20 +246,24 @@ fill_ledger_live() {  # <plan> -> 0 live · 1 not
 
 # ── THE USER'S ORDER HOLDS THE FILL ───────────────────────────────────────────
 #
-# fill_order_open <plan> -> 0, printing the order (`given <ISO-UTC> "<words>"`), while the plan's
-# `## SDLC State` carries an open order; 1 when it carries none.
+# fill_order_open <plan> -> 0, printing the order (`given <ISO-UTC> "<words>"`), while the run's
+# standing order is given; 1 when none stands.
 #
 # AN ORDER IS ONE OF THE THREE WAYS A ROW WAITS, with a read of the record of an open row and a read
 # of an unruled decision. It is the user's word that the run stop where it is: the runner starts no
 # suite under it (lib/gate.sh), and the fill offers no row, so neither the tick nor the stop wall
-# asks for a dispatch the user has held. lib/gate.sh `gate_order_of` is the one reader of the line;
-# a copy of this file with no gate.sh beside it has no reader, and holds nothing.
+# asks for a dispatch the user has held. In a shell that loaded the run's facts (`fill_facts_load`) the order
+# is theirs; elsewhere lib/gate.sh `gate_order_plan` asks the reader for it, and a copy of this file with no
+# gate.sh beside it has no reader, and holds nothing.
 fill_order_open() {  # <plan>
-  declare -F gate_order_of >/dev/null 2>&1 || return 1
-  gate_order_of "${1:-}" plan
+  if [ -n "${1:-}" ] && [ "$1" = "$_FILL_ORDER_PLAN" ]; then
+    [ -n "$_FILL_ORDER" ] && printf '%s\n' "$_FILL_ORDER"; return
+  fi
+  declare -F gate_order_plan >/dev/null 2>&1 || return 1
+  gate_order_plan "${1:-}"
 }
 
-# fill_plan_approved <plan> -> 0 when `## SDLC State` carries a non-blank `approved-by:` line.
+# fill_plan_approved <plan> -> 0 when the run's log holds the Step-3 approval.
 fill_plan_approved() {
   _fill_current_load "${1:-}"
   [ "$_FILL_APPROVED" = 1 ]
@@ -266,7 +277,7 @@ fill_plan_approved() {
 # ONE LEDGER SHAPE (wave-31 T5; REQ-1 AC-1.2, D2). `current:` is a step number at every scale,
 # and the token is that number with its sub-step letter (`4a`, `8b`) taken off. Any other value —
 # the retired task-scale `current: T<n>` among them — is UNREADABLE and fills nothing: the tick
-# says so (`no FILL — plan current: unreadable (T5)`), and launch-sync refuses the plan aloud.
+# says so (`no FILL — plan current: unreadable (T5)`).
 fill_step_token() {  # <plan> -> a numeric step, or ""
   local step
   _fill_current_load "${1:-}"

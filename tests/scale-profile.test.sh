@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for payload/scripts/lib/scale.sh — THE SCALE PROFILE (epic-23 wave-38 T16; D25,
-# REQ-5 AC-5.1, AC-5.3).
+# Tests for payload/scripts/lib/scale.sh — THE SCALE PROFILE.
 #
 # ONE ROW PER SCALE, ONE CELL PER PROPERTY. A scale's properties (patrol, rigor default,
 # writer cap, regression default, branch pattern, integrate act, reader dealing) were five
@@ -17,7 +16,7 @@
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The engagement and
 # close-out roots are SYNTHESIZED: a plan carrying only the keys its reader asks (`scale:`, and
-# for close-out `## SDLC State` with the two branches and `current: 8`), in a real git
+# for close-out the two branches in its header and its log at step 8), each a page at 15, in a real git
 # repository for close-out. The dispatch fixtures are the wall's own shards' (make_repo and the
 # roster rows of tests/dispatch-preflight.prelude.sh), with the plan's `scale:` line rewritten
 # and the Patrol stamp make_repo plants removed, so the wall reads the cell, not the fixture.
@@ -98,8 +97,9 @@ sp_engage_root() {  # <name> <scale> -> root holding one fresh open plan at that
   local r p
   mkdir -p "$SANDBOX/engage-$1/.bionic/tmp" "$SANDBOX/engage-$1/.bionic/docs/plans"
   r="$(cd "$SANDBOX/engage-$1" && pwd -P)"
-  p="$r/.bionic/docs/plans/$1.plan.md"
-  printf -- '---\ncanonical_sdlc_version: 14\nscale: %s\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: tasks in flight\n' "$2" > "$p"
+  p="$r/.bionic/docs/plans/$1.plan.md"; mkdir -p "$r/.bionic/docs/record/$1"
+  printf -- '---\ncanonical_sdlc_version: 15\nscale: %s\n---\n' "$2" > "$p"
+  printf 'run/v1|ev=step|n=4|at=2026-10-04T00:00:00Z\n' > "$r/.bionic/docs/record/$1/run.log"
   printf '%s' "$r"
 }
 sp_engage() {  # <sid> <root>
@@ -179,9 +179,11 @@ expect_contains "T.w8 …for the Patrol" "no Patrol stamp exists" "$GATE_VERR"
 # (4) CLOSE-OUT: a task-scale plan on `fix/x`, not yet merged. `check` refuses no branch shape,
 # and its integrate act is the PR: the merge line carries the `gh pr create` command for the
 # working branch against the integration branch, and nothing is merged. The wave-scale pair on
-# the same branch is refused for its shape. `run` recording the command is close-out-1.test.sh's
-# ANY-BRANCH section (its fixtures carry the facts a close needs).
-sp_co_root() {  # <name> <scale> -> a repository with main and an unmerged fix/x, and a plan at Step 8
+# the same branch is refused for its shape, on a page at 14: the shape only scopes the census of a
+# table with no tree column and a log with no tree fact, and a page at 15 has its trees in its log.
+# `run` recording the command is close-out-1.test.sh's ANY-BRANCH section (its fixtures carry the
+# facts a close needs).
+sp_co_root() {  # <name> <scale> [<version>, 15] -> a repository with main and an unmerged fix/x, and a plan at Step 8
   local d="$SANDBOX/co-$1" p
   mkdir -p "$d"
   (
@@ -192,8 +194,9 @@ sp_co_root() {  # <name> <scale> -> a repository with main and an unmerged fix/x
     git checkout -qb fix/x; echo b >> f.txt; git commit -qam fix; git checkout -q main
   ) >/dev/null 2>&1
   p="$d/.bionic/docs/plans/epic-99-test/fix-x.plan.md"
-  mkdir -p "${p%/*}" "$d/.bionic/tmp"
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\nrigor: single\nscale: %s\n---\n\n# Fix x\n\n## SDLC State\n\nintegration-branch: main\nworking-branch: fix/x\ncurrent: 8\n' "$2" > "$p"
+  mkdir -p "${p%/*}" "$d/.bionic/tmp" "$d/.bionic/docs/record/fix-x"
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: %s\nintent: bugfix\nrigor: single\nscale: %s\nintegration-branch: main\nworking-branch: fix/x\n---\n\n# Fix x\n' "${3:-15}" "$2" > "$p"
+  printf 'run/v1|ev=step|n=8|at=2026-10-04T00:00:00Z\n' > "$d/.bionic/docs/record/fix-x/run.log"
   printf '%s' "$d"
 }
 SP_CT="$(sp_co_root task task)"
@@ -208,6 +211,7 @@ expect_absent "T.c5 …and does not refuse the unmerged branch" "WOULD REFUSE �
 expect_eq "T.c6 …and merges nothing" "$SP_MAIN0" "$(git -C "$SP_CT" rev-parse main)"
 SP_CW="$(sp_co_root wave wave)"
 SP_CO_OUT="$(cd "$SP_CW" && bash "$SP_CLOSE" "$SP_CW/.bionic/docs/plans/epic-99-test/fix-x.plan.md" check 2>&1)"
-expect_contains "T.c7 the pair: at wave scale fix/x is refused for its shape" "is not wave/<NN>-<slug> shaped" "$SP_CO_OUT"
+expect_absent "T.c7 the pair: at wave scale fix/x is not refused for its shape either" "shaped" "$SP_CO_OUT"
+expect_contains "T.c8 …the same check reaches its merge line" "merge: " "$SP_CO_OUT"
 
 finish

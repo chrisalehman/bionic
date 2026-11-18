@@ -13,7 +13,7 @@
 # (`payload missing its session key`) adjacent so that start=open and stop=closed
 # are one artefact.
 #
-# T32 (wave-31, D6; A-orch-61) RETIRED THE STOP GATE'S CLOSED SIDE for a live writer: stop-guard
+# THE STOP GATE'S CLOSED SIDE IS RETIRED for a live writer: the stop gate
 # records reason=unmet and allows, so the keyless pair no longer differs and A10 is retired for
 # the stop gate. The stop rows that reached that deny are the allowed-with-reason case below.
 #
@@ -25,6 +25,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 # The one bound-marker builder (wave-23-fixit-1810 T1).
@@ -34,7 +35,7 @@ set -uo pipefail
 # shipped file ever being modified — §9's mutation-and-restore proof, repeatable
 # by hand: W1R_PARTY_SG=/tmp/mutant.sh bash tests/fail-direction-table.test.sh
 START_GATE="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
-STOP_GATE="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
+STOP_GATE="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop.sh}"
 # The producer and the writer that stand behind the stop gate's positive pair.
 OBSERVER="$BIONIC_HOOKS_DIR/stop-check.sh"
 RECORDER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
@@ -87,23 +88,16 @@ SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 # verbatim capture); the `subagents/agent-<id>.{meta.json,jsonl}` layout is
 # FAITHFUL to §2.5. Session ids, agent ids, plan text: SYNTHESIZED, declared.
 
-write_plan() {  # <path> <current-line>
-  mkdir -p "$(dirname "$1")"
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: double\nscale: wave\n'
-    # A LIVE PLAN CARRIES A MEASURED BUDGET (epic-23 wave-20 T2, REQ-10, D10; ADR-035).
-    # `budget_line_of`/`plan_budget_line` (payload/scripts/lib/run.sh) read this line, at
-    # column 0 with the colon directly after the key, out of the LEADING frontmatter block
-    # only. Every dispatch driven against a `wave:yes` world below reaches `current: 4`, so
-    # without this line dispatch preflight's missing-budget backstop prints an unmeasured-
-    # budget WARN on every one of them — breaking `start|attested`'s literal silence, the
-    # one row in this table that demands it (found by T7, wave-20 T14).
-    printf 'parallel-budget: writers=4 suites=2 worktrees=8 test_jobs=4 source=probe\n'
-    printf -- '---\n\n# Fixture plan\n\n'
-    # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
-    printf '## SDLC State\n\nintegration-branch: main\n%s\napproved-by: dana 2026-09-07T19:05Z "approved"\n\n- Step 4: evidence\n' "$2"
-  } > "$1"
+# write_plan <path> <step|none> -> the run's page at 15 and its log: the step, and the approval the dispatch wall asks
+# for before it admits a writer. `none` leaves the log with no step event, the run that names no step. The page's header
+# carries the measured budget the start gate's missing-budget backstop reads, which every `wave:yes` world below needs
+# to keep `start|attested` silent.
+write_plan() {
+  local log
+  plan_fixture --current "$([ "$2" = none ] && echo 1 || echo "$2")" "$1" wave > /dev/null || return 1
+  [ "$2" = none ] || return 0
+  log="$(plan_fixture_log "$1")"
+  grep -v '|ev=step|' "$log" > "$log.n"; mv "$log.n" "$log"
 }
 
 # make_world <name> <wave:yes|no|nocurrent> -> "repo|transcript|subagents-dir"
@@ -129,7 +123,7 @@ make_world() {
   printf '{}\n' > "$cfg/projects/$slug/$SID_A.jsonl"
   printf '{}\n' > "$cfg/projects/$slug/$SID_B.jsonl"
   case "$wave" in
-    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
                # A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). The arming wall refuses a
                # dispatch whose session carries no fresh Patrol stamp, and every start-gate
                # row below rides an active world — so an unarmed fixture would rewrite this
@@ -149,9 +143,9 @@ make_world() {
                  # BOUND TO THE WAVE'S PLAN (wave-23-fixit-1810, REQ-1, D1): an unbound
                  # session's newest-plan fallback is announced and never acted on, and the
                  # start gate refuses its writer with the bind instruction.
-                 bound_marker "$repo" "$_psid" "$repo/.bionic/docs/plans/epic-99/wave-01.md"
+                 bound_marker "$repo" "$_psid" "$repo/.bionic/docs/plans/epic-99/wave-01.plan.md"
                done ;;
-    nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
+    nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.plan.md" none ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
   esac
   printf '%s|%s|%s' "$repo" "$cfg/projects/$slug/$SID_A.jsonl" "$cfg/projects/$slug/$SID_A/subagents"
@@ -282,7 +276,7 @@ printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "
 # world's plan, which is what a real session is after Step 0 writes its plan. The unbound
 # shape gets its own row (start|attested-unbound) below, as SILENT-WITH-ANNOUNCE.
 printf 'plan=%s\nengaged_at=%s\n' \
-  "$(cd "$T_REPO" && pwd -P)/.bionic/docs/plans/epic-99/wave-01.md" \
+  "$(cd "$T_REPO" && pwd -P)/.bionic/docs/plans/epic-99/wave-01.plan.md" \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$T_REPO/.bionic/tmp/engaged-$SID_A.state"
 chmod 600 "$T_REPO/.bionic/tmp/engaged-$SID_A.state"
 
@@ -299,23 +293,18 @@ printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "
 # WORLD ISOLATION (w2-s45-wallfacts.md §7 diagnosis): `make_world` gives this world its
 # OWN CLAUDE_CONFIG_DIR under $T_REPO/../cfg, but `drive()` runs the gate under the ONE
 # shared CLAUDE_CONFIG_DIR exported above — the config dir the auto-probe's D-5 pruning
-# actually reads. Under that shared dir session A has no transcript anywhere, so it reads
-# as dead: the FIRST auto-probe driven against this world (start|foreign-attestation,
+# actually reads. Under that shared dir no running process is session A, so it reads as
+# dead: the FIRST auto-probe driven against this world (start|foreign-attestation,
 # session B, driven before start|attested below) prunes A's attestation as a dead
-# session's stale record, and start|attested then finds nothing and refuses. Planting A's
-# transcript under the SHARED config dir — not just the world's own — is what makes A
-# read as live wherever the gate actually looks; `session_transcript_exists()` in
-# hooks/preflight-probe.sh scans every project directory under CONFIG_DIR, not one keyed
-# to a specific repo, so this single file is sufficient regardless of slug.
-T_SLUG=$(printf '%s' "$T_REPO" | sed 's/[^a-zA-Z0-9]/-/g')
-mkdir -p "$CLAUDE_CONFIG_DIR/projects/$T_SLUG"
-printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$T_SLUG/$SID_A.jsonl"
+# session's stale record, and start|attested then finds nothing and refuses. A CLI session
+# file under the SHARED config dir naming a running process (this shell) as A is what makes
+# A read as live wherever the gate actually looks (lib/alive.sh's rule; a transcript
+# outlives its session, so it says nothing).
+mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
+jq -n --argjson p "$$" --arg s "$SID_A" '{pid:$p, sessionId:$s}' > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
 
 # `start|attested` (below) is THE POSITIVE PAIR and its §7 direction is literal silence on
-# both streams. Until epic-16 wave-02 that claim needed a genuinely LIVE session sweeper
-# armed against this world, or the unarmed-sweeper nag fired legitimately and broke it. The
-# nag was deleted with the watcher, so silence is now the gate's own answer and this world
-# needs no live process standing behind it.
+# both streams.
 
 # THE STOP GATE'S POSITIVE PAIR, re-founded (epic-23 wave-15, REQ-2; ADR-028). It used to be
 # a world with an observation RECORDED through the real producer→recorder→gate path, because
@@ -708,7 +697,7 @@ section "the ambiguity row says WHICH fault it is (T29)"
 # row would have been repaired by moving the fixture alone, green on a gate with no ambiguity
 # arm in it. So this row carries its own discriminator, and it is the only claim in this file
 # that reads a refusal's TEXT rather than its direction — the refusal's FULL reasoning is
-# pinned where the gate's own suite pins it (tests/stop-guard.test.sh §10(c3)/(c4)).
+# pinned where the stop library's words are pinned (tests/stop.test.sh §GUARD GD1).
 drive stop:ambiguous
 expect_eq "the ambiguous row is refused" "2" "$DRV_ST"
 if printf '%s' "$DRV_ERR" | grep -qF 'more than one live row'; then

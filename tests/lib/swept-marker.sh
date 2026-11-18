@@ -1,5 +1,4 @@
 # tests/lib/swept-marker.sh — extracts the one `landing-swept/v1` writer for fixtures
-# (wave-01-verification-cannot-lie S15, spec AC-26; research-code-map §2.c).
 #
 #     . "$(dirname "$0")/lib/resolve-roots.sh"      # first, so BIONIC_HOOKS_DIR is set
 #     . "$(dirname "$0")/lib/swept-marker.sh"
@@ -27,10 +26,6 @@
 #
 # BIONIC_SWEPT_SOURCE overrides the file it reads, for the one suite that drives a
 # deliberately reformatted copy (tests/landing-gate.test.sh §17).
-#
-# swept_marker_field <line> <key> -> the value of one field, by key, off a raw marker line —
-# the same by-key idiom every production reader uses (hooks/landing-gate.sh's own `_field`),
-# so a suite asserting on a captured or produced marker does not hand-roll the pipeline.
 
 BIONIC_SWEPT_SOURCE="${BIONIC_SWEPT_SOURCE:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
 if ! declare -p SWEPT_SCHEMA >/dev/null 2>&1; then
@@ -53,7 +48,3 @@ if ! declare -p SWEPT_SCHEMA >/dev/null 2>&1; then
   exit 1
 fi
 require_helpers swept_marker_write
-
-swept_marker_field() {  # <line> <key> -> value
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
-}

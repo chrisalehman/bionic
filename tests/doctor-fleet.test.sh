@@ -1,7 +1,5 @@
 #!/bin/bash
-# tests/doctor-fleet.test.sh — doctor's RESOURCES section and the three run-scoped
-# rows (bionic 1.4.0, wave-bionic-1.4.0-update task DOCTOR handoff 5.3 and 1.4;
-# spec AC-27, AC-4's doctor line, AC-8, AC-11).
+# tests/doctor-fleet.test.sh — doctor's RESOURCES section and the three run-scoped rows.
 #
 # WHAT IS UNDER TEST, and why these four facts belong on one page.
 #
@@ -225,33 +223,28 @@ expect_no_match "8: and no fabricated writers count rides it" \
 
 section "Section 4: the active-run row"
 
-# A plan the `active_run` predicate calls OPEN: a `## SDLC State` heading and a
-# flush-left `current:` below 9.
+# A run the `active_run` predicate calls OPEN: a page at version 15 whose run's log stands at a step below 9.
 cat > "${PROJ}/.bionic/docs/plans/w/wave.plan.md" <<'PLAN'
-# a fixture plan
-
-## SDLC State
-
+---
+canonical_sdlc_version: 15
 integration-branch: main
-current: 4
+---
+
+# a fixture plan
 PLAN
+mkdir -p "${PROJ}/.bionic/docs/record/wave"
+printf 'run/v1|ev=step|n=4|at=2026-11-01T00:00:00Z\n' > "${PROJ}/.bionic/docs/record/wave/run.log"
 
 OUT4="$(run_doctor)"
 
 expect_match "9: the row names the plan the predicate resolved" "*active run*wave.plan.md*" "$OUT4"
 expect_match "10: and the step it is on" "*active run*current: 4*" "$OUT4"
+printf 'run/v1|ev=step|n=5|at=2026-11-02T00:00:00Z\n' >> "${PROJ}/.bionic/docs/record/wave/run.log"
+expect_match "10b: a later step the run's log appends is the step it is on" "*active run*current: 5*" "$(run_doctor)"
 
-# Closed: step 9 with a delivered line. `active_run` refuses, and the row has to
+# Closed: the log's step 9, the run delivered. `active_run` refuses, and the row has to
 # follow it rather than keep reporting a run nobody is in.
-cat > "${PROJ}/.bionic/docs/plans/w/wave.plan.md" <<'PLAN'
-# a fixture plan
-
-## SDLC State
-
-current: 9
-
-- Step 9: delivered: 2026-09-02
-PLAN
+printf 'run/v1|ev=step|n=9|at=2026-11-03T00:00:00Z\n' >> "${PROJ}/.bionic/docs/record/wave/run.log"
 
 OUT5="$(run_doctor)"
 expect_match "11: a closed run reads as no active run" "*active run*none*" "$OUT5"
@@ -513,20 +506,6 @@ expect_no_match "18i: …and still does not render their budgets as live capacit
 expect_absent "18j: …and the page names no verb without a failure marker to justify one" \
   "session-poker.sh sweep" "$OUT6D"
 
-section "Section 7: the column budget"
-
-too_wide() {
-  printf '%s\n' "$1" | awk '
-    { s = $0
-      gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
-      if (length(s) > 100) print length(s) ": " $0 }'
-}
-_over="$(too_wide "${OUT7}
-${OUT6B}")"
-if [ -z "$_over" ]; then ok "20: every line of the fullest run fits 100 columns"
-else no "20: a line exceeds 100 columns" "$_over"; fi
-
-
 section "Section 8: the claude CLI absent, and present, on one fixture (AC-7)"
 
 # THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
@@ -544,6 +523,12 @@ OUT_WITHCLI="$(run_doctor)"
 expect_match "21.1: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
 expect_no_match "21.2: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
 expect_match "21.3: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
+too_wide() {
+  printf '%s\n' "$1" | awk '
+    { s = $0
+      gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
+      if (length(s) > 100) print length(s) ": " $0 }'
+}
 _over="$(too_wide "$OUT_NOCLI")"
 if [ -z "$_over" ]; then ok "21.4: the CLI-absent page still fits 100 columns"
 else no "21.4: a line of the CLI-absent page exceeds 100 columns" "$_over"; fi

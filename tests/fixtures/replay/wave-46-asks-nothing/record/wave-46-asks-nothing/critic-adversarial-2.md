@@ -1,0 +1,37 @@
+reviewed: 837ddc39161b522a7071b996cf9d0d9121f1c61b..5a08f601b5aca8cdf332c0ca1581bcbcdf3ab851
+question: adversarial
+result: flag
+scope: piece
+findings: 2
+finding: 1 S4 off payload/scripts/lib/walls.sh:4398 the resolved-spelling compare in walk_registered has no row, so deleting it leaves the gate suite green
+finding: 2 S4 off tests/canonical-sdlc-evidence-gate.prelude.sh:451 the prelude still says a row 26e pins the walk arm's fail-closed default and is the only fixture leaving walk: off, and A-T29.1 says numbering the new section 26 makes that true; no 26e exists and 26a to 26c all leave the key off
+
+# critic-adversarial-2 — wave-46-asks-nothing, the fix piece T29
+
+Reader: w46-T30, at head 5a08f601b5aca8cdf332c0ca1581bcbcdf3ab851, in the main checkout. I wrote none of this code.
+
+## Findings
+
+1. **The resolved compare is unpinned.** `walk_registered` answers yes when an `evidence=` value equals the `walk-artifact:` value as written, or when the two resolve to one path (`payload/scripts/lib/walls.sh:4398`). Section 26 writes both values as `record/w/walk.md`, so only the as-written half is driven. If the `|| [ "$(resolve_walk_path "$ev")" = "$2" ]` half is deleted, 26a, 26b and 26c all keep their verdicts. Inverting it to `!=` is caught by 26c. The verb writes both values from one docs-relative path (`hooks/poker/proof.sh:216` and `walk_pointer_put` at :221 take the same `$rel`), so a registered walk always meets the as-written half, and a deleted branch fails closed: a hand-spelled absolute `walk-artifact:` is refused with the arm's own fix text. S4, a gap in test tooling; user-facing off. The comment at :4390 and the doctrine line in steps/5.md promise the resolved match, so it is a promise without a pin. Shown by reading Section 26 (`sed -n 246,258p tests/canonical-sdlc-evidence-gate.test.sh`): no fixture spells the two values differently.
+2. **A wrong logged assumption about the prelude's references.** A-T29.1 (assumptions.md line 157) says the prelude already calls the walk arm "Section 26" and its fail-closed row "26e", so numbering the new section 26 "makes those references true again". `tests/canonical-sdlc-evidence-gate.prelude.sh:448-452` says 26e pins the fail-closed default and is "the only fixture in the suite that leaves the key off on purpose". `/usr/bin/grep -rn '"26e\|26e ' tests/*.sh` prints nothing, and the new rows 26a to 26c build their plans with `walk: exempt` removed. The default itself is now pinned, implicitly, by 26a: with `walk:` absent the arm fires, and a default of exempt would let 26a through. The comment misstates the suite. S4, user-facing off. The prelude text is older than the reviewed range; the assumption that calls it true is in it.
+
+## Questions the brief named
+
+- **Does the arm still refuse an unregistered walk that names criteria, and one whose walk line names another record?** Yes. My run of the suite, `tests/run.sh --only canonical-sdlc-evidence-gate.test.sh` (log .bionic/docs/record/wave-46-asks-nothing/T30-canonical-sdlc-evidence-gate.log, `head=5a08f601… dirty=0`, `rc=0`), is green, and the landing verdict log line/T29-canonical-sdlc-evidence-gate-5a08f601b5ac.log reads `PASS: 26a`, `PASS: 26b`, `PASS: 26c`, `34/34 passed`. On the real plan, the landed `walk_registered` with the walk proof line removed answers rc1 (log .bionic/tmp/scratch/00000000-0000-4000-8000-000000000003/w46-T30/realplan.log).
+- **Does the gate match the artifact as spelled and as resolved?** As spelled, yes: on the real plan `registered(as-is)=rc0`. As resolved, yes when called: `registered(absolute spelling of walk-artifact)=rc0` in the same log. The resolved half has no suite row; finding 1.
+- **Is the red log a red of the pin against the pre-change library?** Yes. T29-canonical-sdlc-evidence-gate-red.log opens `head=837ddc39161b522a7071b996cf9d0d9121f1c61b dirty=1`, reads `33/34 passed, 1 failed`, fails only 26b with the walk arm's refusal text, and ends `rc=1`. The landing record's run line for it (landing-proofs.log line 630) also says `dirty=1 rc=1`.
+- **Did the compaction remove a pin?** No. Every removed line in the suite's diff is a comment (`git diff 837ddc39..5a08f601 -- tests/canonical-sdlc-evidence-gate.test.sh`, filtered to non-comment changed lines, shows added lines only), and `expect_` calls went from 23 to 26.
+- **Do the render and the manifest agree?** Yes. `bash agents-src/render.sh --check` rc=0 with `every rendered final matches a fresh render, and so does the manifest`; the steps/5.md sha256 is the manifest's `286cbbbf…c1b89e`.
+- **Does `bash hooks/session-poker.sh current 5 --check` pass on the real plan?** Not run. The commit-wall process refused it for a dispatched agent before it started: `bionic: current refused — a subagent may not change a contract or the plan (ask main)`. The orchestrator can run it. The function-level substitute is the real-plan log above.
+
+## Reachability and boundaries
+
+- `walk_registered` is reached from user input: a Bash `git commit` runs hooks/bash-walls.sh, whose evidence-gate wall calls `validate_walk_artifact` at `current: 5` to `9` with a discharged row, which calls it only after the identifier grep matches (`walls.sh:4477`). proof-add walk's own dry commit reaches it too, on a plan copy that already carries the new proof line (`hooks/poker/proof.sh:216`, then `plan_verb_swap` at :921), so registration no longer refuses itself at Step 5 and later.
+- The walk record in range, walk.md, shows the cards and parsers it drove; it does not drive this gate change, which landed after it. I cannot rerun a walk.
+- Known limits: CHANGELOG.md names none about the walk gate's identifier rule (`/usr/bin/grep -niE 'walk' CHANGELOG.md` filtered to limit or criteria lines prints only unrelated limits).
+
+## Three strongest falsification attempts that failed
+
+1. **A forged or stray walk line opens the arm.** The yield trusts a `proved: kind=walk` line in the plan's text and checks neither its head nor the record. That is the trust model the floor arm (`_eg_refuse_floor_absent`, `walls.sh:2643`) and the review arm (`_eg_reading_gaps`, `walls.sh:2541`) already use: proof lines are the verbs' writes, read as text. Fenced example lines cannot register, because the gate's `SECTION` drops fenced lines (`walls.sh:2750-2755`). A line naming another record does not register (26c, and rc1 on the real plan without the line). Nothing new is opened.
+2. **The relaxation flips a refusal another suite relies on.** Before T29 no test anywhere asserted the identifier refusal: `/usr/bin/grep -nE "names acceptance criteria|AC-<n>|drop the criteria" tests/*.sh` prints only 26a and 26c. The change only widens what the arm allows, and only for a plan carrying a walk line naming the artifact. The other suites that touch `walk-artifact:` (card, close-out-3, door-card, session-poker-4) assert no refusal from this arm, so the three suites T29 ran plus the whole run at 837ddc39 cover the head.
+3. **The arm matches a spelling the verb never writes.** proof_line writes `proved: kind=walk head=<hex> at=<iso> evidence=<rel>` (`payload/scripts/lib/proof.sh:95`), kind first and `evidence=` last, and the sed expression in `walk_registered` takes the last `evidence=` token after a flush-left `proved: kind=walk `. The real plan's line 449 is in that form and registers (rc0). CR-only plans are translated before `SECTION` is built (`normalize_newlines`).

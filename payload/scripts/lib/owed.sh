@@ -12,29 +12,32 @@
 # again by the next caller, so the person may hear of an item twice and never not at all
 # (wave-34 T5; D10 "1").
 #
-# THE STORE IS THE RUN'S REGISTER. An ask belongs to the run it holds, not to the session that raised
-# it: `<docs>/record/<run>/asks.state`, <run> the plan's file name less `.plan.md`. Every session acting
-# for the run, a helper's stand-in session included, writes it there and every reader reads it there,
-# so an ask answered in one session is closed for all of them. It lives under record/, not tmp/, so an
-# ask raised late in a run survives the tmp wipe and the close-out can still read it. A session acting
-# for no run keeps `.bionic/tmp/owed-<session>.state`, session-keyed like every other
-# `<class>-<session>.state` there. A session file written before its run had a register is not read
-# as the run's. One line per round of an item, the last line of a key its current state:
+# THE STORE IS THE RUN'S. An ask belongs to the run it holds, not to the session that raised it. Each act on it (an
+# opening, an answer, a send marked or taken back, a close) is one `ask` event appended to the run's log,
+# `<docs>/record/<run>/run.log`, <run> the plan's file name less `.plan.md`, through the one appender (lib/log.sh) and
+# at this library's clock. The log is the run's one store of asks, and no other file is read for one. Every session acting for the run, a helper's stand-in session
+# included, writes there and reads there, so an ask answered in one session is closed for all of them. It lives under
+# record/, not tmp/, so an ask raised late in a run survives the tmp wipe and the close-out can still read it. A session
+# acting for no run keeps `.bionic/tmp/owed-<session>.state`, session-keyed like every other `<class>-<session>.state`
+# there, wiped with them, and written the same way; only its events are read. A session's own file is never read as its
+# run's, bound or not.
 #
-#   owed/v1|key=<key>|state=open|sent=<ISO-UTC or ->|at=<ISO-UTC>|title=<title>|reply=<line>[|round=<n>][|answer=<word>|answered=<ISO-UTC>|event=<what or ->]
-#   owed/v1|key=<key>|state=closed|by=<closer>|at=<ISO-UTC>|opened=<the open line's at>[|round=<n>][|answer=…|answered=…|event=…]
+# THE ONE LIST (`_owed_lines`) is one line per round of an item in the order the rounds opened, the last line of a key
+# its current state: the reader's rounds (lib/reader.sh `reader_ask_rounds`, which holds the line's shape), of the run's
+# plan, or of a session's own file. An event names its round by `round=<n>`
+# from the second on and sets on it the fields it carries: `sent=` and `title=`; `prompt=`, the line the run printed;
+# `answer=` and `event=`, answered at the event's instant; and `reply=`, the closer's words, which close the round.
 #
-# The bracketed answer fields are an answer the user gave the open ask (THE ANSWER, below); a closed line keeps them.
+# A line's answer fields are an answer the user gave the open ask (THE ANSWER, below); a closed line keeps them.
 #
-# EVERY ROUND IS KEPT. An item opened again after it closed (a decision put again after its ruling) is a new round: a
-# new open line appended beside the closed one, carrying `round=<n>`, the first round's 1 implicit. A key holds at most
-# ONE OPEN line, always its last, so every reader of the current state reads a key's last line, and the closer closes
-# that open line. The closed rounds stay, because the minutes the person stood on each are the run's clock
-# (`owed_rounds`): a register that kept only the newest round lost the earlier ones' minutes.
+# EVERY ROUND IS KEPT. An item opened again after it closed (a decision put again after its ruling) is a new round
+# beside the closed one, carrying `round=<n>`, the first round's 1 implicit. A key holds at most ONE OPEN round, always
+# its last, so every reader of the current state reads a key's last line, and the closer closes that round. The closed
+# rounds stay, because the minutes the person stood on each are the run's clock (`owed_rounds`).
 #
-# The file is rewritten whole, beside-then-rename, under a mkdir lock, so a reader never sees a
-# half-written line and two writers cannot lose each other's item. A `|`, a tab, a CR or a LF in
-# a value is folded to a space on the way in: no value can forge a field. A key is
+# An append is one write, so two writers never interleave and no lock is held: two writers of one act write one round
+# twice and the list reads it once. A `|`, a tab, a CR or a LF in a value is folded to a space on the way in: no value
+# can forge a field. A key is
 # `<kind>:<id>` (`approve:step1`, `gate:<hash>`), letters, digits and `:._-` only.
 #
 # A DECISION HAS ONE KEY, `decide:D<n>`. A row that waits on a numbered decision reads it as
@@ -77,28 +80,34 @@ if ! declare -F notify_send >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/notify.sh" ]
   # shellcheck source=/dev/null
   . "$_OWED_LIB_DIR/notify.sh"
 fi
+if ! declare -F reader_ask_rounds >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/reader.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_OWED_LIB_DIR/reader.sh" >/dev/null 2>&1
+fi
 
-OWED_SCHEMA="owed/v1"
-
-# owed_register <root> <plan> -> the run's register, `<docs>/record/<run>/asks.state`, on stdout; rc 1 when
-# <plan> names no run: not a file, or a name that does not end `.plan.md` (a scratch copy's does not).
+# owed_register <root> <plan> -> the run's log, `<docs>/record/<run>/run.log`, where its asks are kept, on stdout; rc 1
+# when <plan> names no run: not a file, or a name that does not end `.plan.md` (a scratch copy's does not).
 owed_register() {
   local root="${1:-}" plan="${2:-}" run docs
   [ -n "$root" ] && [ -n "$plan" ] || return 1
   case "$plan" in *.plan.md) ;; *) return 1 ;; esac
   [ -f "$plan" ] || return 1
-  run="${plan##*/}"; run="${run%.plan.md}"
+  run="$(reader_slug "$plan")" || return 1
   case "$run" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
   declare -F docs_root >/dev/null 2>&1 || return 1
   docs="$(docs_root "$root" 2>/dev/null)" && [ -n "$docs" ] || return 1
-  printf '%s/record/%s/asks.state\n' "$docs" "$run"
+  printf '%s/record/%s/run.log\n' "$docs" "$run"
 }
 
-# owed_file -> the store's absolute path on stdout: the run's register, else the session's own file; rc 1
+# owed_file -> the store's absolute path on stdout: the run's log, else the session's own file; rc 1
 # when there is no session or no root. The session is required even where the run names the store, so a
 # caller that sets an invalid session to write nothing (a preview) writes nothing.
-owed_file() {
+owed_file() { _owed_at && printf '%s\n' "$_OWED_F"; }
+# _owed_at -> owed_file's store in _OWED_F, and in _OWED_P the plan of the run whose log it is (empty for a
+# session's own file), in this shell; rc as owed_file
+_owed_at() {
   local root sid plan
+  _OWED_F=""; _OWED_P=""
   sid="${OWED_SID:-${BIONIC_SID:-${CLAUDE_CODE_SESSION_ID:-}}}"
   [ -n "$sid" ] || return 1
   case "$sid" in *[!A-Za-z0-9._-]*|.|..) return 1 ;; esac
@@ -111,8 +120,19 @@ owed_file() {
   if [ -z "$plan" ] && declare -F session_plan >/dev/null 2>&1; then
     plan="$(session_plan "$root" "$sid" 2>/dev/null)" || plan=""
   fi
-  owed_register "$root" "$plan" && return 0
-  printf '%s/.bionic/tmp/owed-%s.state\n' "$root" "$sid"
+  _owed_run "$root" "$plan" && return 0
+  _OWED_F="$root/.bionic/tmp/owed-$sid.state"
+}
+_owed_run() {  # <root> <plan> -> 0 with the run's log and its plan set as _owed_at sets them; 1 when <plan> names no run
+  _OWED_F="$(owed_register "$1" "$2")" || return 1
+  _OWED_P="$2"
+}
+
+# finding_owed_key <record>#<n> -> the key of the finding's ruling: `finding:` and the identity with each character a
+# key may not hold (`_owed_key_ok`: letters, digits and `:._-`) written `:`; `record/w/st.md#2` is
+# `finding:record:w:st.md:2`. Here, in the asks library, so the poker and a landing's writes key an ask alike.
+finding_owed_key() {
+  printf 'finding:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
 }
 
 _owed_key_ok() {  # <key>
@@ -137,7 +157,7 @@ _owed_clean() {  # <value> -> the value with | TAB CR LF folded to a space
 
 # owed_now -> the instant every line here is stamped with, ISO-UTC: BIONIC_NOW_EPOCH when it is a number (the clock
 # seam the poker's readers honour, so a suite fixes every instant it reads), else the clock. A verb that writes an
-# instant beside the register's own (the plan's approval) takes it from here, so the two agree to the second.
+# instant beside the log's own (the plan's approval) takes it from here, so the two agree to the second.
 owed_now() {
   case "${BIONIC_NOW_EPOCH:-}" in
     ''|*[!0-9]*) date -u +%Y-%m-%dT%H:%M:%SZ ;;
@@ -156,161 +176,122 @@ _owed_dir_ok() {
   return 0
 }
 
-_owed_lock() {  # <store> -> rc 0 holding <store>.lock; rc 1 when it cannot be had in about two seconds
-  local lk="$1.lock" i=0
-  while ! mkdir "$lk" 2>/dev/null; do
-    i=$((i + 1))
-    if [ "$i" -ge 100 ]; then
-      # A lock older than a minute is a writer that died holding it: taken over once.
-      if [ -n "$(find "$lk" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
-        rmdir "$lk" 2>/dev/null
-        mkdir "$lk" 2>/dev/null && return 0
-      fi
-      return 1
-    fi
-    sleep 0.02
-  done
-  return 0
+# _owed_lines -> THE ONE LIST (above) of the store _owed_at set: a run's rounds from its plan, by the plan it holds, a
+# session's from its file. rc 1 when it cannot be read. A home that is a link is not read.
+_owed_lines() {
+  if [ -n "$_OWED_P" ]; then [ ! -L "$_OWED_F" ] && reader_ask_rounds "$_OWED_P"; return; fi
+  [ -f "$_OWED_F" ] && [ ! -L "$_OWED_F" ] || return 0
+  reader_ask_rounds - < "$_OWED_F"
 }
-_owed_unlock() { rmdir "$1.lock" 2>/dev/null; return 0; }
 
-# _owed_rewrite <store> <awk program> [awk -v assignments...] -> the store rewritten through the
-# program, beside-then-rename, under the lock. rc 1 when it could not be written.
-_owed_rewrite() {
-  local f="$1" prog="$2" tmp rc=0
-  shift 2
+# _owed_last <key> -> the key's last round in the store _owed_at set, as <state> TAB <round> TAB <sent>; nothing when
+# it has none; rc 1 when the store cannot be read
+_owed_last() {
+  local l
+  l="$(_owed_lines)" || return 1
+  printf '%s\n' "$l" | awk -F'|' -v key="$1" "$_READER_AWK"'
+    line_kv("key") == key { s = line_kv("state") "\t" line_kv("round") "\t" line_kv("sent") } END { if (s != "") print s }'
+}
+
+# _owed_act <store> <ISO-UTC or -> <key> <round> <field>... -> rc 0 with one ask event on <key>'s round appended to the
+# store, which is a log: the run's, or a session's own file, at <ISO-UTC> or this library's clock. rc 1, nothing
+# written, when the store or its directory is a link or the append fails.
+_owed_act() {
+  local f="$1" at="$2" key="$3" r="$4"
+  shift 4
   _owed_dir_ok "$f" || return 1
-  mkdir -p "${f%/*}" 2>/dev/null || return 1
-  _owed_lock "$f" || return 1
-  tmp="$f.new.$$"
-  if [ -f "$f" ]; then
-    awk "$@" "$prog" "$f" > "$tmp" 2>/dev/null || rc=1
-  else
-    awk "$@" "$prog" /dev/null > "$tmp" 2>/dev/null || rc=1
-  fi
-  if [ "$rc" -eq 0 ]; then
-    chmod 600 "$tmp" 2>/dev/null
-    mv -f "$tmp" "$f" 2>/dev/null || rc=1
-  fi
-  rm -f "$tmp" 2>/dev/null
-  _owed_unlock "$f"
-  return "$rc"
+  declare -F log_append >/dev/null 2>&1 || . "$_OWED_LIB_DIR/log.sh" >/dev/null 2>&1 || return 1
+  [ "$at" != - ] || at="$(owed_now)"
+  [ "$r" -gt 1 ] 2>/dev/null && set -- "round=$r" "$@"
+  RUN_LOG="$f" LOG_AT="$at" log_append ask "key=$key" "$@" >/dev/null 2>&1
 }
-
-# The fields of one line, by name, and a line's key as `owed_key` files it: the awk every reader and
-# writer below shares, so a line written under the approval spelling of a decision reads as the decision.
-_OWED_AWK_FIELD='function fld(line, name,   n, i, a, p) {
-  n = split(line, a, "|"); p = name "="
-  for (i = 2; i <= n; i++) if (index(a[i], p) == 1) return substr(a[i], length(p) + 1)
-  return ""
-}
-function key_of(line,   k) {
-  k = fld(line, "key")
-  return (k ~ /^approve:D[0-9]+$/) ? "decide:" substr(k, 9) : k
-}'
+_owed_round() { local r="${1#*	}"; printf '%s\n' "${r%%	*}"; }  # <_owed_last line> -> its round
 
 # owed_open <key> <title> <reply> -> rc 0. IDEMPOTENT PER KEY: an item already open is left as it
-# is (sent or not), so a card rendered twice is one item and one send; its line moves to the end, as it
-# always has. A key that was never seen is opened unsent; a key whose last line is closed is opened as a
-# new round, unsent, appended after the rounds before it, which stay as they are: a new block on an old
-# key is a new need, and the old one's minutes are kept.
+# is (sent or not) and nothing is written, so a card rendered twice is one item and one send. A key that
+# was never seen is opened unsent; a key whose last round is closed is opened as a new round, unsent,
+# after the rounds before it, which stay as they are: a new block on an old key is a new need, and the
+# old one's minutes are kept.
 owed_open() {
-  local key="${1:-}" title reply f
+  local key="${1:-}" title reply f st
   _owed_key_ok "$key" || return 1
   key="$(owed_key "$key")"
   title="$(_owed_clean "${2:-}")"
   reply="$(_owed_clean "${3:-}")"
-  f="$(owed_file)" || return 1
-  # The title and the reply go in through the environment, never `-v`, which would read a
-  # backslash in a printed line as an escape and store a different line than the one printed.
-  OWED_T="$title" OWED_R="$reply" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    { L[++m] = $0 }
-    key_of($0) == key { n++; li = m }
-    END {
-      op = (li && fld(L[li], "state") == "open")
-      for (i = 1; i <= m; i++) if (!(op && i == li)) print L[i]
-      if (op) print L[li]
-      else printf "owed/v1|key=%s|state=open|sent=-|at=%s|title=%s|reply=%s%s\n", key, now, ENVIRON["OWED_T"], ENVIRON["OWED_R"], (n ? "|round=" (n + 1) : "")
-    }' -v key="$key" -v now="$(owed_now)"
+  _owed_at || return 1; f="$_OWED_F"
+  _owed_dir_ok "$f" || return 1
+  st="$(_owed_last "$key")" || return 1
+  case "$st" in open*) return 0 ;; esac
+  _owed_act "$f" - "$key" $(( ${st:+$(_owed_round "$st")} + 1 )) sent=- "title=$title" "prompt=$reply"
 }
 
-# owed_close <key> <by> [<at ISO-UTC>] -> rc 0. Closes an open item, its one open line, at <at> when given (a verb that
-# wrote the same instant elsewhere), else now; a key that is not open is left alone. The closed line keeps the open
-# line's instant as `opened=`, so the minutes the item stood open can still be counted once it is closed, its round,
-# and its answer fields, last, so what the item waited on once answered reads the same once it is closed.
+# owed_close <key> <by> [<at ISO-UTC>] -> rc 0. Closes an open item, its one open round, at <at> when given (a verb that
+# wrote the same instant elsewhere), else now; a key that is not open is left alone. The closed round keeps its opening
+# as `opened=`, so the minutes the item stood open can still be counted once it is closed, and its answer, so what the
+# item waited on once answered reads the same once it is closed.
 owed_close() {
-  local key="${1:-}" by at f
+  local key="${1:-}" by at f st
   _owed_key_ok "$key" || return 1
   key="$(owed_key "$key")"
   by="$(_owed_clean "${2:-}")"
   at="${3:-}"
   case "$at" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;; *) at="$(owed_now)" ;; esac
-  f="$(owed_file)" || return 1
-  [ -f "$f" ] || return 0
-  awk -v key="$key" "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") == 1 && key_of($0) == key && fld($0, "state") == "open" { y = 1; exit }
-    END { exit !y }' "$f" 2>/dev/null || return 0
-  OWED_B="$by" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    key_of($0) == key && fld($0, "state") == "open" {
-      a = (fld($0, "answer") != "") ? sprintf("|answer=%s|answered=%s|event=%s", fld($0, "answer"), fld($0, "answered"), fld($0, "event")) : ""
-      r = (fld($0, "round") != "") ? "|round=" fld($0, "round") : ""
-      printf "owed/v1|key=%s|state=closed|by=%s|at=%s|opened=%s%s%s\n", key, ENVIRON["OWED_B"], now, fld($0, "at"), r, a; next
-    }
-    { print }' -v key="$key" -v now="$at"
+  _owed_at || return 1; f="$_OWED_F"
+  st="$(_owed_last "$key")" || return 1
+  case "$st" in open*) ;; *) return 0 ;; esac
+  _owed_act "$f" "$at" "$key" "$(_owed_round "$st")" "reply=${by:--}"
 }
 
-_owed_list_file() {  # <store> -> owed_list's lines for that store
-  [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  awk "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    fld($0, "state") == "open" { printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "sent"), fld($0, "title"), fld($0, "reply") }
-  ' "$1" 2>/dev/null
+_owed_list() {  # -> owed_list's lines for the store _owed_at set
+  local l
+  l="$(_owed_lines)" || return 1
+  printf '%s\n' "$l" | awk -F'|' "$_READER_AWK"'
+    line_kv("state") == "open" { printf "%s\t%s\t%s\t%s\n", line_kv("key"), line_kv("sent"), line_kv("title"), line_kv("prompt") }'
+}
+
+# owed_lines [<plan> <root>] -> THE ONE LIST (above) of the run <plan> names under <root>, else of
+# `owed_file`; rc 1 when there is no store or it cannot be read.
+owed_lines() {
+  _owed_store_for "${1:-}" "${2:-}" || return 1
+  _owed_lines
 }
 
 # owed_list -> one line per OPEN item: <key> TAB <sent ISO or -> TAB <title> TAB <reply>.
 owed_list() {
-  local f
-  f="$(owed_file)" || return 1
-  _owed_list_file "$f"
+  _owed_at || return 1
+  _owed_list
 }
 
 # owed_rounds <key ERE> [<plan> <root>] -> one line per round of every key the extended regular expression matches
 # whole, open or closed, in the order they were opened: <key> TAB <round> TAB <open|closed> TAB <opened ISO or -> TAB
-# <closed ISO, or - while open>; read from the run's register <plan> names under <root>, else from `owed_file`. A round's
+# <closed ISO, or - while open>; read as one list from the run <plan> names under <root>, else from `owed_file`. A round's
 # number is its line's round=, else its place among the key's lines. A closed line written before closed lines kept
 # their opening reads `-` for it.
 owed_rounds() {
-  local f
+  local l
   [ -n "${1:-}" ] || return 1
-  f="$(_owed_store_for "${2:-}" "${3:-}")" || return 1
-  [ -f "$f" ] && [ ! -L "$f" ] || return 0
-  OWED_P="^(${1})\$" awk "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    { k = key_of($0) }
-    k !~ ENVIRON["OWED_P"] { next }
-    { n[k]++; r = fld($0, "round"); if (r == "") r = n[k] }
-    fld($0, "state") == "open" { printf "%s\t%s\topen\t%s\t-\n", k, r, fld($0, "at"); next }
-    { o = fld($0, "opened"); printf "%s\t%s\tclosed\t%s\t%s\n", k, r, (o == "" ? "-" : o), fld($0, "at") }
-  ' "$f" 2>/dev/null
+  l="$(owed_lines "${2:-}" "${3:-}")" || return 1
+  printf '%s\n' "$l" | OWED_P="^(${1})\$" awk -F'|' "$_READER_AWK"'
+    { k = line_kv("key"); r = line_kv("round") }
+    k == "" || k !~ ENVIRON["OWED_P"] { next }
+    line_kv("state") == "open" { printf "%s\t%s\topen\t%s\t-\n", k, r, line_kv("at"); next }
+    { o = line_kv("opened"); printf "%s\t%s\tclosed\t%s\t%s\n", k, r, (o == "" ? "-" : o), line_kv("at") }'
 }
 
-# owed_list_plan <plan> <root> -> owed_list's lines for the run <plan> names, read from its register under <root>,
+# owed_list_plan <plan> <root> -> owed_list's lines for the run <plan> names, read from its log under <root>,
 # never the caller's session. rc 1 when there is no plan or no root; nothing printed when <plan> names no run or its
-# register holds no open item.
+# log holds no open item.
 owed_list_plan() {
-  local f
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
-  f="$(owed_register "$2" "$1")" || return 0
-  _owed_list_file "$f"
+  _owed_run "$2" "$1" || return 0
+  _owed_list
 }
 
 
 # THE ANSWER AND WHAT AN ASK WAITS ON. An answer is what the user has said to an ask that is not yet closed: `no` to a
-# waiver, `carry` to a finding. It is stored on the open line, after every other field, and it never closes the ask:
+# waiver, `carry` to a finding. It is stored on the open round, its line's last fields, and it never closes the ask:
 #
-#   owed/v1|key=<key>|state=open|sent=…|at=…|title=…|reply=…|answer=<word>|answered=<ISO-UTC>|event=<what or ->
+#   …|key=<key>|state=open|…|answer=<word>|answered=<ISO-UTC>|event=<what or ->
 #
 # The ask closes at the event the answer names, where it closes today: a waiver when its review passes, is waived or a
 # born row's landing settles it; a finding carried to a row at that row's landing (lib/line.sh); a finding carried with
@@ -319,66 +300,53 @@ owed_list_plan() {
 # `ask_waits_on` derives it from the key's kind and its answer, so every reader asks the one function and no opener
 # has a field to forget.
 
-# _owed_store_for [<plan> <root>] -> the store a reader reads: the run's register <plan> names under <root> when both
-# are given, else `owed_file`. rc 1 when there is none.
+# _owed_store_for [<plan> <root>] -> the store a reader reads, set as _owed_at sets it: the run's log <plan> names
+# under <root> when both are given, else `owed_file`'s. rc 1 when there is none.
 _owed_store_for() {
-  if [ -n "${1:-}" ] && [ -n "${2:-}" ]; then owed_register "$2" "$1"; return; fi
-  owed_file
+  if [ -n "${1:-}" ] && [ -n "${2:-}" ]; then _OWED_F=""; _OWED_P=""; _owed_run "$2" "$1"; return; fi
+  _owed_at
 }
 
-# owed_answer <key> <word> [<event>] -> rc 0 with the answer on the key's open line, the instant it was given and the
+# owed_answer <key> <word> [<event>] -> rc 0 with the answer on the key's open round, the instant it was given and the
 # event it waits on (`-` when none is named); a later answer replaces an earlier one. rc 1, nothing written, when the
 # key is not open, the word is not one word of letters, digits and `._-`, or there is no store.
 owed_answer() {
-  local key="${1:-}" word="${2:-}" event f
+  local key="${1:-}" word="${2:-}" event f st
   _owed_key_ok "$key" || return 1
   case "$word" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
   key="$(owed_key "$key")"
   event="$(_owed_clean "${3:-}")"
-  f="$(owed_file)" || return 1
-  [ -f "$f" ] && [ ! -L "$f" ] || return 1
-  awk -v key="$key" "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") == 1 && key_of($0) == key && fld($0, "state") == "open" { y = 1; exit }
-    END { exit !y }' "$f" 2>/dev/null || return 1
-  # The answer fields are always the last on the line and no value holds a `|`, so cutting at `|answer=` drops an
-  # earlier answer and nothing else.
-  OWED_W="$word" OWED_E="${event:--}" _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    key_of($0) == key && fld($0, "state") == "open" {
-      l = $0; i = index(l, "|answer="); if (i) l = substr(l, 1, i - 1)
-      printf "%s|answer=%s|answered=%s|event=%s\n", l, ENVIRON["OWED_W"], now, ENVIRON["OWED_E"]; next
-    }
-    { print }' -v key="$key" -v now="$(owed_now)"
+  _owed_at || return 1; f="$_OWED_F"
+  st="$(_owed_last "$key")" || return 1
+  case "$st" in open*) ;; *) return 1 ;; esac
+  _owed_act "$f" - "$key" "$(_owed_round "$st")" "answer=$word" "event=${event:--}"
 }
 
-_owed_answers_file() {  # <store> -> owed_answers' lines for that store
-  [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  awk "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    fld($0, "state") == "open" && fld($0, "answer") != "" {
-      printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "answer"), fld($0, "answered"), fld($0, "event")
-    }' "$1" 2>/dev/null
+_owed_answers() {  # -> owed_answers' lines for the store _owed_at set
+  local l
+  l="$(_owed_lines)" || return 1
+  printf '%s\n' "$l" | awk -F'|' "$_READER_AWK"'
+    line_kv("state") == "open" && line_kv("answer") != "" {
+      printf "%s\t%s\t%s\t%s\n", line_kv("key"), line_kv("answer"), line_kv("answered"), line_kv("event") }'
 }
 
 # owed_answers [<plan> <root>] -> one line per OPEN item that holds an answer: <key> TAB <word> TAB <answered ISO> TAB
-# <event or ->, read from the run's register <plan> names under <root>, else from `owed_file`.
+# <event or ->, read as one list from the run <plan> names under <root>, else from `owed_file`.
 owed_answers() {
-  local f
-  f="$(_owed_store_for "${1:-}" "${2:-}")" || return 1
-  _owed_answers_file "$f"
+  _owed_store_for "${1:-}" "${2:-}" || return 1
+  _owed_answers
 }
 
 # owed_answer_of <key> [<plan> <root>] -> the key's answer, `<word> TAB <answered ISO> TAB <event or ->`, from its last
 # line, open or closed, since a closed line keeps the answer it was given; nothing when it was never answered. A new
 # round after a close is the key's last line and starts with no answer, so it reads none.
 owed_answer_of() {
-  local key f
+  local key l
   key="$(owed_key "${1:-}")"
-  f="$(_owed_store_for "${2:-}" "${3:-}")" || return 0
-  [ -f "$f" ] && [ ! -L "$f" ] || return 0
-  awk -v key="$key" "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") == 1 && key_of($0) == key { l = $0 }
-    END { if (l != "" && fld(l, "answer") != "") print fld(l, "answer") "\t" fld(l, "answered") "\t" fld(l, "event") }' "$f" 2>/dev/null
+  l="$(owed_lines "${2:-}" "${3:-}")" || return 1
+  printf '%s\n' "$l" | awk -F'|' -v key="$key" "$_READER_AWK"'
+    line_kv("key") == key { a = line_kv("answer"); s = a "\t" line_kv("answered") "\t" line_kv("event") }
+    END { if (a != "") print s }'
 }
 
 # ask_waits_on <key> [<plan> <root>] -> `user` or `event <what>` on one line, rc 0, from the key's kind and its answer,
@@ -409,9 +377,9 @@ ask_waits_on() {
 }
 
 _owed_hold_waits() {  # [<plan> <root>] -> what hold:merge waits on: the open waivers' events, or user
-  local f k w out="" any=""
-  f="$(_owed_store_for "${1:-}" "${2:-}" 2>/dev/null)" || f=""
-  for k in $(_owed_list_file "$f" | cut -f1); do
+  local k w out="" any="" ks=""
+  ! _owed_store_for "${1:-}" "${2:-}" 2>/dev/null || ks="$(_owed_list | cut -f1)"
+  for k in $ks; do
     case "$k" in waive:*) : ;; *) continue ;; esac
     any=1
     w="$(ask_waits_on "$k" "${1:-}" "${2:-}")"
@@ -426,32 +394,24 @@ owed_unsent() {
   owed_list | awk -F'\t' -v p="${1:-}" '$2 == "-" && index($1, p) == 1 { print $1 }'
 }
 
-# owed_mark_sent <key> -> rc 0. Stamps an open item sent, now.
-owed_mark_sent() {
-  local key="${1:-}" f
-  _owed_key_ok "$key" || return 1
-  key="$(owed_key "$key")"
-  f="$(owed_file)" || return 1
-  [ -f "$f" ] || return 1
-  _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    key_of($0) == key && fld($0, "state") == "open" && fld($0, "sent") == "-" { sub(/\|sent=-\|/, "|sent=" now "|") }
-    { print }' -v key="$key" -v now="$(owed_now)"
-}
+# owed_mark_sent <key> -> rc 0. Stamps an open item not yet sent as sent, now; rc 1 when the key has no round.
+owed_mark_sent() { _owed_sent "${1:-}" mark; }
 
 # owed_unmark_sent <key> -> rc 0. Takes back the sent mark of an open item, so the next caller sends
 # it: `owed_send`'s answer to a send that failed. Only the caller that marked it calls this, and no
 # other caller marks an item already marked, so the mark it takes back is its own.
-owed_unmark_sent() {
-  local key="${1:-}" f
+owed_unmark_sent() { _owed_sent "${1:-}" unmark; }
+
+_owed_sent() {  # <key> <mark|unmark> -> the sent mark set or taken back on the key's open round
+  local key="${1:-}" f st
   _owed_key_ok "$key" || return 1
   key="$(owed_key "$key")"
-  f="$(owed_file)" || return 1
-  [ -f "$f" ] || return 1
-  _owed_rewrite "$f" "$_OWED_AWK_FIELD"'
-    index($0, "owed/v1|") != 1 { next }
-    key_of($0) == key && fld($0, "state") == "open" && fld($0, "sent") != "-" { sub(/\|sent=[^|]*\|/, "|sent=-|") }
-    { print }' -v key="$key"
+  _owed_at || return 1; f="$_OWED_F"
+  st="$(_owed_last "$key")" && [ -n "$st" ] || return 1
+  case "$2|$st" in
+    "mark|open	"*"	-") _owed_act "$f" - "$key" "$(_owed_round "$st")" "sent=$(owed_now)" ;;
+    "unmark|open	"*) case "$st" in *"	-") return 0 ;; esac; _owed_act "$f" - "$key" "$(_owed_round "$st")" sent=- ;;
+  esac
 }
 
 # owed_send [<key prefix>] -> rc 0, always, and nothing on stdout or stderr. THE ONE SEND LOOP:

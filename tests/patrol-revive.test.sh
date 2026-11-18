@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for hooks/patrol-revive.sh — THE PATROL SELF-HEAL (epic-19 wave-01, AC-F6,
-# design ledger D4).
+# Tests for hooks/patrol-revive.sh — THE PATROL SELF-HEAL.
 #
 # THE CONTRACT UNDER TEST. The CLI holds its cron table in process memory with no
 # file behind it, so a `claude plugin update`, a `/reload-plugins` or a
@@ -11,8 +10,7 @@
 # and is older than one fire window (the poker-interval plus the scheduler's jitter)
 # with an idle stretch that long and no tick in it, it refuses the turn in ONE line that
 # names the three acts in order: look at the cron table, create the job if it is absent,
-# arm. The explanation behind the line is not in the line; `session-poker.sh patrol
-# --explain` prints it.
+# arm. The explanation behind the line is not in the line.
 #
 # THE THREE STAMP STATES, and why only one of them speaks here:
 #   absent  — never armed. Nothing engaged a run on this session, or nothing armed
@@ -25,9 +23,8 @@
 # satisfy the arming wall over a cron table that still holds nothing — a Patrol
 # that reads alive and never fires again, which is worse than the state it
 # replaced. Group 5 asserts the stamp's mtime is untouched; Group 4 demands the line
-# name CronCreate before arm, and the explanation rows demand the rule that a refused
-# CronCreate is never followed by arm, for the same reason
-# tests/dispatch-preflight.test.sh S21 demands it.
+# name CronCreate before arm, for the same reason tests/dispatch-preflight.test.sh S21
+# demands it.
 #
 # ACCELERATED CLOCK, NEVER A WAIT. The interval is pinned tiny through the
 # project's own knob (`poker-interval:` in .bionic/config.yaml) and staleness is
@@ -103,6 +100,17 @@ engage_marker() {
   fi
 }
 
+# pr_page <plan> <header lines, or ""> <event>... -> a page at 15 and its run's log, one line per event at
+# increasing instants: the log is where a run at 15 keeps its step, so the page holds its header alone.
+pr_page() {
+  local p="$1" h="$2" d i=0 e; shift 2
+  d="${p%/*}"; case "$d" in */plans/*) d="${d%/plans/*}" ;; *) d="${d%/plans}" ;; esac
+  d="$d/record/$(basename "$p" .plan.md)"; mkdir -p "${p%/*}" "$d"
+  printf -- '---\ncanonical_sdlc_version: 15\n%s---\n' "${h:+$h
+}" > "$p"
+  for e in "$@"; do i=$((i + 1)); printf 'run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n' "$e" "$i"; done > "$d/run.log"
+}
+
 make_env() {  # [interval] -> project dir on stdout
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
@@ -112,17 +120,7 @@ make_env() {  # [interval] -> project dir on stdout
   # SKILL.md arms the Patrol AT engagement — so the marker travels with the stamp in
   # write_stamp below as well. §12 drives the unengaged direction deliberately.
   printf 'poker-interval: %s\n' "${1:-1s}" > "$dir/.bionic/config.yaml"
-  cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<'PRPLAN'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-PRPLAN
+  pr_page "$dir/.bionic/docs/plans/wave-01.plan.md" "" 'step|n=4'
   engage_marker "$dir" "$SID"
   printf '%s' "$dir"
 }
@@ -143,16 +141,6 @@ write_stamp() {  # <project> <session>
   engage_marker "$1" "$2"
 }
 
-# THE STAMP A TICK WRITES (wave-20 REQ-6, D6): `verb=tick`, dated when it ran, and its mtime
-# set to the same instant. The stop wall now refuses a marker turn unless such a stamp sits at
-# or after the marker row, so the rows that describe a Patrol that fired AND ticked plant this
-# rather than `write_stamp`'s arm stamp.
-write_tick_stamp() {  # <project> <session> <seconds ago>
-  printf 'patrol-stamp/v1|at=%s|session=%s|verb=tick\n' "$(pr_iso "$3")" "$2" > "$(stamp_path "$1" "$2")"
-  engage_marker "$1" "$2"
-  backdate "$(stamp_path "$1" "$2")" "$3"
-}
-
 # The `s21_backdate` idiom of tests/dispatch-preflight.test.sh, verbatim in
 # behaviour: age is a MTIME, never a sleep.
 backdate() {  # <file> <seconds ago>
@@ -160,8 +148,6 @@ backdate() {  # <file> <seconds ago>
   ts="$(date -v-"$2"S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-$2 seconds" +%Y%m%d%H%M.%S)"
   touch -t "$ts" "$1"
 }
-
-mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
 
 # ---------- driving the hook ----------
 
@@ -514,17 +500,7 @@ mkdir -p "$WTREPO/.bionic/tmp" "$WTREPO/.bionic/docs/plans"
 printf 'poker-interval: 60s\n' > "$WTREPO/.bionic/config.yaml"
 # The open run this monitor is scoped by lives at the MAIN repository too — same
 # mapping, same reason: a reader rooted at the worktree would find neither.
-cat > "$WTREPO/.bionic/docs/plans/wave-01.plan.md" <<'PRWTPLAN'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-PRWTPLAN
+pr_page "$WTREPO/.bionic/docs/plans/wave-01.plan.md" "" 'step|n=4'
 WT="$WTBASE/wt"
 git -C "$WTREPO" worktree add -q -b pr-wt "$WT" >/dev/null 2>&1
 
@@ -596,35 +572,6 @@ D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 
 fire "$D"; expect_quiet "22b: a stamp inside the project's fire window (40s of a 1m knob) is silent"
 backdate "$(stamp_path "$D" "$SID")" 90
 fire "$D"; expect_block "22c: …and one past it (90s), still inside twice the interval, is refused"
-
-# THE EXPLANATION is what the line leaves out, asked for through the poker beside the hook under test.
-# It is static text over that poker's own path, so it is read once. Its words are a document's, not a
-# computed fact's: the rows below pin the facts a reader acts on, and each needs the verb to have
-# printed before an absence or a phrase means anything.
-G4_EXPLAIN="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" patrol --explain 2>&1)"
-G4_EXPLAIN_RC=$?
-if [ "$G4_EXPLAIN_RC" -eq 0 ] && [ -n "$G4_EXPLAIN" ]; then
-  ok "21a meta: patrol --explain prints, rc 0"
-else
-  no "21a meta: patrol --explain printed nothing or failed" "rc=$G4_EXPLAIN_RC out=<$G4_EXPLAIN>"
-fi
-explain_names() {  # <label> <substring>
-  case "$G4_EXPLAIN" in
-    *"$2"*) ok "$1" ;;
-    *)      no "$1" "the explanation does not name <$2>" ;;
-  esac
-}
-
-# The poker it names is the sibling this hook measured against, never a placeholder a model would paste
-# into a `command not found` (the resolved-root rule).
-explain_names "21: the explanation names the arm act with the poker as an absolute path" "${BIONIC_HOOKS_DIR}/session-poker.sh arm"
-
-# Why the operator is seeing a refusal at all: the cron table is in process memory and a plugin
-# update takes it with no file left behind.
-explain_names "23: …and the cause the operator can act on" "plugin update"
-
-# 24 retired: that a refusal comes once per turn is row 9's fact (a re-entered stop passes), and the
-# line never said it.
 
 section "Group 6: registration"
 
@@ -715,13 +662,9 @@ printf '# bionic session roster — schema roster-state/v1 — machine-local, sa
 # THE ROSTER IS NO LONGER THE WHOLE PREDICATE (bionic 1.3.2, wave-1.3.2 task 4/4). An empty
 # roster on a run that has not delivered is a lull, not a finish, and the tick QUIETs and
 # keeps its stamp — so this fixture has to say the run IS delivered to reach the DISARM this
-# case is about. `current: 9` with `delivered:` on the Step-9 line is the only spelling
-# hooks/session-poker.sh's run_state() accepts.
-mkdir -p "$D/.bionic/docs/plans/epic-99"
-{
-  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 9\n\n'
-  printf -- '- Step 9: delivered: fixture run closed; report: record/fixture/close-out.md\n'
-} > "$D/.bionic/docs/plans/epic-99/wave-01.plan.md"
+# case is about: a step-9 event in the run's log that carries `delivered=`.
+pr_page "$D/.bionic/docs/plans/epic-99/wave-02.plan.md" 'integration-branch: main' \
+  'step|n=9|delivered=fixture run closed; report: record/fixture/close-out.md'
 # AND THE ORDERING IS STATED, NOT LEFT TO THE CLOCK. `make_env` plants a second plan at
 # `plans/wave-01.plan.md` reading `current: 4`, and which of the two the tick resolves is
 # `active_plan`'s newest-by-mtime pick. Both files are written inside the same second, so
@@ -787,18 +730,7 @@ section "§TASK-SCALE: the scale table's patrol cell is the one rule four reader
 # asks a task-scale dispatch for a stamp, resume arms one — or any of them stops acting at wave scale.
 ts_env() {  # <scale> -> make_env's project whose plan carries `scale: <scale>`
   local d; d=$(make_env 1m)
-  cat > "$d/.bionic/docs/plans/wave-01.plan.md" <<TSPLAN
----
-canonical_sdlc_version: 14
-scale: $1
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-TSPLAN
+  pr_page "$d/.bionic/docs/plans/wave-01.plan.md" "scale: $1" 'step|n=4'
   # An empty roster is a run with nothing dispatched yet, which the tick reads as a lull and carries on from;
   # with no roster file at all it refuses, and a refusal is not the reading TS-2b asks for.
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
@@ -878,24 +810,6 @@ if [ -f "$(stamp_path "$TS_RW" "$SID")" ]; then
 else
   no "TS-7c the control: resume over a wave-scale run armed no stamp" "$(ls "$TS_RW/.bionic/tmp")"
 fi
-
-# ---------- what the explanation says about the footgun in its own third act ----------
-#
-# CREATING IS THE REFUSABLE HALF. `CronCreate` is measured non-deterministically refusable by the
-# auto-mode classifier, and a model that stamps without it freshens the stamp over an EMPTY cron
-# table: a Patrol that reads alive to this hook, to the arming wall and to /bionic:doctor, and never
-# fires again. The header argues that this is strictly worse than the death it heals. The line is too
-# short to carry the argument (it says "if absent"), so the explanation carries it, and these rows
-# hold it there for the reader who acts on it.
-D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
-fire "$D"
-expect_block "35: the stale fixture is refused, so there is a refusal to explain"
-explain_names "36: the arm act is conditional on the create act in the text itself" \
-  "Only once step 2 returned a job"
-explain_names "37: …and a refused CronCreate is told to stop, not to arm" \
-  "do NOT run step 3"
-explain_names "38: …and the deliberate-stop path is named, not left to be guessed" \
-  "session-poker.sh disarm"
 
 # ---------- the header's own honesty about its backstop ----------
 #

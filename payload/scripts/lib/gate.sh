@@ -56,7 +56,7 @@
 #
 # THE VERBS.
 #
-#   gate_ask <kind> <key> [--within <seconds>] [--class <browser|compile>]   rc 0, the request id on stdout: admitted.
+#   gate_ask <kind> <key> [--within <seconds>] [--class <heavy class>]   rc 0, the request id on stdout: admitted.
 #                  rc 75 at once, nothing filed: the asking agent's budget refuses the key (THE
 #                  BUDGET; its line on stderr). rc 75: the time ran out; the request is kept with its turn, nothing ran, and
 #                  its holder is cleared (holder=-), so it is nobody's and passed over until the
@@ -71,6 +71,10 @@
 #   gate_end <id> <rc> --by <sid> [--why <reason>]
 #                  (wave-36 T11; D8) stop-run's end, accepted whether or not the request was
 #                  admitted: writes ended= rc= by= why= and records no seconds
+#   gate_end <id> <rc> --by <sid> [--why <reason>] --waiting
+#                  the same end, written only while the request was never admitted, read under the
+#                  lock that admits; rc 3 and nothing written once it is admitted, so an end that
+#                  withdraws an ask can never end a run
 #   gate_state               share=<n> reserve=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
 #   gate_room [--owed <n>]   rc 0 while another writer may start, rc 1 otherwise, one line:
 #                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
@@ -91,6 +95,9 @@
 #   gate_landing_close <landing> [<carrier>]
 #                            the landing published, was returned or stalled: the lease is removed.
 #                            rc 0 (nothing on file is rc 0 too); rc 1 when <carrier> does not hold it
+#   gate_whole_open <tree>   rc 0 when an open whole request names <tree> (both read resolved):
+#                            a whole run is running there, which its log, written once it ends, cannot say.
+#                            It takes no lock.
 #   gate_asked               names (a who each) on stdin; prints those with an OPEN request (see
 #                            THE RULES, "open"), in the order given, and is rc 0 when it printed any.
 #                            One read of the store answers every name, and it takes no lock.
@@ -135,8 +142,8 @@
 #
 # THE RULES, each taken under lock/:
 #
-#   alive     a request's holder is alive by the pid-and-start rule of lib/slots.sh
-#             (`_slots_live`, called, not copied). Admitted, dead and never ended is killed:
+#   alive     a request's holder is alive by lib/alive.sh's one rule, pid and start
+#             (`alive_run`, called, not copied). Admitted, dead and never ended is killed:
 #             the next locked act that reads it writes it ended=<now> rc=137, after which it
 #             overlaps nothing.
 #   open      (T71) ONE rule, `_gate_open`, which the scan, gate_list, gate_asked and the prune
@@ -219,9 +226,10 @@ if ! type -t _res_used_pct >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/resources.sh"
   # shellcheck disable=SC1091
   . "$_GATE_LIB_DIR/resources.sh"
 fi
-if ! type -t _slots_live >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/slots.sh" ]; then
+# Whether a holder is alive is lib/alive.sh's one rule (`alive_run`, over slots.sh's pid and start).
+if ! type -t alive_run >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/alive.sh" ]; then
   # shellcheck disable=SC1091
-  . "$_GATE_LIB_DIR/slots.sh"
+  . "$_GATE_LIB_DIR/alive.sh"
 fi
 # An instant has one reader, lib/time.sh's (wave-39 T17; D18): the finished-row read below dates the record by it.
 if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$_GATE_LIB_DIR/time.sh" ]; then
@@ -229,7 +237,7 @@ if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$_GATE_LIB_DIR/time.sh" ]; then
   . "$_GATE_LIB_DIR/time.sh"
 fi
 # THE LANDING KEY AND THE LANDING RECORD ARE lib/line.sh's (wave-39 T17; D18, AC-12.1): its alphabet (`landing_key`,
-# `landing_key_ok`) and its record reader (`_LINE_FIELDS_AWK`). Loaded when first needed, never at source: line.sh
+# `landing_key_ok`) and its record reader (`_LINE_FIELDS_AWK`, over `line_lines`, the record and the run's log read as one). Loaded when first needed, never at source: line.sh
 # sources the worktree library, and most of the gate's callers ask about no landing.
 _gate_load_line() {  # -> 0 once lib/line.sh's key and reader are loaded
   declare -F landing_key >/dev/null 2>&1 && [ -n "${_LINE_FIELDS_AWK:-}" ] && return 0
@@ -386,7 +394,7 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
 
 _gate_alive() {  # the request last read has a live holder (holder=- is nobody)
   case "$_R_holder" in ''|-) return 1 ;; esac
-  _slots_live "${_R_holder%%:*}" "${_R_holder#*:}"
+  alive_run "${_R_holder%%:*}" "${_R_holder#*:}"
 }
 
 # _gate_num <string> — rc 0 and _G_NUM the string as a decimal whole number (leading zeros are
@@ -425,6 +433,17 @@ _gate_open() {
 _gate_reap() {
   _R_ended="$(_res_now)" _R_rc=137
   printf 'ended=%s\nrc=137\n' "$_R_ended" >> "$1"
+  _gate_reap_fact "${1##*/}"
+}
+# A KILLED RUN IS A RUN FACT: the shim that writes a run's line died with the run, so the gate that finds it
+# killed writes it, `ev=run` with rc=137, to the run's log beside the landing record its request names (record=,
+# a landing's run). A request that names no record is no run's the gate can name, and writes nothing there.
+# Soft: a log that cannot be written changes no gate decision.
+_gate_reap_fact() {  # <id> -> the reaped request's run line in its run's log
+  case "$_R_record" in /*/*) ;; *) return 0 ;; esac
+  _gate_load_line || return 0
+  line_run_event "${_R_record%/*}/run.log" rc=137 "key=$_R_key" "kind=$_R_kind" "tree=$_R_tree" \
+    "landing=$_R_landing" "request=$1" >/dev/null 2>&1 || :
 }
 
 # _gate_holder <id> <holder> — under the lock: rewrites the request's holder line. Handed back
@@ -458,6 +477,19 @@ _gate_cost_file() {  # <key> <project> -> its cost file, cost/<project>%<key>
   printf '%s/cost/%s%%%s\n' "$_GD" "$2" "${1//\//%}"
 }
 
+# _gate_class_heavy <class> — rc 0 when the class is one of the classifier's heavy classes. The names
+# live in one table (lib/cmd-class.sh), loaded here only when a class is actually named, so an
+# ask with no class pays nothing for it.
+_gate_class_heavy() {
+  [ -n "${1:-}" ] || return 1
+  declare -F cmd_class_heavy >/dev/null 2>&1 || {
+    [ -r "$_GATE_LIB_DIR/cmd-class.sh" ] || return 1
+    # shellcheck disable=SC1091
+    . "$_GATE_LIB_DIR/cmd-class.sh" 2>/dev/null || return 1
+  }
+  cmd_class_heavy "$1"
+}
+
 # _gate_cores_for <kind> [<class>] [<key> <project>] [<busy> <faded>] — the cores a request is promised.
 # THE ONE SITE of the promise: the key's measured cores (`_gate_cost_cores`) where a kept line carries
 # them, else a prior. A whole run, and a browser or compile run whose key has no measurement, sizes its
@@ -473,10 +505,7 @@ _gate_cost_file() {  # <key> <project> -> its cost file, cost/<project>%<key>
 _gate_cores_for() {
   local c='' b f
   [ "${1:-work}" = whole ] || [ -z "${3:-}" ] || c="$(_gate_cost_cores "$3" "$4")"
-  [ -n "$c" ] || case "${1:-work}:${2:-}" in
-    whole:*|*:browser|*:compile) ;;
-    *) _res_suite_cores; return ;;
-  esac
+  [ -n "$c" ] || [ "${1:-work}" = whole ] || _gate_class_heavy "${2:-}" || { _res_suite_cores; return; }
   if [ "$#" -ge 6 ]; then b="$5" f="$6"; else b="$(_res_busy_cores 2>/dev/null)"; f="$(_gate_faded "$(_res_now)" "$b")"; fi
   awk -v l="$(_gate_share_cores)" -v b="$b" -v f="$f" -v c="$c" \
     'BEGIN { x = int(l - b - f); if (x < 1) x = 1; if (c != "" && c + 0 <= x) print c; else print x }'
@@ -697,13 +726,13 @@ _gate_row_done() {
       _G_DONE="${_G_DONE}${l} ${ep}
 "
     done <<EOF
-$(awk -F'|' "$_TIME_ISO_AWK$_LINE_FIELDS_AWK"'
+$(line_lines "$1" | awk -F'|' "$_TIME_ISO_AWK$_LINE_FIELDS_AWK"'
       { ev = line_ev() }
       ev == "published" || ev == "returned" || ev == "stalled" {
         r = line_kv("row"); e = iso2epoch(line_kv("at"))
         if (r != "" && e >= 0 && (!(r in last) || e > last[r])) last[r] = e
       }
-      END { for (r in last) printf "%d\t%s\n", last[r], r }' "$1" 2>/dev/null)
+      END { for (r in last) printf "%d\t%s\n", last[r], r }' 2>/dev/null)
 EOF
   fi
   [ -n "$_G_DONE" ] || return 1
@@ -1087,35 +1116,44 @@ gate_budget() {  # <kind> <key> -> rc 0 admitted; rc 75 refused, the budget's li
 
 # ── THE ORDER: THE USER'S WORDS STOP EVERY SUITE ─────────────────────────────────────────────
 #
-# An order is what the user said, recorded by the poker's `order` verb as one line, and ended by
-# `order lift` with another:
+# An order is what the user said, recorded by the poker's `order` verb as one event, and ended by
+# `order lift` with another: an order event (act=given or lifted, said=<words>) appended to the bound
+# run's log, which the reader answers with the order a version-14 plan's `order:` lines still give.
+# With no run bound it is one line of record/orders.log under the docs root:
 #
 #   order: given <ISO-UTC> "<words>"
 #   order: lifted <ISO-UTC> "<words>"
 #
-# under the bound plan's `## SDLC State`, or, with no run bound, in record/orders.log under the docs
-# root. The newest line decides: a `given` line is an open order. tests/run.sh asks gate_order before
-# it starts anything and, while an order is open, refuses with the user's words. Who runs it does not
-# matter: the plan read is the asking session's bound run, else the project's one open run, so a shell
-# with no session key is refused by the same order; the log is read when no plan holds an open one.
+# The newest fact decides: a given order is an open order. tests/run.sh asks gate_order before it starts
+# anything and, while an order is open, refuses with the user's words. Who runs it does not matter: the
+# run read is the asking session's bound run, else the project's one open run, so a shell with no session
+# key is refused by the same order; the log is read when no run holds an open one.
 #
-# gate_order_of <file> [plan] -> the open order's `given <ISO-UTC> "<words>"`, rc 0; rc 1 when none.
-#   With `plan`, only the lines under `## SDLC State` count, outside code fences.
+# gate_order_of <orders.log> -> the open order's `given <ISO-UTC> "<words>"`, rc 0; rc 1 when none.
+# gate_order_plan <plan> -> the run's open order in the same shape, the reader's answer held with the run's
+#   place (lib/proof.sh `proof_order_held`); rc 1 when none stands or it cannot be read.
 # gate_order [<root>] -> the open order, as gate_order_of prints it, rc 0; rc 1 when none. The root
 #   defaults to the project the working directory belongs to (lib/root.sh `project_root`, so a linked
 #   tree reads its main checkout's run).
 gate_order_of() {
   [ -f "${1:-}" ] && [ -r "$1" ] || return 1
-  awk -v plan="${2:-}" '
-    plan != "" && /^[[:space:]]*```/ { fence = !fence; next }
-    plan != "" && fence { next }
-    plan != "" && /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    plan != "" && !s { next }
+  awk '
     /^order:[ \t]+(given|lifted)[ \t]/ { last = $0 }
     END {
       if (last !~ /^order:[ \t]+given[ \t]/) exit 1
       sub(/^order:[ \t]+/, "", last); print last
     }' "$1" 2>/dev/null
+}
+gate_order_plan() {
+  [ -f "${1:-}" ] || return 1
+  if ! declare -F proof_order_held >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    [ -r "$_GATE_LIB_DIR/proof.sh" ] && . "$_GATE_LIB_DIR/proof.sh" >/dev/null 2>&1
+    declare -F proof_order_held >/dev/null 2>&1 || return 1
+  fi
+  proof_order_held "$1" 2>/dev/null | awk '
+    { k = substr($0, 1, index($0, "=") - 1); v[k] = substr($0, index($0, "=") + 1) }
+    END { if (v["order"] != "given") exit 1; printf "given %s \"%s\"\n", v["at"], v["said"] }'
 }
 
 _gate_order_libs() {  # -> 0 once project_root, session_run and docs_root are loaded
@@ -1141,7 +1179,7 @@ gate_order() {
     'bound-open '*) plan="${run#bound-open }" ;;
     'fallback '*) plan="${run#fallback }" ;;
   esac
-  [ -z "$plan" ] || ! gate_order_of "$plan" plan || return 0
+  [ -z "$plan" ] || ! gate_order_plan "$plan" || return 0
   gate_order_of "$(docs_root "$root")/record/orders.log"
 }
 
@@ -1197,7 +1235,7 @@ gate_ask() {
   local kind="${1:-}" key="${2:-}" within='' poll="${BIONIC_GATE_POLL:-2}" start now
   local who='' id='' noted=0 rc land='' rec='' class=''
   if [ "$#" -lt 2 ]; then
-    echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>] [--class <browser|compile>]" >&2
+    echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>] [--class <heavy class>]" >&2
     return 2
   fi
   shift 2
@@ -1210,7 +1248,7 @@ gate_ask() {
   done
   case "$kind" in landing|work|whole) ;; *) echo "gate: kind is landing, work or whole, not '$kind'" >&2; return 2 ;; esac
   case "$within" in *[!0-9]*) echo "gate: --within takes whole seconds, not '$within'" >&2; return 2 ;; esac
-  case "$class" in ''|browser|compile) ;; *) echo "gate: --class is browser or compile, not '${class:0:20}'" >&2; return 2 ;; esac
+  [ -z "$class" ] || _gate_class_heavy "$class" || { echo "gate: --class is not a heavy class: '${class:0:20}'" >&2; return 2; }
   key="${key//$'\n'/ }"
   [ -n "$key" ] || { echo "gate: gate_ask needs a command key" >&2; return 2; }
   _gate_store || return 2
@@ -1282,7 +1320,7 @@ _gate_cpu() {
 # gate_end runs in the holder's own shell, called directly and never inside `$( )`: the `times` it
 # reads is that shell's reaped children, the run, and a subshell has reaped none of them.
 gate_end() {
-  local id="${1:-}" rc="${2:-}" f now secs reading cf ld cores i=0 by='' why='-'
+  local id="${1:-}" rc="${2:-}" f now secs reading cf ld cores i=0 by='' why='-' waiting=''
   case "$id" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc> [--by <sid> [--why <reason>]]" >&2; return 2 ;; esac
   case "$rc" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc> [--by <sid> [--why <reason>]]" >&2; return 2 ;; esac
   shift 2
@@ -1290,6 +1328,7 @@ gate_end() {
     case "$1" in
       --by) by="${2:-}"; shift 2 2>/dev/null || shift ;;
       --why) why="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --waiting) waiting=1; shift ;;
       *) echo "gate: gate_end: unknown option $1" >&2; return 2 ;;
     esac
   done
@@ -1308,6 +1347,7 @@ gate_end() {
     _gate_unlock; echo "gate: request $id was never admitted" >&2; return 2
   fi
   if [ -n "$_R_ended" ]; then _gate_unlock; return 0; fi
+  if [ -n "$waiting" ] && [ -n "$_R_admitted" ]; then _gate_unlock; return 3; fi
   now="$(_res_now)"
   if [ -n "$by" ]; then
     # STOPPED, NOT FINISHED (wave-36 T11; D8, AC-2.2): stop-run's end, admitted or not. It names who
@@ -1419,7 +1459,7 @@ gate_room() {
 # place in line, held by the process that carries it (line.sh `_line_carry`) from its first ask until
 # it publishes, is returned or stalls, so a landing stays the oldest across its gaps.
 #
-#   held   its carrier lives (`_slots_live`, the pid-and-start rule the requests' holders use): the
+#   held   its carrier lives (`alive_run`, the pid-and-start rule the requests' holders use): the
 #          landing is active, ordered by its first-ask instant, ties by seq (THE WIDTH ASK).
 #   away   its carrier ended WAITING (`gate_landing_leave`; line.sh's rc 75, "its place kept"): the
 #          lease is nobody's (carrier=-), orders no one, and keeps its first-ask instant for the next
@@ -1463,7 +1503,7 @@ _gate_lease_state() {
        _gate_num "$(_res_now)" || return 0; now="$_G_NUM"
        [ "$((now - left))" -le "$span" ] || return 0
        _L_state=away ;;
-    *:*) _slots_live "${_L_carrier%%:*}" "${_L_carrier#*:}" && _L_state=held ;;
+    *:*) alive_run "${_L_carrier%%:*}" "${_L_carrier#*:}" && _L_state=held ;;
   esac
   return 0
 }
@@ -1727,6 +1767,21 @@ $nm
 "*) printf '%s\n' "$nm"; hit=0 ;; esac
   done <<< "$names"
   return $hit
+}
+
+# gate_whole_open <tree> — rc 0 when an open (waiting or admitted) whole request names <tree>. The runner
+# files its whole request before its first suite and ends it after its last, while the run's log and the
+# record of it are written only once it has ended, so this request is the one fact that a whole run is
+# running in a checkout. Both paths are compared resolved, so a symlinked spelling of the tree still matches.
+gate_whole_open() {
+  local want f got
+  want="$(cd "${1:-}" 2>/dev/null && pwd -P)" || return 1
+  for f in "$(gate_dir)"/requests/[0-9]*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    _gate_read "$f" 2>/dev/null && [ "$_R_kind" = whole ] && _gate_open || continue
+    got="$(cd "$_R_tree" 2>/dev/null && pwd -P)" && [ "$got" = "$want" ] && return 0
+  done
+  return 1
 }
 
 # gate_list — one line per request, lowest id first:

@@ -7,13 +7,11 @@
 #                         the compare site) under <docs_root>/plans (depth <= 2)
 #                         and <docs_root>/incidents (depth <= 2) that carries a flush-left
 #                         `## SDLC State` heading; exit 1 and silent if none.
-#   run_open <plan>    -> exit 0 iff THAT ONE FILE reads as an open run: its flush-left
-#                         `current:` value is 0-8, or 9 with no `- Step 9:` line carrying
-#                         `delivered:`, or the retired task-scale `current: T<n>` (kept
-#                         open so its readers refuse it by name, below) — AND its own
-#                         frontmatter carries no `abandoned:` line; else exit 1. Any other
-#                         non-numeric `current:` is no open run. Silent both ways: the
-#                         caller already holds the path.
+#   run_open <plan>    -> exit 0 iff THAT ONE FILE reads as an open run: the step its run's
+#                         reader holds is 0-8, or 9 not delivered, and the run is not
+#                         abandoned; else exit 1 (3 when its place cannot be read). A step
+#                         that is no number is no open run. Silent both ways: the caller
+#                         already holds the path.
 #   active_run <root>  -> exit 0 + the plan path iff active_plan finds a file and run_open
 #                         holds on it; else exit 1, silent.
 #   open_runs <root>   -> every file _run_candidates finds for which run_open holds, one
@@ -73,7 +71,11 @@ if ! declare -F docs_root >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$(cd "$(_run_self_dir)" && pwd -P)/roots.sh"
 fi
-
+# plan-read.sh, the same way: the plan's header has one parser, and `plan_frontmatter_get` asks it.
+if ! declare -F plan_read_header >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/plan-read.sh" ;; *) . ./plan-read.sh ;; esac
+fi
 # normalize_newlines [file] -> that document with its line endings TRANSLATED to \n, never
 # deleted. A trailing \r is stripped from each record (CRLF: \r\n → \n) and any remaining
 # lone \r becomes a real newline (classic-Mac CR-only). Called with NO argument it reads
@@ -123,48 +125,33 @@ plan_lines() {  # <plan>
 }
 
 # plan_frontmatter_get <plan> <key> -> the value of that leading-frontmatter key, one
-# quote layer stripped and trailing whitespace trimmed; empty when the key is absent, the
-# plan has no frontmatter, or the file cannot be read.
+# quote layer stripped and surrounding whitespace trimmed; empty when the key is absent, the
+# plan has no frontmatter, or the file cannot be read. The status is 0 whatever the key's fate:
+# an absent key is an empty value, not a failure.
 #
-# THE GRAMMAR IS THE EVIDENCE GATE'S, MOVED HERE RATHER THAN COPIED (epic-23
-# wave-13-fixit-180 T4, REQ-4/D6). `payload/scripts/lib/walls.sh` has read plan
-# frontmatter since v14 — `FRONTMATTER` captured at :916 and the nested `frontmatter_get`
-# at :918 — but that pair is defined INSIDE `_eg_body`, so it exists only while the gate
-# is running and sourcing walls.sh does not define it. The third caller (close-out.sh's
-# archive binding, and `archive_run` itself) therefore had nowhere to reuse it from. It
-# lives here because this file already owns the plan as a document: `normalize_newlines`
-# is its line-ending rule and `run_open` already lifts the frontmatter block with this
-# exact awk. Two spellings of one grammar is what this avoids; walls.sh's own nested copy
-# stays where it is, because moving a wall's parse mid-wave changes what the wall reads.
-#
-# LEADING BLOCK ONLY, LIKE EVERY OTHER FRONTMATTER READER IN THE TREE: the awk arms at
-# line 1 and exits at the closing `---`, so a `---` inside the body is prose.
-#
-# THE FRONTMATTER IS CAPTURED BEFORE IT IS SEARCHED, never `producer | grep | head` on a
-# live pipe: every caller of this file runs under `set -o pipefail`, where `head -1`'s
-# early exit can leave the producer with SIGPIPE and promote 141 to the pipeline's status
-# (run_open's own note, §R4). A here-string is fully written before the reader starts. The
-# status is 0 whatever the key's fate — an absent key is an empty value, not a failure.
+# THE READER'S HEADER PARSER ANSWERS IT: `plan_read_header` (lib/plan-read.sh) is the one parser
+# of a plan's header, the one `reader <plan> header` asks, so the twenty callers of this function
+# and the reader cannot read one key two ways. It is asked directly, not through `reader_main`,
+# because a header needs no run: the reader refuses a plan outside `plans/<epic>/<wave>.plan.md`,
+# and callers of this function read incident files and planted plans anywhere. No translation is
+# started, so the cost is the parser's own read. LEADING BLOCK ONLY, line ends translated (a
+# CR-only plan reads key by key), first line of a key answers.
 plan_frontmatter_get() {
-  local plan="$1" key="$2" fm v
+  local plan="$1" key="$2" v
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   [ -n "$key" ] || return 0
-  fm=$(_run_lines "$plan" | awk '
-        NR == 1 && $0 == "---" { f = 1; next }
-        f && $0 == "---" { exit }
-        f { print }')
-  frontmatter_value_v v "$fm" "$key" && printf '%s\n' "$v"
+  v="$(plan_read_header "$plan" "$key")" && printf '%s\n' "${v#*=}"
   return 0
 }
 
 # frontmatter_value_v <var> <frontmatter text> <key> -> rc 0 and the value in <var> when a line
-# carries the key, rc 1 and an empty <var> when none does. THE GRAMMAR ABOVE, IN BUILTINS (wave-34
-# T11, D19): the first line that is `<key>` between optional whitespace and a `:`, the text after the
+# carries the key, rc 1 and an empty <var> when none does. THE HEADER PARSER'S GRAMMAR, IN BUILTINS:
+# the first line that is `<key>` between optional whitespace and a `:`, the text after the
 # colon with its surrounding whitespace trimmed, then one leading and one trailing quote of either
 # kind dropped — what `grep | head -1 | sed | sed | sed` used to say with five processes. The key is
 # matched as text, which is what every key a caller names (`rigor`, `working-branch`) already was
-# to the regex. walls.sh's `frontmatter_get` reads the evidence gate's FRONTMATTER through this too,
-# so the two readers share one spelling.
+# to the regex. Its one caller is walls.sh's `frontmatter_get`, over the evidence gate's FRONTMATTER
+# text, which it holds already captured and so cannot hand the parser as a file.
 frontmatter_value_v() {
   local _fv_rest="${2}"$'\n' _fv_l
   printf -v "$1" '%s' ''
@@ -304,7 +291,8 @@ budget_cap() {  # <plan> -> `writers=<n>`, or nothing
 }
 
 # _run_candidates <droot> -> every file under <droot>/plans and <droot>/incidents (each
-# walked to depth <= 2) that carries a flush-left `## SDLC State`, NUL-separated, in walk
+# walked to depth <= 2) that carries a flush-left `## SDLC State`, or is a plan page at 15
+# (`_run_page15`), NUL-separated, in walk
 # order: plans/ then incidents/, and within each whatever order `find` produced. Prints
 # nothing and exits 0 when there is no candidate; the caller counts.
 #
@@ -352,9 +340,9 @@ _run_candidates() {
     fi
     # THE FOLDERS AT DEPTH 1, asked only whether they open: a plan under one that does not is
     # invisible to the file walk below. Depth-2 folders hold depth-3 files, out of bound.
-    # A SHELL GLOB, NOT A SECOND `find`: tests/hook-latency.test.sh §6 pins this walk at one
-    # `find` fork, and the file walk's `find` line stays the one line cross-gate §S.2 and the
-    # fixture battery's `depth-1` mutation anchor on. The hidden-name pattern is there because
+    # A SHELL GLOB, NOT A SECOND `find`: this walk costs one `find` fork, and the file walk's
+    # `find` line stays the one line cross-gate §S.2 and the fixture battery's `depth-1` mutation
+    # anchor on. The hidden-name pattern is there because
     # `find` descends dot-folders too; a symlink is skipped because `find` does not follow it,
     # and an unmatched pattern stays literal and fails `-d`.
     for f in "$d"/*/ "$d"/.[!.]*/; do
@@ -367,24 +355,22 @@ _run_candidates() {
         printf 'bound-unreadable %s\n' "$f" >&2
         continue
       fi
-      # FENCE-AWARE, and line endings TRANSLATED rather than deleted. Two failure modes,
-      # opposite directions, both recorded:
-      #   - a `## SDLC State` heading that appears only inside a ``` fenced example is
-      #     DOCUMENTATION. Counting it makes a page about the lifecycle look like a live
-      #     run, and every always-on hook then binds in a project that has none.
-      #   - `tr -d '\r'` collapses a CR-only (classic-Mac) file to a single line, every
-      #     line-anchored match misses, and a real plan becomes invisible to the whole
-      #     fleet while a wave is live (.claude/rules/hook-authoring.md).
-      # awk splits on \n, so a CR-only file arrives as one record that gsub re-splits
-      # into real lines. The evidence gate carries the same reading at its own parse.
-      _run_lines "$f" | awk '
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^## SDLC State/ { found = 1 }
-        END { exit !found }' || continue
+      _run_page15 "$d" "$droot" "$f" || continue
       printf '%s\0' "$f"
     done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
   done
+}
+
+# _run_page15 <walked dir> <droot> <file> -> 0 when the file is a plan page at 15: a `*.plan.md` under <droot>/plans
+# or <droot>/incidents whose header says `canonical_sdlc_version: 15`. Such a page holds no state section, since its
+# run's state is its log, which run_open reads; so the walk finds it by its header, read by the header's one parser,
+# which reads the leading `---` block alone (a header inside a fenced block is prose) and ends a line at a bare CR. A
+# page whose header says anything else is no run's plan. The name is what joins a page to its record
+# (lib/reader.sh `reader_record`), so an incident's plan is a run at 15 when named as a plan, as the skill lays it out
+# (`incidents/<d>/<d>.plan.md`), and a plain `plan.md`, whose record every incident would share, is none.
+_run_page15() {
+  case "$1" in "$2/plans"|"$2/incidents") ;; *) return 1 ;; esac
+  case "$3" in *.plan.md) [ "$(plan_read_header "$3" canonical_sdlc_version)" = canonical_sdlc_version=15 ] ;; *) return 1 ;; esac
 }
 
 # active_plan <root> -> the newest *.md by mtime under <docs_root>/plans and
@@ -469,35 +455,24 @@ plan_unreadable() {
 #
 # A PARKED RUN (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit `## Wake Note` (steps/8.md): a plan is
 # parked when it carries a flush-left `## Wake Note` whose first non-blank body line is not `(none)` (with no body,
-# when its heading carries a title), or a flush-left `parked: <why>` under `## SDLC State`. Fenced text is skipped. The
-# empty template section older plans carry (`## Wake Note` / `(none)`) parks nothing. The one reader: close-out.sh
-# closes a parked plan without the merge act, and session-poker.sh `step-line 9` is accepted on one.
-# plan_parked_why <plan> -> the reason (the parked: value, else the Wake Note's first body line, else its heading's
-# title), rc 0; rc 1, nothing printed, when the plan is not parked. A `|` is folded to `/` so it fits a table cell.
+# when its heading carries a title). Fenced text is skipped. The
+# template's empty section (`## Wake Note` / `(none)`) parks nothing. The one reader: close-out.sh
+# closes a parked plan without the merge act.
+# plan_parked_why <plan> -> the reason (the Wake Note's first body line, else its heading's title), rc 0; rc 1,
+# nothing printed, when the plan is not parked. A `|` is folded to `/` so it fits a table cell.
 plan_parked_why() {
   [ -f "${1:-}" ] || return 1
-  awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / {
-      sec = ""
-      if ($0 ~ /^## SDLC State[ \t]*$/) sec = "s"
-      else if ($0 ~ /^## Wake Note([ \t].*)?$/) { sec = "w"; if (title == "") { t = $0; sub(/^## Wake Note[ \t—:-]*/, "", t); title = t } }
-      next
-    }
-    sec == "s" && pk == "" && /^parked:[ \t]*[^ \t]/ { v = $0; sub(/^parked:[ \t]*/, "", v); pk = v }
-    sec == "w" && !wseen && NF {
-      wseen = 1; v = $0; sub(/^[ \t]*(- )?/, "", v)
-      if (tolower(v) !~ /^\(?none\)?\.?$/) wk = v; else wnone = 1
-    }
-    END {
-      r = pk
-      if (r == "") r = wk
-      if (r == "" && !wnone) r = title
-      sub(/[ \t]+$/, "", r); gsub(/\|/, "/", r)
-      if (r == "") exit 1
-      print r
-    }' "$1" 2>/dev/null
+  local r h b
+  h="$(plan_read_heading "$1" "Wake Note")" || return 1
+  b="$(plan_read_section "$1" Wake | awk '!d && NF { d = 1; sub(/^[ \t]*(- )?/, ""); print (tolower($0) ~ /^\(?none\)?\.?$/ ? "n" : "w" $0) }')"
+  case "$b" in
+    w*) r="${b#w}" ;;
+    n) r="" ;;
+    *) r="$(printf '%s\n' "$h" | awk -F'\t' 'NR == 1 { t = $3; sub(/^[ \t—:-]*/, "", t); print t }')" ;;
+  esac
+  r="${r%"${r##*[![:space:]]}"}"; r="${r//|//}"
+  [ -n "$r" ] || return 1
+  printf '%s\n' "$r"
 }
 
 # THE VERDICT MOVED HERE, UNCHANGED (wave-session-bound-run S1, 2026-09-04). Until this wave
@@ -521,91 +496,50 @@ plan_parked_why() {
 # closed or gone, 3 is a plan that is there and cannot be read (`plan_unreadable`, below).
 # Closed was the wrong answer for the second: the run may be mid-flight, and a reader that
 # calls it closed stops protecting it — the evidence gate admitted every commit against it.
+#
+# THE RUN'S STATE IS THE READER'S, for every run (lib/proof.sh `proof_step_held`): its step, and whether it is open,
+# delivered or abandoned, folded from the homes that write those facts and held between asks, so a step the run's log
+# alone holds closes or opens the run as the plan's current: line would. A run whose place cannot be read is 3, the
+# answer a plan that cannot be read gives: closed would stop protecting a run that may be mid-flight.
+# What decides is the step's number: a sub-step letter (`8a`, `8b`) is stripped, 0 to 8 are open, 9 is open until it
+# is delivered, and any other value is no step this lifecycle has.
 run_open() {
-  local plan="$1"
+  local plan="$1" place n step
   [ -n "$plan" ] || return 1
   plan_unreadable "$plan" >/dev/null && return 3
   [ -f "$plan" ] || return 1
+  _run_place "$plan" >/dev/null || return 3
+  place="$_PROOF_PLACE"
+  case "$place" in *state=open*) : ;; *) return 1 ;; esac
+  n=""; case "$place" in n=*) n="${place%%$'\n'*}"; n="${n#n=}" ;; esac
+  step="${n%[ab]}"
+  case "$step" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$((10#$step))" -le 9 ]
+}
 
-  # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
-  # variable via a here-string, never a live pipe fed by _run_lines/awk. `grep -q`
-  # (and `-m1`) exit at their FIRST match; piped directly to a still-writing producer,
-  # that early exit closes the read end while the producer is mid-write, the producer
-  # takes SIGPIPE and reports 141, and every caller of this file runs under
-  # `set -o pipefail`, which promotes that 141 to the whole pipeline's own status. An
-  # `if pipeline; then return 1; fi` guarded that way reads 141 as false: a plan that
-  # DOES carry `delivered:` (or `abandoned:`) falls through as if it did not, and a
-  # closed run reads open — the fail-dangerous direction. A here-string is fully
-  # written by the shell before the reader ever starts, so there is no live writer left
-  # to signal, regardless of match position or file size (measured: a `delivered:` line
-  # near the top of a file past ~16-20 KB with pipefail on reproduces this at the
-  # `_run_lines "$plan" | grep -qE …` shape; tests/run-predicate.test.sh §R4, AC-21;
-  # sibling note tests/cross-gate-agreement.test.sh:1502, `producer | grep -q` under
-  # pipefail exits 141 on large files).
-  local lines
-  lines=$(_run_lines "$plan")
-
-  # Frontmatter close: a plan explicitly abandoned is never active, regardless of `current:`.
-  local frontmatter
-  frontmatter=$(awk '
-    NR == 1 && $0 == "---" { f = 1; next }
-    f && $0 == "---" { exit }
-    f { print }
-  ' <<< "$lines")
-  if grep -q '^abandoned:' <<< "$frontmatter"; then
-    return 1
+# _run_place <plan> -> the reader's held answer of where the run stands (`n=`, `state=`, `approved=`), also left in
+# _PROOF_PLACE; 2 when it cannot be read. lib/proof.sh, beside this file, is loaded the first time.
+_run_place() {
+  if ! declare -F proof_step_held >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(cd "$(_run_self_dir)" && pwd -P)/proof.sh" >/dev/null 2>&1
+    declare -F proof_step_held >/dev/null 2>&1 || return 2
   fi
+  proof_step_held "$1"
+}
 
-  # The `current:` line. LEADING WHITESPACE IS TOLERATED and the read is fence-aware, for
-  # the same reason the marker test above is: this is the exact tolerance the five
-  # hand-copies in hooks/ carried, and a predicate that is stricter than the walls it
-  # replaces goes silently inert on a plan those walls read perfectly well.
-  local body
-  body=$(awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    { print }' <<< "$lines")
-  local current
-  current=$(grep -m1 -E '^[[:space:]]*current[[:space:]]*:' <<< "$body" \
-    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-    | tr -d '[:space:]')
-  [ -n "$current" ] || return 1
+_run_reader() {  # -> 0 once lib/reader.sh, beside this file, is loaded in this shell
+  declare -F reader_main >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$(cd "$(_run_self_dir)" && pwd -P)/reader.sh"
+}
 
-  # THE RETIRED TASK-SCALE POINTER STAYS AN OPEN RUN (wave-31 T24; REQ-1 AC-1.2, D2; A-orch-52).
-  # `current: T<n>` is no step at any scale, and no reader judges a plan by it. It is kept open
-  # here, and only it, so the readers that act on an open run reach the plan and refuse it by
-  # name: launch-sync's `NOT-RECORDED … is not numeric` (and the stop wall that runs it), the
-  # tick's no-FILL, the evidence gate's numeric refusal. Called closed, the plan would be skipped
-  # in silence, which AC-1.2 forbids. Any other malformed value stays closed, below.
-  if grep -qE '^T[0-9]+$' <<< "$current"; then
-    return 0
-  fi
-
-  # THE STEP NUMBER MAY CARRY A SUB-STEP LETTER — `8a`, `8b` — which the lifecycle uses
-  # and every wall this replaces accepted (`^[0-9]+[ab]?$`). A predicate that read `8b`
-  # as malformed would call a live run closed for the whole of step 8, which is where
-  # implementation happens. The letter is stripped; what decides is the number.
-  local step="${current%[ab]}"
-  case "$step" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-
-  # Steps 0-8: open by definition.
-  if [ "$((10#$step))" -lt 9 ]; then
-    return 0
-  fi
-
-  # Step 9: open unless a Step-9 evidence line records delivery. Anything past 9 is not a
-  # step this lifecycle has, and an unrecognised state is not an open run.
-  if [ "$((10#$step))" -eq 9 ]; then
-    if grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"; then
-      return 1
-    fi
-    return 0
-  fi
-
-  # Anything else (out-of-range current:, malformed) is not a recognized open state.
-  return 1
+# run_step <plan> -> the reader's `step` answer for the plan's run: `n=<step>` when one stands, then
+# `state=open|delivered|abandoned`, read from its log. A caller that prints a run's step or tells a delivered run
+# apart asks this.
+run_step() {
+  _run_reader || return 1
+  reader_main "${1:-}" step
 }
 
 # active_run <root> -> exit 0 + the plan path iff active_plan succeeds and that plan's state
@@ -746,12 +680,17 @@ open_runs() {
 # copies to each other. Both failure directions are silent if guessed at — a window of zero
 # empties the live set and an unbounded one makes `live` mean `open` — so an unparseable
 # value falls back to the same default an absent one gets.
+#
+# THE OPEN SET MAY BE HANDED IN. `live_runs <root> <open set>` filters the set its caller already read from
+# `open_runs <root>` instead of walking again: a process that prints both reads every candidate once, where the
+# second walk asked `run_open` of every plan a second time, and once runs write logs each ask folds one.
 live_runs() {
   local root="$1"
   local open_set raw try n u mult secs="" now cutoff f mt cnt=0
   local window_default="7d"
 
-  open_set=$(open_runs "$root") || return 1
+  if [ "$#" -ge 2 ]; then open_set="$2"; else open_set=$(open_runs "$root") || return 1; fi
+  [ -n "$open_set" ] || return 1
 
   raw=$(config_value "$root" "live-window" "$window_default")
   for try in "$raw" "$window_default"; do
@@ -1020,32 +959,19 @@ session_working_branch() {
 }
 
 # plan_working_branch <plan> -> the plan's `working-branch:`, or nothing (wave-35 T7; REQ-5 AC-5.3, D14).
-# THE ONE READER OF THE WORKING BRANCH. The `## SDLC State` key first, the one the `current` verb writes
-# the Step-4 block from, then the frontmatter key of the same name, which a plan written by Step 0 also
-# carries. Fenced lines are not read, and the value is its first word, quotes off. `ready` (through
+# THE ONE READER OF THE WORKING BRANCH. The frontmatter key, which a plan written by Step 0 carries, read by the
+# header's one parser (`plan_read_header`); the value is its first word, quotes off. `ready` (through
 # `session_working_branch`), the stop wall (lib/stop.sh's landing gate), the card (card.sh), `current 4`
 # (hooks/session-poker.sh), the proof judge (lib/proof.sh `proof_state`) and the evidence gate
 # (lib/walls.sh `validate_tests_head`) each call it, so a plan that names its branch in one place is read
-# by all six (tests/units.test.sh §BRANCH). It was six readers in three orders: `ready` refused a plan
-# that carried the key under SDLC State alone, which the proof judge read.
-_RUN_WB_SDLC_AWK='
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-  insdlc && /^[[:space:]]*working-branch[[:space:]]*:/ {
-    v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
-_RUN_WB_FM_AWK='
-  NR == 1 && $0 == "---" { f = 1; next }
-  f && $0 == "---" { exit }
-  f && /^[[:space:]]*working-branch[[:space:]]*:/ {
-    v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
+# by all six (tests/units.test.sh §BRANCH).
 plan_working_branch() {  # <plan>
   local plan="${1:-}" wb
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  wb="$(_run_lines "$plan" | awk "$_RUN_WB_SDLC_AWK")"
-  [ -n "$wb" ] || wb="$(_run_lines "$plan" | awk "$_RUN_WB_FM_AWK")"
+  wb="$(plan_read_header "$plan" working-branch)" && wb="${wb#*=}"
+  wb="${wb%%[[:space:]]*}"
+  case "$wb" in [\'\"]*) wb="${wb#?}" ;; esac
+  case "$wb" in *[\'\"]) wb="${wb%?}" ;; esac
   printf '%s' "$wb"
 }
 

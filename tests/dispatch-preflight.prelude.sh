@@ -19,8 +19,8 @@
 
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
-# The rendered dispatch.md the gate itself reads at refusal time (T2, D3/D11) — the same
-# file `dp_scaffold_marked` in hooks/dispatch-preflight.sh resolves via `$HOOK_DIR/..`.
+# The rendered dispatch.md, whose fenced scaffold the suites read: the page the dispatch library's
+# refusals send a writer to.
 DISPATCH_FILE="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
 
 # scaffold_block <file> -> the fenced scaffold lines, one per line. Defined at the TOP of
@@ -33,12 +33,6 @@ scaffold_block() {
     inb && /^```/              { fence++; if (fence == 2) exit; next }
     inb && fence == 1          { print }
   ' "$1"
-}
-
-# scaffold_raw_line <file> <label> -> that label's own line, verbatim, out of the shipped
-# scaffold — what a marked line looks like before its ` <ADD>` suffix, if any.
-scaffold_raw_line() {
-  scaffold_block "$1" | /usr/bin/grep -m1 -E "^${2}:"
 }
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-test.XXXXXX")" && pwd)"
@@ -81,9 +75,8 @@ require_helpers ok no expect_status expect_contains expect_absent expect_empty e
 #     to .bionic/docs/record/w3-slice1-posttooluse-probe.md capture E (an
 #     Agent-tool payload captured live at CLI 2.1.222): tool_input carries
 #     description, prompt, subagent_type, run_in_background, and — when the
-#     dispatch names one — name. The earlier note here ("SHAPE-ONLY, no
-#     verbatim Agent capture exists") described the pre-probe state and is
-#     superseded. tool_input became load-bearing in task 4/3: the roster row
+#     dispatch names one — name.
+#     tool_input is load-bearing: the roster row
 #     is lifted from it.
 #   * tool_input.model — SHAPE-EXTRAPOLATED and declared: the Agent tool
 #     accepts a `model` override, but no captured payload carries one (every
@@ -93,8 +86,7 @@ require_helpers ok no expect_status expect_contains expect_absent expect_empty e
 #   * dispatch brief text (BRIEF_FULL / the compact variant) — SYNTHESIZED,
 #     but its LABEL GRAMMAR is the shipped one: skills/canonical-sdlc/SKILL.md
 #     §Dispatch's seven-field sentence (span-pinned by
-#     tests/dispatch-spans.test.sh §5d — that suite was deleted in an earlier
-#     purge, commit b959b5e, and nothing replaced the span pin) and the
+#     no suite) and the
 #     exemplar brief recorded verbatim at .bionic/docs/record/w2-ac3-run.md:25-40.
 #   * attestation record — FAITHFUL to hooks/preflight-probe.sh's own
 #     schema/comment block: `# comment` + `key=value` lines, read BY KEY
@@ -225,6 +217,25 @@ mk_agent_payload() {
       tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
+# as_brief <repo> <row> <name> <brief text> -> the prompt of a dispatch that binds <row>: the path of the
+# brief rendered for <row> and <name>, holding <brief text>. SYNTHESIZED: the text is the case's own, not
+# the brief verb's render, under the mark and sum lib/brief.sh writes (`brief_mark`, `brief_sum`), so the
+# wall reads its contract from the file as it reads a rendered one's. A <row> of `-` is the row the wall
+# binds: the text's unfenced `Row:`, else the first plan row the name is (`<prefix>-<id>`, or the id).
+as_brief() {
+  local rel=".bionic/docs/record/wave-01-test/briefs/$3.md" row="$2"
+  if [ "$row" = - ]; then
+    row="$(printf '%s\n' "$4" | awk '/^[[:space:]]*```/ { f = !f; next } !f && /^Row:[[:space:]]/ { print $2; exit }')"
+    [ -n "$row" ] || row="$(awk -F'|' -v nm="$3" 'NF > 3 { id = $2; gsub(/[ \t]/, "", id)
+      if (id != "" && id != "id" && id !~ /^-+$/ && (nm == id || substr(nm, length(nm) - length(id)) == "-" id)) { print id; exit } }' \
+      "$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" 2>/dev/null)"
+  fi
+  mkdir -p "$1/${rel%/*}" && printf '<!-- brief -->\n%s\n' "$4" > "$1/$rel.b" \
+    && ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" >/dev/null 2>&1 && s="$(brief_sum "$1/$rel.b")" \
+         && { brief_mark "$row" "$3" "$s"; printf '\n'; tail -n +2 "$1/$rel.b"; } > "$1/$rel" ) && rm -f "$1/$rel.b"
+  printf '%s' "$rel"
+}
+
 mk_bash_payload() {  # <sid> <cwd>  — an irrelevant tool, for the A7 hoist tests
   jq -n --arg s "$1" --arg c "$2" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
@@ -265,26 +276,6 @@ GATE_ENV=""
 # bytes and one column, so a byte count would pass a line that wraps.
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh"
 GATE_TIME=0
-# dp_hires_cs_since <epoch-float> -> whole hundredths of a second elapsed since it.
-#
-# SUB-SECOND, via python3, for the same reason tests/session-start.test.sh §16 reaches for
-# it: a whole-second `date +%s` difference is off by up to a full second either way
-# depending on where the two reads straddle a tick. Two arms in this file claim the gate
-# "stopped waiting at the bound", and what they have to tell apart is a wait that ended on
-# the bound from one that ran 15% past it — at the 20s bound of the time, 20s from 23s, of
-# which a whole-second clock can lose one second at each end. That is how a tick-counted
-# wait ran 15% long underneath these two arms for a whole wave without either of them
-# noticing (wave-14 T34). The margin shrinks with the bound, which is why the slack below
-# is stated against `$S29_BOUND` rather than left at a fixed number of seconds.
-#
-# HUNDREDTHS, AS AN INTEGER, so the comparison stays in bash arithmetic and no arm has to
-# fork a second interpreter to decide. A host with no python3 answers 999999, which fails
-# both arms loudly rather than passing them blind.
-dp_hires_cs_since() {
-  python3 -c 'import sys,time; print(int((time.time()-float(sys.argv[1]))*100))' "$1" 2>/dev/null \
-    || echo 999999
-}
-
 run_gate() {  # <payload-json>
   local _sid _t0; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   # T57: no wall runs on a fixture that was never made (fixture_drive_ok, beside make_repo).
@@ -293,12 +284,6 @@ run_gate() {  # <payload-json>
     GATE_ST=97; GATE_VERDICT="fixture-lost"; return 0
   fi
   _t0=$(date +%s)
-  # OPT-IN, AND ONLY OVER THE FIRST DRIVE. Set `GATE_HIRES=1` before a call to have
-  # `$GATE_TIME_CS` measured to the hundredth; every other caller pays nothing, which
-  # matters on a driver this file runs a few hundred times. The two python3 forks land
-  # outside the timed span on the way in and immediately after `$?` on the way out.
-  GATE_TIME_CS=""
-  [ -z "${GATE_HIRES:-}" ] || _gate_hires_t0=$(python3 -c 'import time; print(time.time())' 2>/dev/null)
   GATE_ENV="$GATE_ENV CLAUDE_CODE_SESSION_ID=$_sid"
   if [ -n "$GATE_CONFIG_DIR" ]; then
     # shellcheck disable=SC2086
@@ -308,7 +293,6 @@ run_gate() {  # <payload-json>
     GATE_OUT=$(printf '%s' "$1" | env $GATE_ENV bash "$GATE" 2>"$SANDBOX/.err")
   fi
   GATE_ST=$?
-  [ -z "${GATE_HIRES:-}" ] || GATE_TIME_CS=$(dp_hires_cs_since "${_gate_hires_t0:-0}")
   GATE_TIME=$(( $(date +%s) - _t0 ))
   GATE_ERR=$(cat "$SANDBOX/.err")
   # THE VERDICT, read off both wires. `jq` rather than a grep for the reason: a reason the
@@ -504,25 +488,12 @@ make_repo() {
       : > "$repo/.bionic/tmp/engaged-$_psid.state"
     done
     mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
-    cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
----
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: build
-rigor: double
-scale: wave
----
-
-# Test wave plan
-
-## SDLC State
-
-integration-branch: main
-current: 4
-approved-by: dana 2026-09-07T19:05Z "approved"
-
-- Step 4: tasks in flight
-PLAN
+    # The live wave is at 15: the page holds no state section, and the run's log the step and the approval.
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nintegration-branch: main\n---\n\n# Test wave plan\n' \
+      > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+    mkdir -p "$repo/.bionic/docs/record/wave-01-test"
+    printf 'run/v1|ev=%s|at=2026-09-07T19:0%sZ\n' 'step|n=1' 1:00 'step|n=2' 2:00 'step|n=3' 3:00 'step|n=4' 4:00 \
+      'approval|key=step3|by=dana|said=approved' 5:00 > "$repo/.bionic/docs/record/wave-01-test/run.log"
     # A LIVE WAVE'S SESSIONS ARE BOUND TO IT (wave-23-fixit-1810, REQ-1, D1). An empty marker
     # beside an open plan is the UNBOUND state, whose `fallback` plan is announced and never
     # acted on — so a fixture that meant "this session is running this wave" and left the
@@ -612,60 +583,9 @@ write_attestation() {
   chmod 600 "$repo/.bionic/tmp/preflight-$sid.state"
 }
 
-# write_legacy_attestation <repo> <session_id> — the OLD, pre-wave-03 single-slot
-# filename. Used to prove the gate never consults it (task 4/2).
-write_legacy_attestation() {
-  local repo="$1" sid="$2"
-  mkdir -p "$repo/.bionic/tmp"
-  {
-    printf '# bionic environment attestation — machine-local, safe to delete\n'
-    printf 'version=1\n'
-    printf 'kind=preflight-attestation\n'
-    printf 'session_id=%s\n' "$sid"
-    printf 'written_at=1785790000\n'
-    printf 'repo=%s\n' "$repo"
-  } > "$repo/.bionic/tmp/preflight.state"
-  chmod 600 "$repo/.bionic/tmp/preflight.state"
-}
-
 # ======================================================================================
 # HOISTED FROM THE SECTIONS (wave-30 T1). Read by sections in more than one shard.
 # ======================================================================================
-
-# ---- from S18: fix_example ----
-# TWO SHAPES, since T2 (D3, D11). A single-fault refusal (containment, absent, ambiguous) still
-# carries the OLD indented Fix: block, unchanged — on the deny reason since wave-19 T4. A several-fault refusal (`deny`: ambiguous,
-# combined) now carries the MARKED SCAFFOLD instead — its own `Expected artifact:` line is a
-# placeholder with an embedded `e.g. …` example, not a recommendation typed for this brief, so
-# the nested `<wave>`/`<name>` placeholders are filled the same way §scaffold-verbatim's own
-# `scaffold_fill()` fills them, and any trailing ` <ADD>` this brief earned is stripped.
-fix_example() {  # <stderr-or-reason> -> the artifact path the wall's own text recommends
-  local line ex
-  line=$(printf '%s\n' "$1" | grep -m1 -E '^[[:space:]]+Expected artifact: ')
-  if [ -n "$line" ]; then
-    printf '%s\n' "$line" | sed -e 's/^[[:space:]]*Expected artifact: //' -e 's/[[:space:]]*$//'
-    return
-  fi
-  line=$(printf '%s\n' "$1" | grep -m1 -E '^Expected artifact: ')
-  [ -n "$line" ] || return 0
-  ex=$(printf '%s\n' "$line" \
-    | sed -e 's/^Expected artifact: .*e\.g\. //' -e 's/>[[:space:]]*<ADD>[[:space:]]*$//' -e 's/>[[:space:]]*$//')
-  ex="${ex//<wave>/w99}"
-  ex="${ex//<name>/scaffold-note}"
-  printf '%s\n' "$ex"
-}
-
-# ---- from S18: BRIEF_THREE_FAULTS ----
-# THE THREE-FAULT BRIEF (wave-12 T2, spec D3, AC-1.1/AC-1.2). One brief that trips three
-# brief-shape arms at once: the deliverable label offers two candidates (A11), which leaves
-# `deliverable=` empty with no waiver behind it (A13), and no instrument is declared at all
-# (A14). It is the shape Chris met on 2026-09-13 — six dispatches to spawn one researcher,
-# because the gate exited at the first fault every time — and the §combined section below
-# reads the whole refusal. It is defined in S18 because the self-consistency loop there is the
-# first thing that drives it.
-BRIEF_THREE_FAULTS='Your task: review the wave.
-Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
-Expected duration: 20 minutes'
 
 # ---- from S21: s21_stamp_path, s21_backdate, s21_iso, s21_idle_tr, s21_busy_tr, s21_stale_payload ----
 s21_stamp_path() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "$2"; }
@@ -701,17 +621,6 @@ s21_idle_tr() {  # -> path of a transcript whose last turn opened after a long i
       "$(s21_iso 1)"
   } > "$SANDBOX/.s21-idle.jsonl"
   printf '%s' "$SANDBOX/.s21-idle.jsonl"
-}
-
-s21_busy_tr() {  # -> path of a transcript holding one continuous 2500s turn
-  { printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"a long piece of work"}}\n' \
-      "$(s21_iso 2500)"
-    for _s21_s in 2400 2100 1800 1500 1200 900 600 300 120 30 5; do
-      printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
-        "$(s21_iso "$_s21_s")"
-    done
-  } > "$SANDBOX/.s21-busy.jsonl"
-  printf '%s' "$SANDBOX/.s21-busy.jsonl"
 }
 
 s21_stale_payload() {  # <sid> <repo> -> a dispatch payload carrying the idle transcript
@@ -758,16 +667,6 @@ s22_roster_row() {
     "claims=${4:-}" cadence= absent= waiver= "tool_use_id=t-$3" >> "$f"
 }
 
-# s22_sweep <repo> <sid> <name> — the landing marker that closes a row.
-# THROUGH THE ONE WRITER (S17, spec AC-26): `swept_marker_write` is
-# hooks/landing-gate.sh's own function, extracted by tests/lib/swept-marker.sh and called
-# for real. The printf that used to sit here wrote a marker the originator would not
-# recognise — no `session=`, no `agent_id=` — and stayed green because every reader of the
-# marker is by key.
-s22_sweep() {
-  swept_marker_write "$(roster_path "$1" "$2")" 2026-09-02T00:00:00Z "$2" "$3" "" MET
-}
-
 # s22_ack <repo> <sid> <name> [at] — one `event=ack` line on the sweeper's OWN ledger,
 # `.bionic/tmp/sweeper-<sid>.state`, which is where `session-sweeper.sh ack` journals the
 # orchestrator's judgement that a row is closed (that verb's write, :1020). The SCHEMA is
@@ -790,33 +689,7 @@ s22_fake_tree() {
   printf 'gitdir: %s/.git/worktrees/%s\n' "$1" "$2" > "$1/.worktrees/$2/.git"
 }
 
-# ---- from S27: s27_impact, BRIEF_FILES ----
-# s27_impact <repo> <suite>... — writes an impact command into <repo> that answers with
-# exactly the named suites, in the `suite<TAB>reason:file` shape S12 published, and points
-# .bionic/config.yaml at it. The stub ECHOES ITS ARGUMENTS into a side file, so the test
-# can prove the declared paths reached it rather than assuming they did.
-s27_impact() {
-  local repo="$1"; shift
-  mkdir -p "$repo/.bionic"
-  {
-    printf '#!/bin/bash\n'
-    printf 'printf "%%s\\n" "$@" > "$(dirname "$0")/impact-args.txt"\n'
-    local _s
-    for _s in "$@"; do printf 'printf "%%s\\tpath-ref:fixture\\n" %s\n' "$_s"; done
-  } > "$repo/.bionic/impact-stub.sh"
-  chmod +x "$repo/.bionic/impact-stub.sh"
-  printf 'impact-command: bash %s/.bionic/impact-stub.sh\n' "$repo" > "$repo/.bionic/config.yaml"
-}
-
-BRIEF_FILES='Canonical-sdlc Step 4, task 4/13 of epic-99 wave-01; build · double · wave.
-Your task: build the widget.
-Expected artifact: .bionic/docs/record/w99-files.md
-Expected duration: ~20 minutes.
-Files: payload/scripts/lib/widget.sh, hooks/widget-guard.sh'
-
-# ---- from S28: PF_LIB_DIR, PF_FULL_BRIEF, pf_repo, pf_commit, pf_plan_path, pf_row, PF_FRONT_EXTRA, PF_STATE_EXTRA, pf_plan, pf_state, pf_line ----
-PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
-[ -r "$PF_LIB_DIR/proof.sh" ] || PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../scripts/lib"
+# ---- from S28: PF_FULL_BRIEF, pf_repo, pf_plan_path, pf_tasks, pf_row, pf_plan ----
 
 # The floor row lands no code, so its brief names no landing suite (wave-28 T7, ruling A-orch-73: a
 # writer brief that binds a row, as `w99-T12` binds T12, carries a Lands-on: line).
@@ -840,60 +713,31 @@ pf_repo() {
   git -C "$repo" commit -qm base 2>/dev/null
   printf '%s' "$repo"
 }
-# pf_commit <repo> <path> <content> -> one commit on whatever the checkout holds.
-pf_commit() {
-  mkdir -p "$(dirname "$1/$2")"
-  printf '%s\n' "$3" > "$1/$2"
-  git -C "$1" add "$2"
-  git -C "$1" commit -qm "change $2" 2>/dev/null
-}
 pf_plan_path() { printf '%s/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md' "$1"; }
+# pf_tasks <repo> <row>... -> the bound plan gains a `## Tasks` table of the rows given, each in the nine
+# cells a page at 15 holds.
+pf_tasks() {
+  local p; p="$(pf_plan_path "$1")"; shift
+  { printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '%s\n' "$@"; } >> "$p"
+}
 # pf_row <id> <step> <status> <Files> [<kind> [<deps>]] -> one `## Tasks` data row (a build row
 # with no deps unless told otherwise).
 pf_row() {
   printf '| %s | %s | %s | does the thing | implementor | %s | 30 | REQ-1 | %s | — | %s |' \
     "$1" "$2" "${5:-build}" "${6:-—}" "$4" "$3"
 }
-# pf_plan <repo> <floor head, or empty> [<row>...] — the plan, written whole: a `## Tasks`
-# heading closes `## SDLC State`, so a proof or cause line appended after it would be outside
-# the section. PF_STATE_EXTRA, when set, is one more line inside `## SDLC State`; PF_FRONT_EXTRA,
-# when set, is one more frontmatter line (the plan's `regression:` key, wave-31 T26).
-PF_STATE_EXTRA=""
-PF_FRONT_EXTRA=""
+# pf_plan <repo> <floor head, or empty> [<row>...] — make_repo's run at 15 taken to Step 5: the page whole, each row in
+# its nine cells, and the log gains the step, each active row's dispatch under its agent and, given a head, the floor.
 pf_plan() {
-  local repo="$1" head="$2" row; shift 2
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: double\nscale: wave\n'
-    [ -z "$PF_FRONT_EXTRA" ] || printf '%s\n' "$PF_FRONT_EXTRA"
-    printf -- '---\n\n# Test wave plan\n\n'
-    printf '## SDLC State\n\n'
-    printf 'integration-branch: main\nworking-branch: wave/99-test\ncurrent: 5\n'
-    printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n\n'
-    printf -- '- Step 5: verify\n'
-    [ -z "$head" ] || \
-      printf 'proved: kind=floor head=%s at=2026-10-04T00:00:00Z evidence=record/w99-floor.txt\n' "$head"
-    [ -z "$PF_STATE_EXTRA" ] || printf '%s\n' "$PF_STATE_EXTRA"
-    if [ "$#" -gt 0 ]; then
-      printf '\n## Tasks\n\n'
-      printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
-      printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
-      for row in "$@"; do printf '%s\n' "$row"; done
-    fi
-  } > "$(pf_plan_path "$repo")"
+  local repo="$1" head="$2" l="$1/.bionic/docs/record/wave-01-test/run.log"; shift 2
+  { printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\n'
+    printf 'integration-branch: main\nworking-branch: wave/99-test\n---\n\n# Test wave plan\n'; } > "$(pf_plan_path "$repo")"
+  printf 'run/v1|ev=step|n=5|at=2026-09-07T19:06:00Z\n' >> "$l"
+  [ -z "$head" ] || printf 'run/v1|ev=proof|kind=floor|head=%s|evidence=record/w99-floor.txt|at=2026-10-04T00:00:00Z\n' "$head" >> "$l"
+  [ "$#" -gt 0 ] || return 0
+  { printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '%s\n' "$@" | awk -F' *[|] *' -v lf="$l" '{ print "| " $2 " | " $3 " | " $4 " | " $5 " | " $7 " | " $8 " | " $9 " | " $10 " | — |"
+      if ($12 == "active") print "run/v1|ev=dispatch|row=" $2 "|name=" $6 "|at=2026-09-07T19:07:00Z" >> lf }'; } >> "$(pf_plan_path "$repo")"
 }
-# pf_state <repo> -> what proof_state prints for the fixture's plan and tree.
-pf_state() {
-  ( . "$PF_LIB_DIR/proof.sh" >/dev/null 2>&1; proof_state "$(pf_plan_path "$1")" "$1" ) 2>/dev/null
-}
-pf_line() { printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: '; }
 
-# ---- from §runs-lift: RL_BT, RL_JEST, RL_PYTEST, RL_GO, RL_NPM ----
-# THE MARK, HELD IN A VARIABLE. A backtick inside a double-quoted string here would be a
-# command substitution, and a backtick pair inside a double-quoted ASSERTION NAME is the
-# fault cross-gate §B pins against tree-wide. Every run below is built from this.
-RL_BT='`'
-RL_JEST="${RL_BT}npx jest --testPathPatterns 'x'${RL_BT}"
-RL_PYTEST="${RL_BT}pytest tests/unit${RL_BT}"
-RL_GO="${RL_BT}go test ./...${RL_BT}"
-RL_NPM="${RL_BT}npm test${RL_BT}"

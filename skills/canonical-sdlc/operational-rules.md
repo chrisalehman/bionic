@@ -1,12 +1,12 @@
 ---
 name: canonical-sdlc-operational-rules
-description: Canonical-sdlc operational rules — artifact shape, the Tasks table, design authoring, close-out, the debt ledger and the rulings. Copied beside SKILL.md, read on demand — nothing loads it.
+description: Canonical-sdlc operational rules — artifact shape, the Tasks table, design authoring, close-out, debts and the rulings. Copied beside SKILL.md, read on demand — nothing loads it.
 updated: 2026-10-10
 ---
 
 # canonical-sdlc operational rules
 
-The detail SKILL.md and `steps/*.md` compress, each section cited from the step that needs it. It is reference, not a standing instruction: nothing loads it unprompted.
+The detail SKILL.md and `steps/*.md` compress, each section cited from the step that needs it.
 
 ## Artifact paths and frontmatter
 
@@ -20,7 +20,7 @@ The detail SKILL.md and `steps/*.md` compress, each section cited from the step 
   sdlc-step: N
   epic: epic-NN-<slug>
   wave: wave-NN-<slug>
-  canonical_sdlc_version: 14
+  canonical_sdlc_version: 15
   intent: <intent>
   rigor: <rigor>
   scale: <scale>
@@ -31,52 +31,42 @@ The detail SKILL.md and `steps/*.md` compress, each section cited from the step 
 
 ### The `## Tasks` table
 
-A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch works from: ten required columns and the optional `worktree`, `base`, `reads`, `suites`, `lands-on` and `artifact` (below):
+A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch works from: nine cells a row, all a person's; the write hook refuses any other cell.
 
 ```
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads | suites | lands-on | artifact |
+| id | step | kind | task | deps | size | serves | Files | artifact |
 ```
 
 - **`id`** — `T<n>`, matching `^T[0-9]+$`, the row's own key.
 - **`step`** — the SDLC step this row executes at (4 for build/test rows; 5–9 for verify/review/document/integrate/close rows).
 - **`kind`** — one of `build | test | verify | review | doc | integrate | close | prototype`.
 - **`task`** — the row's task in one line; `complexity: standard | complex` rides in this cell for Step-4 rows.
-- **`agent`** — the ROSTER NAME the dispatch gave the agent (for example `w21-T5`), byte for byte, never the role: the commit gate matches an `active` row's cell to a roster `name=` and refuses one that "names no launched agent". A row nobody was dispatched for leaves the cell empty or `—`.
-- **`deps`** — task ids (`T1, T4`) or an external prerequisite `ext:<slug>`, never prose: `units.sh`'s validator splits the cell on `,`, and every token must resolve in the id set or match `ext:<slug>` (a letter or digit, then letters, digits, `.`, `_` or `-`). Without `reads`, an id reads "wait for that task to land"; with it, this cell holds only `ext:` tokens. An `ext:` token holds the row out of the ready set, named on the Patrol tick's `HELD` line, until it is removed.
-- **`reads`** (optional, found by its header name) — what the row must have before it is ready; write a read only where the row reads what another row writes. The edges between rows are computed from these cells, never written by hand.
-
-  | piece | shape |
-  |---|---|
-  | reads cell | comma-separated: a `Files` path · `head` · `record` · `proof:<kind>` · `approval:<name>` · `ext:<slug>` · `live:<artifact>`; empty takes the kind default |
-  | kind defaults | build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:regression, proof:review, head`, and `approval:release` when the plan carries a release row · close the integrate row's merge |
-  | read row | a `review` row reading `live:head:<q>[+<q>]`, each `<q>` one of `evidence` · `adversarial` · `structure`, holds, ranges (the tick's `RANGE` line) and returns to pending per question; a bare `live:head` keeps one range. Under one review disposition the read row is `reads: approval:plan, head`, ready once the last build row lands (`steps/6.md`) |
-
-- **`suites`**, **`lands-on`**, **`artifact`** (optional) — the suites the row runs and lands on (each defaults to `Files`' `*.test.sh` entries) and its record: this cell, else the ledger's, else the `Files` entry named `<row>.md` or `<row>-*`, else the first record entry. `task-set files=` refuses a record row left with none.
+- **`deps`** — task ids (`T1, T4`) or an external prerequisite `ext:<slug>`, never prose: `units.sh`'s validator splits the cell on `,`, and every token must resolve in the id set or match `ext:<slug>` (a letter or digit, then letters, digits, `.`, `_` or `-`). An id reads "wait for that task to land"; write one only where the row reads what that row writes. An `ext:` token holds the row out of the ready set, named on the Patrol tick's `HELD` line, until it is removed. A row also waits on its kind's default: build `approval:plan` · verify `approval:plan, head` · review `approval:plan, live:head` · doc `approval:plan, head` · integrate `proof:regression, proof:review, head`, and `approval:release` when the plan carries a release row · close the integrate row's merge.
 - **`size`** — the row's expected duration in minutes.
 - **`serves`** — the requirement id(s) this row discharges.
 - **`Files`** — every path the row may create or edit (the dispatch budget's source). Two rows that write one file run side by side and reconcile on landing; an entry ending in `!` is unmergeable, and a second row that writes it waits for the first to land.
-- **`worktree`** (optional) — the row's tree path once created; `—` while none exists.
-- **`base`** (optional, ADR-032) — the commit the tree was cut from, as `spawn-worktree.sh` printed it. Absent, the landing gate reconstructs it from `working-branch:` and says so.
-- **`status`** — `pending | active | landed | dropped`, at every scale.
+- **`artifact`** — the row's record: this cell, else the `Files` entry named `<row>.md` or `<row>-*`, else the first record entry.
 
-**Approvals and proofs a `reads` cell names.** `approval:plan` is the `approved-by:` line Step 3 writes. Any other approval, and every proof, is a line inside `## SDLC State` that only its verb writes, never a hand edit:
+**The row's section.** `## T<n> — <title>` holds what a person has to say about the row — research to read, rulings — and its `suites:` and `lands-on:` lines, each defaulting to `Files`' `*.test.sh` entries. Its agent, tree, base, state and landing are events: `reader.sh <plan> status <id>`.
+
+**Approvals and proofs a row waits on** are events in `record/<wave>/run.log`, each appended by its verb, never by a hand edit:
 
 | piece | shape |
 |---|---|
-| approval | `approved: <name> by <who> <ISO-UTC> head=<40-hex> "<reply>"`, written by `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim, at the working head |
-| proof | `proved: kind=<regression\|review\|task\|check> head=<40-hex> at=<ISO-UTC> evidence=<path under record/>`, written by `session-poker.sh proof-add <kind> <evidence>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
-| review | `proof-add review <record> --question <q> --reader <name>` adds ` question=<q> reader=<name> result=<pass\|flag\|fail> scope=<piece\|whole>`; the reviewer's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
-| declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and the `kind=check` line (` result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged |
+| approval | `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim: one approval event, at the working head for a named one. `approve step0`, `step1`, `step2` and `plan` are Steps 0 to 3's, each once |
+| proof | `session-poker.sh proof-add <kind> <evidence>`: one proof event, `kind=<regression\|review\|task\|walk>`, `head=` and `evidence=<path under record/>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
+| review | `proof-add review <record> --question <q> --reader <name>` adds `question=`, `reader=`, `result=<pass\|flag\|fail>` and `scope=<piece\|whole>`; the reviewer's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
+| declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and a `kind=check` proof (`result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged |
 | declared regression | `regression-command:` (run by `regression-run`) in `.bionic/config.yaml`, its record `steps/5.md`'s; with neither, the regression is `tests/run.sh`'s whole run |
-| landing record | `<docs-root>/record/<plan name less .plan.md>/landing-proofs.log`, appended by `ready` and the hand landing (`spawn-worktree.sh land <tree> --by-hand --reason '<why>'`), never rewritten: one `line/v1\|ev=<act>\|…` line per act, and per publish a `landed: row=<id> branch=<b> head=<40-hex> merge=<40-hex> at=<ISO-UTC>` header. A row's landing is the `merge=` of its last header. An unwritable record refuses `why=proofs-unwritable` |
-| declared debt | a brief's one `Lands-red: <name>.test.sh until <ext:slug\|approval:name>` with `Red-evidence: <path under record/>`, recorded by the dispatch wall alone (`amend` cannot add them). `land` accepts that one suite red, every other suite green, when the evidence holds `head: <40-hex>` naming the head landed, and appends `debt: id=… row=… suite=… token=…` to the landing record. It stays open until a regression or task proof shows the suite green after the red landing (and after the `approved:` line, for `approval:`); `current 8`, close-out, the integrate row and, from Step 6, the commit gate refuse while it is open |
-| debt ledger | `## Debt ledger` below |
+| landing | `ready` and the hand landing (`spawn-worktree.sh land <tree> --by-hand --reason '<why>'`) append one event per act to the run's log, never rewritten; a row's landing is the `commit=` of its last `published` event. An unwritable log refuses `why=proofs-unwritable` |
+| declared debt | a brief's one `Lands-red: <name>.test.sh until <ext:slug\|approval:name>` with `Red-evidence: <path under record/>`, recorded by the dispatch wall alone (`amend` cannot add them). `land` accepts that one suite red, every other suite green, when the evidence holds `head: <40-hex>` naming the head landed, and appends an `admitted` event (its row, suite and token) to the run's log. It stays open until a regression or task proof shows the suite green after the red landing (and after the named approval, for `approval:`); `current 8`, close-out, the integrate row and, from Step 6, the commit gate refuse while it is open |
+| debts | `## Debts` below |
 
 **The regression, once** (`steps/5.md` holds the rule). `session-poker.sh regression-run` refuses it at `regression: no`, beside an open build row, at a head that already has a whole run, or at a head the full pass's state reads green by content. A red suite is a fix row's. A whole run at a later head where code landed is the normal path. A head whose landings since the pass moved no code reads green and needs none.
 
-**`working-branch:`** in the plan's frontmatter names the wave's branch: the landing gate (`lib/stop.sh`) merge-bases a task tree against it, and `worktree_land_for_session` merges a landed tree into it. A plan naming none falls back to the main checkout's branch, announced inert.
+**`working-branch:`** in the plan's frontmatter names the wave's branch: the landing gate (`lib/stop.sh`) merge-bases a task tree against it, and the landing line (`spawn-worktree.sh ready`; lib/line.sh `line_tree_run` reads it as the branch a tree lands onto) merges a landed tree into it. A plan naming none lands nothing: `spawn-worktree.sh ready` refuses its trees (`REFUSED reason=no-working-branch plan=<plan>`) and merges nothing into any branch.
 
-**Cell shapes.** One `- T<n>:` line per `## Tasks` row, inside `## SDLC State`: the ledger check reads that section, never `## Tasks`. A Verification Matrix `evidence:` cell names exactly one path under `record/`, optionally ` — <note>`; a `;`-joined list is refused. An `auditor` cell is the bare token `CONFIRMED`; cite an audit inside `evidence:`, never beside the token. The regression proof is the run's log (`steps/5.md`); `advisory-exceeded: <M>` beside it is recorded, never judged.
+**Cell shapes.** A proof's `evidence=` names exactly one path under `record/`. The regression proof is the run's log (`steps/5.md`); `advisory-exceeded: <M>` beside it is recorded, never judged.
 
 ## Design section authoring (the Step-2 back-half)
 
@@ -126,7 +116,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 ```
 | concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |
 |---|---|---|---|---|
-| version pin value | `payload/scripts/lib/walls.sh`'s `SUPPORTED_SDLC_VERSION` (the commit gate behind `hooks/bash-walls.sh`) | none fits: no other file holds a version constant | the governing-skill hook · the two SVG diagrams | `tests/cross-gate-agreement-1.test.sh` §V pins the renderings against the gate's value, with a mutation arm |
+| version pin value | none single: the literal `15` in the commit gate's version case (`payload/scripts/lib/walls.sh`, behind `hooks/bash-walls.sh`) and in the write hook's (`hooks/canonical-sdlc-governing-skill.sh`) | none fits: no file holds a version constant, each case reads the header's `canonical_sdlc_version` itself | the governing-skill hook · `plan_read_faults` in `payload/scripts/lib/plan-read.sh` | `tests/canonical-sdlc-evidence-gate.test.sh` §Section 2b holds the two gates to one answer on a plan at 13, 14 and 15; the literal in `plan_read_faults` is not in it |
 | agreement-test duty + authoring rules | `agents-src/blocks/checks-structure.md` (`one-site`) | the render markers of `agents-src/render.sh` | payload/context/checks-structure.md · this section | `bash agents-src/render.sh --check` holds the rendered file to its block; this section is the unpinned one |
 ```
 
@@ -134,7 +124,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 - **One row per concept rendered at more than one surface.** A concept in one place has nothing to disagree with; the table is a duplication ledger, not an inventory.
 - **The owner is a place, not a layer or a role.** "the governing-skill hook" is an owner; "the backend" is not. With no file, function or named constant to name, the concept has no owner yet — write that down as the finding.
 - **Rendering surfaces include prose.** A constant read by two scripts and quoted in a doc has three surfaces, and the doc is the one that drifts, because nothing runs it.
-- **The agreement test is a real hermetic test that fails when the surfaces disagree** — named, not a suite and not "covered by the unit tests". The exemplar is the `SUPPORTED_SDLC_VERSION` pin in `tests/cross-gate-agreement-1.test.sh` §V: one constant, its renderings held against the gate as origin, with a mutation arm. Name what a test leaves out rather than rounding up to "pinned"; a surface becomes pinnable by changing its format or by naming it in the same test as the origin. `none — <why>` is a legitimate cell (prose against prose has no seam to test), but the reviewer stops on it: give the reason.
+- **The agreement test is a real hermetic test that fails when the surfaces disagree** — named, not a suite and not "covered by the unit tests". The exemplar is the version pin in `tests/canonical-sdlc-evidence-gate.test.sh` §Section 2b: the commit gate and the write hook, each holding the literal `15`, driven on one plan at three versions so that they cannot disagree. Name what a test leaves out rather than rounding up to "pinned"; a surface becomes pinnable by changing its format or by naming it in the same test as the origin. `none — <why>` is a legitimate cell (prose against prose has no seam to test), but the reviewer stops on it: give the reason.
 
 ### The Eval design table
 
@@ -145,8 +135,8 @@ The load-bearing row of the section, and the only part later steps consume mecha
 - **Eval is `command → expected observation`,** both halves: a command alone is a thing you ran, an observation alone is a hope. The observation is what the terminal shows — `rc=2, stderr names AC-K2.3`, never `the wall works`.
 - **Fails when names a PLANTED DEFECT, singular and specific.** "the code is broken" fails the column; "the `fails-when:` line is deleted from one AC block" passes it, because a writer can make that mutation and watch the eval turn red, first, before the code.
 - **A criterion that admits no "Fails when" goes back to Step 1.** The defect is in the criterion's wording, and an eval rewritten around an unfalsifiable criterion buys a green that means nothing.
-- **One row per criterion, and the plan renders them.** Step 3 adds sequencing and bookkeeping and authors no eval.
-- **The gate reads the rendered column.** From `current: 4` on, an AC block whose `fails-when:` is missing or empty refuses the commit, naming the row. A waiver dissolves the obligation to RUN an eval, never the obligation to have designed one.
+- **One row per criterion, read in place.** Step 3 adds sequencing and authors no eval.
+- **The gate reads the Fails when column.** From step 4 on, a criterion whose Fails when is empty refuses the commit, naming the row. A waiver dissolves the obligation to RUN an eval, never the obligation to have designed one.
 
 ## Close-out report (Step 9)
 
@@ -169,35 +159,29 @@ SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-s
 
 **The anti-ceremony bound.** The whole report reads in the time it takes to read this paragraph twice. A per-AC breakdown, a restated matrix, a section per step's evidence or a sub-heading per finding is the same failure: confirmation dressed up as an audit. A part with nothing to say gets one clause ("no material risks"), not a heading. Plain English means no jargon a plain reader would look up; the altitude is decisions and outcomes, not diffs, commands or file paths.
 
-**The debt the continuation carries.** Close-out carries every unburned item of the run's debt ledger into the continuation's `## Deferrals`, after the `deferred:` lines, one line each: `debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>`, merged once into a continuation that exists. A burned item is not carried. The next run's Step 1 runs `session-poker.sh debt adopt <newest continuation>` right after its card.
+**The debt the continuation carries.** Close-out carries every unburned item of the run's debts into the continuation's `## Deferrals`, after the `deferred:` lines, one line each: `debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>`, merged once into a continuation that exists. A burned item is not carried. The next run's Step 1 runs `session-poker.sh debt adopt <newest continuation>` right after its card.
 
 **Archiving.** `archive-root:` (default `$HOME/bionic-archive`) and `archive-on-close:` (default `true`) in `.bionic/config.yaml` set where Step 9's `archive_run` moves a closed run, never `record:`, and whether it moves anything; see `payload/scripts/lib/archive.sh`.
 
-**The released version.** An optional plan frontmatter field, `release: <version>`, names what the run released: `close-out.sh` writes it into the `delivered:` line, the epic row's version cell and the continuation header; with none, no version is written and the epic cell reads `—`. The installed tool's version stays on `attested-by:`.
+**The released version.** An optional plan frontmatter field, `release: <version>`, names what the run released: `close-out.sh` writes it into step 9's `delivered`, the epic row's version cell and the continuation header; with none, no version is written and the epic cell reads `—`. The installed tool's version stays on `attested-by:`.
 
-## Debt ledger
+## Debts
 
 Findings are classed by payment date, not by reviewer: harm (paid by the user, now), evidence (paid by the claim, now) and debt (paid by the next change). A finding of class debt — a second copy of a concept, an unpinned shared pair or a one-case abstraction — is the `debt:` line of `payload/context/severity.md`, rated by its kind and concept on that file's debt table, never by severity; it is flag-class in the derived result and writes no plan line.
 
-**The file.** `<docs-root>/record/<run>/debt.md`, under the header:
-
-```
-concept | kind | sites | raised-by <record> | touches N | burned <row> | —
-```
-
-one line per item, its last cell `—` while open and `burned <row>` once a row has burned it.
+**Where a debt lives.** One `debt` event in the run's log per item: its `concept`, `kind`, `sites`, `raised-by` record and `touches`, and `burned=<row>` once a row has burned it.
 
 **Burn when touched.** The orchestrator records it at the Step-6 disposition, and the next row whose `Files:` touch the item's concept burns it inside its own work, or says why not.
 
-**The touch counter.** A brief whose `Files:` cover one of an item's sites adds one to its `touches`, and the dispatch wall prints `debt: <concept> <kind> touches <N> — burn it in this row or say why not`; the highest count burns first. `ready` prints `debt: burned <N>, touched <M>` and close-out `debt: touched N · burned M`, never the ledger's length.
+**The touch counter.** A brief whose `Files:` cover one of an item's sites adds one to its `touches`, and the dispatch wall prints `debt: <concept> <kind> touches <N> — burn it in this row or say why not`; the highest count burns first. `ready` prints `debt: burned <N>, touched <M>` and close-out `debt: touched N · burned M`, never the count of debts.
 
-**The verbs.** `session-poker.sh debt` is the ledger's one writer, each subcommand taking the plan last, or the session's bound run:
+**The verbs.** `session-poker.sh debt` is the debts' one writer, each subcommand taking the plan last, or the session's bound run:
 
-- `debt add <review record>` writes a line per debt line of a review, each concept and kind once.
+- `debt add <review record>` appends a debt per debt line of a review, each concept and kind once.
 - `debt touched <concept>` adds one to the touches of each unburned item of the concept.
-- `debt burn <concept> <row>` writes `burned <row>`.
-- `debt list` prints the items.
-- `debt adopt <continuation>` writes each `debt:` line a previous run's continuation carries into this ledger, once, its touches and `raised-by` kept.
+- `debt burn <concept> <row>` marks each unburned item of the concept burned by the row.
+- `debt list` prints the items, burned ones too.
+- `debt adopt <continuation>` appends each `debt:` line a previous run's continuation carries, once, its touches and `raised-by` kept.
 
 ## The start join (`hooks/execution-recorder.sh`)
 
@@ -213,5 +197,5 @@ An agent start carries its type and id, never its launch, so it is joined to the
 - **Late fixes get a fresh run.** A fix found after a run has closed becomes a fixit in a fresh
   canonical-sdlc run. It is never bolted onto the closed run, and a known defect blocks the
   push.
-- **The doctrine is net zero.** The loaded set — `skills/canonical-sdlc/SKILL.md`, `skills/canonical-sdlc/steps/*.md`, `skills/canonical-sdlc/dispatch.md`, `skills/canonical-sdlc/operational-rules.md`, `agents/*.md` and `payload/context/*.md` — never grows: the commit wall sums its bytes before and after the staged change and refuses growth naming the delta and the files, unless the committing row reads `approval:doctrine-growth` and the plan carries its `approved: doctrine-growth` line. A shrink passes silently. A sentence added here is paid for by a sentence removed.
+- **The doctrine is net zero.** The loaded set — `skills/canonical-sdlc/SKILL.md`, `skills/canonical-sdlc/steps/*.md`, `skills/canonical-sdlc/dispatch.md`, `skills/canonical-sdlc/operational-rules.md`, `agents/*.md` and `payload/context/*.md` — never grows: the commit wall sums its bytes before and after the staged change and refuses growth naming the delta and the files, unless the committing row reads an approval of `doctrine-growth` the run holds. A shrink passes silently. A sentence added here is paid for by a sentence removed.
 - **A test proves a program.** A test proves what a program does, never what a document says: a check that pins the wording of doctrine or a file's size is refused at review as a defect, not accepted as evidence.

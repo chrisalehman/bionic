@@ -117,11 +117,11 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # on purpose: a writer emits one schema, a reader must tolerate every schema still on disk.
 ATTESTATION_VERSION=2
 ATTESTATION_VERSIONS_SUPPORTED="1 2"
-# D-3 payload-shape canary (w3 task 4/4): the same-actor wall in hooks/stop-guard.sh reads
-# observer identity from the undocumented top-level `agent_id` field on subagent-invoked
+# Payload-shape canary: hooks/ruling-push.sh and the partition in payload/scripts/lib/walls.sh
+# read the caller's identity from the undocumented top-level `agent_id` field of subagent-invoked
 # PostToolUse|Bash payloads (validated .bionic/docs/record/w3-slice1-posttooluse-probe.md,
 # CLI 2.1.222, and re-validated .bionic/docs/record/w3-canary-validation.md, CLI 2.1.223). The
-# CLI auto-updates and shape drift on that field would open D-3 silently, so every run compares
+# CLI auto-updates and shape drift on that field would blind both readers silently, so every run compares
 # the pinned validated version against the installed `claude --version` and warns — never
 # blocks, never touches the attestation — on drift. Move this pin only after re-running the
 # 4/1 probe method and confirming the field's shape on the new version.
@@ -130,8 +130,6 @@ STATE_BASENAME_PREFIX="preflight-"
 STATE_BASENAME_SUFFIX=".state"
 LEGACY_STATE_BASENAME="preflight.state"
 LOCK_BASENAME=".preflight.lock"
-OTHER_SESSION_WINDOW_MIN=15   # warn-only liveness heuristic; mtime-based, known to
-                              # false-positive on recently-dead sessions (spec Not Doing)
 # Reader copy of hooks/dispatch-preflight.sh's roster filename constants (task
 # 4/7). This script only reads roster files, byte for byte, so a real prefix
 # mismatch is a mislabeled scan, never a write hazard — kept as a copy per TDD
@@ -222,110 +220,28 @@ fi
 
 # ---------- the library ----------
 #
-# One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
+# The stub below sources the one loader, whose stub and walk both live in
 # payload/scripts/lib/loader.sh. FAIL OPEN: nothing this script does is irreversible,
 # and a reporting verb that refused because a file was missing would take the
 # diagnosis down with the thing being diagnosed.
 BIONIC_LIB_WANT="root.sh session.sh"
-# --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
-# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
-# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
-# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
-# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
-# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
-# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
-# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
-# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
-# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
-# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
-BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
-_bl_try() {
-  [ -n "${1:-}" ] || return 1
-  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
-  [ -d "$1" ] || return 1
-  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
-  BIONIC_LIB="$1"
-}
-if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
-  if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
-    _bl_mk="${_bl_keys%%
-*}"
-    _bl_mk="${_bl_mk#bionic@}"
-  fi
-  if [ -n "$_bl_mk" ]; then
-    _bl_src=""
-    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
-      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
-    fi
-    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
-    if [ -z "$BIONIC_LIB" ]; then
-      _bl_best=""; _bl_bestk=""
-      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
-        [ -d "$_bl_v" ] || continue
-        _bl_n="${_bl_v##*/}"
-        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
-        _bl_x1=""; _bl_x2=""; _bl_x3=""
-        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
-$_bl_n
-BIONIC_LOADER_VER
-        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
-        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
-      done
-      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
-    fi
-  fi
+# Find the library through lib/loader.sh beside this hook; payload/scripts/lib/loader.sh says how.
+_bl_dir="$(dirname "$0")"; _bl_l="$_bl_dir/../scripts/lib/loader.sh"; [ -r "$_bl_l" ] || _bl_l="$_bl_dir/../payload/scripts/lib/loader.sh"
+# shellcheck source=/dev/null
+if [ -r "$_bl_l" ]; then . "$_bl_l"; bionic_load; else
+  BIONIC_LIB=""; BIONIC_LIB_MISSING="${BIONIC_LIB_WANT%% *}"; BIONIC_LIB_CANDS="$_bl_dir/../scripts/lib, $_bl_dir/../payload/scripts/lib"
+  loader_fail_open() { echo "$1: library $BIONIC_LIB_MISSING not found at $BIONIC_LIB_CANDS — hook stepping aside; run /bionic:doctor" >&2; exit 0; }
+  loader_fail_closed() { set -- "$1"; [ "${#1}" -le 25 ] || set -- "${1:0:24}…"; echo "bionic: load refused — $1 cannot load the bionic library (run /bionic:doctor)" >&2; exit 2; }
 fi
-if [ -z "$BIONIC_LIB" ]; then
-  BIONIC_LIB_MISSING="${_bl_want%% *}"
-  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
-fi
-loader_fail_open() {
-  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
-  exit 0
-}
-loader_fail_closed() {
-  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
-  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
-  case "${2:-}" in
-    "claude plugin update bionic@bionic"|\
-    "claude plugin install bionic@bionic"|\
-    "bash $_bl_root/scripts/doctor.sh"|\
-    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
-  esac
-  _bl_who="${1:-a bionic hook}"
-  if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
-  printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
-    cat >&2 <<BIONIC_LOADER_REFUSE
-A wall that cannot read a command refuses it rather than waving it through.
-
-Wanted: ${BIONIC_LIB_MISSING:-the bionic library}
-Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
-
-Until the plugin is whole again this wall permits exactly four commands, each matched
-as a whole string:
-
-    claude plugin update bionic@bionic
-    claude plugin install bionic@bionic
-    bash $_bl_root/scripts/doctor.sh
-    bash $_bl_root/scripts/setup.sh
-
-Anything else is refused, including one of those four with another command chained
-after it. Run one of them, or act from your own terminal.
-BIONIC_LOADER_REFUSE
-  fi
-  exit 2
-}
-# --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "preflight-probe"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# Whether another session is alive is lib/alive.sh's one rule. Soft: a library directory without it
+# (an older checkout) prunes nothing and reports no other session, the direction that loses nothing.
+# shellcheck source=/dev/null
+[ -r "$BIONIC_LIB/alive.sh" ] && . "$BIONIC_LIB/alive.sh"
 
 # THE SESSION KEY, from the library (design §1): the environment value is primary. The
 # attestation filename is built from it and the dispatch wall reconstructs that filename
@@ -339,8 +255,8 @@ if [ -z "$SESSION_ID" ]; then
   exit 3
 fi
 
-# Hoisted here (rather than beside its sole prior use in the other-sessions scan) so the
-# D-5 pruning step below can also resolve other sessions' transcript directories.
+# The config directory whose projects/ holds this session's transcript, read by the
+# other-sessions scan below.
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 # ---------------------------------------------------------------- where state lives
@@ -455,19 +371,10 @@ fi
 # session's own blocking probes above passed — remove: (a) the legacy single-slot file,
 # which this script no longer writes or reads, so a repo mid-transition to per-session
 # filenames must not go on trusting a stale shared record; (b) any per-session
-# attestation whose owning session no longer has a live working log (its own transcript
-# file is gone from every project directory this config dir knows about). A LIVE foreign
-# session's attestation — its transcript still exists — is never touched here or by any
-# other session's run; that concurrency is the entire point of D-5.
-session_transcript_exists() {  # <session id>
-  local sid="$1" d
-  [ -n "$sid" ] || return 1
-  [ -d "$CONFIG_DIR/projects" ] || return 1
-  for d in "$CONFIG_DIR"/projects/*/; do
-    [ -f "${d}${sid}.jsonl" ] && return 0
-  done
-  return 1
-}
+# attestation whose owning session is dead by lib/alive.sh's rule (its process is not running
+# with the start its record names). A transcript outlives its session, so its presence says
+# nothing. A LIVE foreign session's attestation is never touched here or by any other session's
+# run; that concurrency is the entire point of D-5.
 
 prune_stale_attestations() {
   [ -e "$LEGACY_STATE_FILE" ] && rm -f "$LEGACY_STATE_FILE" 2>/dev/null
@@ -478,11 +385,11 @@ prune_stale_attestations() {
     sid="${base#"$STATE_BASENAME_PREFIX"}"
     sid="${sid%"$STATE_BASENAME_SUFFIX"}"
     [ "$sid" = "$SESSION_ID" ] && continue
-    session_transcript_exists "$sid" || rm -f "$f" 2>/dev/null
+    alive_session "$sid" || rm -f "$f" 2>/dev/null
   done
 }
 
-[ "$STATE_DIR_OK" -eq 1 ] && prune_stale_attestations
+[ "$STATE_DIR_OK" -eq 1 ] && declare -F alive_session >/dev/null 2>&1 && prune_stale_attestations
 
 # ---------------------------------------------------------------- context probes
 
@@ -498,8 +405,8 @@ fi
 
 # Other live sessions in this project. Warn-only by design (§4, UC-6): detection, never
 # prevention. The project directory is located by finding the one that holds THIS
-# session's own transcript, so no filename-encoding scheme has to be guessed.
-# (CONFIG_DIR is set earlier, beside the session-key check, so D-5 pruning above can use it.)
+# session's own transcript, so no filename-encoding scheme has to be guessed; a session found there
+# is reported only while it is alive by lib/alive.sh's rule, never by its transcript's age.
 OTHER_SESSIONS=0
 PROJ_DIR=""
 if [ -d "$CONFIG_DIR/projects" ]; then
@@ -520,7 +427,7 @@ fi
 report_roster_coverage() {  # <foreign session id> <that session's transcript dir>
   local sid="$1" tdir="$2" has_roster="absent"
   [ -f "$STATE_DIR/${ROSTER_PREFIX}${sid}${ROSTER_SUFFIX}" ] && has_roster="present"
-  warn "another live session on this project: $sid (transcript touched within ${OTHER_SESSION_WINDOW_MIN}m; roster: ${has_roster})"
+  warn "another live session on this project: $sid (its process is running; roster: ${has_roster})"
 
   local sub="$tdir/$sid/subagents"
   [ -d "$sub" ] || return 0
@@ -542,10 +449,11 @@ if [ -n "$PROJ_DIR" ]; then
     [ -n "$_t" ] || continue
     _other="$(basename "$_t" .jsonl)"
     [ "$_other" = "$SESSION_ID" ] && continue
+    declare -F alive_session >/dev/null 2>&1 && alive_session "$_other" || continue
     OTHER_SESSIONS=$((OTHER_SESSIONS + 1))
     report_roster_coverage "$_other" "$PROJ_DIR"
   done <<EOF
-$(find "$PROJ_DIR" -maxdepth 1 -name '*.jsonl' -mmin "-$OTHER_SESSION_WINDOW_MIN" 2>/dev/null)
+$(find "$PROJ_DIR" -maxdepth 1 -name '*.jsonl' 2>/dev/null)
 EOF
   [ "$OTHER_SESSIONS" -eq 0 ] && say "no other live session detected on this project"
 else

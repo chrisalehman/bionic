@@ -36,8 +36,7 @@
 # putting non-UTF-8 bytes in `detail`.
 #
 # WHY IT EXISTS (surfaces map §B.3). 21 hook files carry 62 distinct refusal texts
-# across four emission modes. `hooks/stop-guard.sh`'s `deny()` frame is 12 fixed
-# lines before its reasons and reaches 18 rendered; `hooks/background-suite-guard.sh`'s
+# across four emission modes. `hooks/background-suite-guard.sh`'s
 # run-arm heredoc is the twelve red lines Chris named. Every one of them is the model's
 # instruction and the user's interruption printed to one stream, because the hook had
 # nowhere else to put either half. This file is that other place.
@@ -347,8 +346,9 @@ _refuse_bytecut() {
   printf '%s' "$s"
 }
 
-# _refuse_log_need <verb> <fix> — a fix opening `needs: ` is a person's exit, and a person's exit met
-# during a run is an event on that run's landing record, which its reader counts. SOFT TO THE END: a
+# _refuse_log_need <verb> <fix> <fact> — a fix opening `needs: ` is a person's exit, and a person's exit met
+# during a run is an event on that run's landing record, which its reader counts. Its reason is what was
+# refused and what it needs, as the user line says them: the interface lacked a door. SOFT TO THE END: a
 # subshell with both streams closed, so a library that will not load, an unbound session or a failed
 # append changes nothing about the refusal's streams or exit, and a library the hook never asked for is
 # not left defined in it. Nothing is written when no plan is bound: there is no run to count it against.
@@ -358,9 +358,9 @@ _refuse_log_need() {
   (
     lib="${BIONIC_LIB:-$(cd "$(_refuse_self_dir)" && pwd -P)}"
     declare -F session_plan >/dev/null 2>&1 || . "$lib/run.sh" || exit 0
-    declare -F line_event >/dev/null 2>&1 || . "$lib/line.sh" || exit 0
+    declare -F line_hand_event >/dev/null 2>&1 || . "$lib/line.sh" || exit 0
     plan="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID")" || exit 0
-    line_event "$plan" refusal needs=person "wall=$1"
+    line_hand_event "$plan" refusal "$3 ($2)" needs=person "wall=$1"
   ) >/dev/null 2>&1 || :
 }
 
@@ -472,7 +472,7 @@ $(_refuse_fold_detail "$detail")"
     fi
   fi
 
-  _refuse_log_need "$verb" "$fix"
+  _refuse_log_need "$verb" "$fix" "$fact"
 
   # (g) THE WIRE. One case, three modes, and the exit status is part of each.
   case "$mode" in

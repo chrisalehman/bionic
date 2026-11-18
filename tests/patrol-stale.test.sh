@@ -1,6 +1,5 @@
 #!/bin/bash
-# ONE STALENESS ARITHMETIC FOR THE PATROL STAMP — the FIRE WINDOW (epic-23 wave-16
-# REQ-11, AC-11.1/11.2; ADR-028).
+# ONE STALENESS ARITHMETIC FOR THE PATROL STAMP — the FIRE WINDOW.
 #
 # WHAT THIS SUITE OWNS, AND WHAT CHANGED. It used to own a constant:
 # `payload/scripts/lib/patrol.sh`'s `PATROL_STALE_MULTIPLIER`, "the stamp is stale
@@ -56,8 +55,8 @@ sourced() {  # <fn-or-expr...> — run against a clean copy of patrol.sh's globa
 section "Section 2: patrol_stamp_state measures against the fire window"
 
 # No hooks/session-poker.sh beside this fixture repo, so patrol_interval falls
-# back to its own last-resort default (1200s, PATROL_INTERVAL_LAST_RESORT) —
-# matching the poker's own 20m default. The rows read `interval=` and `limit=`
+# back to its own default (1200s, PATROL_INTERVAL_DEFAULT) —
+# the constant the poker takes its own default from. The rows read `interval=` and `limit=`
 # back out of the record and compare the second against the LIBRARY's own
 # `patrol_fire_window`, so a change to either the default or the window's
 # arithmetic is still caught in agreement rather than against a number typed here.
@@ -73,6 +72,8 @@ esac
 expect_eq "5: limit = patrol_fire_window(interval)" "$WINDOW" "$LIMIT"
 expect_eq "6: with the real last-resort default, that limit is 1320 and not 2400" \
   "1320" "$LIMIT"
+expect_regex "7: patrol_verdict answers every field its callers read, by key" '^verdict=[a-z]+\|ref=[0-9]+\|gap=[0-9]+\|window=[0-9]+\|reason=' \
+  "$(sourced patrol_verdict "$TMP/no-such-stamp" "$TMP/no-such-transcript" "$SECS")"
 
 section "Section 3: every reader of \"how stale is stale\" calls the predicate"
 #

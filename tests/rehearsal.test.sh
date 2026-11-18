@@ -9,6 +9,7 @@
 #                     weeks out, a held task naming what it waits on, and a card head with no invented wave
 #   §FACTS            three goals declared, met, not met and not measured; a close at 1× under three landings;
 #                     the suites and the whole run named
+#   §GATE             a rehearsed world whose own gate is full stops at its landing's WAITING
 #
 # EACH SECTION, ONE SHAPE. The sandbox's own `hooks/session-poker.sh sitrep <plan>` prints the sheet, whose `ask:`
 # lines are exactly the state's asks; a judgment written from the sheet, answering every open ask, renders through
@@ -16,8 +17,8 @@
 # clean state has no ask to drop, so its refusal is a judgment naming an ask the register lacks, the same floor read
 # from the other side.
 #
-# FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts, a
-# plan in its Step-3 shape and the release check's closure. Every later state is a command's: the poker's verbs,
+# FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts and
+# the release check's closure, with no plan: its run starts at the configuration card. Every state is a command's: the poker's verbs,
 # the door's landing, the sweeper's ack, close-out. What `rehearse` writes by hand is what a run's people and agents
 # write by hand: the plan's prose, a review's record, a row's code, a criterion's evidence. Each command it runs is
 # logged beside the sandbox (`rehearsal.log`), and each section reads the commands its state turns on from that log.
@@ -51,8 +52,8 @@ rt_state clean
 expect_eq "CL-1 rehearse reaches the state and prints the sandbox's plan (exit 0)" "0|yes" \
   "$RT_RC|$([ -f "$RT_PLAN" ] && echo yes)"
 if [ "$RT_RC" = 0 ]; then
-  expect_eq "CL-1b …through the door's landing of one build row, the other still building" "yes" \
-    "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)"
+  expect_eq "CL-1b …through the build row's ready, the release row launched" "yes|yes" \
+    "$([ "$(rt_ran 'spawn-worktree.sh ready')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'dispatch event')" -ge 2 ] && echo yes)"
   rt_sheet_and_card CL "" "" ""
 fi
 
@@ -75,5 +76,12 @@ section "§FACTS: the sheet's facts read true: every line a measurement naming w
 # goal, or a goal reads another status; the close is scaled by one or two landed tasks; a review that passed and then
 # failed counts as both; a note counts the reads it leaves out.
 rt_facts_state clean
+
+section "§GATE: a rehearsed world whose own gate is full stops at the build row's landing"
+# fails-when: the rehearsal takes the landing line's WAITING as a landing, or its world's gate ignores its own config.
+mkdir -p "$WORLD_ROOT/full/config/bionic" && printf '1\n' > "$WORLD_ROOT/full/config/bionic/share"
+GA_RC=0; ( RH_WITHIN=5 rehearse single-verify "$WORLD_ROOT/full" ) > /dev/null 2> "$WORLD_ROOT/full.err" || GA_RC=$?
+expect_eq "GA-1 a share of 1% under 30% used admits nothing: rehearse stops (exit 1)" "1" "$GA_RC"
+expect_contains "GA-1b …at the build row's ready, WAITING (rc 75)" "the build row says ready failed (rc 75)" "$(cat "$WORLD_ROOT/full.err")"
 
 finish

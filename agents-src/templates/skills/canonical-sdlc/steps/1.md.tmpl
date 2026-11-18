@@ -22,9 +22,10 @@ it is still cheap. That is a Step-1 quality bar, not a Step-2 discovery.
 
 **Titles.** A `### REQ-<n> — <title>` heading and a `## Not Doing` item (`<title>: <reason>`) open on a title of at most 30 characters; a longer one is refused, never cut.
 
-**The step ends at the card below, rendered in full.** One line per requirement, never a
+**The step ends at the card below.** One line per requirement, never a
 paragraph — the artifact path is the depth, and `explain <requirement>` opens one. Approval
-is against the card, and the card's own question is the gate.
+is against the card: on its literal `approved`, run `session-poker.sh approve step1 '<verbatim reply>'`,
+which the gate asks of every commit at Step 2.
 
 ```
 Step 1 · Requirements
@@ -51,7 +52,5 @@ Card: `bash <plugin-root>/scripts/card.sh step1 <requirements.md>` renders it wh
 
 The card prints one `Inherited` line of counts over the newest continuation's `deferred:` and `debt:` lines, never the lines. The requirements file's `## Inherited deferrals` disposes of each deferral with one of `adopted: <id> as REQ-<n>`, `again: <id>` (carried) or `closed: <id> <reason>`; a disposal naming an id the continuation lacks refuses the card.
 
-Right after the card, run `session-poker.sh debt adopt <newest continuation>`: it writes each carried `debt:` item into this run's ledger, once, with its touches kept.
-
-**Evidence:** `Step 1: requirements: <path>; <how the scope was approved>`
+Right after the card, run `session-poker.sh debt adopt <newest continuation>`: it appends each carried `debt:` item to this run's log, once, with its touches kept.
 

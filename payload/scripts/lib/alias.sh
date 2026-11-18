@@ -22,7 +22,7 @@
 #                 verb          floor-run      -> regression-run      hooks/session-poker.sh, after `VERB="$1"`
 #                 proof-kind    floor          -> regression          hooks/session-poker.sh, after `PF_KIND="$1"`
 #                 born-operand  floor:         -> regression:         hooks/session-poker.sh task-add --born
-#                 reads         proof:floor    -> proof:regression    a reads cell TYPED to task-add or task-set reads=
+#                 reads         proof:floor    -> proof:regression    a reads cell TYPED to task-add
 #                 config        floor          -> regression-command  .bionic/config.yaml, read by regression-run
 #                 log           floor-run-     -> regression-run-     the whole-run log's name, the second-run glob
 #                 rigor-key     rigor-floor    -> rigor-minimum       hooks/canonical-sdlc-governing-skill.sh, twice
@@ -154,21 +154,6 @@ alias_gone_names() {
 $ALIAS_GONE
 ALIAS_GONE_EOF
   return 0
-}
-
-# alias_gone_cell <kind> <cell> -> as alias_gone, for a comma-separated cell a person typed: each token trimmed, a
-# `live:` prefix dropped. Exit 0 and the sentence at the first token that is gone.
-alias_gone_cell() {
-  local k="${1:-}" rest="${2:-}" t
-  ALIAS_GONE_SAID=""
-  while :; do
-    t="${rest%%,*}"
-    t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
-    t="${t#live:}"
-    _alias_gone_row "$k" "$t" && return 0
-    case "$rest" in *,*) rest="${rest#*,}" ;; *) break ;; esac
-  done
-  return 1
 }
 
 # alias_gone_text <kind> <text> -> exit 0 and the sentence when a line of <text> (a config file's, a frontmatter's)

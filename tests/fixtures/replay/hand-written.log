@@ -1,0 +1,12 @@
+run/v1|ev=dispatch|row=T13|name=w49-T13|brief=record/wave-49-what-a-run-costs/briefs/w49-T13.md|fixture=hand-written|at=2026-11-07T03:28:00Z
+run/v1|ev=stalled|row=T14|logs=record/wave-49-what-a-run-costs/line/T14-gate-0000000.log|fixture=hand-written|at=2026-11-07T03:28:05Z
+run/v1|ev=hand|what=refusal|row=T14|why=a suite the brief does not name|fixture=hand-written|at=2026-11-07T03:28:10Z
+run/v1|ev=decision|d=D13|verb=put|fixture=hand-written|at=2026-11-07T03:28:15Z
+run/v1|ev=debt|concept=fixture-concept|row=T14|fixture=hand-written|at=2026-11-07T03:28:20Z
+run/v1|ev=admitted|id=fixture.1|row=T14|branch=wt/49-T14|head=0000000000000000000000000000000000000001|suite=gate.test.sh|token=ext:fixture|fixture=hand-written|at=2026-11-07T03:28:25Z
+run/v1|ev=admitted|id=fixture.2|row=T14|branch=wt/49-T14|head=0000000000000000000000000000000000000001|suite=slots.test.sh|token=ext:fixture|fixture=hand-written|at=2026-11-07T03:28:30Z
+run/v1|ev=void|id=fixture.1|branch=wt/49-T14|why=host-red|fixture=hand-written|at=2026-11-07T03:28:35Z
+run/v1|ev=cancel|of=admitted|id=fixture.2|fixture=hand-written|at=2026-11-07T03:28:40Z
+run/v1|ev=cancel|of=dispatch|row=T13|name=w49-T13|fixture=hand-written|at=2026-11-07T03:28:45Z
+run/v1|ev=abandon|why=a run abandoned and taken back|fixture=hand-written|at=2026-11-07T03:28:50Z
+run/v1|ev=cancel|of=abandon|why=a run abandoned and taken back|fixture=hand-written|at=2026-11-07T03:28:55Z

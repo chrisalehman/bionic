@@ -11,7 +11,6 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
-. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/cross-gate-agreement.prelude.sh"
 
@@ -65,16 +64,12 @@ cg_run_open() {  # <plan path> -> "0" (open) or "1" (not a recognized open state
   ( . "$RUN_LIB" >/dev/null 2>&1; run_open "$1" ) >/dev/null 2>&1
   printf '%s' "$?"
 }
-cg_plan() {  # <current: value, or "" for none> -> a fixture plan path carrying it
-  local cur="$1"
-  local safe; safe="$(printf '%s' "${cur:-none}" | tr -c 'A-Za-z0-9' '_')"
-  local f="$SANDBOX/fx/cg/current-${safe}.plan.md"
-  mkdir -p "$(dirname "$f")"
-  {
-    printf '# cg fixture plan\n\n## SDLC State\n\n'
-    [ -n "$cur" ] && printf 'current: %s\n\n' "$cur"
-    printf -- '- Step %s: in progress\n' "${cur:-0}"
-  } > "$f"
+cg_run() {  # <step> -> a page at 15 under a docs root's plans/, its run's log holding that one step as the step writer
+            # (lib/proof.sh `proof_step_event`) takes it: a digit, or a digit and its sub-step letter
+  local f="$SANDBOX/fx/cg15/.bionic/docs/plans/epic-99/at-$1.plan.md"
+  mkdir -p "${f%/*}" "$SANDBOX/fx/cg15/.bionic/docs/record/at-$1"
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n# cg fixture plan\n' > "$f"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$1" > "$SANDBOX/fx/cg15/.bionic/docs/record/at-$1/run.log"
   printf '%s' "$f"
 }
 
@@ -82,49 +77,18 @@ cg_plan() {  # <current: value, or "" for none> -> a fixture plan path carrying 
 for CG_STEP in 3 4 8; do
   for CG_LETTER in '' a b; do
     CG_VAL="${CG_STEP}${CG_LETTER}"
-    CG_PLAN="$(cg_plan "$CG_VAL")"
-    expect_eq "CG.1 sched_plan_current(current: $CG_VAL) reads the step, letter stripped" \
+    CG_PLAN="$(cg_run "$CG_VAL")"
+    expect_eq "CG.1 sched_plan_current(step $CG_VAL) reads the step, letter stripped" \
       "$CG_STEP" "$(cg_sched_current "$CG_PLAN")"
     expect_eq "CG.1 …and run.sh's run_open agrees this is a live, in-range step" \
       "0" "$(cg_run_open "$CG_PLAN")"
   done
 done
 
-# ── CG.2 an unparseable current: is never mistaken for an active step by EITHER reader ──
-for CG_BAD in "abc" "3 (Step-3 review)" "3c"; do
-  CG_PLAN="$(cg_plan "$CG_BAD")"
-  expect_eq "CG.2 sched_plan_current withholds on '$CG_BAD'" "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.2 …and run.sh's run_open agrees this plan is not a recognized open state" \
-    "1" "$(cg_run_open "$CG_PLAN")"
-done
-# no current: line at all — same non-agreement: both give up on the field, neither fills it in
-CG_NOLINE="$SANDBOX/fx/cg/no-current.plan.md"
-mkdir -p "$(dirname "$CG_NOLINE")"
-printf '# cg fixture plan\n\n## SDLC State\n\n- Step 3: in progress\n' > "$CG_NOLINE"
-expect_eq "CG.2 no current: line at all — sched_plan_current withholds" \
-  "" "$(cg_sched_current "$CG_NOLINE")"
-expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)" \
-  "1" "$(cg_run_open "$CG_NOLINE")"
-
-# ── CG.3 the retired task-scale `current: T<n>`: the divergence that routes it to its refusal ──
-# run_open calls `T<n>` an open run while the FILL gate withholds on it. Since wave-31 (one ledger
-# shape, D2; A-orch-52) `T<n>` is no step at any scale, and the pair answer two questions on
-# purpose: run_open keeps the retired plan OPEN so launch-sync, the stop wall and the tick reach it
-# and refuse it by name (AC-1.2's `NOT-RECORDED … is not numeric`), and the FILL gate, which has no
-# number to compare, fills nothing. A change that closed it would skip such a plan in silence, so
-# it must turn this red.
-for CG_T in T1 T5 T23; do
-  CG_PLAN="$(cg_plan "$CG_T")"
-  expect_eq "CG.3 sched_plan_current withholds on the retired task pointer '$CG_T' (no numbered step)" \
-    "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.3 …while run.sh's run_open keeps '$CG_T' an OPEN run, so its readers refuse it by name" \
-    "0" "$(cg_run_open "$CG_PLAN")"
-done
-
 # ── CG.4 the discriminator: reverting the letter-strip splits the pair (proves CG.1 can go red) ──
 # The pre-fix bug, planted. A copy of session-poker.sh with ONLY the a/b-strip line reverted
 # to a bare assignment — the exact shape this section would have caught before T6.
-CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"
+CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"; mkdir -p "${CG_MUT%/*}"
 anchor insert hooks/poker/tick.sh '  step="${current%[ab]}"'
 LC_ALL=C awk '{
   if ($0 == "  step=\"${current%[ab]}\"") { print "  step=\"$current\"" } else { print }
@@ -140,8 +104,8 @@ cg_sched_current_mut() {  # <plan path> -> sched_plan_current's answer off the M
       '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
     sched_plan_current "$1" ) 2>/dev/null
 }
-CG_PLAN_3B="$(cg_plan 3b)"
-expect_eq "CG.4 …the mutant copy rejects current: 3b as unreadable (the pre-fix bug)" \
+CG_PLAN_3B="$(cg_run 3b)"
+expect_eq "CG.4 …the mutant copy rejects step 3b as unreadable (the pre-fix bug)" \
   "" "$(cg_sched_current_mut "$CG_PLAN_3B")"
 expect_eq "CG.4 …while the shipped file still reads it as step 3 — CG.1 discriminates" \
   "3" "$(cg_sched_current "$CG_PLAN_3B")"
@@ -159,13 +123,11 @@ section "S15 — landing-swept/v1: one writer, pinned to a captured marker"
 # line the originator already wrote, verbatim) — what it shares is the `SWEPT_SCHEMA`
 # constant, so §S15b below pins the two hooks' copies of that constant to agree, byte for
 # byte, rather than sourcing one file: two separate hook PROCESSES have no shared memory to
-# source an in-process value from, the same reason payload/scripts/lib/loader.sh's own block
-# is duplicated-but-pinned rather than sourced.
+# source an in-process value from.
 #
 # EXTRACTED, NOT SOURCED FROM A LIB (see tests/lib/swept-marker.sh's own header for why: a
-# hook copied out of the tree, as several sections above already do, resolves its
-# BIONIC_LIB_WANT files through the loader's registry/cache fallback — whatever was last
-# LANDED, not this worktree's uncommitted tree). The real source, `eval`'d, real call — the
+# hook copied out of the tree, as several sections above already do, finds only the library
+# laid beside it, and with none it finds no loader at all — never this worktree's tree). The real source, `eval`'d, real call — the
 # same `field1_via`/`field2_via` idiom this file already uses.
 #
 # BY KEY, NEVER BY POSITION. The captured line's five fields are read out with the same
@@ -236,7 +198,7 @@ section "S13 — the suite budget: the brief's own set, one row writer, one alph
 #   payload/scripts/lib/brief.sh        RECORDS it, the brief's `Suites:` tokens as basenames
 #   payload/scripts/lib/walls.sh        ENFORCES it, against basenames read out of a command
 #
-# What is pinned here is the SEAM: the grammar's own lift, driven over a `Suites:` line in
+# What is pinned here is the SEAM: the contract's one reader, driven over a `Suites:` line in
 # every spelling a brief uses, answering in the alphabet the guard compares in.
 
 S13_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
@@ -249,8 +211,8 @@ S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
 [ -r "$S13_ROSTER_LIB" ] || S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/roster.sh"
 S13_CMDCLASS="$BIONIC_HOOKS_DIR/../payload/scripts/lib/cmd-class.sh"
 [ -r "$S13_CMDCLASS" ] || S13_CMDCLASS="$BIONIC_HOOKS_DIR/../scripts/lib/cmd-class.sh"
-# THE CONTRACT GRAMMAR (wave-20 T6; REQ-4, Δ10): the dispatch wall, `amend` and `task-add` all
-# record the set `brief_validate_fields` builds, so that is the file this pin drives.
+# THE CONTRACT'S ONE READER: the dispatch wall, `amend` and `task-add` all record the set
+# `brief_contract` reads, so that is the file this pin drives.
 S13_HOOK="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
 [ -r "$S13_HOOK" ] || S13_HOOK="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
 expect_eq "S13.2 the library this section reads is present" "yes" \
@@ -258,31 +220,26 @@ expect_eq "S13.2 the library this section reads is present" "yes" \
 
 # --- §S13.2 the set the row records is the brief's own tokens, as basenames ---
 #
-# Driven through the grammar the dispatch wall calls, over one `Suites:` line carrying the
+# Driven through the reader the dispatch wall calls, over one `Suites:` line carrying the
 # three spellings a brief uses for a suite (path-relative, `./`-prefixed, absolute). The set
-# `brief_validate_fields` hands the row writer is the lift's, once each, as basenames.
-s13_set() {  # <Suites: span> -> "<BRIEF_SUITES_ALLOWED>|<BRIEF_SUITES_SOURCE>"
-  bash -c '
-    . "$1" || exit 9
-    sink() { :; }
-    brief_validate_fields "$(lift_contract_fields "Suites: $2" implementor)" implementor "$3" sink >/dev/null 2>&1
-    printf "%s|%s" "${BRIEF_SUITES_ALLOWED-}" "${BRIEF_SUITES_SOURCE-}"
-  ' _ "$S13_HOOK" "$1" "$SANDBOX" 2>/dev/null
+# the row writer is handed is the reader's, once each, as basenames.
+s13_set() {  # <Suites: span> -> the suites= value the reader records
+  bash -c '. "$1" || exit 9; brief_field "$(brief_contract "Suites: $2")" suites' _ "$S13_HOOK" "$1" 2>/dev/null
 }
 S13_GOT="$(s13_set "tests/cmd-class.test.sh, ./tests/walls.test.sh, $REPO_ROOT/tests/brief-x.test.sh, tests/cmd-class.test.sh")"
-expect_eq "S13.2 the recorded set is the brief's tokens as basenames, once each, declared" \
-  "cmd-class.test.sh walls.test.sh brief-x.test.sh|declared" "$S13_GOT"
-S13_SET="${S13_GOT%%|*}"
+expect_eq "S13.2 the recorded set is the brief's tokens as basenames, once each" \
+  "cmd-class.test.sh walls.test.sh brief-x.test.sh" "$S13_GOT"
+S13_SET="$S13_GOT"
 expect_eq "S13.2 …carrying no path, no tab and no duplicate" "0" \
   "$(printf '%s\n' "$S13_SET" | tr ' ' '\n' | awk '/\// || /\t/ { n++ } END { print n + 0 }')"
 # THE MUTATION: a different Suites: line lands a different set, so the row above is the brief's
 # answer and not a constant.
 expect_eq "S13.2 …and a different Suites: line records a different set" \
-  "gamma.test.sh|declared" "$(s13_set "tests/gamma.test.sh")"
+  "gamma.test.sh" "$(s13_set "tests/gamma.test.sh")"
 
 # --- §S13.3 the guard compares in that same alphabet ---
 #
-# `cmd_suite_targets` is the reader on the enforcement side. Every basename the grammar
+# `cmd_suite_targets` is the reader on the enforcement side. Every basename the reader
 # just recorded must be a name it can produce too, from the command a writer would type —
 # otherwise a suite on the budget is refused by the wall that granted it.
 S13_TARGETS_OK=0
@@ -371,11 +328,6 @@ expect_eq "S13.4 mutation: …and red on the printf copy too (R4)" "1" \
 # every named suite in the fleet.
 expect_eq "S13.5 the guard reads the key the wall writes" "0" \
   "$(grep -qF 'suites_allowed=' "$S13_BG" && echo 0 || echo 1)"
-# DROPPED (wave-22 T9, review fix candidate 7; critic Scope). A second row here counted the
-# source text of the arm's prefix strip (`${_bseg#suites_allowed=}`). It pinned how the arm
-# spells the read, not what the arm does: a rename of the strip's variable turned it red with
-# no change in behaviour. That the arm reads the key the wall writes is proven behaviourally,
-# by bash-walls §15 and by §AM2 here (an amended `suites_allowed=` is admitted by the arm).
 
 # ============================================================
 # --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
@@ -383,10 +335,6 @@ expect_eq "S13.5 the guard reads the key the wall writes" "0" \
 # ONE reader of a row's `files=` for reconciliation, ONE place that computes the diff, ONE
 # row -> worktree mapping (never re-derived). Neither side reads an `impact-command` key any
 # more (wave-31 T2 the dispatch side, T23 the landing side; REQ-4 AC-4.2): S18.3 pins both.
-# The reconciliation is `stop_landing_gate`'s now (epic-23 wave-11, T12): the diff and the
-# shared mapping moved into payload/scripts/lib/stop.sh with the rest of the sweep. One owner
-# still, at a new address.
-S18_LG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
 S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 
 # --- §S18.1 exactly one file reconciles a diff against a row's files=, and it is lib/stop.sh ---
@@ -505,29 +453,22 @@ expect_nonempty "S18.2 hooks/stop.sh declares a BIONIC_LIB_WANT line at all" "$S
 # either spelling (quoted or bare), proved on a read that stays — the landing's release-check —
 # before it is asked for the deleted key's reads. proof.sh's floor read is T25's (D3) and is
 # not counted here.
-s18_config_reads() {  # <file> <key> -> how many lines read that key through config_value
-  /usr/bin/grep -cE "config_value .*[[:space:]]\"?$2\"?[[:space:]]+\"\"" "$1" 2>/dev/null | tr -d ' '
-}
 # ============================================================
 section "S13b — one run normaliser on both sides of the row (wave-20 T4; REQ-7, D7)"
 # ============================================================
 #
 # THE SAME SEAM AS S13, FOR THE OTHER BUDGET FIELD. `re_executes=` is WRITTEN by the
-# dispatch lift (`lift_contract_fields`, its `collapse()`) and COMPARED by the budget arm to
+# contract's one reader (`brief_contract`, through `cmdnorm_run`) and COMPARED by the budget arm to
 # the run the claim reader built (payload/scripts/lib/cmd-class.sh, LAST_RUN). Each side has
 # its own suite and each can pass while the two spell one run two ways — which is exactly how
 # `npx jest x 2>&1 | tee log` came to be refused for the run its brief declared (triage-B
-# B1). Pinned here: the lift, run with the library it loads, stores the run the claim reader
-# reads off every redirected spelling of it.
-#
-# THE LIFT IS A LIBRARY NOW (wave-20 T6; REQ-4, Δ10), so this section sources
-# payload/scripts/lib/brief.sh — the one file every contract door calls — where it used to
-# lift the function's text out of hooks/dispatch-preflight.sh between two anchors. Sourcing
-# it alone also proves it brings in cmd-class.sh for itself: nothing else is loaded here.
+# B1). Pinned here: the reader, run with the library it loads, stores the run the claim reader
+# reads off every redirected spelling of it. This section sources payload/scripts/lib/brief.sh
+# alone, which also proves it brings in cmd-class.sh for itself: nothing else is loaded here.
 S13B_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
 [ -r "$S13B_LIB" ] || S13B_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
-s13b_lift_runs() {  # <brief text> -> the lifted re_executes= value
-  bash -c '. "$1" || exit 1; lift_contract_fields "$2" | sed -n "s/^re_executes=//p"' \
+s13b_lift_runs() {  # <brief text> -> the re_executes= value the reader records
+  bash -c '. "$1" || exit 1; brief_contract "$2" | sed -n "s/^re_executes=//p"' \
     _ "$S13B_LIB" "$1" 2>&1
 }
 s13b_claim_run() {  # <command> -> the first claim's run column
@@ -562,11 +503,9 @@ section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-3
 # under it then goes green against a fixture that was never mutated. Before this
 # wave every one of these sites carried its own precondition or none: a `cmp -s`
 # against the doctored copy, a count-difference row, or nothing at all. The
-# research code map's census found 24 of them; the real number in this tree is 49
-# call sites over four suites, because the census read only `grep -v` in this suite
-# and missed every `sed`/`awk` mutant tree here plus
-# the doctoring `agent-context-guard` and `landing-gate` each carry. Every one of
-# them now goes through ONE spelling — the framework's `anchor` — and this section
+# research code map's census found 24 of them, because it read only `grep -v` in this
+# suite and missed every `sed`/`awk` mutant tree here and the doctoring other suites
+# carry. Every one of them now goes through ONE spelling — the framework's `anchor` — and this section
 # is the wall that keeps them there.
 #
 # THE BRACKETS IN THE PATTERN BELOW ARE DELIBERATE. This file is itself one of the
@@ -588,9 +527,8 @@ expect_eq "S19.1 anchor is defined in exactly one file under tests/" "1" \
 # --- §S19.2 ABSENCE: no suite hand-rolls its own mutation precondition ---
 #
 # NO EXCEPTIONS, AND NO NARROWED PATTERN. This row carried a named waiver while two
-# doctoring sites the code map's 24-site census never found — `mutate_guard` in
-# `tests/agent-context-guard.test.sh` and the inverted-guard awk in
-# `tests/landing-gate.test.sh` — sat outside the declared set of the task that
+# doctoring sites the code map's 24-site census never found, among them the inverted-guard
+# awk in `tests/landing-gate.test.sh`, sat outside the declared set of the task that
 # built `anchor`. Both are routed now, so the waiver is deleted and the expectation
 # is EMPTY: the sweep reads every suite in tests/, and a hand-rolled precondition
 # reappearing ANYWHERE turns this row red and names the file and the hit count.
@@ -606,11 +544,6 @@ mkdir -p "$S19_SB"
 printf 'if cmp -%s "$SKILL_MD" "$DOCTORED_REPLANTED"; then no "x" "the %s target matched nothing"; fi\n' \
   s sed >> "$S19_SB/replanted.test.sh"
 
-# --- §S19.3 retired (wave-24): six exact-count pins on `anchor` calls (per-suite sites and calls,
-# this suite, agent-context-guard, landing-gate, and their total). An exact count goes red on
-# every legitimate new mutant and is repaired by retyping the number, so it tested the author's
-# memory, not the tree. The relation it stood for is derived below, in §S19.4, with its paired
-# positive; §S19.2 holds the absence side across every suite.
 
 # --- §S19.4 every doctored copy is anchored, suite by suite ---
 # Each doctoring suite gets its own site pattern, and a pattern that finds no site is RED

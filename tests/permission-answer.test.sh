@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/permission-answer.test.sh — hooks/permission-answer.sh, THE CARRIER (epic-23
-# wave-25-never-paused, REQ-1, REQ-2, REQ-3, REQ-5, REQ-6, REQ-7; spec D1, D8, D9, D10).
+# tests/permission-answer.test.sh — hooks/permission-answer.sh, THE CARRIER.
 #
 # WHAT IT OWNS. The one hook that answers the platform's permission question for an engaged
 # run. It is registered on PermissionRequest only, collects the facts (who asked, which
@@ -96,27 +95,19 @@ make_project() {
   plan="$dir/.bionic/docs/plans/epic-99/$PLAN_BASE.plan.md"
   cat > "$plan" <<PAPLAN
 ---
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 intent: build
 rigor: double
 scale: wave
 working-branch: $BRANCH
+integration-branch: main
 spec: specs/epic-99/$PLAN_BASE.spec.md
 requirements: specs/epic-99/$PLAN_BASE.requirements.md
 ---
 
 # fixture plan
-
-## SDLC State
-
-integration-branch: main
-intent: build
-rigor: double
-scale: wave
-current: 4
-
-- Step 4: tasks in flight
 PAPLAN
+printf 'run/v1|ev=step|n=4|at=2026-10-03T00:00:00Z\n' > "$dir/.bionic/docs/record/$PLAN_BASE/run.log"
   : > "$dir/.bionic/docs/specs/epic-99/$PLAN_BASE.spec.md"
   : > "$dir/.bionic/docs/specs/epic-99/$PLAN_BASE.requirements.md"
   if [ "$mode" = bound ]; then
@@ -179,7 +170,6 @@ drive() {
 n_obj() { printf '%s' "$1" | jq -s 'length' 2>/dev/null || printf 'bad'; }
 behavior() { printf '%s' "$1" | jq -r '.hookSpecificOutput.decision.behavior // "none"' 2>/dev/null || printf 'bad'; }
 message() { printf '%s' "$1" | jq -r '.hookSpecificOutput.decision.message // ""' 2>/dev/null; }
-event_of() { printf '%s' "$1" | jq -r '.hookSpecificOutput.hookEventName // ""' 2>/dev/null; }
 
 # The answer log for a project: beside the audit log, read from the lib that names that one.
 log_of() {
@@ -433,7 +423,7 @@ OUT="$(cd "$A5P" && printf '%s' "$(payload "$A5P" Bash "$(bash_ti "touch $A5P/sr
        | env HOME="$HOME_FX" CLAUDE_PROJECT_DIR="$A5P" BIONIC_PLUGINS_DIR="$SANDBOX/plugins" \
          CLAUDE_CODE_SESSION_ID="$SID" bash "$SANDBOX/broken/hooks/permission-answer.sh" 2>/dev/null)"
 RC=$?
-expect_eq "A5.h1 no library: rc 0" "0" "$RC"
+expect_eq "A5.h1 no library: rc 2, which the platform ignores on this event" "2" "$RC"
 expect_empty "A5.h2 …and nothing on stdout (bionic claims no authority it cannot establish)" "$OUT"
 expect_true "A5.h3 …and the copy really is the hook (not an empty file)" test -s "$SANDBOX/broken/hooks/permission-answer.sh"
 
@@ -872,4 +862,11 @@ a22 "find $A22T/src -name '*.txt'"
 expect_eq "A22.c4 control: a find rooted in the tree: allow" "allow" "$(behavior "$OUT")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════════════
+# The words, called directly (lib/grant.sh): a failure names what failed, and a denial's message is the reason beside its fix.
+pw() { bash -c '. "$1"; shift; "$@"; printf "%s|%s|%s" "$GRANT_FAIL_REASON" "$GRANT_FAIL_MESSAGE" "$GRANT_DENY_MESSAGE"' _ "$LIBDIR/grant.sh" "$@"; }
+expect_eq "A23.a a failure key quotes its facts in the reason and the message" \
+  "failure: the decision could not be made (grant_decide rc 3)|bionic could not answer this permission question, so it is denied: the decision could not be made (grant_decide rc 3). Tell the lead (the human, if you are the lead) what failed; /bionic:doctor checks the install.|" \
+  "$(pw grant_fail_words decide 3)"
+expect_eq "A23.b a reason with a mark and a fix make one message" "||bionic: outside the grant fix it" "$(pw grant_deny_words deny-fix $'outside\tthe grant\tfix it')"
 finish

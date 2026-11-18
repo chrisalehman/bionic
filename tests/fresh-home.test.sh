@@ -62,10 +62,7 @@
 # NEW kind (a github-skill, a marketplace plugin) needs a new arm in the shim
 # block — that is the one place this suite has to be extended by hand.
 #
-# REVIVED AND RAISED, epic-18 wave-03 (Chris D2, 2026-08-23). This suite was
-# deleted with eighteen others on the reliability ruling — "if the tests cannot
-# be made to fail, then the tests are no good" — and brought back on the
-# condition that it be fixed in the same act. Three things changed. The rows that
+# The rows that
 # pinned a REPORT'S WORDING were rewritten to read a row's state marker, or
 # deleted where the claim was already carried by a claim about bytes. Every
 # negative now has a positive on the same extractor and the same fixture, and no
@@ -608,80 +605,7 @@ run_payload() {  # <script> [args...] — stdin carries the answers
 
 YES="$(for _ in $(seq 1 80); do printf 'y\n'; done)"
 
-SETTINGS="${HOME_FIX}/.claude/settings.json"
-CCS_CONFIG="${HOME_FIX}/.config/ccstatusline/settings.json"
-NB_SKILL="${HOME_FIX}/.claude/skills/notebooklm/SKILL.md"
-GLOBAL_MEMORY="${HOME_FIX}/.claude/CLAUDE.md"
 RC_FILE_FIX="${HOME_FIX}/.zshrc"
-
-jqf() {  # <jq-program> — read one value out of the fixture settings.json
-  [ -f "$SETTINGS" ] || { echo "<no settings.json>"; return 0; }
-  jq -r "$1" "$SETTINGS" 2>/dev/null || echo "<unreadable>"
-}
-
-# One table/section out of a doctor report, by its flush-left heading (doctor
-# no longer delimits sections with `=== NAME ===`; a heading is a line with no
-# leading whitespace — "THIRD PARTY — tools and plugins bionic depends on",
-# "ENVIRONMENT", "BIONIC NATIVE — ships inside the plugin" — and every row under
-# it is indented).
-# The heading itself is matched by PREFIX, since most of them carry an em-dash
-# tagline after the name, and it is never printed back; capture runs until the
-# blank line doctor always prints before the next heading.
-doctor_section() {  # <file> <name>
-  awk -v want="$2" '
-    on && $0 == "" { on = 0 }
-    on { print; next }
-    index($0, want) == 1 { on = 1 }
-  ' "$1"
-}
-
-# The `present` column of one THIRD PARTY row, read as yes/no/unknown off that
-# row's own verdict symbol (✓/✗/–) — the table that replaced DEPENDENCIES still
-# names each row by dependency name in column 2, so the same "find this name,
-# report its state" claim holds, just against `_doctor_third_row`'s columns
-# (symbol name version source state) instead of the deleted class-keyed table.
-dep_present() {  # <report-file> <name>
-  doctor_section "$1" "THIRD PARTY" | awk -v n="$2" '
-    NF >= 4 && $2 == n {
-      # NOT `$1 == "✓"`. macOS /usr/bin/awk (20200816) compares these multibyte
-      # glyphs byte-blind: `$1 == "✓"` is true for ✗ and – as well, so the first
-      # branch always fired and every row read "yes" — 23 assertions vacuous
-      # (Step-6 critic F1). index(…)==1 discriminates all three.
-      if (index($1, "✓") == 1)      print "yes";
-      else if (index($1, "✗") == 1) print "no";
-      else                          print "unknown";
-      exit
-    }'
-}
-
-# Does a path exist, as a word rather than as an exit status. Every "bionic did
-# not write this" claim below goes through it, and so does at least one "bionic
-# did write this" claim in the same group — which is the only thing that makes
-# the first kind of claim mean anything (.claude/rules/test-harness.md, "Anti-vacuity").
-path_exists() {  # <path> -> yes|no
-  if [ -e "$1" ]; then printf 'yes'; else printf 'no'; fi
-}
-
-# Non-emptiness as a word, for the same reason.
-yn() {  # <string> -> yes|no
-  if [ -n "${1:-}" ]; then printf 'yes'; else printf 'no'; fi
-}
-
-# The permission rules a settings.json carries, joined. Read from a FILE argument
-# so the same extractor can be pointed at a planted file that does carry rules —
-# without which "setup wrote none" is a sentence about an extractor that might
-# never return anything at all.
-perm_allow_join() {  # <settings-file>
-  [ -f "$1" ] || return 0
-  jq -r '[.permissions.allow[]?] | join(" ")' "$1" 2>/dev/null
-}
-
-# The environment names bionic owns, as settings.json carries them.
-settings_env_names() {  # <settings-file>
-  [ -f "$1" ] || return 0
-  jq -r '[.env // {} | keys[] | select(startswith("CLAUDE_CODE_") or startswith("BASH_MAX_"))] | join(" ")' \
-    "$1" 2>/dev/null
-}
 
 # --- The verdict glyphs, read from doctor.sh rather than restated -----------
 #
@@ -701,41 +625,7 @@ const_from() {  # <file> <name>
   return 1
 }
 DOCTOR_OK_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_OK)"   || DOCTOR_OK_GLYPH=""
-DOCTOR_BAD_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_BAD)" || DOCTOR_BAD_GLYPH=""
 DOCTOR_NIL_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_NIL)" || DOCTOR_NIL_GLYPH=""
-
-# The STATE MARKER of one ENVIRONMENT row, found by the setting name in its
-# second column. NOT the row's trailing sentence: doctor writes that sentence to
-# be read by a person, and a suite that pinned it would go red the day somebody
-# improved the wording and stay green the day the answer itself was wrong. The
-# symbol is where the answer lives. Comparison is bash `case`, in-process.
-env_row_state() {  # <report-file> <setting> -> yes|no|unknown|"" (no such row)
-  local want="$2" line sym rest
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line#"${line%%[![:space:]]*}"}"
-    sym="${line%%[[:space:]]*}"
-    rest="${line#"$sym"}"
-    rest="${rest#"${rest%%[![:space:]]*}"}"
-    case "$rest" in "$want"*) ;; *) continue ;; esac
-    case "$sym" in
-      "$DOCTOR_OK_GLYPH")  printf 'yes' ;;
-      "$DOCTOR_BAD_GLYPH") printf 'no' ;;
-      "$DOCTOR_NIL_GLYPH") printf 'unknown' ;;
-      *)                   printf 'unrecognised-symbol' ;;
-    esac
-    return 0
-  done <<< "$(doctor_section "$1" "ENVIRONMENT")"
-  return 0
-}
-
-# The BIONIC NATIVE row whose component is `plugin`, if the report has one.
-# doctor prints it only when the plugin is NOT loaded, so its absence is the
-# positive proof of a healthy load — a claim that needs the row to be visible to
-# this extractor when it IS printed, which Group 5 proves after the teardown.
-# `$2` is an ASCII component name; the verdict glyph is `$1` and is not compared.
-native_plugin_row() {  # <report-file>
-  doctor_section "$1" "BIONIC NATIVE" | awk '$2 == "plugin" { print; exit }'
-}
 
 # --- The rc item's extractors ------------------------------------------------
 #
@@ -760,12 +650,6 @@ RC_START_LIT="$(env_sh_var RC_START)"
 RC_END_LIT="$(env_sh_var RC_END)"
 RC_PROXY_LINE="$(env_sh rc_default claude-proxy)"
 
-# The working-principles item's markers and text, likewise read from the payload:
-# the block setup writes is the block the shipped file carries (wave-27 D16).
-PRINCIPLES_START_LIT="$(env_sh_var PRINCIPLES_START)"
-PRINCIPLES_END_LIT="$(env_sh_var PRINCIPLES_END)"
-PRINCIPLES_SHIPPED="${PAYLOAD}/context/working-principles.md"
-
 # The lines BETWEEN bionic's markers, in order. Not "does the file contain the
 # proxy line": a proxy line outside the markers is a line bionic does not own.
 rc_block_lines() {  # <file>
@@ -775,19 +659,6 @@ rc_block_lines() {  # <file>
     if [ "$line" = "$RC_START_LIT" ]; then inside=1; continue; fi
     if [ "$line" = "$RC_END_LIT" ];   then inside=0; continue; fi
     [ "$inside" = "1" ] && out="${out}${line}"$'\n'
-  done < "$file"
-  printf '%s' "$out"
-}
-
-# Every line NOT between the markers, the markers themselves excluded: what the
-# user's rc held before bionic touched it, and must still hold afterwards.
-rc_nonblock_lines() {  # <file>
-  local file="$1" line inside=0 out=""
-  [ -f "$file" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "$RC_START_LIT" ]; then inside=1; continue; fi
-    if [ "$line" = "$RC_END_LIT" ];   then inside=0; continue; fi
-    [ "$inside" = "0" ] && out="${out}${line}"$'\n'
   done < "$file"
   printf '%s' "$out"
 }

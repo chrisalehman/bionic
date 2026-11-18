@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/time.test.sh — payload/scripts/lib/time.sh `iso_epoch`, the one reader of an instant (wave-39 T17; D18,
-# REQ-12 AC-12.1; burns debt iso-to-epoch).
+# tests/time.test.sh — payload/scripts/lib/time.sh `iso_epoch`, the one reader of an instant.
 #
 # WHAT THIS SUITE OWNS. An instant is `YYYY-MM-DDTHH:MM:SSZ`, twenty characters, UTC, and nothing else. Three
 # readers of it stood: hooks/session-poker.sh `iso_epoch` (BSD `date -j -f`, which reads `…Zx` with a warning,
@@ -9,12 +8,11 @@
 # month 13 converted). D18 rules strict `…Z`: lib/time.sh owns the grammar and the arithmetic (the patrol's), and
 # the three former callers read through it.
 #
-#   §AGREE   one table of instants, read four ways on each: lib/time.sh `iso_epoch`, the poker's `iso_epoch` (its
-#            own definition, lifted from the hook and run over the library the hook loads), the patrol's ledger
-#            report (`fill_ledger_report`: the epoch is <now> less the seconds it charges the line), and the gate
+#   §AGREE   one table of instants, read three ways on each: lib/time.sh `iso_epoch`, the poker's `iso_epoch` (its
+#            own definition, lifted from the hook and run over the library the hook loads), and the gate
 #            (`_gate_row_done`, over a landing record written by line.sh's `line_event`: the epoch is the last
 #            asked= the record's `published` line still finishes after, found by bisection). Each valid instant
-#            reads one epoch on all four; each refused one reads nothing on all four.
+#            reads one epoch on all three; each refused one reads nothing on all three.
 #   §TRANSCRIPT  the patrol's verdict reads Claude Code's transcript, whose instants carry milliseconds: a
 #            fractional `…33.724Z` there is read to the whole second (the transcript's edge, not the grammar), and
 #            a no-Z one is still unreadable.
@@ -26,7 +24,7 @@
 # own session transcripts), cut to the fields the patrol's jq reads.
 #
 # ANTI-VACUITY. Every refused row (an empty reading) sits in the same table as valid rows read through the same
-# four extractors, and §AGREE first proves each extractor returns a number on a valid instant.
+# three extractors, and §AGREE first proves each extractor returns a number on a valid instant.
 #
 # Usage: bash tests/time.test.sh
 
@@ -57,22 +55,15 @@ expect_regex "AG.0 the poker's iso_epoch definition is lifted from the hook" '^i
 via_lib() { bash -c '. "$1/time.sh" 2>/dev/null; iso_epoch "$2"' _ "$LIB" "$1" 2>/dev/null; }
 via_poker() { bash -c '. "$1/patrol.sh" 2>/dev/null; eval "$2"; iso_epoch "$3"' _ "$LIB" "$POKER_ISO" "$1" 2>/dev/null; }
 NOW_FAR=4000000000
-via_patrol() {
-  printf 'fill-ledger/v1|at=%s|state=ok|ready=T1|missed=1|turn=t1\n' "$1" > "$TMP/fill.log"
-  bash -c '. "$1/patrol.sh" 2>/dev/null; fill_ledger_report "$2" s yes "$3"' _ "$LIB" "$TMP/fill.log" "$NOW_FAR" 2>/dev/null \
-    | awk -F'|' -v now="$NOW_FAR" 'index($0, "fill-report/v1|") == 1 {
-        for (i = 2; i <= NF; i++) { if (index($i, "turns=") == 1) t = substr($i, 7); if (index($i, "missed_s=") == 1) m = substr($i, 10) }
-        if (t == 1) printf "%d\n", now - m }'
-}
-# The gate's record is written by line.sh's own writer, its clock pinned to the instant under test.
+# The gate's record is written by line.sh's own writer, its clock pinned in its text: a variable is shadowed by its locals.
 git init -q "$TMP/p" 2>/dev/null
 PLAN="$TMP/p/.bionic/docs/plans/epic-x/wave-x.plan.md"
 mkdir -p "${PLAN%/*}" && printf '# plan\n' > "$PLAN"
 REC="$(bash -c '. "$1/line.sh" 2>/dev/null; line_record "$2"' _ "$LIB" "$PLAN" 2>/dev/null)"
-expect_regex "AG.0b line.sh names the plan's landing record" '/landing-proofs\.log$' "$REC"
+expect_regex "AG.0b line.sh names the plan's landing record, the run's log" '/record/[^/]+/run\.log$' "$REC"
 via_gate() {
   rm -f "$REC"
-  bash -c '. "$1/line.sh" 2>/dev/null; at="$3"; _line_now() { printf "%s\n" "$at"; }; line_event "$2" published row=T1 commit=c1 kind=queue by=- why=-' \
+  bash -c '. "$1/line.sh" 2>/dev/null; eval "_line_now() { printf \"%s\\n\" $(printf %q "$3"); }"; line_event "$2" published row=T1 commit=c1 kind=queue by=- why=-' \
     _ "$LIB" "$PLAN" "$1" >/dev/null 2>&1
   bash -c '
     . "$1/gate.sh" 2>/dev/null
@@ -85,13 +76,13 @@ via_gate() {
     done
     echo "$hi"' _ "$LIB" "$REC" "$NOW_FAR" 2>/dev/null
 }
-four() { printf '%s|%s|%s|%s' "$(via_lib "$1")" "$(via_poker "$1")" "$(via_patrol "$1")" "$(via_gate "$1")"; }
+three() { printf '%s|%s|%s' "$(via_lib "$1")" "$(via_poker "$1")" "$(via_gate "$1")"; }
 
-section "§AGREE — one instant, one epoch, on the library and its three former callers (D18; AC-12.1)"
+section "§AGREE — one instant, one epoch, on the library and two of its former callers (D18; AC-12.1)"
 # Valid instants, each with the epoch `date -u -j -f` gives it on macOS (and :60, Feb 30 normalised as it does).
 while IFS='|' read -r id s want why; do
   [ -n "$id" ] || continue
-  expect_eq "$id $why: $s reads $want on lib|poker|patrol|gate" "$want|$want|$want|$want" "$(four "$s")"
+  expect_eq "$id $why: $s reads $want on lib|poker|gate" "$want|$want|$want" "$(three "$s")"
 done <<'ROWS'
 AG.1|2026-10-18T15:07:33Z|1792336053|the research fixture
 AG.2|1970-01-01T00:16:48Z|1008|near the epoch, as gate.test.sh's landings are
@@ -102,7 +93,7 @@ ROWS
 # Refused instants: nothing on every reader.
 while IFS='|' read -r id s why; do
   [ -n "$id" ] || continue
-  expect_eq "$id $why: '$s' reads nothing on lib|poker|patrol|gate" "|||" "$(four "$s")"
+  expect_eq "$id $why: '$s' reads nothing on lib|poker|gate" "||" "$(three "$s")"
 done <<'ROWS'
 AG.6|2026-10-18T15:07:33.5Z|a fractional second
 AG.7|2026-10-18T15:07:33|no Z
@@ -113,7 +104,7 @@ AG.11|2026-10-18 15:07:33Z|a blank for the T
 AG.12|2026-10-18T15:07:33+00:00|an offset for the Z
 AG.13| 2026-10-18T15:07:33Z|a leading blank
 ROWS
-expect_eq "AG.14 the empty string reads nothing on lib|poker|patrol|gate" "|||" "$(four "")"
+expect_eq "AG.14 the empty string reads nothing on lib|poker|gate" "||" "$(three "")"
 
 section "§TRANSCRIPT — the patrol reads the transcript's milliseconds to the whole second; the grammar stays strict"
 STAMP="$TMP/patrol.stamp"; : > "$STAMP"

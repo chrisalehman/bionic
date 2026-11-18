@@ -19,14 +19,6 @@ set -euo pipefail
 # call starts, where `wall_evidence_gate` (payload/scripts/lib/walls.sh) runs; tests/bash-walls.test.sh owns the composition.
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
-# THE FLOOR A RUN PAST STEP 6 CARRIES: a Step 7..9 fixture about something else gets the
-# prelude's readings and one `proved: kind=regression` line after `current:`; rows about the floor arm write plans as given.
-eg_floor() {  # <plan content> -> the content with the readings and one floor proof line
-  eg_readings "$1" | EG_H="$EG_HEAD" awk '{ print }
-    !done && /^[[:space:]]*current[[:space:]]*:[[:space:]]*[7-9][ab]?[[:space:]]*$/ {
-      printf "proved: kind=regression head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
-}
-
 # ============================================================
 # Section 1: non-commit commands always allowed
 # ============================================================
@@ -34,12 +26,8 @@ eg_floor() {  # <plan content> -> the content with the readings and one floor pr
 section "Section 1: Non-commit commands pass through"
 
 h1=$(make_home)
-# Seed a plan that WOULD block if the command were a commit.
-write_plan "$h1" "$FM
-## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5: TODO" > /dev/null
+# Seed a plan that WOULD block if the command were a commit: a run at Step 5 with no regression proof.
+eg_page "$h1" 5 > /dev/null
 
 expect_allow "ls command — not a commit" "$h1" "ls /tmp"
 expect_allow "git status — not a commit" "$h1" "git status"
@@ -65,183 +53,80 @@ write_plan "$h2c" "# regular plan
 Some content.
 No SDLC State section here." > /dev/null
 
-# ============================================================
-# Section 5: empty / placeholder evidence — blocked
-# ============================================================
+section "Section 2b: a plan declares 15; one at 14 on disk is a document; the two gates agree"
 
-section "Section 5: Placeholder evidence — blocked"
-
-h5=$(make_home)
-write_plan "$h5" "$FM
+# Bound, since the walk admits a page at 15 alone: the session's binding is how a page at 13 reaches the commit.
+h2v=$(make_home)
+bound_marker "$h2v" "$EG_SID" "$(write_plan "$h2v" "${FM/version: 14/version: 13}
 ## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5:   " > /dev/null
-expect_block "empty evidence line" "$h5" 'git commit -m "x"' "is empty"
-
-for token in TODO pending "in progress" XXX TBD placeholder; do
-  h=$(make_home)
-  write_plan "$h" "$FM
+current: 4" v.plan.md)"
+expect_block "a plan at 13 is refused, the fix naming the version a plan is written at" "$h2v" 'git commit -m "x"' "set 'canonical_sdlc_version: 15'"
+h2s=$(make_home)
+bound_marker "$h2s" "$EG_SID" "$(write_plan "$h2s" "${FM/version: 14/version: 13}
+# a plan" s.plan.md)"
+expect_block "a bound plan at 13 with no state section is refused at the commit too, on its version alone" "$h2s" 'git commit -m "x"' "canonical_sdlc_version: '13'"
+for v in 13 14 15; do
+  h=$(make_home); git -C "$h" init -q; p=$(write_plan "$h" "${FM/version: 14/version: $v}
 ## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5: $token" > /dev/null
-  expect_block "placeholder '$token'" "$h" 'git commit -m "x"' "placeholder"
+current: 4" "v$v.plan.md"); bound_marker "$h" "$EG_SID" "$p"; run_hook "$h" 'git commit -m "x"'
+  w=$(jq -n --arg p "$p" --arg c "$(cat "$p")" --arg s "$EG_SID" '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}' \
+    | HOME="$h" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh" 2>&1 >/dev/null | grep -c 'unsupported version' || true)
+  case "$v" in 13) expect_eq "the write hook refuses 13 for its version" 1 "$w" ;; 14) expect_eq "the write hook says nothing of a plan at 14 on disk" 0 "$w" ;; esac
+  expect_eq "the write hook and the commit gate agree on version $v" "$w" "$(grep -c 'unsupported sdlc version' <<< "$HOOK_STDERR" || true)"
 done
-
-# Case-insensitive: the whole trimmed value must equal a token, so the fixture is the bare 'Todo' (prose is legal; 5e).
-h5b=$(make_home)
-write_plan "$h5b" "$FM
-## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5: Todo" > /dev/null
-expect_block "placeholder 'Todo' (mixed case, bare token)" "$h5b" 'git commit -m "x"' "placeholder"
-
-# --- whole-value equality: the ban matches only when the trimmed, lowercased value EQUALS a token
-# (todo/pending/in progress/inprogress/xxx/tbd/placeholder); a token inside a longer value is legal.
-
-# 5c — whole-line 'Step 5: pending' (single-line value) → block.
-h5c=$(make_home)
-write_plan "$h5c" "$FM
-## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5: pending" > /dev/null
-expect_block "whole-line 'Step 5: pending' → block" "$h5c" 'git commit -m "x"' "placeholder"
-
-# 5d — trim + lowercase first: a padded, mixed-case '  Pending  ' continuation value still equals the token → block.
-h5d=$(make_home)
-write_plan "$h5d" "$FM
-## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5:
-  readback:   Pending  " > /dev/null
-expect_block "padded mixed-case 'readback:   Pending  ' → block" "$h5d" 'git commit -m "x"' "placeholder"
-
-# 5e — a value that merely CONTAINS a token ('resolved all TODOs …') is legal → allow.
-h5e=$(make_home)
-write_plan "$h5e" "$FM
-## SDLC State
-current: 3
-Step 3: resolved all TODOs from the last review" > /dev/null
-expect_allow "substring-only 'resolved all TODOs' → allow (whole-value equality)" \
-  "$h5e" 'git commit -m "x"'
-
-# 5f — a continuation key whose whole value equals a token ('stack-health: pending') → block.
-h5f=$(make_home)
-write_plan "$h5f" "$FM
-## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5:
-  stack-health: pending" > /dev/null
-expect_block "continuation 'stack-health: pending' (whole value) → block" \
-  "$h5f" 'git commit -m "x"' "placeholder"
+# The plan builder writes a page at 15: the version, no state section, and the log the reader reads.
+p=$(plan_fixture --current 5 "$EG_PF_DIR/plans/epic-99-fixture/wave-015.plan.md" wave "$(eg_pf_row T1 dw active)")
+expect_eq "plan_fixture writes the version alone, and the row's dispatch in its log" "1|state=dispatched" \
+  "$(grep -c -e '^canonical_sdlc_version: 15$' -e '^## SDLC State' "$p")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$p" status T1 | head -1)"
+# A run's step is an event the current verb writes. A log whose newest step is no number (written by hand) is refused,
+# naming that verb. fails-when: the refusal names a state section, which the write hook refuses on a page at 15.
+hst=$(make_home); git -C "$hst" init -q; bound_marker "$hst" "$EG_SID" "$(eg_page "$hst" 4 'run/v1|ev=step|n=T4|at=2026-10-24T00:00:00Z')"
+expect_block "a log whose newest step is T4 is refused, naming the verb that records a step" "$hst" 'git commit -m "x"' "session-poker.sh current <N>"
+expect_absent "…and no state section" "SDLC State" "$HOOK_VSTDERR"
 
 # ============================================================
 # Section 9: a criterion is owed at the step whose task proves it
 # ============================================================
 #
-# A matrix row's `task:` names the plan row whose work proves it, and the row is owed at that row's step: before
-# it, a pending or blocked row owes neither its per-tier keys nor an auditor's verdict. The literal `task: 9` is the
-# close's step; a row owed at 9 is the close's to settle, never demanded of an open plan.
-# FIXTURE FIDELITY: the matrix plan builders with a `## Tasks` table before the matrix; Step-7+ plans via eg_floor.
-# fails-when: a pending T3 row whose task is a Step-9 row is refused at 6, 7 or 8, or a row whose task
-# is a Step-4 row is let through at 6, or the deferral outlives its owing step.
+# A criterion is owed at the step of the task that proves it: before it, a pending or blocked criterion owes neither
+# its per-tier keys nor an auditor's verdict. The literal 9 is the close's step; a criterion owed at 9 is the close's
+# to settle, never demanded of an open plan. The criteria table's Task column names the task.
+# FIXTURE FIDELITY: the page at 15 is SYNTHESIZED in the nine cells and the Eval design, its one landing an event of
+# its run's log; the Step-9 runs are eg_page's.
+# fails-when: a criterion is owed at a step other than its task's (9o), a dash or a missing column names a step
+# (9o, 9q), the close settles one it does not measure (9p), or the deferral outlives its owing step (9k, 9l).
 
 section "Section 9: a criterion is owed at the step whose task proves it"
-
-ow_tasks="## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | the build | implementor | — | 30m | REQ-1 | a.sh | landed |
-| T7 | 7 | doc | the release | orchestrator | — | 10 | REQ-1 | CHANGELOG.md | pending |
-| T9 | 9 | close | the close | orchestrator | — | 10 | REQ-1 | none | pending |"
-
-# ow_matrix <tier> <task value> -> the first row discharged and confirmed, the second pending with that tier and task:
-ow_matrix() {
-  printf '%s\n' "## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
-| AC-2 | $1 | pending | — |  |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash test.sh — unit suite
-  readback: 332/332 asserted
-AC-2:
-  fails-when: the close reads above zero
-  eval: $1 — \`bash payload/hooks/session-poker.sh landing-report --hand-holds\` at the close reads total=0
-  task: $2
-  evidence: pending"
-}
-# ow_plan <current> <tier> <task value> -> the whole plan at that step, the Tasks table above the matrix
-ow_plan() {
-  local body p
-  case "$1" in
-    5) body="$step5_base" ;; 6) body="$step6_body" ;; 7) body="$v9_step7_body" ;;
-    8) body="$v9_step8_body" ;; 9) body="$v9_step9_body" ;;
-  esac
-  p="$(plan "$1" "$body" "$(ow_matrix "$2" "$3")" | OW_T="$ow_tasks" awk '/^## Verification Matrix/ { print ENVIRON["OW_T"]; print "" } { print }')"
-  if [ "$1" -ge 7 ]; then eg_floor "$p"; else printf '%s\n' "$p"; fi
-}
-ow_home() {  # <current> <tier> <task value> -> a sandbox holding that plan
-  local h; h=$(make_home); write_plan "$h" "$(ow_plan "$@")" > /dev/null; printf '%s' "$h"
-}
-
-for ow_c in 5 6 7 8; do
-  expect_allow "9a-$ow_c a pending T3 row whose task is a Step-9 row owes nothing at current $ow_c" \
-    "$(ow_home "$ow_c" T3 T9)" 'git commit -m "x"'
-done
-expect_allow "9b at current 9, the plan still open, the row is the close's own to settle" \
-  "$(ow_home 9 T3 T9)" 'git commit -m "x"'
-expect_allow "9c the literal task: 9 on a T0 row still defers to the close at current 8" \
-  "$(ow_home 8 T0 9)" 'git commit -m "x"'
-expect_allow "9d the literal task: 9 on a T3 row defers too: the tier says how, the step says when" \
-  "$(ow_home 6 T3 9)" 'git commit -m "x"'
-expect_block "9e a pending T3 row whose task is a Step-4 row still owes its evidence at 6" \
-  "$(ow_home 6 T3 T1)" 'git commit -m "x"' "AC-2 has placeholder evidence"
-expect_allow "9f a row whose task is a Step-7 row owes nothing at 6" \
-  "$(ow_home 6 T3 T7)" 'git commit -m "x"'
-ow_adv() { OW_RC=0; eg_head_repo "$1"; sed -i.bak -e "s/reader=w-read result=pass scope=piece/reader=bionic:critic result=pass scope=whole/" -e "1s/^---\$/---\nbase-sha: $EG_HEAD/" -e "s/^current: .*/current: $(($2 - 1))\nworking-branch: $(git -C "$1" branch --show-current)/" "$1/.bionic/docs/plans/active.md"; eg_autobind "$1"; OW_OUT="$(cd "$1" && HOME="$1" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current "$2" --check 2>&1)" || OW_RC=$?; }
-ow_t7() { local ow_tasks="${ow_tasks//CHANGELOG.md | pending/CHANGELOG.md | $2}"; ow_home 7 T3 T7; }
-ow_adv "$(ow_home 7 T3 T7)" 7
-expect_eq "9g the advance into the step that owes a row whose task is open is admitted" 0 "$OW_RC"
-expect_allow "9h a commit at the owing step with the task row pending owes nothing" \
-  "$(ow_home 7 T3 T7)" 'git commit -m "x"'
-for ow_s in landed dropped; do
-  expect_block "9i-$ow_s once the task row is $ow_s the commit is refused" \
-    "$(ow_t7 x $ow_s)" 'git commit -m "x"' "AC-2 has placeholder evidence"
-  ow_adv "$(ow_t7 x $ow_s)" 8
-  expect_contains "9i-$ow_s-adv …and so is the advance, naming AC-2 and its exits" "confirmed AC-2 (rule it: the auditor confirms it, the row is waived," "$OW_OUT"
-done
-expect_allow "9m a task list is owed at the latest step it names (T1, T9 at 8)" \
-  "$(ow_home 8 T3 "T1, T9")" 'git commit -m "x"'
 
 # The two file-scope readers the judge and the card share with the gate, asked as hooks/poker/judge.sh asks them.
 ow_ask() {  # <plan> <function> [args…] -> what the function prints, then `rc=<n>`
   bash -c 'L="$1"; shift; . "$L/root.sh" && . "$L/run.sh" && . "$L/units.sh" && . "$L/walls.sh" >/dev/null 2>&1 || exit 9
     PLAN="$1"; RIGOR="$(plan_frontmatter_get "$1" rigor)"; shift; "$@"; echo "rc=$?"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$@"
 }
-ow_p8="$(write_plan "$(make_home)" "$(ow_plan 8 T3 T9 | awk '
-  /^\| AC-2 \|/ { print; print "| AC-3 | T3 | pending | — |  |"; next }
-  { print }
-  END { print "AC-3:"; print "  fails-when: the build is red"; print "  task: T1"; print "  evidence: pending" }')")"
-expect_eq "9n matrix_unruled at 8 names the row owed at 4 and not the row owed at the close" "AC-3
-rc=0" "$(ow_ask "$ow_p8" matrix_unruled "$ow_p8" 8)"
-expect_eq "9j the owing step of a row id is that row's step, read from the Tasks table" "9|4|7|9|9" \
-  "$(for t in T9 T1 T7 9 'T1, T9'; do ow_ask "$ow_p8" matrix_owing_step "$ow_p8" "  task: $t" | head -1; done | paste -sd'|' -)"
-ow_p9="$(write_plan "$(make_home)" "$(ow_plan 9 T3 T9)")"
-ow_p9d="$(write_plan "$(make_home)" "$(ow_plan 9 T3 T9 | awk '/^Step 9:/ { print "- Step 9: delivered: 2026-10-24T00:00Z wave-01"; skip = 1; next } skip && /^  / { next } { skip = 0; print }')")"
-expect_eq "9k a row owed at 9 is deferred while the plan is open, and owed once the Step-9 line carries delivered:" \
+# At 15 a criterion has no block: the criteria table's Task column names the task that proves it.
+ow_h15="$(make_home)"; ow_15="$ow_h15/.bionic/docs/plans/epic-01-x/wave-01-x.plan.md"; mkdir -p "${ow_15%/*}" "$ow_h15/.bionic/docs/record/wave-01-x"
+ow_page15() {  # <Task column: yes|no> -> the page at 15, T1 landed in its log
+  local h=' Task |' s='---|' x c
+  [ "$1" = yes ] || { h=''; s=''; }
+  printf -- '---\ncanonical_sdlc_version: 15\nrigor: double\nscale: wave\n---\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the build | — | 30 | REQ-1 | a.sh | — |\n| T7 | 7 | doc | the release | — | 10 | REQ-1 | CHANGELOG.md | — |\n| T9 | 9 | close | the close | — | 10 | REQ-1 | — | — |\n'
+  printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |%s\n|---|---|---|---|---|---|%s\n' "$h" "$s"
+  for x in "AC-2|T9" "AC-3|T1" "AC-4|T7" "AC-5|9" "AC-6|T1, T9" "AC-7|—"; do c=" ${x#*|} |"; [ "$1" = yes ] || c=''
+    printf '| REQ-1 | a suite | %s | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close | above zero |%s\n' "${x%%|*}" "$c"; done
+}
+printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' "$EG_HEAD" > "$ow_h15/.bionic/docs/record/wave-01-x/run.log"
+ow_owe15() { local a; for a in AC-2 AC-3 AC-4 AC-5 AC-6 AC-7; do printf '%s:%s:%s ' "$a" "$(ow_ask "$ow_15" matrix_owing_step "$ow_15" "$a" | head -1 | sed 's/^rc=.*//')" "$(ow_ask "$ow_15" matrix_owing_open "$ow_15" "$a" | head -1 | sed 's/^rc=.*//')"; done; }
+ow_page15 yes > "$ow_15"
+expect_eq "9o at 15 each criterion is owed at the step of the task its Task cell names, open while that task is not landed; a dash names none" \
+  "AC-2:9:yes AC-3:4: AC-4:7:yes AC-5:9: AC-6:9:yes AC-7:: " "$(ow_owe15)"
+expect_eq "9p …so the close settles the criteria owed at 9 whose eval is its measure, and the advance to 8 owes those owed before it and none of these" \
+  "AC-2 AC-5 AC-6|AC-3 AC-4 AC-7" "$(ow_ask "$ow_15" matrix_close_rows "$ow_15" | /usr/bin/grep -v '^rc=' | paste -sd' ' -)|$(ow_ask "$ow_15" matrix_unruled "$ow_15" 8 | /usr/bin/grep -v '^rc=' | paste -sd' ' -)"
+ow_page15 no > "$ow_15"
+expect_eq "9q a page at 15 with no Task column owes every criterion at no particular step, as before the column" \
+  "AC-2:: AC-3:: AC-4:: AC-5:: AC-6:: AC-7:: " "$(ow_owe15)"
+ow_p9="$(eg_page "$(make_home)" 9)"
+ow_p9d="$(eg_page "$(make_home)" 9 'run/v1|ev=step|n=9|delivered=2026-10-24T00:00Z wave-01|at=2026-10-24T00:00:00Z')"
+expect_eq "9k a row owed at 9 is deferred while the run is open, and owed once its step 9 carries delivered:" \
   "rc=0|rc=1" "$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 9 pending | tail -1)|$(ow_ask "$ow_p9d" matrix_row_deferred "$ow_p9d" 9 9 pending | tail -1)"
 expect_eq "9l a discharged row is never deferred, and a pending one is before its step" "rc=1|rc=0" \
   "$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 6 discharged | tail -1)|$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 6 pending | tail -1)"
@@ -249,22 +134,53 @@ expect_eq "9l a discharged row is never deferred, and a pending one is before it
 # ============================================================
 # Section 26: the walk gate reads the walk
 # ============================================================
-# A walk narrates without the criteria unless proof-add walk registered it as a verdict table, whose AC identifiers
-# are its verdicts: the arm yields to a `proved: kind=walk` line whose evidence names the Step-5 walk-artifact.
-# fails-when: the identifier arm deleted (26a), a registered walk refused (26b), or the yield read by kind alone (26c).
+# The walk the gate reads is the run's newest walk proof, which proof-add walk registers only once it parsed the
+# record's verdict table, so the AC identifiers in that record are its verdicts.
+# fails-when: a discharged criterion admitted with no walk proof (26a), a walk proof naming an absent record admitted
+# (26c), or a walk proof the run's log holds not read as the walk (26d).
 
 section "Section 26: the walk gate reads the walk"
 
-wg_home() {  # <proved line or empty> -> a sandbox at current 5 whose walk record holds one verdict row
-  local h; h=$(make_home); mkdir -p "$h/.bionic/docs/record/w"
+wg_home() {  # [<record the walk proof names>] -> a sandbox at 15, current 5, the walk owed and its criterion discharged
+  local h p; h=$(make_home); eg_head_repo "$h"; mkdir -p "$h/.bionic/docs/record/w"
   printf 'verdict: confirmed\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | drove it |\n' > "$h/.bionic/docs/record/w/walk.md"
-  write_plan "$h" "$(ow_plan 5 T3 T9 | WG_P="$1" awk '/^walk: exempt$/ { next } { print }
-    /^current: 5$/ && ENVIRON["WG_P"] != "" { print ENVIRON["WG_P"] }
-    /^  auditor: / { print "  walk-artifact: record/w/walk.md" }')" > /dev/null; printf '%s' "$h"
+  p=$(eg_page "$h" 5 "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-24T00:00:00Z" \
+    "run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-24T00:00:01Z" \
+    ${1:+"run/v1|ev=proof|kind=walk|head=$EG_HEAD|evidence=record/w/$1|at=2026-10-24T00:00:02Z"})
+  awk '!/^walk: exempt$/' "$p" > "$p.t" && mv "$p.t" "$p"; printf '%s' "$h"
 }
-wg_line="proved: kind=walk head=$EG_HEAD at=2026-10-24T00:00:00Z evidence=record/w"
-expect_block "26a an unregistered walk naming AC identifiers is refused on the identifier arm" "$(wg_home "")" 'git commit -m "x"' "AC-<n>"
-expect_allow "26b the same walk, registered by proof-add walk, is its verdict table" "$(wg_home "$wg_line/walk.md")" 'git commit -m "x"'
-expect_block "26c a walk line naming another record does not register this one" "$(wg_home "$wg_line/other.md")" 'git commit -m "x"' "AC-<n>"
+expect_block "26a a discharged criterion with no walk proof is refused for the walk" "$(wg_home)" 'git commit -m "x"' "no walk recorded"
+expect_block "26c a walk proof naming an absent record is refused for it" "$(wg_home other.md)" 'git commit -m "x"' "record/w/other.md"
+expect_allow "26d a walk proof the run's log holds is the walk, its record's AC identifiers its verdicts" "$(wg_home walk.md)" 'git commit -m "x"'
+
+# ============================================================
+# Section 27: an epic's plan at 15 owes its own spec, never a wave's requirements
+# ============================================================
+# An epic has no wave and no requirements file: its Step 1 and 2 write specs/<epic>/epic.spec.md. fails-when: a run
+# bound to an epic at 15 is refused for the header's wave when its spec stands (27a), is admitted with no spec (27b),
+# or a wave's plan, asked beside it, stops owing the requirements file it names (27c, 27d).
+
+section "Section 27: a bound epic at 15 owes its spec"
+
+ep_home() {  # [spec: yes|no] -> a sandbox whose one plan is an epic at 15, current 3, Step 2's approval in its log
+  local h p d; h=$(make_home); eg_head_repo "$h"
+  p=$(eg_page "$h" 3 'run/v1|ev=approval|key=step2|by=fixture|said=approved|at=2026-10-04T00:30:00Z'); d="${p%/plans/*}"
+  mkdir -p "$d/record/epic-99-fixture" "$d/specs/epic-99-fixture"; mv "$d/record/wave-01-fixture/run.log" "$d/record/epic-99-fixture/run.log"
+  rm -f "$d/specs/epic-99-fixture/wave-01-fixture".*
+  awk '/^wave: / { next } /^rigor: / { $0 = "rigor: double" } /^scale: / { $0 = "scale: epic" } /^multi_agent: / { $0 = "multi_agent: true" } { print }' "$p" > "${p%/*}/epic.plan.md" && rm "$p"
+  [ "${1:-yes}" = no ] || printf '# epic spec\n' > "$d/specs/epic-99-fixture/epic.spec.md"
+  printf '%s' "$h"
+}
+expect_allow "27a an epic at 15, current 3, its spec standing and Step 2 approved, commits" "$(ep_home yes)" 'git commit -m "x"'
+expect_block "27b …and with its spec gone is refused for that file, named" "$(ep_home no)" 'git commit -m "x"' "owed at 15: Step 1's requirements: specs/epic-99-fixture/epic.spec.md"
+wv_home() {  # [requirements: yes|no] -> a wave at 15, current 3, rigor double, multi_agent true, Step 2 approved
+  local h p; h=$(make_home); eg_head_repo "$h"
+  p=$(eg_page "$h" 3 'run/v1|ev=approval|key=step2|by=fixture|said=approved|at=2026-10-04T00:30:00Z')
+  sed -i '' -e 's/^rigor: .*/rigor: double/' -e 's/^multi_agent: .*/multi_agent: true/' "$p"
+  [ "${1:-yes}" = yes ] || rm -f "${p%/plans/*}/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '%s' "$h"
+}
+expect_allow "27c a wave at 15, rigor double, its requirements file standing, commits" "$(wv_home yes)" 'git commit -m "x"'
+expect_block "27d …and with that file gone is refused for it, named as before" "$(wv_home no)" 'git commit -m "x"' "owed at 15: Step 1's requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md"
 
 finish

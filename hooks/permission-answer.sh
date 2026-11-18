@@ -34,7 +34,8 @@
 # refusal by exit code is not a decision the platform reads from this event. So the
 # direction is split at the one fact that decides who may answer at all: BEFORE engagement is
 # established a failure is silent (jq missing, the loader failing, a session that cannot be
-# identified: bionic claims no authority it cannot establish), and AFTER it every failure is
+# identified: bionic claims no authority it cannot establish; the loader's refusal exits 2,
+# which this event does not honour, so the dialog shows), and AFTER it every failure is
 # a denial that says what failed. Never an allow, never empty stdout.
 #
 # WHAT IT NEVER PRINTS: `updatedPermissions`, `updatedInput` or `interrupt`, on any path, and
@@ -54,105 +55,20 @@ BIONIC_INPUT=$(cat) || exit 0
 
 # ---------- the library ----------
 #
-# One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
-# payload/scripts/lib/loader.sh. Its fail-open arm is the silent half of the split above: a
-# library that will not load cannot say whether this session is engaged.
+# The stub below sources the one loader, whose stub and walk both live in
+# payload/scripts/lib/loader.sh. A library that will not load cannot say whether this session
+# is engaged, so the loader refuses with exit 2 and prints nothing on stdout: the platform
+# ignores exit 2 on a permission request and shows the person's dialog, never an allow.
 BIONIC_LIB_WANT="cmd-class.sh context.sh git-argv.sh grant.sh root.sh roots.sh roster.sh run.sh session.sh worktree.sh"
-# --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
-# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
-# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
-# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
-# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
-# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
-# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
-# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
-# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
-# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
-# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
-BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
-_bl_try() {
-  [ -n "${1:-}" ] || return 1
-  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
-  [ -d "$1" ] || return 1
-  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
-  BIONIC_LIB="$1"
-}
-if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
-  if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
-    _bl_mk="${_bl_keys%%
-*}"
-    _bl_mk="${_bl_mk#bionic@}"
-  fi
-  if [ -n "$_bl_mk" ]; then
-    _bl_src=""
-    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
-      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
-    fi
-    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
-    if [ -z "$BIONIC_LIB" ]; then
-      _bl_best=""; _bl_bestk=""
-      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
-        [ -d "$_bl_v" ] || continue
-        _bl_n="${_bl_v##*/}"
-        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
-        _bl_x1=""; _bl_x2=""; _bl_x3=""
-        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
-$_bl_n
-BIONIC_LOADER_VER
-        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
-        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
-      done
-      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
-    fi
-  fi
+# Find the library through lib/loader.sh beside this hook; payload/scripts/lib/loader.sh says how.
+_bl_dir="$(dirname "$0")"; _bl_l="$_bl_dir/../scripts/lib/loader.sh"; [ -r "$_bl_l" ] || _bl_l="$_bl_dir/../payload/scripts/lib/loader.sh"
+# shellcheck source=/dev/null
+if [ -r "$_bl_l" ]; then . "$_bl_l"; bionic_load; else
+  BIONIC_LIB=""; BIONIC_LIB_MISSING="${BIONIC_LIB_WANT%% *}"; BIONIC_LIB_CANDS="$_bl_dir/../scripts/lib, $_bl_dir/../payload/scripts/lib"
+  loader_fail_open() { echo "$1: library $BIONIC_LIB_MISSING not found at $BIONIC_LIB_CANDS — hook stepping aside; run /bionic:doctor" >&2; exit 0; }
+  loader_fail_closed() { set -- "$1"; [ "${#1}" -le 25 ] || set -- "${1:0:24}…"; echo "bionic: load refused — $1 cannot load the bionic library (run /bionic:doctor)" >&2; exit 2; }
 fi
-if [ -z "$BIONIC_LIB" ]; then
-  BIONIC_LIB_MISSING="${_bl_want%% *}"
-  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
-fi
-loader_fail_open() {
-  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
-  exit 0
-}
-loader_fail_closed() {
-  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
-  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
-  case "${2:-}" in
-    "claude plugin update bionic@bionic"|\
-    "claude plugin install bionic@bionic"|\
-    "bash $_bl_root/scripts/doctor.sh"|\
-    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
-  esac
-  _bl_who="${1:-a bionic hook}"
-  if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
-  printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
-    cat >&2 <<BIONIC_LOADER_REFUSE
-A wall that cannot read a command refuses it rather than waving it through.
-
-Wanted: ${BIONIC_LIB_MISSING:-the bionic library}
-Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
-
-Until the plugin is whole again this wall permits exactly four commands, each matched
-as a whole string:
-
-    claude plugin update bionic@bionic
-    claude plugin install bionic@bionic
-    bash $_bl_root/scripts/doctor.sh
-    bash $_bl_root/scripts/setup.sh
-
-Anything else is refused, including one of those four with another command chained
-after it. Run one of them, or act from your own terminal.
-BIONIC_LOADER_REFUSE
-  fi
-  exit 2
-}
-# --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "permission-answer"; fi
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "permission-answer"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null
@@ -243,15 +159,7 @@ _pa_clean() {
 # measured as honoured; built with jq so the message is escaped. Nothing else is ever added.
 _pa_emit() {
   local out
-  if [ "$1" = allow ]; then
-    out="$(jq -cn '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"allow"}}}' 2>/dev/null)"
-  else
-    out="$(jq -cn --arg m "${2:-bionic: denied}" \
-      '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"deny",message:$m}}}' 2>/dev/null)"
-    # jq is known present; if it still fails, a fixed denial is printed rather than nothing.
-    [ -n "$out" ] || out='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"bionic: denied (the answer could not be built)"}}}'
-  fi
-  [ -n "$out" ] || out='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"bionic: denied (the answer could not be built)"}}}'
+  out="$(grant_answer_json "$@")"
   PA_ANSWERED=1
   printf '%s\n' "$out" >&3 2>/dev/null || printf '%s\n' "$out"
 }
@@ -267,18 +175,19 @@ _pa_log() {
 _pa_finish() {
   local d="$1" r="$2" m="${3-}"
   if ! _pa_log "$d" "$r" 2>/dev/null && [ "$d" = allow ]; then
+    grant_unlogged_words "$(answers_path "$BIONIC_ROOT" 2>/dev/null || printf 'no HOME')"
     d=deny-fix
-    r="the answer could not be written to the answer log"
-    m="bionic: denied, because $r ($(answers_path "$BIONIC_ROOT" 2>/dev/null || printf 'no HOME')). Report it to the lead; /bionic:doctor checks the install."
+    r="$GRANT_FAIL_REASON"
+    m="$GRANT_FAIL_MESSAGE"
   fi
-  if [ "$d" = allow ]; then _pa_emit allow; else _pa_emit deny "$m"; fi
+  _pa_emit "$d" "$m"
   exit 0
 }
 
-# _pa_fail <what failed> — a failure after engagement: a denial that names it (AC-1.5).
+# _pa_fail <key> [<arg>...] (grant_fail_words) — a failure after engagement: a denial that names it.
 _pa_fail() {
-  _pa_finish deny-fix "failure: $1" \
-    "bionic could not answer this permission question, so it is denied: $1. Tell the lead (the human, if you are the lead) what failed; /bionic:doctor checks the install."
+  grant_fail_words "$@"
+  _pa_finish deny-fix "$GRANT_FAIL_REASON" "$GRANT_FAIL_MESSAGE"
 }
 
 # The trap: an exit that printed no decision prints the failure's denial, and the hook still
@@ -287,7 +196,7 @@ _pa_on_exit() {
   local rc=$?
   [ "$PA_ANSWERED" = 1 ] && return 0
   trap - EXIT
-  _pa_fail "the hook stopped (exit $rc) while $PA_STAGE"
+  _pa_fail stopped "$rc" "$PA_STAGE"
 }
 
 # ---------- from here, every exit answers ----------
@@ -307,8 +216,8 @@ trap 'exit 143' TERM INT HUP
 
 # ---------- the question ----------
 PA_STAGE="reading the question"
-[ "$PA_PARSED" = 1 ] || _pa_fail "could not read the question: the payload is not a JSON object"
-[ -n "$PA_TOOL" ] || _pa_fail "could not read the question: it names no tool"
+[ "$PA_PARSED" = 1 ] || _pa_fail not-object
+[ -n "$PA_TOOL" ] || _pa_fail no-tool
 PA_AGENT="$(_pa_field .agent_id)"
 PA_SCRATCH="$(_pa_field .scratchpad_dir)"
 PA_CWD="$(_pa_field .cwd)"
@@ -340,14 +249,14 @@ PA_ROW=""
 if [ -n "$PA_AGENT" ]; then
   PA_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state"
   if [ -L "$PA_ROSTER" ]; then
-    _pa_fail "the roster for this session is a symlink, which bionic refuses to follow"
+    _pa_fail roster-symlink
   elif [ ! -e "$PA_ROSTER" ]; then
-    _pa_fail "there is no roster for this session, so the asking agent $PA_AGENT cannot be found"
+    _pa_fail roster-absent "$PA_AGENT"
   elif [ ! -r "$PA_ROSTER" ]; then
-    _pa_fail "the roster for this session cannot be read, so the asking agent $PA_AGENT cannot be found"
+    _pa_fail roster-unread "$PA_AGENT"
   fi
   PA_ROW="$(roster_row_for_id "$PA_ROSTER" "$PA_AGENT")" \
-    || _pa_fail "the roster has no row for the asking agent $PA_AGENT"
+    || _pa_fail roster-no-row "$PA_AGENT"
   PA_NAME="$(_pa_row_field "$PA_ROW" name)"
   # An agent dispatched without a name has a real row whose name= is empty: that is a reader
   # (a tree is recorded for a name, and it has none), not a fault. It stays labelled by its id.
@@ -362,7 +271,7 @@ PA_BOUND=0
 if [ -z "$PA_AGENT" ]; then
   case "$BIONIC_RUN_WORD" in
     bound-open) PA_CLASS=lead ;;
-    bound-unreadable) _pa_fail "the run this session is bound to cannot be read ($BIONIC_RUN_PLAN)" ;;
+    bound-unreadable) _pa_fail run-unreadable "$BIONIC_RUN_PLAN" ;;
     *) PA_CLASS=unbound ;;
   esac
 elif [ -z "$PA_NAME" ]; then
@@ -372,7 +281,7 @@ else
   case "$?" in
     0) PA_CLASS=writer ;;
     1) PA_CLASS=reader; PA_OWN="" ;;
-    *) _pa_fail "the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
+    *) _pa_fail workspace-unread ;;
   esac
 fi
 
@@ -383,7 +292,7 @@ fi
 # one that does not resolve is a failure rather than a missing fact.
 PA_STAGE="collecting the roots of the asker"
 PA_MAIN="$(grant_resolve "$BIONIC_ROOT")" \
-  || _pa_fail "the main root of the project, $BIONIC_ROOT, does not resolve to a real location"
+  || _pa_fail main-root "$BIONIC_ROOT"
 PA_FACTS=("main=$PA_MAIN")
 _pa_root() {  # <key> <path> — the fact, resolved, or nothing
   local r
@@ -410,7 +319,7 @@ case "$PA_CLASS" in
     case "$?" in
       0) while IFS= read -r PA_T; do _pa_root tree "$PA_T"; done <<< "$PA_TREES" ;;
       1) : ;;
-      *) _pa_fail "the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
+      *) _pa_fail workspace-unread ;;
     esac
     _pa_root record "$(_pa_record_dir "$PA_PLAN")"
     _pa_root plan "$PA_PLAN"
@@ -443,7 +352,7 @@ case "$PA_CLASS" in
     ;;
 esac
 grant_roots "$PA_CLASS" "${PA_FACTS[@]}" 2>/dev/null \
-  || _pa_fail "the grant could not be composed from the recorded roots (grant_roots rc $?)"
+  || _pa_fail roots $?
 
 # ---------- what the action does ----------
 #
@@ -497,7 +406,7 @@ case "$PA_TOOL" in
       PA_EFFECTS="?${PA_TAB}command too large to read${PA_TAB}$(_pa_clean "$PA_CMD" 200)"
     else
       PA_RAW="$(cmd_effects "$PA_CMD" "$PA_CWD" reads 2>/dev/null)" \
-        || _pa_fail "the command reader failed (cmd_effects rc $?)"
+        || _pa_fail reader $?
       if [ -n "$PA_RAW" ] && _pa_more_than "$PA_RAW" "$PA_EFFECTS_MAX"; then
         PA_MANY=1
         PA_N="$(printf '%s\n' "$PA_RAW" | awk 'END { print NR }')"
@@ -539,7 +448,7 @@ PA_CAT=""
 if [ "$PA_BIG" = 0 ]; then
   case "$PA_TOOL" in
     Bash)
-      PA_CAT="$(grant_reserved Bash "$PA_CMD")" || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+      PA_CAT="$(grant_reserved Bash "$PA_CMD")" || _pa_fail reserved $?
       if [ -z "$PA_CAT" ] && [ "$PA_MANY" = 0 ] && [ -n "$PA_RAW" ]; then
         # The home directory is the fact an RR line is judged against; resolved only when
         # the reader printed one, so no other question pays for it.
@@ -549,14 +458,14 @@ if [ "$PA_BIG" = 0 ]; then
             [ -z "${HOME:-}" ] || PA_HOME="$(grant_resolve "$HOME")" || PA_HOME="" ;;
         esac
         PA_CAT="$(grant_reserved_effects "$PA_HOME" "$PA_RAW$PA_NL$PA_EFFECTS")" \
-          || _pa_fail "the reserved table failed (grant_reserved_effects rc $?)"
+          || _pa_fail reserved-effects $?
       fi
       ;;
     Write|Edit|MultiEdit|NotebookEdit|Read)
-      PA_CAT="$(grant_reserved "$PA_TOOL" "$PA_PATH")" || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+      PA_CAT="$(grant_reserved "$PA_TOOL" "$PA_PATH")" || _pa_fail reserved $?
       if [ -z "$PA_CAT" ] && [ -n "$PA_RESOLVED_PATH" ] && [ "$PA_RESOLVED_PATH" != "$PA_PATH" ]; then
         PA_CAT="$(grant_reserved "$PA_TOOL" "${PA_RESOLVED_PATH#\?"$PA_TAB"}")" \
-          || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+          || _pa_fail reserved $?
       fi
       ;;
   esac
@@ -564,7 +473,7 @@ fi
 
 PA_STAGE="deciding"
 PA_VERDICT="$(grant_decide "$PA_CLASS" "$GRANT_WRITE_ROOTS" "$GRANT_DELETE_ROOTS" "$PA_EFFECTS" "$PA_CAT" "$GRANT_MAIN_ROOT" 2>/dev/null)" \
-  || _pa_fail "the decision could not be made (grant_decide rc $?)"
+  || _pa_fail decide $?
 
 # _pa_gate <category> — the gate request for the lead (D7): one line per distinct request
 # (same asker, category and head), appended to .bionic/tmp/gate-<lead sid>.state. A symlink at
@@ -596,20 +505,16 @@ case "$PA_KIND" in
     esac
     ;;
   deny-fix)
-    # The reason may carry a resolver's mark (a TAB); the fix never does, so it is the last field.
-    PA_FIX="${PA_REST##*"$PA_TAB"}"
-    PA_REASON="${PA_REST%"$PA_TAB"*}"
-    PA_REASON="${PA_REASON//$PA_TAB/ }"
-    _pa_finish deny-fix "$PA_REASON" "bionic: $PA_REASON $PA_FIX"
+    grant_deny_words deny-fix "$PA_REST"
+    _pa_finish deny-fix "$GRANT_DENY_REASON" "$GRANT_DENY_MESSAGE"
     ;;
   deny-reserved)
-    PA_CATEGORY="${PA_REST%%"$PA_TAB"*}"
-    PA_REASON="${PA_REST#*"$PA_TAB"}"
+    grant_deny_words deny-reserved "$PA_REST"
     PA_GATED=""
-    _pa_gate "$PA_CATEGORY" || PA_GATED=" (the gate request could not be recorded: the gate file was refused)"
-    _pa_finish deny-reserved "$PA_CATEGORY: $PA_REASON$PA_GATED" "bionic: $PA_REASON"
+    _pa_gate "$GRANT_DENY_CATEGORY" || PA_GATED=" (the gate request could not be recorded: the gate file was refused)"
+    _pa_finish deny-reserved "$GRANT_DENY_CATEGORY: $GRANT_DENY_REASON$PA_GATED" "$GRANT_DENY_MESSAGE"
     ;;
   *)
-    _pa_fail "the decision printed no verdict"
+    _pa_fail no-verdict
     ;;
 esac

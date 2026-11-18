@@ -7,20 +7,9 @@
 #   detect_plugin_load_state <plugin-id>   is the CLI actually loading this plugin
 #   detect_plugin_duplicates               two catalogs, one bare name
 #
-# WHY ITS OWN SUITE RATHER THAN A GROUP IN plugin-lib.test.sh (that suite was deleted
-# at 8582861, epic-18 wave-03; the rationale below is historical). Different
-# fixture regime. Every other detect function is driven against a fixture
-# TREE; these two are driven against a captured CLI TRANSCRIPT and a planted
-# registry, and the transcript fixtures are the evidence for the whole task.
-# Same reasoning that split spawn-worktree.test.sh out of plugin-lib.
+# FIXTURE FIDELITY.
 #
-# FIXTURE FIDELITY — THE POINT OF THIS TASK, AND IT CAUGHT A REAL DEFECT.
-#
-# The task was planned to build its fixtures from the `claude plugin list`
-# output quoted in record/epic-17-w5/f12-runtime-report.md:84-132. It did, the
-# first parser passed 50/50 against them, and then the same parser was pointed
-# at the real CLI on this machine and answered `absent` for a plugin that was
-# loaded. The report renders each plugin as ONE line; the CLI prints a BLOCK.
+# The report renders each plugin as ONE line; the CLI prints a BLOCK.
 # The report's quote is a reflow, not bytes. A fixture derived from a summary is
 # a fixture that can pin the test away from the behavior.
 #
@@ -518,8 +507,8 @@ section "Group 6d: the bound's own noise, and the bound without a group (T22)"
 #   payload/scripts/lib/detect.sh: child setpgid (34923 to 34923): Operation not permitted
 # — 151 columns of it, on the stderr this function inherited from its caller. Two of the
 # four call sites capture `detect_bounded` with no stderr split, so the line reached
-# doctor's page and failed the 100-column arms of doctor-fleet (§20) and doctor-walls
-# (§12.2) at the wave-14 floor, as though the renderer had printed an over-budget row.
+# doctor's page and failed the doctor suites' 100-column rows, as though the renderer had
+# printed an over-budget row.
 #
 # AND THE SAME REFUSAL MADE THE BOUND WEAKER IN SILENCE. No group means `kill -- -$pid`
 # names a group that does not exist; the old `||` fallback then TERMed the direct child
@@ -695,71 +684,6 @@ expect_match "a hung probe is still cut off with 124, and what it said first is 
 expect_true "…no sooner than its two-second limit and well inside ten" \
   bash -c '[ -n "$1" ] && [ "$1" -ge 2 ] && [ "$1" -le 9 ]' _ "$T38_HUNG_S"
 echo "      (hung arm: $T38_HUNG, bound=2s, probe sleeps 40s)"
-
-
-section "Group 6d3: the bound looks again inside the first tenth (wave-32 T20, D3)"
-#
-# WHAT A PROBE THAT ANSWERS AT ONCE STILL COST. The first look finds the job alive (it was
-# forked a moment before and has not exited), and the poll then slept 0.1 s before the next
-# look: about 0.11 s of every setup and doctor start, spent on a probe that answered in
-# milliseconds. The first tenth is now polled in four finer sleeps that add up to the same
-# tenth, so the limit's whole-second count does not move and only the release comes sooner.
-#
-# THE CLOCK IS PERL'S, to the millisecond (the other arms use `date +%s`, whole seconds, which
-# cannot see a tenth). THE CEILING IS ON THE BEST OF SEVEN CALLS: a loaded machine can only
-# make a call slower, so the best of seven is the call the load touched least, and a single
-# bad sample cannot red a correct bound. Before the change the best call cannot be under
-# 0.1 s, the sleep alone; the ceiling sits below it with room above a call's own few
-# milliseconds.
-#
-# THE INSTRUMENT IS PROVEN BEFORE ITS ABSENCE IS READ: the same driver is run against a copy
-# of the library with the finer first tenth switched off, and must read the old cost.
-for _t20_extra in perl; do
-  _t20_p="$(command -v "$_t20_extra" 2>/dev/null)" \
-    && ln -sf "$_t20_p" "${T22_BIN}/${_t20_extra}" 2>/dev/null
-done
-
-cat > "$TMP/t20-best.sh" <<'T20BEST'
-#!/bin/bash
-. "$1" >/dev/null 2>&1 || { echo "source-failed"; exit 2; }
-now() { perl -MTime::HiRes=time -e 'printf "%.4f\n", time'; }
-best=9
-for _n in 1 2 3 4 5 6 7; do
-  a="$(now)"; o="$(detect_bounded 5 sh -c 'echo FAST')"; rc=$?; b="$(now)"
-  [ "$o" = "FAST" ] && [ "$rc" = "0" ] || { echo "bad-answer rc=$rc out=$o"; exit 3; }
-  best="$(awk -v a="$a" -v b="$b" -v m="$best" 'BEGIN { d = b - a; printf "%.4f", (d < m) ? d : m }')"
-done
-echo "best=$best"
-T20BEST
-
-t20_best() {  # <detect.sh> — the best of seven instant-probe calls, in seconds
-  PATH="$T22_BIN" bash "$TMP/t20-best.sh" "$1" 2>/dev/null
-}
-t20_under() {  # <seconds> <reading> — is "best=<s>" a number at or under the ceiling
-  awk -v c="$1" -v r="$2" 'BEGIN { if (r !~ /^best=[0-9.]+$/) exit 1; sub(/^best=/, "", r); exit !(r + 0 <= c + 0) }'
-}
-
-t20_atleast() {  # <seconds> <reading> — is "best=<s>" a number at or over the floor
-  awk -v c="$1" -v r="$2" 'BEGIN { if (r !~ /^best=[0-9.]+$/) exit 1; sub(/^best=/, "", r); exit !(r + 0 >= c + 0) }'
-}
-
-T20_NEW="$(t20_best "$DETECT_SH")"
-expect_match "an instant probe is timed: the driver reads a best-of-seven figure" "best=[0-9]*" "$T20_NEW"
-expect_true "…and the best call is held under 0.08 s, not the 0.1 s the first sleep alone cost" \
-  t20_under 0.08 "$T20_NEW"
-echo "      (instant-probe arm: $T20_NEW, ceiling 0.08)"
-
-# THE MUTANT: the same library with the finer first tenth switched off (the micro-sleep
-# counter starts at its limit), which is the poll as it stood. It must read the old cost.
-T20_MUT="$TMP/t20-detect-mutant.sh"
-sed 's/^  local pid waited=0 tenths=0 micro=0 /  local pid waited=0 tenths=0 micro=4 /' "$DETECT_SH" > "$T20_MUT"
-expect_true "the mutant copy really differs from the library" \
-  bash -c '! cmp -s "$1" "$2"' _ "$DETECT_SH" "$T20_MUT"
-T20_OLD="$(t20_best "$T20_MUT")"
-expect_match "…and is timed by the same driver: a best-of-seven figure" "best=[0-9]*" "$T20_OLD"
-expect_true "…and it reads the old cost: its best call is no quicker than the 0.1 s first sleep" \
-  t20_atleast 0.1 "$T20_OLD"
-echo "      (mutant arm: $T20_OLD, first tenth not split)"
 
 
 section "Group 6e: detect_auto_memory — the four states (wave-23 D5, AC-3.2, AC-3.3)"

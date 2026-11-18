@@ -11,7 +11,7 @@
 #
 # WHAT THIS REPLACES. Five command objects fired on every Bash tool call —
 # protect-main, protect-database, the canonical-sdlc evidence gate, farm-out-reminder
-# and background-suite-guard (that last behind hooks/agent-context-guard.sh) — each
+# and background-suite-guard — each
 # with its own copy of this preamble, its own loader run and its own verdict, and NO
 # rule for how five verdicts combine. Up to three of them could refuse one command; the
 # platform collected whichever arrived. The functions are named below in the order that
@@ -25,10 +25,10 @@
 # also draws a farm-out nudge gets both answers.
 #
 # THE PAYLOAD AND THE COMMAND ARE READ BEFORE THE LIBRARY IS. Not for convenience: the
-# repair allowlist in `loader_fail_closed` needs the command text, and it has to be
+# repair matcher under the loader's stub needs the command text, and it has to be
 # consulted BEFORE this wall decides to refuse — otherwise a broken publish locks the
-# user out of the very commands that repair it (R-1 §(5), the lockout this wave is
-# named for). `jq` on the payload is the one read that does not need the library.
+# user out of the very commands that repair it. `jq` on the payload is the one read
+# that does not need the library.
 #
 # ── FAIL-CLOSED, AND WHOSE REACH IT IS (T23 ruling R4) ───────────────────────
 #
@@ -97,104 +97,28 @@ COMMAND=$(printf '%s' "$BIONIC_INPUT" | jq -r '.tool_input.command // empty' 2>/
 
 # ---------- the library ----------
 #
-# One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
+# The stub below sources the one loader, whose stub and walk both live in
 # payload/scripts/lib/loader.sh.
 BIONIC_LIB_WANT="context.sh fold.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh walls.sh"
-# --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
-# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
-# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
-# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
-# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
-# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
-# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
-# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
-# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
-# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
-# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
-BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
-_bl_try() {
-  [ -n "${1:-}" ] || return 1
-  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
-  [ -d "$1" ] || return 1
-  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
-  BIONIC_LIB="$1"
-}
-if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
-  if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
-    _bl_mk="${_bl_keys%%
-*}"
-    _bl_mk="${_bl_mk#bionic@}"
-  fi
-  if [ -n "$_bl_mk" ]; then
-    _bl_src=""
-    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
-      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
-    fi
-    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
-    if [ -z "$BIONIC_LIB" ]; then
-      _bl_best=""; _bl_bestk=""
-      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
-        [ -d "$_bl_v" ] || continue
-        _bl_n="${_bl_v##*/}"
-        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
-        _bl_x1=""; _bl_x2=""; _bl_x3=""
-        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
-$_bl_n
-BIONIC_LOADER_VER
-        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
-        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
-      done
-      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
-    fi
-  fi
+# Find the library through lib/loader.sh beside this hook; payload/scripts/lib/loader.sh says how.
+_bl_dir="$(dirname "$0")"; _bl_l="$_bl_dir/../scripts/lib/loader.sh"; [ -r "$_bl_l" ] || _bl_l="$_bl_dir/../payload/scripts/lib/loader.sh"
+# shellcheck source=/dev/null
+if [ -r "$_bl_l" ]; then . "$_bl_l"; bionic_load; else
+  BIONIC_LIB=""; BIONIC_LIB_MISSING="${BIONIC_LIB_WANT%% *}"; BIONIC_LIB_CANDS="$_bl_dir/../scripts/lib, $_bl_dir/../payload/scripts/lib"
+  loader_fail_open() { echo "$1: library $BIONIC_LIB_MISSING not found at $BIONIC_LIB_CANDS — hook stepping aside; run /bionic:doctor" >&2; exit 0; }
+  loader_fail_closed() { set -- "$1"; [ "${#1}" -le 25 ] || set -- "${1:0:24}…"; echo "bionic: load refused — $1 cannot load the bionic library (run /bionic:doctor)" >&2; exit 2; }
 fi
-if [ -z "$BIONIC_LIB" ]; then
-  BIONIC_LIB_MISSING="${_bl_want%% *}"
-  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
-fi
-loader_fail_open() {
-  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
-  exit 0
-}
-loader_fail_closed() {
-  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
-  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
-  case "${2:-}" in
-    "claude plugin update bionic@bionic"|\
-    "claude plugin install bionic@bionic"|\
-    "bash $_bl_root/scripts/doctor.sh"|\
-    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
+if [ -n "$BIONIC_LIB_MISSING" ]; then
+  # The four commands that mend an install that cannot load pass, each matched as a whole string, so one
+  # with another command chained after it is refused like any other; no variable widens them, since a
+  # turn can set one on itself. They live here because this file is what runs when the loader is gone.
+  _bw_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bw_root="$(dirname "$0")/.."
+  case "$COMMAND" in
+    "claude plugin update bionic@bionic"|"claude plugin install bionic@bionic"|\
+    "bash $_bw_root/scripts/doctor.sh"|"bash $_bw_root/scripts/setup.sh") exit 0 ;;
   esac
-  _bl_who="${1:-a bionic hook}"
-  if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
-  printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
-    cat >&2 <<BIONIC_LOADER_REFUSE
-A wall that cannot read a command refuses it rather than waving it through.
-
-Wanted: ${BIONIC_LIB_MISSING:-the bionic library}
-Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
-
-Until the plugin is whole again this wall permits exactly four commands, each matched
-as a whole string:
-
-    claude plugin update bionic@bionic
-    claude plugin install bionic@bionic
-    bash $_bl_root/scripts/doctor.sh
-    bash $_bl_root/scripts/setup.sh
-
-Anything else is refused, including one of those four with another command chained
-after it. Run one of them, or act from your own terminal.
-BIONIC_LOADER_REFUSE
-  fi
-  exit 2
-}
-# --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "bash-walls" "$COMMAND"; fi
+  loader_fail_closed "bash-walls"
+fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null
@@ -276,15 +200,6 @@ fi
 # the plan they belong to. The gate reads it only when that is the plan it judges. Only for a call
 # that holds a commit (the word, no fork otherwise), so no other call pays for the read.
 #
-# A PLAN VERB'S DRY COMMIT IS BOUND TO A COPY of the plan (wave-27 T76; review pass 60 P0-1): the
-# copy keeps `BIONIC_DEBTS_PLAN`, the plan the gate judges, and the record is the one of the plan the
-# copy was made from, which the verb wrote into its marker as `dry_of=` (lib/proof.sh
-# `proof_debt_origin`, which reads `dry_of=` for any session's copy). So a dry commit
-# and a real commit of the same plan text at the same step get the same answer from the debt arm,
-# and from the readings arm (wave-37 T2; REQ-9 AC-9.1, D12): the origin is named FIRST, before the
-# readings are derived, and handed to the deriver as the plan whose record it reads, so a finding a
-# landed row fixed is found on the copy as on the plan. The copy's text is still the text read.
-#
 # JURISDICTION FIRST (T80; wave-19 AC-9.2). A commit that lands in another repository has no plan
 # here, so the collector asks the gate's own predicate (lib/walls.sh `eg_commit_outside_root`)
 # before it resolves anything, and for such a commit reads neither the binding nor any record.
@@ -296,14 +211,9 @@ case "$COMMAND" in
   *commit*)
     if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ] && [ "$_EG_CWD_SRC" != moving ]; then
       BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
-      _bw_from="$BIONIC_DEBTS_PLAN"
-      if [ -n "$_bw_from" ] && declare -F proof_debt_origin >/dev/null 2>&1; then
-        _bw_from="$(proof_debt_origin "$BIONIC_SID" "$(engaged_marker_path "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" "$_bw_from")"
-      fi
-      # THE ORIGIN IS HANDED TO THE READER RULE TOO. "After the release" is the publish order in a landing record,
-      # and a copy's own name names none, so the gate's table judgment (lib/walls.sh `validate_dispatch_ledger`)
-      # reads the origin beside the plan it judges, and a dry commit of a copy is judged as a commit of the plan.
-      BIONIC_DEBTS_ORIGIN="$_bw_from"
+      # A session is bound to the plan itself, so the plan whose landing record is read is the plan judged; lib/walls.sh
+      # still reads this name in two places, and it is that plan.
+      BIONIC_DEBTS_ORIGIN="$BIONIC_DEBTS_PLAN"
       # THE READINGS' RESULTS AS THE JUDGE DERIVES THEM (wave-28 T60; D33, AC-8.6; A-orch-161). A
       # reading re-rated by a `check:`, `deferred:` or `moved:` line is judged on its derived result,
       # which needs the record its findings are in; the gate reads no record, so the collector reads it
@@ -314,10 +224,10 @@ case "$COMMAND" in
       # prints nothing for a plan with no line that binds a pass. The hook's clock is 10 s, past which
       # the walls fail open for the commit.
       if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_readings_derived >/dev/null 2>&1 && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"; then
-        BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" "${_bw_from:-$BIONIC_DEBTS_PLAN}" 2>/dev/null)" || BIONIC_READINGS=""
+        BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" 2>/dev/null)" || BIONIC_READINGS=""
       fi
-      if [ -n "$_bw_from" ] && declare -F proof_debt_record >/dev/null 2>&1 \
-         && _bw_rec="$(proof_debt_record "$_bw_from" "$BIONIC_ROOT")"; then
+      if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_debt_record >/dev/null 2>&1 \
+         && _bw_rec="$(proof_debt_record "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT")"; then
         BIONIC_DEBTS_OPEN="$(proof_debts_read "$_bw_rec")"
       fi
     fi ;;
@@ -347,14 +257,12 @@ case "$COMMAND" in
     fi ;;
 esac
 
-# wall_ruling_unread — the writer's commit with a ruling unread is refused, carrying the ruling. A pure
-# predicate over the two facts gathered above (the freeze, .claude/rules/hook-authoring.md).
+# wall_ruling_unread — the writer's commit with a ruling unread is refused, carrying the ruling. The facts are gathered
+# above (the freeze, .claude/rules/hook-authoring.md); the words and the decision are lib/roster.sh
+# `ruling_unread_refusal`'s, defined only when the gathering loaded that library.
 wall_ruling_unread() {  # <event> -> 0 nothing · 2 block
-  [ -n "$BIONIC_RULINGS_UNREAD" ] || return 0
-  fold_block exit2 commit "an orchestrator ruling for you is unread" "read it below, commit again" \
-    "${BIONIC_RULINGS_WRITER:-this writer}, shown now:
-$BIONIC_RULINGS_UNREAD"
-  return 2
+  declare -F ruling_unread_refusal >/dev/null 2>&1 || return 0
+  ruling_unread_refusal "$BIONIC_RULINGS_WRITER" "$BIONIC_RULINGS_UNREAD"
 }
 
 # THE TWO FACTS OF AN ACKNOWLEDGEMENT, gathered for `wall_ruling_ack` (wave-34 T5; REQ-4 AC-4.3, D9 "1"). `ruling-ack
@@ -363,7 +271,7 @@ $BIONIC_RULINGS_UNREAD"
 # for a call that runs the verb (`_wall_poker_contract_verb`'s argv, asked for this one verb) this reads the ruling's
 # writer off the session's roster (lib/roster.sh `ruling_fold`) and the caller's roster name off the payload's
 # `agent_id` (`roster_row_for_id`, empty for the main thread or an agent no row names), and counts the call's segments:
-# the ack is admitted alone, as `deliver` is. An id no ruling carries gathers nothing; the verb refuses it.
+# the ack is admitted alone in one call. An id no ruling carries gathers nothing; the verb refuses it.
 BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_ALONE=0
 case "$COMMAND" in
   *ruling-ack*)
@@ -385,24 +293,11 @@ case "$COMMAND" in
 esac
 
 # wall_ruling_ack — an acknowledgement from anyone but the ruling's writer, or not alone in its call, is refused naming
-# the writer it needs, and the ruling stays unread. A pure predicate over the facts gathered above (the freeze).
+# the writer it needs, and the ruling stays unread. The facts are gathered above (the freeze); the words and the
+# decision are lib/roster.sh `ruling_ack_refusal`'s, defined only when the gathering loaded that library.
 wall_ruling_ack() {  # <event> -> 0 nothing · 2 block
-  local _who="the main thread"
-  [ -n "$BIONIC_ACK_WRITER" ] || return 0
-  if [ "$BIONIC_ACK_CALLER" = "$BIONIC_ACK_WRITER" ]; then
-    [ "$BIONIC_ACK_ALONE" = 1 ] && return 0
-    fold_block exit2 ruling-ack "an acknowledgement goes alone in its call" "run the ack by itself" \
-      "ruling $BIONIC_ACK_ID is yours, $BIONIC_ACK_WRITER, and the wall reads one acknowledgement per call. Run it alone:
-    bash <plugin>/hooks/session-poker.sh ruling-ack $BIONIC_ACK_ID"
-    return 2
-  fi
-  [ -z "$BIONIC_ACK_AGENT" ] || _who="${BIONIC_ACK_CALLER:-an agent no roster row names}"
-  fold_block exit2 ruling-ack "this ruling is ${BIONIC_ACK_WRITER}'s to ack" "the addressed writer acks it" \
-    "ruling $BIONIC_ACK_ID is addressed to $BIONIC_ACK_WRITER, not to $_who. An acknowledgement is the writer's receipt
-that it read the ruling, so one from anyone else would mark it read while its writer never saw it. It stays unread:
-$BIONIC_ACK_WRITER's next tool result carries it, and its commit and ready wait on it until $BIONIC_ACK_WRITER runs
-    bash <plugin>/hooks/session-poker.sh ruling-ack $BIONIC_ACK_ID"
-  return 2
+  declare -F ruling_ack_refusal >/dev/null 2>&1 || return 0
+  ruling_ack_refusal "$BIONIC_ACK_ID" "$BIONIC_ACK_WRITER" "$BIONIC_ACK_CALLER" "$BIONIC_ACK_AGENT" "$BIONIC_ACK_ALONE"
 }
 
 bionic_fold "$EVENT" \

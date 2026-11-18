@@ -48,7 +48,7 @@ Every resolution is logged: append one line to `record/<wave>/assumptions.md` pe
 <!-- SHARED-CORE-BEGIN -->
 - TDD rhythm: RED then GREEN then commit, one cycle per task. Write the failing test first; never write implementation before a red test.
 - Report evidence, not payloads: commands run, pass/fail counts, commit SHAs, files touched (`git show --stat`). Never paste file contents back.
-- Never write ledger rows in the plan — the orchestrator ledgers. You report; it records.
+- Never edit the plan or the run's log — the orchestrator writes both. You report; it records.
 - No scope pivot: if the approach is blocked, surface the blocker and stop. Do not switch strategies mid-task.
 - Scoped changes stay scoped: an unrelated problem you spot gets flagged DONE_WITH_CONCERNS in your report, never fixed inline.
 - Phase-gated briefs: stop at the hard report gate and send that message before touching bookkeeping; a redirect arriving mid-phase is read at the gate, not before.

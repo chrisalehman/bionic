@@ -27,8 +27,7 @@
 #     `false`, when the caller did not set it — which is why the arm tests `== true`.
 #     NOT YET OBSERVED in a captured PreToolUse|Bash hook payload (A-3, s5-report.md):
 #     these cases prove the hook's logic against the documented shape, not the transport.
-#   * roster stamp, attestation, session ids — SYNTHESIZED, the same schema
-#     tests/agent-context-guard.test.sh writes.
+#   * roster stamp, attestation, session ids — SYNTHESIZED.
 #
 # Usage: bash tests/cmd-class.test.sh
 
@@ -46,16 +45,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
 PLAIN_HOOKS="${BIONIC_HOOKS_DIR}"
 LIB="$REPO_ROOT/payload/scripts/lib/cmd-class.sh"
-# BOTH WALLS ARE ONE PROCESS (T23). `wall_farm_out_reminder` and
-# `wall_background_suite_guard` are functions of payload/scripts/lib/walls.sh behind
-# hooks/bash-walls.sh, so the two names below name the same hook; the classifier each of
+# `wall_farm_out_reminder` and `wall_background_suite_guard` are functions of
+# payload/scripts/lib/walls.sh behind hooks/bash-walls.sh; the classifier each of
 # them consumes is unchanged, which is what this suite is about.
-FARM_OUT="$PAYLOAD_HOOKS/bash-walls.sh"
 BG_GUARD="$PAYLOAD_HOOKS/bash-walls.sh"
-# hooks/agent-context-guard.sh IS NO LONGER IN FRONT OF THIS WALL (T23/R2): the manifest
-# registers hooks/bash-walls.sh alone on PreToolUse|Bash and the guard's predicate is a
-# function-level gate inside `wall_background_suite_guard`. The file itself stays, still
-# registered on SubagentStop, and tests/agent-context-guard.test.sh is its suite.
+# NO SCRIPT STANDS IN FRONT OF THIS WALL: the manifest registers hooks/bash-walls.sh alone on
+# PreToolUse|Bash, and the arming predicate is a function-level gate inside
+# `wall_background_suite_guard`.
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/cmd-class-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
@@ -261,7 +257,7 @@ case_is suite "$HEREDOC_THEN_SUITE" "suite: a real command AFTER a heredoc still
 section "C4 — background-suite-guard inside the compound (AC-23, AC-24)"
 #
 # THE GUARD IS NOT IN FRONT ANY MORE, AND THE MANIFEST IS WHY (T23 ruling R2, A-54).
-# hooks/agent-context-guard.sh used to wrap this wall's registration; the fold could not
+# A guard script used to wrap this wall's registration; the fold could not
 # keep that wrapper, because a wrapper around the COMPOUND would silence protect-main,
 # protect-database, the evidence gate and farm-out-reminder on every main-thread call.
 # The guard's predicate is a FUNCTION-level gate inside `wall_background_suite_guard`
@@ -297,7 +293,7 @@ run_hook() {  # <payload> <hook> [args...]
   # registry and cache when the library is not beside the hook, and a fixture must never
   # load THIS machine's installed bionic.
   # THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2).
-  # hooks/agent-context-guard.sh builds the roster filename from lib/session.sh's answer,
+  # The wall's arming check builds the roster filename from lib/session.sh's answer,
   # where the ENV value is primary — so a driver that left the runner's own session id in
   # the environment would have the guard looking for a roster this fixture never wrote,
   # and every wall behind it would read "unarmed".
@@ -326,9 +322,8 @@ SUPERSET_SUITES=(
 make_repo() {  # <name> -> an armed repo of an ENGAGED session
   local repo="$SANDBOX/$1/repo"
   mkdir -p "$repo/.bionic/tmp"
-  # ENGAGED: hooks/agent-context-guard.sh in front, and the wall behind it, both step
-  # aside for a session that never invoked the skill. The arming roster below is a
-  # different fact and the cells here are about that one.
+  # ENGAGED: the wall steps aside for a session that never invoked the skill. The arming
+  # roster below is a different fact and the cells here are about that one.
   : > "$repo/.bionic/tmp/engaged-$SID.state"
   git -C "$repo" init -q 2>/dev/null
   git -C "$repo" config user.email t@example.com
@@ -356,13 +351,6 @@ GREPO=$(make_repo guarded)
 run_compound() {  # <payload> — straight into hooks/bash-walls.sh, as hooks.json registers it
   run_hook "$1" "$BG_GUARD"
 }
-
-# THE BACKGROUND ARM'S OWN SENTENCE, which is what every row in this section is really
-# asking about. It is `wall_background_suite_guard`'s fact and no other wall's, so its
-# presence in the composed verdict is the arm firing and its absence is the arm silent —
-# a reading that survives farm-out-reminder answering the same payload.
-BSG_REASON='suite-run refused — a backgrounded suite'"'"'s result is never read'
-FARM_REASON="run refused — this command belongs in a subagent"
 
 # THE DETAIL KNOB IS NOT THIS SECTION'S ANY MORE. `BIONIC_WALL_VERBOSE=1` is the `exit2`
 # channel's rule — one line on the user stream, everything else behind the knob — and the
@@ -424,7 +412,7 @@ expect_silent_as_typed "AC-16 …in silence, from both walls" 'echo "sudo bash t
 
 # --- the partition still holds, one level in: an UNARMED session is silent ---
 #
-# THE PARTITION MOVED, THE EXPERIMENT DID NOT. It used to be hooks/agent-context-guard.sh
+# THE PARTITION MOVED, THE EXPERIMENT DID NOT. It used to be a guard script
 # in front; it is the first thing `wall_background_suite_guard` asks now (T23/R2). So the
 # pair below is the same difference measured at the same fixture — unarmed, and armed —
 # with the verdict read by the arm's own sentence rather than by an exit code the
@@ -438,8 +426,7 @@ expect_eq "an unarmed session leaves the arm silent even for a backgrounded suit
 run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
 
 section "C6 — every source in payload/hooks/*.sh resolves inside payload/"
-# A sourced library the installer misses is a silently inert wall (agent-context-guard.sh
-# :106-108). The hooks are reachable under two spellings of one directory (see the header),
+# A sourced library the installer misses is a silently inert wall. The hooks are reachable under two spellings of one directory (see the header),
 # so each literal is expanded under BOTH and the pin is: at least one expansion exists, and
 # every expansion that exists lies under <repo>/payload/.
 # Two literal shapes reach a sibling file from a hook: "$(dirname "$0")/<rel>.sh" (the
@@ -492,7 +479,7 @@ fi
 #      kernel resolves `..` to <repo>, not to <repo>/payload.
 #   3. tests/lib/resolve-roots.sh — <repo>/hooks directly.
 # The pin: at least one reading finds the file (a reference nothing can resolve is the
-# silently-inert-wall class, agent-context-guard.sh:106-108), and no reading escapes the
+# silently-inert-wall class), and no reading escapes the
 # checkout onto a path the plugin does not ship.
 lexnorm() {  # lexical a/b/../c, no filesystem, no symlink following
   awk -v p="$1" 'BEGIN {
@@ -629,5 +616,35 @@ for fileless in 'pytest' 'npm test' 'go test ./...' 'make test' 'make check' 'ca
   expect_eq "C7 …and names no suite FILE" "" "$(targets_of "$fileless")"
 done
 
+
+section "TABLE — the heavy class names are spelled in the classifier's table and nowhere else"
+# A second spelling is a class the gate, the wall and the shim can disagree about. The table sits between its two
+# markers in cmd-class.sh; comments and the playwright/dependency prose of setup, doctor and deps are not class sites.
+TB_BEGIN=$(/usr/bin/grep -n '^# HEAVY-CLASS-TABLE-BEGIN' "$LIB" | cut -d: -f1)
+TB_END=$(/usr/bin/grep -n '^# HEAVY-CLASS-TABLE-END' "$LIB" | cut -d: -f1)
+expect_true "TB1 the table is marked in the classifier" test -n "$TB_BEGIN" -a -n "$TB_END"
+TB_SPELLED=$(/usr/bin/grep -rnwE --include='*.sh' 'browser|compile' "$REPO_ROOT/hooks" "$REPO_ROOT/payload" \
+  | awk -F: -v lib="$LIB" -v b="${TB_BEGIN:-0}" -v e="${TB_END:-0}" '
+      $1 ~ /\/(setup|doctor|deps)\.sh$/ { next }
+      { f = $1; n = $2; line = $0; sub(/^[^:]*:[^:]*:/, "", line) }
+      line ~ /^[ \t]*#/ { next }
+      f == lib && n >= b && n <= e { next }
+      { print f ":" n }')
+expect_empty "TB2 no site outside the table spells a heavy class" "$TB_SPELLED"
+expect_true "TB2 control: the table itself spells them" test "$(/usr/bin/grep -cwE 'browser|compile' "$LIB")" -gt 0
+# Every class a web tool can emit is one the table names: the producer reads the table's rows.
+TB_BAD=""; TB_ROWS=0
+while read -r tb_c tb_t tb_w; do
+  [ -n "$tb_c" ] || continue
+  TB_ROWS=$((TB_ROWS + 1))
+  [ "$tb_w" != "*" ] || tb_w=x
+  [ "$(class_of "$tb_t $tb_w")" = "$tb_c" ] || TB_BAD="$TB_BAD $tb_t/$tb_w"
+  expect_true "TB3 cmd_class_heavy accepts '$tb_c'" bash -c '. "$1" && cmd_class_heavy "$2"' _ "$LIB" "$tb_c"
+done <<EOF2
+$(bash -c '. "$1" && printf "%s\n" "$CMD_HEAVY_TABLE"' _ "$LIB")
+EOF2
+expect_true "TB3 the table has rows to check" test "$TB_ROWS" -ge 4
+expect_empty "TB3 every table row is what the classifier answers for it" "$TB_BAD"
+expect_true "TB3 …and 'build' is not heavy" bash -c '. "$1" && ! cmd_class_heavy build && ! cmd_class_heavy ""' _ "$LIB"
 
 finish

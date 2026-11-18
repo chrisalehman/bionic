@@ -12,13 +12,18 @@
 #                                  of the working branch `wave/x`, checked out at <root>. Build it once per suite.
 #   door_world_single <dir>        the same fixture, its plan at `rigor: single`: the run a single-rigor review reads,
 #                                  where one critic answers the evidence question and no auditor is dealt.
+#   door_project <dir>             the same repository, its config and record directory, with no plan and no session
+#                                  bound: the project a fresh run starts in, before its planner writes a page.
 #   door_copy <root> <dir>         copies a built fixture to <dir>, binds the copy's own plan, and prints the same
 #                                  line for the copy. A section that changes the fixture changes a copy.
 #   door_piece <root> <row>        cuts the tree <root>/.worktrees/<row> on `wt/<row>` off the accepted head, with
-#                                  its `.bionic` link, and prints its path. The plan's rows are T1 and T2.
+#                                  its `.bionic` link, records its tree event in the run's log through the writer the
+#                                  create verb records it with (lib/worktree.sh `worktree_tree_event`, by `dw-<row>`), and
+#                                  prints its path. The plan's rows are T1 and T2.
 #   door_release <root> <tree>     commits the release in <tree>: CHANGELOG.md gains the DOOR_VERSION entry whose
 #                                  landing numbers `release-note` renders at the accepted head, and plugin.json
-#                                  carries DOOR_VERSION. Prints the instant the numbers were rendered for.
+#                                  carries DOOR_VERSION. Prints the instant the numbers were rendered for. DOOR_RUNNER
+#                                  names the function that runs release-note, door_run's arguments and results.
 #   door_run <root> <cmd> [args]   runs <cmd> from <root> as the bound session, with every exported variable that
 #                                  names the tree under test unset and PATH stripped of it. Sets DOOR_OUT
 #                                  (stdout and stderr) and DOOR_RC.
@@ -31,11 +36,12 @@
 #                                  `pwd=<physical cwd> script=<physical path of the script that ran>`.
 #
 #   DOOR_VERSION, DOOR_NAME, DOOR_SEEN, DOOR_PLAN_REL: the release the plan names, the one entry in the names list,
-#   the sentinel file, and the plan's path under <root>.
+#   the sentinel file, and the plan's path under <root>. DOOR_BRANCH, the working branch, is `wave/x` unless a caller
+#   sets it before sourcing this file.
 #
 #   DOOR_LIVE_ROW=1, set for a door_world call, gives the plan the one live criterion a planner writes for a run's close:
-#   a close row T9 at step 9, an Eval design row of a second requirement whose eval is `landing-report --hand-holds` at
-#   the close, and its matrix row at tier T3, pending. It is owed at the close, which writes it. Unset, the plan is as before.
+#   a close row T9 at step 9 and an Eval design row of a second requirement whose eval is `landing-report --hand-holds`
+#   at the close, of live type. It is owed at the close, which proves it. Unset, the plan is as before.
 #
 # WHAT THE FIXTURE HOLDS, at its accepted head, committed: hooks/ and payload/scripts/ copied whole from the tree
 # under test, with the payload/hooks link; tests/run.sh and tests/lib/ whole, so the check and the name scan are
@@ -43,13 +49,13 @@
 # commits it, the real file of more than a pipe's buffer, never a filler; payload/.claude-plugin/plugin.json.
 # Ignored and so never landed: .bionic/config.yaml declaring `release-check: bash tests/lib/release-check.sh
 # <list>`, the list a file beside <dir>, outside every checkout, and the check's files as bionic declares its own,
-# `release-check-files:`; the bound plan with `release: DOOR_VERSION`,
+# `release-check-files:`; the bound plan, a page at version 15, with `release: DOOR_VERSION`,
 # `working-branch: wave/x`, `base-sha:` the accepted head (the release range is what lands after it), and rows T1
-# (build) and T2 (the release). The plan is a planner's Step-3 state, so it also carries what only the planner
-# writes and no verb creates: `rigor: double` (`single` from door_world_single) and `scale: wave`, without which
-# the judge cannot deal the readings a run owes, and the matrix skeleton, one `## Eval design` row and its
-# `## Verification Matrix` table row at tier T1, which matrix-render, matrix-set and discharge fill. Every later
-# state of the plan is a verb's.
+# (build) and T2 (the release) in nine cells. The plan is a planner's Step-3 state, so it also carries what only the
+# planner writes and no verb creates: `rigor: double` (`single` from door_world_single) and `scale: wave`, without
+# which the judge cannot deal the readings a run owes, and one `## Eval design` row, whose criterion the walk's proof
+# and the evidence review discharge. The run's log, beside the record, holds steps 1 to 4, the plan's approval and
+# each row's dispatch. Every later state of the run is a verb's.
 #
 # WHICH COPY RAN. The fixture's committed release-check.sh carries one line more than the tree under test's, after
 # its shebang: when DOOR_SEEN names a file, it appends where it ran and which script it is. A run of the tree
@@ -73,6 +79,7 @@ if ! type -t bound_marker >/dev/null 2>&1; then
 fi
 
 DOOR_VERSION="99.0.0"
+DOOR_BRANCH="${DOOR_BRANCH:-wave/x}"
 # The listed name is built, never written whole: the fixture commits this file, and the name scan reads every
 # file in a landing's range, so a literal here would be a hit in the fixture's own closure.
 DOOR_NAME="zq-door-$((5000 + 521))"
@@ -91,6 +98,7 @@ _door_inside() {  # <path> -> 0 when it lies under WORLD_ROOT
 }
 
 door_world() { _door_world door_world double "${1:-}"; }          # <dir> -> `<root> <accepted head>`
+door_project() { _door_world door_project none "${1:-}"; }        # <dir> -> the same, with no plan and no binding
 door_world_single() { _door_world door_world_single single "${1:-}"; }   # <dir> -> the same, at `rigor: single`
 
 # _door_world <name> <rigor> <dir> -> the fixture at <dir>, its plan at <rigor>; <name> heads every refusal
@@ -119,7 +127,7 @@ _door_world() (
     "$src/tests/lib/release-check.sh" > "$root/tests/lib/release-check.sh" || exit 1
   printf '.bionic\n.bionic/\n.worktrees/\n' > "$root/.gitignore"
   git -C "$root" add -A && git -C "$root" commit --quiet -m "door: the check's closure" || exit 1
-  git -C "$root" checkout --quiet -b wave/x || exit 1
+  git -C "$root" checkout --quiet -b "$DOOR_BRANCH" || exit 1
   head="$(git -C "$root" rev-parse HEAD)" || exit 1
 
   list="$root-names.list"
@@ -127,62 +135,51 @@ _door_world() (
   mkdir -p "$root/.bionic/tmp" "$root/.bionic/docs/record/wave-x"
   printf 'release-check: bash tests/lib/release-check.sh %s\nrelease-check-files: %s\n' "$list" \
     'tests/lib/*.sh payload/scripts/lib/*.sh hooks/session-poker.sh hooks/poker/*.sh' > "$root/.bionic/config.yaml"
+  [ "$me" != door_project ] || { printf '%s %s\n' "$root" "$head"; exit 0; }
   plan="$root/$DOOR_PLAN_REL"
   mkdir -p "${plan%/*}"
-  local live_step="" live_row="" live_eval="" live_ac=""
-  if [ "${DOOR_LIVE_ROW:-}" = 1 ]; then
-    live_step='
-- T9: pending dispatch — the close'
-    live_row='
-| T9 | 9 | close | the close. The run reads its own measure last. | orchestrator | — | | 10 | REQ-2 | .bionic/docs/record/wave-x/continuation.md | | | pending |'
-    live_eval='
-| REQ-2 | the close reads its measure | AC-2.1 | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero |'
-    live_ac='
-| AC-2.1 | T3 | pending | — | — |'
-  fi
-  cat > "$plan" <<PLAN
+  _door_page15 "$plan" "$head" "$rigor" || exit 1
+  bound_marker "$root" "$WORLD_SID" "$plan" || exit 1
+  printf '%s %s\n' "$root" "$head"
+)
+
+# _door_page15 <plan> <head> <rigor> -> the run's page at 15: the header, its rows in nine cells and the Eval design,
+# no state or matrix section; what those held is its log's, beside the record (steps 1 to 4, the plan's approval, each
+# row's dispatch). DOOR_LIVE_ROW's close row is a row of the page, and its criterion an Eval design row of live type.
+_door_page15() {
+  local lr="" le=""
+  [ "${DOOR_LIVE_ROW:-}" != 1 ] || { lr='
+| T9 | 9 | close | the close. The run reads its own measure last. | — | 10 | REQ-2 | .bionic/docs/record/wave-x/continuation.md | — |'
+    le='
+| REQ-2 | the close reads its measure | AC-2.1 | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero |'; }
+  cat > "$1" <<PLAN || return 1
 ---
-working-branch: wave/x
-base-sha: $head
+working-branch: $DOOR_BRANCH
+base-sha: $2
 release: $DOOR_VERSION
-rigor: $rigor
+rigor: $3
 scale: wave
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 ---
 # door fixture plan (tests/lib/door.sh)
 
-## SDLC State
-
-current: 4
-approved-by: fixture 2026-10-04T00:00Z "approved"
-- Step 4: started
-- T1: active
-- T2: active$live_step
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | a library change | dw-T1 | — | | 10 | REQ-1 | payload/scripts/lib/said.sh | .worktrees/T1 | | active |
-| T2 | 4 | doc | the release $DOOR_VERSION | dw-T2 | — | | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | .worktrees/T2 | | active |$live_row
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a library change | — | 10 | REQ-1 | payload/scripts/lib/said.sh | — |
+| T2 | 4 | doc | the release $DOOR_VERSION | — | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | — |$lr
 
 ## Eval design
 
 | Requirement | Approach | Criterion | Eval type | Eval | Fails when |
 |---|---|---|---|---|---|
-| REQ-1 | fixture run | AC-1.1 | hermetic | \`tests/run.sh\` | the whole run is red |$live_eval
-
-## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T1 | pending | — | — |$live_ac
+| REQ-1 | fixture run | AC-1.1 | hermetic | \`tests/run.sh\` | the whole run is red |$le
 PLAN
-  bound_marker "$root" "$WORLD_SID" "$plan" || exit 1
-  printf '%s %s\n' "$root" "$head"
-)
+  printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'step|n=1' 1 'step|n=2' 2 'step|n=3' 3 'step|n=4' 4 \
+    'approval|key=step3|by=fixture|said=approved' 5 'dispatch|row=T1|name=dw-T1' 6 'dispatch|row=T2|name=dw-T2' 7 \
+    > "${1%/.bionic/docs/plans/*}/.bionic/docs/record/wave-x/run.log"
+}
 
 door_copy() (  # <root> <dir> -> `<root> <accepted head>` of the copy
   local src="${1:-}" dir="${2:-}"
@@ -191,26 +188,30 @@ door_copy() (  # <root> <dir> -> `<root> <accepted head>` of the copy
   cp -R "$src" "$dir" && dir="$(cd "$dir" && pwd -P)" || exit 1
   [ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" = "$dir" ] || exit 1
   bound_marker "$dir" "$WORLD_SID" "$dir/$DOOR_PLAN_REL" || exit 1
-  printf '%s %s\n' "$dir" "$(git -C "$dir" rev-parse refs/heads/wave/x)"
+  printf '%s %s\n' "$dir" "$(git -C "$dir" rev-parse "refs/heads/$DOOR_BRANCH")"
 )
 
 door_piece() (  # <root> <row> -> the tree's path
   local t="$1/.worktrees/$2"
   _door_inside "$1" || { echo "door_piece: $1 is no fixture under WORLD_ROOT" >&2; exit 2; }
-  git -C "$1" worktree add --quiet -b "wt/$2" "$t" wave/x >/dev/null 2>&1 || exit 1
+  local base
+  base="$(git -C "$1" rev-parse "refs/heads/$DOOR_BRANCH")" || exit 1
+  git -C "$1" worktree add --quiet -b "wt/$2" "$t" "$DOOR_BRANCH" >/dev/null 2>&1 || exit 1
   ln -s "$1/.bionic" "$t/.bionic" || exit 1
+  bash -c '. "$1/worktree.sh" && worktree_tree_event "$2" "$3" "dw-$4" "$5" "wt/$4" "$6" "$4"' _ \
+    "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1" "$WORLD_SID" "$2" "$t" "$base" || exit 1
   printf '%s' "$t"
 )
 
 door_release() (  # <root> <tree> -> the instant the numbers were rendered for
   local root="$1" tree="$2" head now on note
   _door_inside "$tree" || { echo "door_release: $tree is no fixture under WORLD_ROOT" >&2; exit 2; }
-  head="$(git -C "$root" rev-parse refs/heads/wave/x)" || exit 1
+  head="$(git -C "$root" rev-parse "refs/heads/$DOOR_BRANCH")" || exit 1
   # One second before now: the record's lines carry whole seconds and the report keeps a line written AT the
   # instant, so an instant in the landing's own first second would fold that landing's events into the numbers.
   now="$(date -u +%s)"
   on="$(date -u -r "$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((now - 1))" +%Y-%m-%dT%H:%M:%SZ)" || exit 1
-  door_run "$root" bash "$DOOR_POKER" release-note --at "$head" --on "$on" "$root/$DOOR_PLAN_REL"
+  "${DOOR_RUNNER:-door_run}" "$root" bash "$DOOR_POKER" release-note --at "$head" --on "$on" "$root/$DOOR_PLAN_REL"
   [ "$DOOR_RC" -eq 0 ] || { printf 'door_release: release-note refused: %s\n' "$DOOR_OUT" >&2; exit 1; }
   note="$(mktemp "$WORLD_ROOT/door-note.XXXXXX")" && printf '%s\n' "$DOOR_OUT" > "$note" || exit 1
   awk -v v="$DOOR_VERSION" -v nf="$note" '

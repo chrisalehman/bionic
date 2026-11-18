@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/engage.test.sh — hooks/engage.sh, the ENGAGEMENT TRIGGER (task-engaged-session,
-# task T1; matrix AC-1, AC-2, AC-3, AC-4, AC-17, AC-18).
+# tests/engage.test.sh — hooks/engage.sh, the ENGAGEMENT TRIGGER.
 #
 # WHAT IT OWNS. The one act that puts a session inside bionic: invoking the
 # canonical-sdlc skill. The hook fires on the two paths that invocation can take —
@@ -28,12 +27,12 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 HOOK="$BIONIC_HOOKS_DIR/engage.sh"
 LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 BINDLIB="$REPO_ROOT/payload/scripts/lib/binding.sh"
-LOADER_LIB="$REPO_ROOT/payload/scripts/lib/loader.sh"
 HOOKS_JSON="$REPO_ROOT/hooks/hooks.json"
 RUNNER="$REPO_ROOT/tests/run.sh"
 
@@ -51,18 +50,8 @@ OTHER_SID="0ther999-8888-7777-6666-555555555555"
 make_repo() {  # [name] -> project dir on stdout
   local dir
   dir="$(cd "$(mktemp -d "$SANDBOX/${1:-repo}.XXXXXX")" && pwd -P)"
-  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
-  cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<'ENGPLAN'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-ENGPLAN
+  mkdir -p "$dir/.bionic/tmp"
+  mk_page "$dir/.bionic/docs/plans/wave-01.plan.md" 4
   printf '%s' "$dir"
 }
 
@@ -136,50 +125,29 @@ call_engaged() {  # <root> <sid> -> sets ES_ST
 #
 # `open_runs` decides membership, so these builders exist to move a fixture across
 # that boundary and back: an OPEN plan is a member, a CLOSED one is not, and a
-# markdown file with no flush-left `## SDLC State` is not a plan at all. Every
-# negative arm below pairs with a positive built by the sibling function on the SAME
-# root, so a refusal can never pass because the root was empty.
+# markdown file that is neither a page at 15 nor carries a state section is not a plan at
+# all. Every negative arm below pairs with a positive built by the sibling function on the
+# SAME root, so a refusal can never pass because the root was empty.
 
-mk_open_plan() {  # <root> <relname> [mmddhhmm-ish touch stamp] -> abs path on stdout
-  local p="$1/.bionic/docs/plans/$2"
-  mkdir -p "$(dirname "$p")"
-  cat > "$p" <<'MKOPEN'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-MKOPEN
-  [ -n "${3:-}" ] && touch -t "$3" "$p"
-  printf '%s' "$p"
+# mk_page <plan> <step> -> a plan page at 15 and its run's log (plan_fixture_log), at <step>: 9 is delivered.
+mk_page() {
+  local l; l="$(plan_fixture_log "$1")"; mkdir -p "${1%/*}" "${l%/*}"
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n' > "$1"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$2" > "$l"
 }
-
+mk_open_plan() {  # <root> <relname> [mmddhhmm-ish touch stamp] -> abs path on stdout
+  mk_page "$1/.bionic/docs/plans/$2" 4; [ -n "${3:-}" ] && touch -t "$3" "$1/.bionic/docs/plans/$2"
+  printf '%s' "$1/.bionic/docs/plans/$2"
+}
 mk_closed_plan() {  # <root> <relname> [stamp] -> abs path on stdout
-  local p="$1/.bionic/docs/plans/$2"
-  mkdir -p "$(dirname "$p")"
-  cat > "$p" <<'MKCLOSED'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 9
-
-- Step 9: close-out — delivered: 2026-09-01
-MKCLOSED
-  [ -n "${3:-}" ] && touch -t "$3" "$p"
-  printf '%s' "$p"
+  mk_page "$1/.bionic/docs/plans/$2" 9; [ -n "${3:-}" ] && touch -t "$3" "$1/.bionic/docs/plans/$2"
+  printf '%s' "$1/.bionic/docs/plans/$2"
 }
 
 mk_nonplan() {  # <root> <relname> -> abs path on stdout
   local p="$1/.bionic/docs/plans/$2"
   mkdir -p "$(dirname "$p")"
-  printf 'just notes, no SDLC State heading anywhere\n' > "$p"
+  printf 'just notes, no state section and no header anywhere\n' > "$p"
   printf '%s' "$p"
 }
 
@@ -377,17 +345,10 @@ expect_contains "hooks.json registers engage.sh on UserPromptExpansion" \
 expect_eq "engage.sh is registered exactly twice, and no more" "2" \
   "$(printf '%s\n' "$HJ_ROWS" | /usr/bin/grep -c 'engage\.sh')"
 
-# The loader idiom, byte for byte against the pin — the same comparison
-# cross-gate §N.1 and hook-adoption §1 make, restated here so this suite fails on
-# its own subject rather than only in the roster suites.
-N_BLOCK="$( . "$LOADER_LIB" && bionic_loader_pin )"
-BLOCK_OF=$(awk '/^# --- bionic-loader\/v2 BEGIN$/{f=1} f{print} f&&/^# --- bionic-loader\/v2 END$/{exit}' "$HOOK")
-expect_eq "engage.sh carries the canonical loader block, byte for byte" "$N_BLOCK" "$BLOCK_OF"
-
-WANT_LINE=$(awk '/^# --- bionic-loader\/v2 BEGIN$/{print prev; exit} {prev=$0}' "$HOOK")
+WANT_LINE=$(/usr/bin/grep -m1 '^BIONIC_LIB_WANT=' "$HOOK")
 case "$WANT_LINE" in
-  BIONIC_LIB_WANT=\"*\") ok "engage.sh declares BIONIC_LIB_WANT above the block" ;;
-  *) no "engage.sh declares BIONIC_LIB_WANT above the block" "line above BEGIN was: [$WANT_LINE]" ;;
+  BIONIC_LIB_WANT=\"*\") ok "engage.sh declares BIONIC_LIB_WANT" ;;
+  *) no "engage.sh declares BIONIC_LIB_WANT" "read: [$WANT_LINE]" ;;
 esac
 WANTS=$(printf '%s' "$WANT_LINE" | sed -e 's/^BIONIC_LIB_WANT="//' -e 's/"$//')
 SOURCED=$(/usr/bin/grep -oE '^\. "\$BIONIC_LIB/[a-z.-]+\.sh"' "$HOOK" \
@@ -492,6 +453,8 @@ expect_eq "bind_plan to the root's one open plan exits 0" "0" "$BIND_ST"
 expect_empty "…and prints nothing on stdout" "$BIND_OUT"
 expect_empty "…and nothing on stderr" "$BIND_ERR"
 if [ -f "$M10" ]; then ok "…and the marker is a regular file"; else no "…and the marker is a regular file" "no file at $M10"; fi
+call_engaged "$R10" "$SID"; E8_OWN=$ES_ST; call_engaged "$R10" e8-other-session
+expect_eq "…which engages its own session and no other (engaged_session)" "0|1" "$E8_OWN|$ES_ST"
 ST10=$(engat_of "$M10")
 printf 'plan=%s\nengaged_at=%s\n' "$P10A" "$ST10" > "$SANDBOX/expect10.state"
 if cmp -s "$SANDBOX/expect10.state" "$M10"; then

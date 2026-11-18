@@ -12,10 +12,10 @@
 # The cure is positional: prose, quoted strings and heredoc bodies are never argv[0] of
 # anything, so they cannot classify. That is the whole invariant this file exists to hold.
 #
-# WHO READS IT. hooks/farm-out-reminder.sh (the main-thread wall) and
-# hooks/background-suite-guard.sh (the agent-context wall behind agent-context-guard.sh).
-# Both source it FAIL-CLOSED — a library that cannot load makes the hook refuse, naming
-# the path it could not load, never silently allow (design D1, Chris 2026-08-30). The
+# WHO READS IT. The walls hooks/bash-walls.sh carries — `wall_farm_out_reminder` (the
+# main-thread wall) and `wall_background_suite_guard` (the agent-context wall) in
+# payload/scripts/lib/walls.sh, which load it through `wall_libs` and step aside naming the
+# path it could not load — and hooks/permission-answer.sh and payload/scripts/lib/gate.sh. The
 # repo convention this replaces was byte-identical copies pinned by
 # tests/cross-gate-agreement.test.sh; the removal case in tests/cmd-class.test.sh is what
 # pays for the shared file instead.
@@ -328,6 +328,36 @@ cmd_case_blind() {  # <dir> -> rc 0 case-blind, 1 case-exact
   return "$_CMD_CB_RC"
 }
 
+# THE HEAVY CLASSES, ONE TABLE. A browser run drives a whole browser and a compile run a whole
+# toolchain, so each is its own class: the gate promises it its measured cost, the farm-out wall
+# refuses it on the orchestrator's thread as it refuses a suite, and the booking shim carries its
+# class. Every site that needs the names reads this table (`cmd_class_heavy`, `CMD_HEAVY_CLASSES`);
+# the classifier below reads its rows to name a tool. Invariant: a class is spelled in these rows
+# and nowhere else under hooks/ or payload/, and every row's class is one `cmd_class_heavy` accepts.
+# A row is `<class> <tool> <word>`: the tool's own word, and the word after it that makes it a run
+# (`*` for any word after it).
+# HEAVY-CLASS-TABLE-BEGIN
+CMD_HEAVY_TABLE="browser playwright test
+browser cypress run
+browser lighthouse *
+compile next dev
+compile next build
+compile next start"
+# HEAVY-CLASS-TABLE-END
+# The distinct class names of the rows, in row order, space-separated.
+CMD_HEAVY_CLASSES=""
+while read -r _cmd_hv_c _; do
+  case " $CMD_HEAVY_CLASSES " in *" $_cmd_hv_c "*) ;; *) CMD_HEAVY_CLASSES="${CMD_HEAVY_CLASSES:+$CMD_HEAVY_CLASSES }$_cmd_hv_c" ;; esac
+done <<CMD_HEAVY_EOF
+$CMD_HEAVY_TABLE
+CMD_HEAVY_EOF
+unset _cmd_hv_c
+
+cmd_class_heavy() {  # <class> -> rc 0 when it names a heavy class of the table above
+  case $'\n'"$CMD_HEAVY_TABLE" in *$'\n'"${1:-?} "*) return 0 ;; esac
+  return 1
+}
+
 # The awk program. `mode=heredoc` stops after step 1; `mode=lines` runs the whole reading.
 _cmd_class_awk() {  # <mode> ; command on stdin
   # ONLY mode=effects PARSES _CMD_EFFECTS_AWK (wave-25 T2). awk compiles the whole program on
@@ -340,8 +370,12 @@ _cmd_class_awk() {  # <mode> ; command on stdin
   # THE FILESYSTEM'S FOLD, asked of the tree the reading is about (the root, else the cwd it was
   # handed, else this process's), with no fork (`cmd_case_blind`).
   ! cmd_case_blind "${_CMD_SCRIPT_ROOT:-${_CMD_SCRIPT_CWD:-$PWD}}" || _cb=1
-  _CMD_CASE_BLIND="$_cb" awk -v mode="$1" "$CMD_RUN_NORM_AWK$CMD_WORD_FOLD_AWK$_CMD_WRITES_AWK$_fx$_pl"'
-    BEGIN { FOLD = (ENVIRON["_CMD_CASE_BLIND"] == "1") }
+  _CMD_CASE_BLIND="$_cb" _CMD_HEAVY="$CMD_HEAVY_TABLE" awk -v mode="$1" "$CMD_RUN_NORM_AWK$CMD_WORD_FOLD_AWK$_CMD_WRITES_AWK$_fx$_pl"'
+    BEGIN {
+      FOLD = (ENVIRON["_CMD_CASE_BLIND"] == "1")
+      nh = split(ENVIRON["_CMD_HEAVY"], hv_rows, "\n")
+      for (hi = 1; hi <= nh; hi++) if (split(hv_rows[hi], hv_f, " ") == 3) HEAVY[hv_f[2], hv_f[3]] = hv_f[1]
+    }
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function base(p) { sub(/.*\//, "", p); return p }
     # ONE RUN, ONE SPELLING (REQ-1 AC-1.5). The same collapse
@@ -1141,10 +1175,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # its measured cost; `vitest` is a suite like `jest`. A word that is none of these answers
     # empty, so the caller falls through to the arms below.
     function webtool(t, w) {
-      if (t == "playwright") return (w == "test" ? "browser" : "")
-      if (t == "cypress") return (w == "run" ? "browser" : "")
-      if (t == "lighthouse") return "browser"
-      if (t == "next") return (w == "dev" || w == "build" || w == "start" ? "compile" : "")
+      if ((t, w) in HEAVY) return HEAVY[t, w]
+      if ((t, "*") in HEAVY) return HEAVY[t, "*"]
       if (t == "vitest") return "suite"
       return ""
     }
@@ -2885,8 +2917,7 @@ cmd_whole_run() {  # <command> [<repo root>] -> rc 0 when the command is a whole
   # `-h`, `--help` and `--list` claim nothing, by `cmd_suite_targets`' own arms, so none of the four
   # is a whole run here, and nothing in this function reads a flag.
   #
-  # THE READER IS the regression-runs counter (hooks/session-poker.sh `regression_runs_count`), which
-  # asks of the command a finished run ran, and calls this. `run.sh` is also the token
+  # It answers of the command a finished run ran whether that run was the whole runner. `run.sh` is also the token
   # `payload/scripts/lib/brief.sh` emits for the path-qualified runner in a brief's suite set.
   #
   # With a root the script a shell runs is opened and read for what it runs (`bash red.sh`, wave-31
@@ -2899,7 +2930,7 @@ $(cmd_suite_targets "${1-}" "${2-}")
   return 1
 }
 
-cmd_class() {  # <command> -> suite|bootstrap|install|build|browser|compile|none, by priority
+cmd_class() {  # <command> -> the class name, by priority (none when it has none)
   # FIVE FORKS LESS THAN IT USED TO COST (epic-23 wave-14 REQ-4; research R3 §3
   # measured 6.4 ms of `classify_tier1`'s 13.1 on this function alone). The reading
   # is unchanged — the SAME lines from the SAME awk, still by priority and not by
@@ -2936,9 +2967,9 @@ cmd_class() {  # <command> -> suite|bootstrap|install|build|browser|compile|none
 # CMD_CLASS_PICKED. It assigns rather than prints, so a caller holding the lines already
 # pays no fork for the pick (walls.sh `_wall_class_read`, wave-26 T39/T40).
 CMD_CLASS_PICKED=""
-cmd_class_pick() {  # <class lines> -> sets CMD_CLASS_PICKED to suite|bootstrap|install|build|browser|compile|none
+cmd_class_pick() {  # <class lines> -> sets CMD_CLASS_PICKED to the highest-priority class, else none
   local lines=$'\n'"${1-}"$'\n' c
-  for c in suite bootstrap install build browser compile; do
+  for c in suite bootstrap install build $CMD_HEAVY_CLASSES; do
     case "$lines" in
       *$'\n'"$c"$'\t'*|*$'\n'"$c"$'\n'*) CMD_CLASS_PICKED="$c"; return 0 ;;
     esac

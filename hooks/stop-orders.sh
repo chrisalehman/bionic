@@ -23,13 +23,13 @@
 #
 # ORDER records that a human asked for an agent to be stopped, and prints what stopping it
 # gives up. It is not evidence and it does not discharge the contract — it is an
-# INSTRUCTION, and hooks/stop-guard.sh gets out of its way. Why a record at all: the gate
+# INSTRUCTION, and the stop guard (`stop_guard`, lib/stop.sh) gets out of its way. Why a record at all: the gate
 # runs inside a PreToolUse payload that carries nothing about who asked for the stop, so
 # the order has to reach it the only way anything reaches a gate in this machine — as a
 # fact on disk, written before the stop.
 #
 # AN ORDER IS BOUNDED IN TIME, and this is the one clock in the stop arc that belongs
-# there. hooks/stop-guard.sh refuses to put a window on EVIDENCE (an observation is stale
+# there. The stop guard refuses to put a window on EVIDENCE (an observation is stale
 # the moment its subject writes, however recent, and valid however old while its subject is
 # dormant). An instruction is the other thing: it is current when it is given and it stops
 # being current, and a standing order that outlived its conversation would open the wall
@@ -95,7 +95,7 @@ UNROSTERED_SCHEMA="stop-unrostered/v1"
 ROSTER_VERSION="v1"
 
 # HOW LONG AN ORDER IS CURRENT, in seconds. Duplicated as a literal in
-# hooks/stop-guard.sh, which is the reader; the two are held together by
+# payload/scripts/lib/stop.sh (`SG_ORDER_TTL_S`), which is the reader; the two are held together by
 # tests/cross-gate-agreement.test.sh's stop-order case, which records an order at a
 # boundary epoch and asks the gate about it.
 ORDER_TTL_SECONDS=1800
@@ -131,7 +131,7 @@ ORDER_AT=""
 # The two are different facts about one act, the reader discharges either, and the line says
 # which — so a stop nobody remembers typing is explicable afterwards.
 #
-# A CLOSED SET, not free text: the value is printed back to a reader by hooks/stop-guard.sh,
+# A CLOSED SET, not free text: the value is printed back to a reader by the stop guard (lib/stop.sh),
 # and a free-text field would let a caller write whatever it liked into that sentence.
 ORDER_BY="human"
 case "$VERB" in
@@ -190,105 +190,19 @@ esac
 
 # ---------- the library ----------
 #
-# One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
+# The stub below sources the one loader, whose stub and walk both live in
 # payload/scripts/lib/loader.sh. FAIL OPEN: nothing this script does is irreversible,
 # and a reporting verb that refused because a file was missing would take the
 # diagnosis down with the thing being diagnosed.
 BIONIC_LIB_WANT="root.sh session.sh agents.sh"
-# --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
-# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
-# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
-# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
-# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
-# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
-# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
-# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
-# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
-# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
-# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
-BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
-_bl_try() {
-  [ -n "${1:-}" ] || return 1
-  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
-  [ -d "$1" ] || return 1
-  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
-  BIONIC_LIB="$1"
-}
-if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
-  if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
-    _bl_mk="${_bl_keys%%
-*}"
-    _bl_mk="${_bl_mk#bionic@}"
-  fi
-  if [ -n "$_bl_mk" ]; then
-    _bl_src=""
-    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
-      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
-    fi
-    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
-    if [ -z "$BIONIC_LIB" ]; then
-      _bl_best=""; _bl_bestk=""
-      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
-        [ -d "$_bl_v" ] || continue
-        _bl_n="${_bl_v##*/}"
-        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
-        _bl_x1=""; _bl_x2=""; _bl_x3=""
-        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
-$_bl_n
-BIONIC_LOADER_VER
-        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
-        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
-      done
-      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
-    fi
-  fi
+# Find the library through lib/loader.sh beside this hook; payload/scripts/lib/loader.sh says how.
+_bl_dir="$(dirname "$0")"; _bl_l="$_bl_dir/../scripts/lib/loader.sh"; [ -r "$_bl_l" ] || _bl_l="$_bl_dir/../payload/scripts/lib/loader.sh"
+# shellcheck source=/dev/null
+if [ -r "$_bl_l" ]; then . "$_bl_l"; bionic_load; else
+  BIONIC_LIB=""; BIONIC_LIB_MISSING="${BIONIC_LIB_WANT%% *}"; BIONIC_LIB_CANDS="$_bl_dir/../scripts/lib, $_bl_dir/../payload/scripts/lib"
+  loader_fail_open() { echo "$1: library $BIONIC_LIB_MISSING not found at $BIONIC_LIB_CANDS — hook stepping aside; run /bionic:doctor" >&2; exit 0; }
+  loader_fail_closed() { set -- "$1"; [ "${#1}" -le 25 ] || set -- "${1:0:24}…"; echo "bionic: load refused — $1 cannot load the bionic library (run /bionic:doctor)" >&2; exit 2; }
 fi
-if [ -z "$BIONIC_LIB" ]; then
-  BIONIC_LIB_MISSING="${_bl_want%% *}"
-  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
-fi
-loader_fail_open() {
-  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
-  exit 0
-}
-loader_fail_closed() {
-  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
-  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
-  case "${2:-}" in
-    "claude plugin update bionic@bionic"|\
-    "claude plugin install bionic@bionic"|\
-    "bash $_bl_root/scripts/doctor.sh"|\
-    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
-  esac
-  _bl_who="${1:-a bionic hook}"
-  if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
-  printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
-    cat >&2 <<BIONIC_LOADER_REFUSE
-A wall that cannot read a command refuses it rather than waving it through.
-
-Wanted: ${BIONIC_LIB_MISSING:-the bionic library}
-Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
-
-Until the plugin is whole again this wall permits exactly four commands, each matched
-as a whole string:
-
-    claude plugin update bionic@bionic
-    claude plugin install bionic@bionic
-    bash $_bl_root/scripts/doctor.sh
-    bash $_bl_root/scripts/setup.sh
-
-Anything else is refused, including one of those four with another command chained
-after it. Run one of them, or act from your own terminal.
-BIONIC_LOADER_REFUSE
-  fi
-  exit 2
-}
-# --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-orders"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -324,6 +238,29 @@ fi
 # walks for the nearest real `.bionic`.
 REPO="$(project_root "$PWD")"
 REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+
+# stopped_row_back <name> -> the plan row still running under <name> returned to pending, its launch taken back by
+# lib/units.sh `units_row_back` (the log's cancel), and said; 1 when this session's open run holds no
+# row running under the name, or the launch could not be taken back. An agent gone unlanded leaves its row to be
+# offered again, so stopping it is the whole of returning it.
+stopped_row_back() {
+  local run plan rows id
+  # shellcheck source=/dev/null
+  { declare -F session_run >/dev/null 2>&1 || . "$BIONIC_LIB/run.sh"; } >/dev/null 2>&1
+  # shellcheck source=/dev/null
+  { declare -F units_row_back >/dev/null 2>&1 || . "$BIONIC_LIB/units.sh"; } >/dev/null 2>&1
+  declare -F session_run >/dev/null 2>&1 && declare -F units_row_back >/dev/null 2>&1 || return 1
+  run="$(session_run "$REPO_REAL" "$SESSION_ID" 2>/dev/null)" || return 1
+  case "$run" in 'bound-open '*) plan="${run#bound-open }" ;; *) return 1 ;; esac
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 1
+  id="$(printf '%s\n' "$rows" | awk -F'\t' -v n="$1" '$10 == "active" && $5 == n { print $1; exit }')"
+  [ -n "$id" ] || return 1
+  if ! units_row_back "$plan" "$id"; then
+    die "stopped: $1 — its row $id still reads running: its launch could not be taken back; stopped $1 again takes it back."
+    return 1
+  fi
+  say "stopped: $1 — its row $id is pending again, its launch taken back, and is offered at the next tick."
+}
 if [ -z "$REPO_REAL" ]; then
   die "REFUSED — cannot resolve the working directory."
   exit 2
@@ -628,10 +565,12 @@ EOF
     # WHAT IS BEING GIVEN UP, from the verdict's own detail and never from a second
     # opinion about the disk. An order is not a claim that the work landed, and the
     # operator is owed the difference in one line.
-    if [ -f "$SWEEPER" ]; then
-      _v=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-            CLAUDE_CODE_SESSION_ID="$SESSION_ID" bash "$SWEEPER" verdict "$_target" 2>/dev/null )
-      _line=$(printf '%s\n' "$_v" | grep -F 'landing-verdict/v1|' | head -1)
+    # The read is the stop library's, the one the stop guard asks: the first line of the call scoped
+    # to the name. Loaded here alone, so no other verb pays for it; a library without it says nothing.
+    # shellcheck source=/dev/null
+    { declare -F stop_verdict_line >/dev/null 2>&1 || . "$BIONIC_LIB/stop.sh"; } >/dev/null 2>&1
+    if [ -f "$SWEEPER" ] && declare -F stop_verdict_line >/dev/null 2>&1; then
+      _line=$(stop_verdict_line "$REPO_REAL" "$SESSION_ID" "$SWEEPER" "$_target")
       if [ -n "$_line" ]; then
         _state=$(line_field "$_line" state)
         _detail=$(line_field "$_line" detail)
@@ -714,12 +653,11 @@ EOF
         if [ -z "$_mark" ] || [ "$_m_at" \> "$_best_at" ]; then _mark="$_m"; _best_at="$_m_at"; _mark_sid="$_msid"; fi
       done <<< "$(roster_sessions_with_name "$STATE_DIR" "$_target")"
     fi
-    _acked=0
+    # A NAME CLOSED WITH ITS ROW STILL RUNNING is closed again by nothing; its row's launch alone is taken back, below,
+    # behind the same fresh-panel check, so no row is left running with no door to return it.
+    _acked=0; _back_only=0
     if [ "$(line_field "$_line" acked)" = "yes" ]; then
-      if [ -z "$_mark" ]; then
-        die "REFUSED — $_target is already acked; a second ack would say nothing new."
-        exit 2
-      fi
+      [ -n "$_mark" ] || _back_only=1
       _acked=1
     fi
     # THE REASON FOLLOWS THE VERDICT (wave-19 T1e, audit V-1; REQ-1 AC-1.2). A landed row
@@ -803,7 +741,13 @@ EOF
       _cad=$(printf '%s' "$_detail" | grep -oE '\([0-9]+s\)' | tr -d '()s')
       say "panel-gone overrides STILL-LIVE (progress ${_age:-?}s old, cadence ${_cad:-?}s)"
     fi
-    if [ "$_acked" -eq 1 ]; then
+    if [ "$_back_only" -eq 1 ]; then
+      if ! stopped_row_back "$_target"; then
+        die "REFUSED — $_target is already acked; a second ack would say nothing new."
+        exit 2
+      fi
+      exit 0
+    elif [ "$_acked" -eq 1 ]; then
       say "stopped: $_target — its row was already closed (acked)."
     else
       if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
@@ -814,6 +758,7 @@ EOF
       fi
       [ -n "$_ack" ] && printf '%s\n' "$_ack"
       say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
+      [ "$_reason" != abandoned ] || stopped_row_back "$_target" || :
     fi
     # THE TREE GOES AT THE STOP (wave-28 T6; D7, AC-3.2). Only for a row carrying the mark: the tree
     # recorded for the name (`workspace_for_name`), else the plan's cell, else the convention's, removed by
@@ -991,7 +936,7 @@ EOF
       _row=$(roster_row_for "$_name")
       _deliv=$(line_field "$_row" deliverable)
       _why=""
-      # THE DISCHARGE SET, spelled the same way hooks/stop-guard.sh spells it: an ack, or a
+      # THE DISCHARGE SET, spelled the same way `stop_guard` (lib/stop.sh) spells it: an ack, or a
       # WAIVED contract, or a MET one that had a declared artifact to meet. A row that
       # declared nothing stats MET for want of anything to hold it to, and standing one
       # down on that is standing it down on a fact nobody produced — an ack is what closes

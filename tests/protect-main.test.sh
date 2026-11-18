@@ -117,6 +117,8 @@ section "Section 1: On 'main' branch (all pushes must be BLOCKED)"
 export FAKE_BRANCH="main"
 
 expect_block "explicit: push origin main"            "git push origin main"
+PM_PLAIN_RC=0; PM_PLAIN_ERR="$(pm_payload "$PLAIN_REPO" 'git push origin main' | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" 2>&1 >/dev/null)" || PM_PLAIN_RC=$?
+expect_eq "…and the same push from a repo this session never engaged: exit 0, nothing on stderr" "0|" "$PM_PLAIN_RC|$PM_PLAIN_ERR"
 expect_block "explicit: push upstream main"           "git push upstream main"
 expect_block "explicit: push origin master"           "git push origin master"
 expect_block "bare push"                              "git push"
@@ -213,33 +215,6 @@ pm_stderr() {  # <branch> <command> -> the hook's stderr, verbatim
         bash "$HOOK" 2>"$PM_SANDBOX/.err" >/dev/null
   cat "$PM_SANDBOX/.err"
 }
-
-pm_one_line() {  # <label> <branch> <command> <expected line>
-  local _lbl="$1" _br="$2" _cmd="$3" _want="$4" _got _n _line _rest
-  _got="$(pm_stderr "$_br" "$_cmd")"
-  _n="$(/usr/bin/grep -c '^bionic: ' "$PM_SANDBOX/.err" | tr -d ' ')"
-  _line="$(/usr/bin/grep -m1 '^bionic: ' "$PM_SANDBOX/.err")"
-  # WHAT FOLLOWS THE VERDICT, if anything: the stream minus its rendered line(s). Read
-  # here rather than asserted per caller, because every site of this wall carries a
-  # `detail` and a row that stopped carrying one is the regression worth seeing.
-  _rest="$(/usr/bin/grep -v '^bionic: ' "$PM_SANDBOX/.err" | /usr/bin/grep -c . | tr -d ' ')"
-  eq_or() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "want [$3] got [$2]"; fi; }
-  eq_or "$_lbl: exactly one VERDICT line on the user stream" "$_n" "1"
-  if printf '%s' "$_line" | /usr/bin/grep -qE "$PM_LINE_RE"; then
-    ok "$_lbl: in AC-E1.3's shape"
-  else
-    no "$_lbl: in AC-E1.3's shape" "line=[$_line]"
-  fi
-  eq_or "$_lbl: and it is the table's own wording" "$_line" "$_want"
-  # THE POSITIVE THAT KEEPS THE COUNT HONEST (ADR-030): the verdict is one line BECAUSE
-  # the detail is a separate thing beneath it, not because the wall went quiet.
-  if [ "$_rest" -ge 1 ]; then
-    ok "$_lbl: with its detail beneath it, no knob set"
-  else
-    no "$_lbl: with its detail beneath it, no knob set" "nothing after the verdict"
-  fi
-}
-
 
 # THE DETAIL IS ON THE WIRE, end to end through this real wall (AC-E1.5, re-authored by
 # ADR-030). The branch name is the value the one line had no room for. It used to live

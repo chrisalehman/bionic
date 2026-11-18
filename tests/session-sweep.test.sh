@@ -2,9 +2,7 @@
 # Tests for hooks/session-poker.sh `sweep` — the verb that deletes what DEAD sessions left
 # under a project's .bionic/tmp.
 #
-# Governing requirement: .bionic/docs/ideas/fixit-1.5.2-dead-session-sweep.md §Proposed fix
-# and §Acceptance, ruled into fixit 1.5.1 as T5 (plan D-4, D-5; AC-9, AC-10, AC-11). The
-# defect it closes: doctor proves a project's predecessor sessions dead, lists their
+# The defect it closes: doctor proves a project's predecessor sessions dead, lists their
 # leftover state, and names no way to clear it — so `.bionic/tmp` grows one set of files per
 # `/clear`, forever, under a header reading "Nothing to do".
 #
@@ -64,8 +62,6 @@ SID_LIVE="1a2b3c4d-1111-4e05-9f21-7d0c5a8e6b44"
 SID_DEAD="5e6f7a8b-2222-42d6-b0e8-3c1f2a94d7e0"
 SID_DEAD2="9c0d1e2f-3333-4a17-8b55-6e2d9f0a1c33"
 SID_SELF="7f8e9d0c-4444-4b28-9a66-1d3c5e7f9b22"
-
-expect_matches() { expect_regex "$@"; }
 
 # ---------- fixture builders ----------
 
@@ -614,7 +610,7 @@ section "7d. the failure path — a marker is written, one line prints, and it c
 # rc=2 causes — a symlinked .bionic/tmp, an unresolvable cwd — are either
 # pre-empted by this hook's own guard before it would ever call sweep, or too
 # machine-fragile to plant reliably). The stub is asked ONLY for `sweep`; every
-# other verb this hook calls (`interval`, `interval-default`) gets a real,
+# other verb this hook calls (`interval`) gets a real,
 # trivial answer so the age gate and the report above still behave normally.
 ss_plant_hook_tree() {  # <root> <sweep-exit-code|"hang"> -> echoes <root>/hooks
   local root="$1" mode="$2" lib_src
@@ -625,7 +621,7 @@ ss_plant_hook_tree() {  # <root> <sweep-exit-code|"hang"> -> echoes <root>/hooks
   cp "$lib_src"/*.sh "$root/scripts/lib/" 2>/dev/null
   {
     printf '#!/bin/bash\ncase "$1" in\n'
-    printf '  interval|interval-default) echo 1; exit 0 ;;\n'
+    printf '  interval) echo 1; exit 0 ;;\n'
     if [ "$mode" = hang ]; then
       printf '  sweep) sleep 999 ;;\n'
     else

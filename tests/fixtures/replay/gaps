@@ -1,0 +1,25 @@
+wave-46-asks-nothing.hands.unplaced=4 roster adoption rows, lost when the run's tmp was wiped; the cards print unplaced=4 at both heads
+wave-49-what-a-run-costs.hands.unplaced=1 at f87acbfc and 3 at fcbb975f, the same loss
+wave-46-asks-nothing.hands.killed=the gate store's killed count on each landing line, pruned with the store
+wave-49-what-a-run-costs.hands.killed=the gate store's killed count on each landing line, pruned with the store
+all.dispatch=the rosters were the only record of a launch; neither run holds a line for one
+all.card.behind=commits behind the head and the reviews' coverage need the repository at the named heads
+all.card.check-files=the files the release changed in the release check need the repository and the check's file list
+all.card.rendered=the render time is the card's local time and its wording belongs to the rendering
+all.run.logs=188 of 271 run logs the verdict lines cite at wave 46, and 108 of 158 at wave 49, are gone with the tmp
+wave-49-mid.asks.fields=the open ask is the closed register row set open again at the cut; its sent and title fields were never in the record
+all.finding.unlined=a card also counts the findings a review file holds with no moved: or deferred: line (the S4 flags it carries); the reader holds only lined findings
+wave-49-mid.handoff=the cut keeps the closed run's Handoff section, written in local time after the cut; the scrub's cut reads UTC instants only
+wave-49-mid.hands.waive-row=the cut keeps the closed plan's matrix blocks, so its waiver: line written at 17:34:52Z, after the cut, stands in it as a hand act
+release-approval-31da41f7.stop.ready=a card's world holds the closed plan, so rows born after the card (T31 to T35, born at 12:37Z and later) stand in it and read ready; the run's own stop line before the card wrote ready= empty
+release-approval-f87acbfc.stop.ready=the same: T25 and T26 were born at 15:54Z, after the card, and read ready in the closed plan
+wave-49-mid.status.T3=the cut keeps T3's agent and worktree cells, and no instant says whether it was dispatched by the cut
+wave-49-mid.status.T5=the cut keeps the agent and worktree cells of rows dispatched after it (T5 from T3's landing at 04:40Z); the scrub resets status cells only
+wave-49-mid.status.T9=the same as T5, from T5's landing
+wave-49-mid.status.T10=the same as T5
+wave-49-mid.status.T11=the same as T5
+wave-49-mid.status.T12=the same as T5, from T20's landing
+release-approval-93683c5e.card.decision.approve:merge-unproved=the judge's rule changed after this card was printed: fb4fd80b8 (2026-10-27T00:10Z, "green is content") reads the full pass green past F when every commit since moved no code, and the three landings since 6b7563af (29643d9f7, b9399de36, 93683c5e5) change CHANGELOG.md alone, so no merge decision is put
+release-approval-f87acbfc.card.decision.row:AC-7.3=the world holds the closed plan's matrix block, whose task: names T23 (Step 6, landed 07:24Z); the card at 08:35Z put no decision for the row, so it then read owed or ruled (auditor-evidence.md read it "owed by the doc row T12 and the close row T14 at their steps"), and the plan keeps no history of a matrix block or cell
+release-approval-fcbb975f.card.decision.row:AC-7.3=the replay table names the verb a reply runs, and the row waiver's verb was renamed waive after this card was printed
+release-approval-fcbb975f.card.decision.approve:release=the walls' rule changed after this card was printed: every run with a row that integrates is now asked the release approval at the advance to 8 and at the close, and this run was outside the release order (no test row at Step 5 or before), so nothing asked it again after its approval at f87acbfc; code landed past that head (payload/scripts/lib/walls.sh, by fcbb975f), so the card drawn now puts the release again

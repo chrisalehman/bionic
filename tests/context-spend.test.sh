@@ -1,12 +1,8 @@
 #!/bin/bash
-# Tests for the CONTEXT-SPEND instrument — epic-23 wave-11-lean-spine, task T12,
-# ruling R1 ("the suite that does not exist is written FIRST").
+# Tests for the CONTEXT-SPEND instrument.
 #
-# WHY THIS FILE EXISTS AT ALL. Census §6.3 measured it: of the four hooks that fire
-# on Stop, this was the ONE with no dedicated suite. It was covered only sideways —
-# doctor-patrol, cross-gate-agreement, engage, hook-adoption, patrol-duties-gate and
-# session-sweep each reach it while asking about something else — so a merge that
-# changed its behaviour had thin cover. This suite is the BASELINE the fold is
+# WHY THIS FILE EXISTS AT ALL.
+# This suite is the BASELINE the fold is
 # proven against: it was committed GREEN against the unmerged `hooks/context-spend.sh`
 # and is re-pointed here, unchanged in count, at `hooks/stop.sh` — which runs this
 # instrument as `stop_context_spend` (payload/scripts/lib/stop.sh).
@@ -17,27 +13,13 @@
 # refuses and it never writes stdout, because a Stop hook's stdout can carry a block
 # payload.
 #
-# ── TWO ASSERTIONS HERE RECORD THE GAP THE MERGE CLOSED ──────────────────────
-#
-# §1b and §2b are marked [GAP CLOSED]. Before the merge this hook read NEITHER
-# `hook_event_name` NOR `stop_hook_active` — measured at the baseline commit:
-#
-#     grep -n 'hook_event_name\|stop_hook_active' hooks/context-spend.sh   -> (no output)
-#
-# while the other three opened with both. In production the omission cost nothing,
-# because hooks.json registered this hook on Stop alone and a re-entry Stop finds the
-# state file already carrying the new step — the same-step arm makes it idempotent by
-# a different route, which §5 drives directly. Both assertions were committed in the
-# OTHER direction first, green against the unmerged hook, so the pair below reads as
-# a change that was measured rather than a rule that was asserted.
-#
-# The gap was load-bearing from the moment the four folded into one process
+# The event guard is load-bearing because the four hooks are one process
 # registered on Stop AND SubagentStop (REQ-1f (iv), ADR-004): without the event guard
 # the instrument would start recording step boundaries on every teammate landing, a
 # thing it has never done.
 #
 # ACCELERATED, NEVER SLEPT. A step boundary is manufactured by seeding the state file
-# through the hook itself and then editing the plan's `current:` — the boundary
+# through the hook itself and then appending a step event to the run's log — the boundary
 # detector is a file diff, so nothing here waits on a clock.
 #
 # FAKE $HOME, ALWAYS. `audit_path` is `$HOME`-rooted by incident 0001, so every
@@ -87,8 +69,8 @@ audit_file_for() {  # <fake home> <project root> -> the path the hook will appen
   printf '%s/.claude/logs/%s/sdlc-audit.md' "$1" "$(slug_for "$2")"
 }
 
-# A scratch project: an ENGAGED session, one OPEN run, and a plan whose `## SDLC
-# State` names a step. No git repository — `project_root` answers at the nearest
+# A scratch project: an ENGAGED session, one OPEN run, and a plan page at 15 whose
+# run's log names a step. No git repository — `project_root` answers at the nearest
 # ancestor carrying `.bionic/`, which is this directory itself.
 #
 # The engagement marker BINDS the session to that plan (wave-23-fixit-1810, REQ-1, D1).
@@ -104,28 +86,18 @@ make_env() {  # [step] -> project dir on stdout
   # append assertion below would read an empty file and call it silence.
   dir=$(cd "$(mktemp -d)" && pwd -P)
   step="${1:-4}"
-  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
-  cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<CSPLAN
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: $step
-
-- Step $step: tasks in flight
-CSPLAN
+  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans" "$dir/.bionic/docs/record/wave-01"
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n' > "$dir/.bionic/docs/plans/wave-01.plan.md"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$step" > "$dir/.bionic/docs/record/wave-01/run.log"
   bound_marker "$dir" "$SID" "$dir/.bionic/docs/plans/wave-01.plan.md"
   printf '%s' "$dir"
 }
 
-# THE PLAN'S STEP, rewritten in place. This is the whole boundary mechanism: the
-# state file holds the step the last Stop saw, the plan holds the step this Stop
+# THE RUN'S STEP, one more step event in its log. This is the whole boundary mechanism: the
+# state file holds the step the last Stop saw, the run holds the step this Stop
 # sees, and a difference between them is the boundary.
 set_step() {  # <project> <step>
-  local p="$1/.bionic/docs/plans/wave-01.plan.md"
-  sed -e "s/^current:.*/current: $2/" "$p" > "$p.new" && mv "$p.new" "$p"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:0%s:00Z\n' "$2" "$2" >> "$1/.bionic/docs/record/wave-01/run.log"
 }
 
 make_home() { ( cd "$(mktemp -d)" && pwd -P ); }

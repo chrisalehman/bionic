@@ -141,6 +141,12 @@ No program the section could run makes the assertion fail, given the fixture as 
   gone) is read as a section, and with nothing else in it, it is vacuous.
 - The verdict names why, in one clause.
 
+A section whose code is deleted in the same landing is not read at all: nothing is left for a
+defect to mutate. It is not a sixth verdict. Its record line stays as it was read, and the culled
+list carries the reason: `<suite> §<key> — gone with <name>`, where `<name>` is on the deletion list
+(`tests/fixtures/deletion-list.txt`). The lint admits such a line for a keep or a `rule:` keep that
+is no longer called, and refuses a name that is not on the list.
+
 ## 3. The reading method
 
 1. **List the suite's sections** with the command below. It prints every `section` and
@@ -203,6 +209,11 @@ One line per section, five fields, ` | ` between them, no `|` inside a field:
   `<suite> §<key>`, separated by `, `. `none` when the search found no other, followed by the
   pattern searched: `none (searched 'units_validate' in tests/)`. A `duplicate` line never says
   `none`. A `keep` line names others only when it is kept by rule or by the one-catcher rule.
+
+A `duplicate` may not be culled while its last field marks a catcher `(unverified)` or
+`(unverified; <why>)`, names a catcher that is itself on the culled list, or names one no suite
+calls by its whole key. The lint reads every culled duplicate's record line, however long it has
+stood, and refuses the cull, so a duplicate is culled only on a standing catcher someone has run.
 
 Two lines of the shape, on a made-up suite:
 

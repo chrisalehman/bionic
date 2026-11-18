@@ -1,0 +1,658 @@
+#!/bin/bash
+# tests/reader.test.sh — payload/scripts/reader.sh, the one program that reads a run's log and answers.
+#
+# `reader <plan> <question> [args]` reads record/<wave>/run.log, found from the plan by name, folds it,
+# and answers one question of a closed list: yes or no by exit code alone, a value as `key=value`
+# lines, a list as one `run/v1` line per item.
+#
+#   §FOLD     a repeated line counts once, a later value answers, a cancelled line is absent, a step written again answers;
+#             an act by hand taken again at another time counts again.
+#   §NAME     every answer over a planted log equals the answer over it with each line's fields moved.
+#   §FORM     a yes or no answer prints nothing; value lines are `key=value`; list lines start `run/v1|`.
+#   §UNKNOWN  an unlisted question exits 2 and prints the list.
+#   §REST     the twelve log-side questions each answer a planted log in their form, honour the fold, and
+#             answer the same with each line's fields moved.
+#   §HEADER     the plan's header keys, its body never read as one, CR-only line ends too.
+#   §ROW        a Tasks row is its nine authored cells, named by the table's header.
+#   §CRITERION  a criterion is its Eval design row, an escaped bar kept as a bar.
+#   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it; at 15 its
+#               verdict is the one an untimed proof the act wrote carries, else the evidence review at the head.
+#   §JOIN       a plan's log is found by its name; a header key pointing elsewhere is only words.
+#   §READY      ready reads a row's deps from its Tasks cell when the caller names none.
+#   §JOIN-15    a nine-cell row's waits are its deps and what its kind and step imply.
+#   §SECTION    a task's own section is the heading whose first word is its id, read to the next heading.
+#   §PLACES     a plan at each place the run walk admits reads its record; any other place is refused.
+#   §TABLE      a fenced table is prose, the heading reads in either case and may go on, the header line is the
+#               one naming the key column, and a lone CR ends a line.
+#   §WAITS      each row a read names carries the reads naming it; a row reading its own id waits on itself, and
+#               one reading live:head still writes the settled head.
+#   §HALF       a run is its log: a plan at 14 with its old homes and no log has no event, and the fold's key names
+#               the log and no other file of the record.
+#   §ASK-LOG    lib/owed.sh writes each act on an ask to the run's log on its own clock, and reads the log as one list.
+#   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
+#               A registered proof is one proof event in the run's log, the plan byte for byte as it was; a
+#               registered walk discharges each criterion it confirms by one proof naming it.
+#   §HANDS      an amend, a hold, an extension, an adoption, a by-hand landing and a person's stop of a run each leave
+#               one hand event with its reason, through the one writer that refuses an act with none; the tick's
+#               withdrawal of a request for the load leaves none.
+#   §SESSION    an order, a handoff and a session are the log's, each the last of its kind; a session counts once,
+#               by its first act.
+#   §HELD       the run's held place, its order and its sessions answer as the whole fold over every plan this suite built.
+#
+# FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
+
+set -uo pipefail
+. "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
+READER="${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh"
+D="$(mktemp -d)/docs"; H="$(printf 'a%.0s' {1..40})"; G="$(printf 'b%.0s' {1..40})"
+plan() {  # <wave> -> a plan whose run log is fed from stdin
+  mkdir -p "$D/plans/epic-x" "$D/record/$1"; printf '# %s\n' "$1" > "$D/plans/epic-x/$1.plan.md"
+  cat > "$D/record/$1/run.log"
+}
+ask() { bash "$READER" "$D/plans/epic-x/$W.plan.md" "$@"; }
+keys() { ask "$@" | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(key|row)=/) print substr($i, 5) }' | tr '\n' ' '; }
+
+section "FOLD"
+W=fold; plan fold <<EOF
+run/v1|ev=step|n=4|by=me|at=2026-11-01T00:00:01Z
+run/v1|ev=published|row=T1|commit=c1|kind=queue|at=2026-11-01T00:00:02Z
+run/v1|ev=published|row=T1|commit=c1|kind=queue|at=2026-11-01T00:00:03Z
+run/v1|ev=published|row=T2|commit=c2|kind=hand|at=2026-11-01T00:00:04Z
+run/v1|ev=ask|key=decide:D1|sent=s|at=2026-11-01T00:00:05Z
+run/v1|ev=ask|key=decide:D2|sent=s|at=2026-11-01T00:00:06Z
+run/v1|ev=ask|key=decide:D1|sent=s|reply=yes|at=2026-11-01T00:00:07Z
+run/v1|ev=proof|kind=regression|head=$H|rc=1|at=2026-11-01T00:00:08Z
+run/v1|ev=proof|kind=regression|head=$H|rc=0|at=2026-11-01T00:00:09Z
+run/v1|ev=approval|key=step3|by=me|at=2026-11-01T00:00:10Z
+run/v1|ev=approval|key=release|by=me|at=2026-11-01T00:00:11Z
+run/v1|ev=cancel|of=approval|key=release|at=2026-11-01T00:00:12Z
+run/v1|ev=step|n=5|by=me|at=2026-11-01T00:00:13Z
+EOF
+expect_eq "a repeated line counts once: two landings, not three" "T1 T2 " "$(keys landed)"
+expect_eq "a later value answers: the replied ask is closed, the other open" "decide:D2 " "$(keys asks)"
+ask green "$H"; expect_status "a later value answers: the regression rerun at rc=0 is green" 0 "$?"
+expect_eq "a later value answers: one proof at the head, the later" "rc=0" "$(ask proof "$H" | grep -o 'rc=[0-9]')"
+ask approved step3; expect_status "an approval no cancel names is a yes" 0 "$?"
+ask approved release; expect_status "a cancelled approval is absent" 1 "$?"
+expect_eq "the later step answers" "n=5 state=open" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
+printf 'run/v1|ev=step|n=4|by=me|at=2026-11-01T00:00:14Z\n' >> "$D/record/fold/run.log"; expect_eq "a step written again is the step the run went back to" "n=4 state=open " "$(ask step | tr '\n' ' ')"
+W=fields; plan fields < /dev/null; bash -c '. "$1/proof.sh" && proof_step_event "$2" 8 cleanup=done && ! proof_step_event "$2" 8 merge=main' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$D/plans/epic-x/fields.plan.md"
+expect_eq "a field given at the advance is in the step's answer, and one its step does not carry is refused unwritten" "n=8 cleanup=done state=open |1" "$(ask step | tr '\n' ' ')|$(grep -c . "$D/record/fields/run.log")"
+W=apw; plan apw < /dev/null; AW="$(bash -c '. "$1/proof.sh" && proof_approval_event "$2" release by=me head="$3" && proof_approved_head "$2" release' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$D/plans/epic-x/apw.plan.md" "$H")"
+expect_eq "an approval the one writer appends is the reader's yes, at the head it was given" "$H|0" "$AW|$(ask approved release; echo $?)"
+# fails-when: an approval closes an ask, so the open asks a sheet counts are not the asks the register lists.
+W=again; printf 'run/v1|ev=%s\n' 'ask|key=approve:release|sent=s|at=2026-11-01T00:00:01Z' 'approval|key=release|by=me|at=2026-11-01T00:00:02Z' | plan again
+AG="$(keys asks)"; printf 'run/v1|ev=ask|key=approve:release|reply=approve|at=2026-11-01T00:00:03Z\n' >> "$D/record/again/run.log"
+expect_eq "an approval alone closes no ask, and the reply on its round closes it" "approve:release |" "$AG|$(keys asks)"
+# fails-when: a proof is identified without its scope, so a piece reading replaces a whole one of the same question
+# at the same head, and the judge over the reader reads the whole read absent.
+W=scope; plan scope <<EOF
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|scope=whole|at=2026-11-01T00:00:01Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|scope=piece|at=2026-11-01T00:00:02Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=fail|scope=piece|at=2026-11-01T00:00:03Z
+EOF
+expect_eq "a whole and a piece reading at one head are two facts, the later piece replacing the earlier" "whole/pass piece/fail " \
+  "$(ask reviews "$H" | awk -F'|' '{ for (i = 2; i <= NF; i++) { if ($i ~ /^scope=/) s = substr($i, 7); if ($i ~ /^result=/) r = substr($i, 8) } printf "%s/%s ", s, r }')"
+# fails-when: a review proof is identified without its record, so a second record of one question at one head and
+# scope replaces the first and a finding of the first reads unregistered; or a check is, so a rerun stands beside it.
+W=records; plan records <<EOF
+run/v1|ev=proof|kind=review|head=$H|question=structure|result=fail|scope=piece|evidence=r/b.md|at=2026-11-01T00:00:01Z
+run/v1|ev=proof|kind=review|head=$H|question=structure|result=fail|scope=piece|evidence=r/c.md|at=2026-11-01T00:00:02Z
+run/v1|ev=proof|kind=check|head=$H|rc=1|evidence=r/1.log|at=2026-11-01T00:00:03Z
+run/v1|ev=proof|kind=check|head=$H|rc=0|evidence=r/2.log|at=2026-11-01T00:00:04Z
+EOF
+expect_eq "two review records of one question at one head and scope both stand, and a check's rerun replaces it" "r/b.md r/c.md r/2.log " \
+  "$(ask proof "$H" | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^evidence=/) printf "%s ", substr($i, 10) }')"
+
+# fails-when: two open debts of one concept and two kinds are one fact; a burned debt closes another kind than its own;
+# a writer writes a file of the record but the log.
+W=debtkind; plan debtkind < /dev/null
+dk() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh" && "$@" ); }; DK="$D/plans/epic-x/debtkind.plan.md"
+dkinds() { ask debts | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^kind=/) printf "%s ", substr($i, 6) }'; }
+for k in duplicate unpinned-pair; do dk proof_debt_event "$DK" concept=cv kind=$k sites=a.sh:1 raised-by=r.md touches=1; done
+expect_eq "two open debts of one concept and two kinds are two facts" "duplicate unpinned-pair " "$(dkinds)"
+dk proof_debt_event "$DK" concept=cv kind=duplicate sites=a.sh:1 raised-by=r.md touches=1 burned=T9
+expect_eq "a burned debt closes the debt of its own kind, and the other stays open" "unpinned-pair " "$(dkinds)"
+dk proof_decision_event "$DK" d=D4 verb=ruled said=1 by=Dana "title=the fourth"; dk proof_decision_event "$DK" d=D4 verb=put by=orchestrator "title=the fourth"
+expect_eq "a decision ruled and put again by its writer: the ledger answers each round, numbered in order, and the log is the record's one file" \
+  "Δ0/ruled Δ1/put |run.log" "$(ask ledger D4 | sed -n 's/.*|entry=\([^|]*\)|.*|verb=\([a-z]*\)|.*/\1\/\2/p' | tr '\n' ' ')|$(ls "$D/record/debtkind")"
+
+# fails-when: two acts by hand equal but for their time are one fact, so a second amend of one agent for one reason
+# goes uncounted; two equal lines with no time, which nothing tells apart, are two; a cancel naming the act misses one.
+W=twice; plan twice <<EOF
+run/v1|ev=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:01Z
+run/v1|ev=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:02Z
+run/v1|ev=hand|what=stop-run|name=w2|why=an older line
+run/v1|ev=hand|what=stop-run|name=w2|why=an older line
+EOF
+whats() { ask hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^what=/) printf "%s ", substr($i, 6) }'; }
+expect_eq "two amends of one agent for one reason at two times are two acts; two equal untimed lines are one" "amend amend stop-run " "$(whats)"
+printf 'run/v1|ev=cancel|of=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:03Z\n' >> "$D/record/twice/run.log"
+expect_eq "…and a cancel naming the act by its fields retracts it at each time it was taken" "stop-run " "$(whats)"
+
+section "NAME"
+QS=("step" "approved step3" "approved release" "green $H" "green $G" "proof $H" "proof $H regression" "landed" "asks")
+answers() { local q; for q in "${QS[@]}"; do W=$1; out="$(ask $q)"; printf '%s rc=%s %s\n' "$q" "$?" "$out"; done; }
+awk -F'|' -v OFS='|' '{ f = $2; for (i = 2; i < NF; i++) $i = $(i + 1); $NF = f; print }' \
+  "$D/record/fold/run.log" | plan moved
+expect_regex "the moved log has ev off its place" '^run/v1\|n=4\|by=me\|at=[^|]*\|ev=step$' "$(head -1 "$D/record/moved/run.log")"
+expect_contains "the planted log answers a list with lines" "proof $H rc=0 run/v1|ev=proof|" "$(answers fold)"
+expect_eq "every answer is the same with each line's fields moved" "$(answers fold)" "$(answers moved)"
+
+section "FORM"
+W=fold; out="$(ask approved step3)"; expect_status "a yes exits 0" 0 "$?"; expect_empty "a yes prints nothing" "$out"
+out="$(ask green "$G")"; expect_status "a no exits 1" 1 "$?"; expect_empty "a no prints nothing" "$out"
+out="$(ask step)"; expect_nonempty "a value answer prints" "$out"
+expect_eq "every value line is key=value" "" "$(printf '%s\n' "$out" | grep -Ev '^[a-z][a-z0-9_-]*=')"
+out="$(ask landed; ask asks; ask proof "$H")"; expect_eq "the lists print four lines" 4 "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+expect_eq "every list line starts run/v1|" "" "$(printf '%s\n' "$out" | grep -v '^run/v1|ev=')"
+W=done; printf 'run/v1|ev=step|n=9|by=me|at=2026-11-01T00:00:01Z\n' | plan done
+expect_eq "a run at Step 9 is delivered" "n=9 state=delivered" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
+W=gone; printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:01Z\nrun/v1|ev=abandon|by=me|why=w|at=2026-11-01T00:00:02Z\n' | plan gone
+expect_eq "an abandoned run says so" "n=6 state=abandoned" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
+p15() { printf -- '---\ncanonical_sdlc_version: 15\n---\n# %s\n' "$1" > "$D/plans/epic-x/$1.plan.md"; }   # <wave> -> its page at 15
+plan fresh < /dev/null; p15 fresh; p15 bare; printf 'run/v1|ev=abandon|by=me|why=w|at=2026-11-01T00:00:01Z\n' | plan left; p15 left
+plan old < /dev/null
+expect_eq "a page at 15 nothing has moved stands at step 0, open: its log empty, or none at all" "n=0 state=open|n=0 state=open" \
+  "$(W=fresh; ask step | paste -sd' ' -)|$(W=bare; ask step | paste -sd' ' -)"
+expect_eq "…one abandoned before a step reads abandoned at none, and a page not at 15 reads open at none, as before" \
+  "state=abandoned|state=open" "$(W=left; ask step | paste -sd' ' -)|$(W=old; ask step | paste -sd' ' -)"
+
+section "UNKNOWN"
+W=fold; out="$(ask nosuch 2>&1)"; expect_status "an unlisted question exits 2" 2 "$?"
+for q in step approved proof green landed asks; do expect_contains "the refusal lists $q" "$q" "$out"; done
+ask step >/dev/null; expect_status "a listed question is answered" 0 "$?"
+
+section "REST"
+# Each row: the question, the field its lines are read by (`-` the whole line), and `rc=<exit> <values>`.
+W=rest; t=2026-11-02T00:00; plan rest <<EOF
+run/v1|ev=ask|key=approve:step3|sent=s|at=${t}:01Z
+run/v1|ev=ask|key=approve:release|sent=s|holds=T9|at=${t}:02Z
+run/v1|ev=ask|key=decide:D1|sent=s|at=${t}:03Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|at=${t}:04Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|at=${t}:05Z
+run/v1|ev=proof|kind=review|head=$G|question=structure|result=fail|at=${t}:06Z
+run/v1|ev=waiver|question=evidence|head=$H|by=me|at=${t}:07Z
+run/v1|ev=decision|d=D1|verb=put|at=${t}:08Z
+run/v1|ev=decision|d=D1|verb=ruled|said=yes|at=${t}:09Z
+run/v1|ev=decision|d=D2|verb=put|at=${t}:10Z
+run/v1|ev=finding|ref=F1|to=defer|at=${t}:11Z
+run/v1|ev=finding|ref=F2|to=carried|at=${t}:12Z
+run/v1|ev=finding|ref=F1|to=fix|row=T5|at=${t}:13Z
+run/v1|ev=debt|concept=c1|kind=k|at=${t}:14Z
+run/v1|ev=debt|concept=c2|kind=k|at=${t}:15Z
+run/v1|ev=debt|concept=c2|kind=k|burned=T4|at=${t}:16Z
+run/v1|ev=admitted|id=d1|row=T3|at=${t}:17Z
+run/v1|ev=admitted|id=d2|row=T3|at=${t}:18Z
+run/v1|ev=void|id=d2|why=w|at=${t}:19Z
+run/v1|ev=stop|session=s1|state=held|room=2|at=${t}:20Z
+run/v1|ev=stop|session=s1|state=free|room=3|at=${t}:21Z
+run/v1|ev=order|act=given|said=away|at=${t}:22Z
+run/v1|ev=order|act=lifted|said=away|at=${t}:23Z
+run/v1|ev=order|act=given|said=away|at=${t}:24Z
+run/v1|ev=hand|kind=amend|lacked=x|at=${t}:25Z
+run/v1|ev=published|row=T2|commit=c2|kind=hand|at=${t}:26Z
+run/v1|ev=published|row=T1|commit=c1|kind=queue|at=${t}:27Z
+run/v1|ev=dispatch|row=T3|name=w3|suites=a.test.sh|files=f|at=${t}:28Z
+run/v1|ev=dispatch|row=T3|name=w3|suites=b.test.sh|files=f|at=${t}:29Z
+run/v1|ev=tree|row=T3|path=/t3|branch=wt/T3|base=c0|at=${t}:30Z
+run/v1|ev=returned|row=T3|why=red|at=${t}:31Z
+run/v1|ev=dispatch|row=T4|name=w4|at=${t}:32Z
+run/v1|ev=cancel|of=dispatch|row=T4|name=w4|at=${t}:33Z
+run/v1|ev=handoff|path=/h1|at=${t}:34Z
+run/v1|ev=handoff|path=/h2|at=${t}:35Z
+run/v1|ev=handoff|path=/h1|at=${t}:36Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=red|at=${t}:37Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=green|at=${t}:38Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=discarded|at=${t}:39Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=u.test.sh|result=discarded|at=${t}:40Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=u.test.sh|result=red|at=${t}:41Z
+EOF
+printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' >> "$D/plans/epic-x/rest.plan.md"
+for r in T1 T2 T3 T4; do printf '| %s | 4 | build | t | — | 30 | R | f | out/%s.md |\n' $r $r >> "$D/plans/epic-x/rest.plan.md"; done
+REST=("holds|holds|rc=0 step 4,T9" "reviews|question|rc=0 adversarial,structure,evidence" "reviews $H|question|rc=0 adversarial,evidence"
+  "ledger|verb|rc=0 put,ruled,put" "ledger D1|verb|rc=0 put,ruled" "findings|to|rc=0 carried,fix" "findings fix|ref|rc=0 F1"
+  "debts|concept/id/ref|rc=0 F2,c1,d1" "stop|-|rc=0 room=3,session=s1,state=free,at=${t}:21Z,order=given,asks=3,ready="
+  "order|-|rc=0 order=given,said=away,at=${t}:24Z" "hands|kind|rc=0 amend,hand" "handoff|-|rc=0 path=/h1,at=${t}:36Z"
+  "status T3|-|rc=0 state=returned,files=f,name=w3,suites=b.test.sh,tree=/t3,branch=wt/T3,base=c0"
+  "status T4|-|rc=0 state=pending" "status T1|-|rc=0 state=landed,commit=c1" "ready T4 T1|-|rc=0 " "ready T4 T3|-|rc=1 "
+  "ready T3|-|rc=1 " "ready T1|-|rc=1 " "verdicts|result|rc=0 green,red" "verdicts T9|result|rc=0 ")
+pick() {  # <field[/field…]|-> -> each line's first named field, or the whole line, joined by commas
+  awk -F'|' -v f="$1" 'BEGIN { n = split(f, w, "/") } { v = (f == "-") ? $0 : ""
+    for (j = 1; j <= n && v == ""; j++) for (i = 2; i <= NF; i++) if (index($i, w[j] "=") == 1) v = substr($i, length(w[j]) + 2)
+    printf "%s%s", (NR > 1 ? "," : ""), v }'
+}
+rest() { local r q f; for r in "${REST[@]}"; do q="${r%%|*}"; f="${r#*|}"; f="${f%%|*}"; out="$(ask $q)"; printf '%s|rc=%s %s\n' "$q" "$?" "$(printf '%s\n' "$out" | pick "$f")"; done; }
+got="$(rest)"; for r in "${REST[@]}"; do expect_eq "${r%%|*} answers its fold" "${r##*|}" "$(printf '%s\n' "$got" | awk -v p="${r%%|*}|" 'index($0, p) == 1 { print substr($0, length(p) + 1) }')"; done
+awk -F'|' -v OFS='|' '{ f = $2; for (i = 2; i < NF; i++) $i = $(i + 1); $NF = f; print }' "$D/record/rest/run.log" | plan restmoved
+cp "$D/plans/epic-x/rest.plan.md" "$D/plans/epic-x/restmoved.plan.md"
+expect_eq "the twelve answer the same with each line's fields moved" "$got" "$(W=restmoved; rest)"
+ask status 2>/dev/null; expect_status "status with no row exits 2" 2 "$?"
+ask ready 2>/dev/null; expect_status "ready with no row exits 2" 2 "$?"
+
+EVAL='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-7 | planted | AC-7.1 | unit | `cell` \| `row` | none |
+| REQ-7 | planted | AC-7.2 | unit | e2 | f2 |
+| REQ-7 | planted | AC-7.3 | unit | e3 | f3 |
+| REQ-7 | planted | AC-7.4 | unit | e4 | f4 |
+| REQ-7 | planted | AC-7.5 | unit | e5 | f5 |'
+mkdir -p "$D/plans/epic-x" "$D/record/new"
+cat > "$D/plans/epic-x/new.plan.md" <<EOF
+---
+canonical_sdlc_version: 15
+rigor: single
+scale-recommendation: 'one wave'
+---
+
+## Goal
+
+release: none, said in prose.
+
+## Eval design
+
+$EVAL
+
+## Tasks
+
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | Read the plan. | — | 120 | REQ-7 | a.sh, b.sh | out/T1.md |
+| T2 | 4 | build | Ask the log. | T1 | 60 | REQ-4 | c.sh | out/T2.md |
+| T3 | 4 | build | Wait on two. | T1, T9 | 30 | REQ-4 | d.sh | out/T3.md |
+EOF
+flat() { ask "$@" | tr '\n' ' ' | sed 's/ $//'; }
+
+section "HEADER"
+W=dq; printf -- '---\ncanonical_sdlc_version: 15\nscale-recommendation: "one wave: one plan"\n---\n' > "$D/plans/epic-x/dq.plan.md"
+expect_eq "a header key, its quotes dropped" "scale-recommendation=one wave: one plan" "$(ask header scale-recommendation)"
+W=new; expect_eq "the newer header, its quotes dropped" "canonical_sdlc_version=15 rigor=single scale-recommendation=one wave" "$(flat header)"
+ask header sdlc-step; expect_status "a key the header lacks answers no" 1 "$?"
+W=cr; plan cr < /dev/null; printf -- '---\rrigor: double\rabandoned: 2026-11-01\r---\rbody: no\r' > "$D/plans/epic-x/cr.plan.md"
+expect_eq "a CR-only header reads key by key, as a CRLF one does" "rigor=double abandoned=2026-11-01|rigor=double" \
+  "$(flat header)|$(printf -- '---\r\nrigor: double\r\n---\r\n' > "$D/plans/epic-x/cr.plan.md"; ask header)"
+printf -- '---\ngoals: a · one (x)\nrigor: double\ngoals: b · two (y)\n---\ngoals: body\n' > "$D/plans/epic-x/cr.plan.md"
+every() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_header "$D/plans/epic-x/cr.plan.md" "$@" ) | tr '\n' '|'; }
+expect_eq "a repeated key answers its first line, and with all every line of it in the header, the body not read" \
+  "goals=a · one (x)||goals=a · one (x)|goals=b · two (y)|" "$(every goals)|$(every goals all)"
+
+section "ROW"
+W=new; expect_eq "a row is its nine authored cells" \
+  "id=T2 step=4 kind=build task=Ask the log. deps=T1 size=60 serves=REQ-4 files=c.sh artifact=out/T2.md" "$(flat row T2)"
+ask row T9; expect_status "a row the table lacks answers no" 1 "$?"
+ask row; expect_status "row with no id is refused" 2 "$?"
+
+section "CRITERION"
+W=new; expect_eq "a criterion is its Eval design row, an escaped bar read as a bar" \
+  "requirement=REQ-7 approach=planted criterion=AC-7.1 eval-type=unit eval=\`cell\` | \`row\` fails-when=none" "$(flat criterion AC-7.1)"
+ask criterion AC-9.9; expect_status "a criterion the Eval design lacks answers no" 1 "$?"
+
+section "CELL"
+W=new; cat > "$D/record/new/run.log" <<EOF
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.1|rc=0|at=2026-11-01T00:00:01Z
+run/v1|ev=cancel|of=proof|kind=eval|head=$H|ac=AC-7.1|at=2026-11-01T00:00:02Z
+run/v1|ev=finding|ref=AC-7.1|severity=S2|at=2026-11-01T00:00:03Z
+run/v1|ev=approval|key=AC-7.2|by=me|at=2026-11-01T00:00:04Z
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.4|rc=0|evidence=record/new/e4.md|at=2026-11-01T00:00:05Z
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.3|rc=1|at=2026-11-01T00:00:06Z
+run/v1|ev=waiver|ac=AC-7.5|head=$H|by=me|why=w|at=2026-11-01T00:00:07Z
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-9.9|rc=0|at=2026-11-01T00:00:08Z
+run/v1|ev=proof|kind=review|question=evidence|head=$H|result=pass|evidence=record/new/a.md|at=2026-11-01T00:00:09Z
+run/v1|ev=proof|kind=review|question=evidence|head=$G|result=fail|evidence=record/new/b.md|at=2026-11-01T00:00:10Z
+EOF
+cells() { local c; for c in 1 2 3 4 5; do printf '%s; ' "$(flat cell "AC-7.$c")"; done; }
+expect_eq "discharged only with a standing proof, waiver or approval naming the criterion" \
+  "state=pending; state=discharged by=approval; state=pending; state=discharged by=proof; state=discharged by=waiver; " "$(cells)"
+every() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" && reader_cells "$D/plans/epic-x/$W.plan.md" "$@" ) | tr '\037\n' ',;'; }
+expect_eq "at 15 every criterion in one fold: its state, its tier by its eval type, its proof's evidence, the evidence review at the head (failed, a finding; no head, none), its approval" \
+  "AC-7.1,pending,,T1,,CONFIRMED,,REQ-7;AC-7.2,discharged,approval,T1,,CONFIRMED,me 2026-11-01 AC-7.2,REQ-7;AC-7.3,pending,,T1,,CONFIRMED,,REQ-7;AC-7.4,discharged,proof,T1,record/new/e4.md,CONFIRMED,,REQ-7;AC-7.5,discharged,waiver,T1,,CONFIRMED,,REQ-7;|REFUTED|" "$(every "$H")|$(every "$G" | cut -d, -f6)|$(every | cut -d, -f6)"
+# The person's word comes after the proof: an approval naming a discharged criterion confirms it and never unseats the
+# proof or the waiver that discharged it; an approval alone still discharges.
+W=conf; plan conf <<< "run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.4|rc=0|evidence=record/conf/e4.md|at=2026-11-01T00:00:05Z
+run/v1|ev=approval|key=AC-7.4|by=me|said=saw it hold|at=2026-11-01T00:00:06Z
+run/v1|ev=waiver|ac=AC-7.5|head=$H|by=me|why=w|evidence=record/conf/w5.md|at=2026-11-01T00:00:07Z
+run/v1|ev=approval|key=AC-7.5|by=me|at=2026-11-01T00:00:08Z
+run/v1|ev=approval|key=AC-7.2|by=me|at=2026-11-01T00:00:09Z"
+cp "$D/plans/epic-x/new.plan.md" "$D/plans/epic-x/conf.plan.md"
+conf() { every "$H" | tr ';' '\n' | awk -F, '$1 ~ /^AC-7\.[245]$/ { printf "%s=%s:%s:%s ", $1, $3, $5, $7 }'; }
+expect_eq "at 15 an approval after the proof or the waiver confirms the criterion and leaves its discharge and evidence; alone it discharges" \
+  "AC-7.2=approval::me 2026-11-01 AC-7.2 AC-7.4=proof:record/conf/e4.md:me 2026-11-01 saw it hold AC-7.5=waiver:record/conf/w5.md:me 2026-11-01 AC-7.5 |state=discharged by=proof" \
+  "$(conf)|$(flat cell AC-7.4)"
+# A run brought forward: the act carries an older row's verdict on its proof, untimed; a proof appended at 15 is
+# stamped by the appender, so a verdict named on it by hand is no verdict.
+W=fwd; plan fwd <<< "run/v1|ev=proof|kind=review|question=evidence|head=$G|result=fail|evidence=record/fwd/b.md|at=2026-11-01T00:00:10Z
+run/v1|ev=proof|ac=AC-7.1|evidence=record/fwd/e1.log|auditor=CONFIRMED|at="
+cp "$D/plans/epic-x/new.plan.md" "$D/plans/epic-x/fwd.plan.md"
+( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh" && proof_event "$D/plans/epic-x/fwd.plan.md" kind=eval "head=$H" ac=AC-7.4 evidence=record/fwd/e4.log auditor=CONFIRMED )
+expect_eq "the proof appended at 15 is stamped with its instant" 1 "$(grep -c '^run/v1|ev=proof|kind=eval|.*|ac=AC-7.4|.*|auditor=CONFIRMED|at=20[0-9-]*T' "$D/record/fwd/run.log")"
+fwd() { every "$@" | tr ';' '\n' | awk -F, '$1 == "AC-7.1" || $1 == "AC-7.4" { printf "%s=%s:%s ", $1, $3, $6 }'; }
+expect_eq "at 15 a criterion takes the verdict the act carried on its proof, at any head; one named on a proof appended at 15 is the review's at the head" \
+  "AC-7.1=proof:CONFIRMED AC-7.4=proof:REFUTED |AC-7.1=proof:CONFIRMED AC-7.4=proof: " "$(fwd "$G")|$(fwd)"
+W=new; ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
+ask cell; expect_status "cell with no criterion is refused" 2 "$?"
+
+section "JOIN"
+W=new; expect_eq "a plan with no pointer key reads its log by name" "state=discharged by=proof" "$(flat cell AC-7.4)"
+W=ptr; awk '{ print } /^rigor:/ { print "log: record/new/run.log" }' "$D/plans/epic-x/new.plan.md" > "$D/plans/epic-x/ptr.plan.md"
+expect_eq "a pointer key in the header is never followed: the approval the pointed-at log holds discharges nothing here" \
+  "log=record/new/run.log state=pending" "$(flat header log) $(flat cell AC-7.2)"
+
+section "READY"
+W=new; printf 'run/v1|ev=%s|at=2026-11-01T00:00:09Z\n' 'published|row=T1|commit=c1|kind=queue' 'approval|key=step3|by=me' 'step|n=4' >> "$D/record/new/run.log"
+readies() { local r; for r in "$@"; do ask ready $r; printf '%s=%s ' "${r// /+}" "$?"; done; }
+expect_eq "ready reads the deps cell, and deps a caller names stand as given" "T2=0 T3=1 T3+T1=0 T1=1 T7=1 " "$(readies T2 T3 'T3 T1' T1 T7)"
+
+# A nine-cell table holds a row's waits in deps, and its kind and step imply the rest.
+JLOG="run/v1|ev=approval|key=step3|by=me|at=2026-11-03T00:00:01Z
+run/v1|ev=step|n=4|at=2026-11-03T00:00:02Z
+run/v1|ev=ask|key=approve:ship|sent=s|at=2026-11-03T00:00:03Z
+run/v1|ev=ask|key=waive:F1|sent=s|at=2026-11-03T00:00:04Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|at=2026-11-03T00:00:05Z"
+printf '%s\n' "$JLOG" | plan w15
+cat > "$D/plans/epic-x/w15.plan.md" <<'EOF'
+## Tasks
+
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| B1 | 4 | build | t | — | 30 | R | src/b.sh, out/B1.md | out/B1.md |
+| B2 | 4 | build | t | B1 | 30 | R | out/B2.md | out/B2.md |
+| B3 | 6 | test | t | — | 30 | R | tests/b.test.sh | out/B3.md |
+| B4 | 8 | integrate | t | — | 30 | R | out/B4.md | out/B4.md |
+EOF
+joined() {  # <row…> -> each row's ready exit; the stop's ready= line; each ask holds lists, as key>holds; status of an absent row
+  local h; h="$(ask holds | awk -F'|' '{ for (i = 2; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^holds=/) v = substr($i, 7) }; printf "%s>%s ", k, v }')"
+  local rc; ask status Z9 >/dev/null; rc=$?; printf '%s; %s; %s; Z9=%s' "$(readies "$@")" "$(ask stop | grep '^ready=')" "$h" "$rc"
+}
+land() { printf 'run/v1|ev=published|row=%s|commit=c|kind=queue|at=2026-11-03T00:00:09Z\n' "$1" >> "$D/record/$W/run.log"; }
+
+section "JOIN-15"
+W=w15; expect_eq "a nine-cell row waits on its deps and what its kind and step imply, and no approval holds it" \
+  "B1=0 B2=1 B3=1 B4=1 ; ready=B1; waive:F1>B4 ; Z9=1" "$(joined B1 B2 B3 B4)"
+land B1; expect_eq "a test row at Step 6 waits for the code writers before it" "B1=1 B2=0 B3=1 B4=1 ; ready=B2" "$(joined B1 B2 B3 B4 | cut -d';' -f1-2)"
+printf '%s\n' "$JLOG" | plan w15s; printf '%s\n' '## Tasks' '' '| id | step | kind | task | deps | size | serves | Files | artifact |' '|---|---|---|---|---|---|---|---|---|' \
+  '| B1 | 4 | build | t | — | 30 | R | src/b.sh | — |' '| B5 | 4 | build | t | approval:ship | 30 | R | src/e.sh | — |' > "$D/plans/epic-x/w15s.plan.md"
+W=w15s; expect_eq "an approval a nine-cell row names in its deps holds it on its ask, and the row beside it is ready" \
+  "B1=0 B5=1 ; ready=B1; approve:ship>B5 ; Z9=1" "$(joined B1 B5)"
+
+section "SECTION"
+SP="$D/plans/epic-x/sec.plan.md"
+printf '%s\n' '## Tasks' '' '| id | task |' '|---|---|' '| T1 | one |' '' '## T1 — the first' '' 'Research to read: a.md' '' \
+  'suites: a.test.sh, b.test.sh' '' '### T10: not the first' "T10's words." '## T2' > "$SP"
+sect() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_section "$SP" "$@" ); }
+expect_eq "a section is the body under the heading whose first word is the id, to the next heading" \
+  "Research to read: a.md||suites: a.test.sh, b.test.sh|" "$(sect T1 | tr '\n' '|')"
+expect_eq "the first word is the whole id, its trailing colon dropped" "T10's words." "$(sect T10)"
+expect_eq "a key line of the section answers its value" "a.test.sh, b.test.sh" "$(sect T1 suites)"
+sect T2 >/dev/null; expect_status "a heading with no body is a section" 0 "$?"
+sect T1 artifact >/dev/null; expect_status "a key the section lacks answers no" 1 "$?"
+sect T3 >/dev/null; expect_status "a row with no heading of its own has no section" 1 "$?"
+
+section "PLACES"
+P="$(mktemp -d)"
+at() {  # <place> -> the rows landed over the log of a run there
+  local d="$P/${1//\//-}" r; r="${1##*/}"; r="$d/record/${r%.plan.md}"
+  mkdir -p "$d/${1%/*}" "$r"; printf '# r\n' > "$d/$1"
+  printf 'run/v1|ev=published|row=T2|commit=c2|kind=queue|at=2026-11-01T00:00:02Z\n' > "$r/run.log"
+  bash "$READER" "$d/$1" landed | grep -o 'row=T[0-9]'
+}
+for pl in plans/flat.plan.md plans/epic-y/nest.plan.md incidents/0001-x/plan.md; do expect_eq "$pl: its log is read from its record" \
+  "row=T2" "$(at $pl)"; done
+for pl in notes/w.plan.md plans/a/b/w.plan.md; do
+  mkdir -p "$P/out/${pl%/*}"; printf '# r\n' > "$P/out/$pl"; bash "$READER" "$P/out/$pl" step 2>/dev/null
+  expect_status "$pl: no place the walk admits, refused" 2 "$?"
+done
+
+
+section "TABLE"
+# Each plan's real Tasks row T1 is `real`; a decoy where the old walk would look is `decoy`.
+TH='| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|'
+TR='| T1 | 4 | build | real | — | 30 | R | a.sh | out/T1.md |'
+tp() { printf '%s\n' "$2" > "$D/plans/epic-x/$1.plan.md"; }
+tp tfence "## Goal
+\`\`\`
+## Tasks
+$TH
+| T1 | 4 | build | decoy | — | 30 | R | z.sh | out/T1.md |
+\`\`\`
+## Tasks
+$TH
+$TR"
+tp tsuffix "## Tasks (amended)
+
+$TH
+$TR"
+tp tlower "## tasks
+
+$TH
+$TR"
+tp tnote "## Tasks
+
+| note | here |
+|---|---|
+$TH
+$TR"
+printf '## Tasks\r\r%s\r%s\r' "$(printf '%s' "$TH" | tr '\n' '\r')" "$TR" > "$D/plans/epic-x/tcr.plan.md"
+expect_eq "a fenced table is prose, the heading reads in either case and may go on, the header names id, a lone CR ends a line" \
+  "tfence=real tsuffix=real tlower=real tnote=real tcr=real " \
+  "$(for W in tfence tsuffix tlower tnote tcr; do printf '%s=%s ' $W "$(ask row T1 | sed -n 's/^task=//p')"; done)"
+
+section "WAITS"
+# The rows each wait names carry the wait: a row naming its own id waits on itself, and a review row reading
+# live:head by its kind writes the settled head for a test row that reads it.
+cat > "$D/plans/epic-x/wr.plan.md" <<'EOF2'
+## Tasks
+
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 4 | build | t | C1 | 30 | R | src/c.sh | — |
+| C2 | 6 | review | t | — | 30 | R | src/d.sh | — |
+| C3 | 5 | test | t | C1 | 30 | R | record/C3.md | — |
+EOF2
+rw() { ( . "${READER%/reader.sh}/lib/reader.sh" && plan_read_waits "$D/plans/epic-x/wr.plan.md" ) | awk -F'\t' '$2 == "row" { printf "%s>%s<%s ", $1, $3, $4 }'; }
+expect_eq "each row a wait names, with the waits that name it" "C1>C1<C1 C2>C1<live:head C3>C1<head,C1 C3>C2<head " "$(rw)"
+section "HALF"
+# A run is its log alone: its old homes beside a plan at 14, or beside a log, are never read, and the kept fold's key
+# (lib/proof.sh `_proof_facts`) is summed over the plan, the reader's libraries and the log, no other file of the record.
+# fails-when: the reader translates the old homes, or the key sums a home beside the log, so editing it refolds.
+HD="$D/record/half"; mkdir -p "$HD"; HP="$D/plans/epic-x/half.plan.md"; printf '## SDLC State\n\ncurrent: 4\n' > "$HP"
+printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' > "$HD/beside-a.log"
+printf 'owed/v1|key=%s|state=open|sent=-|at=2026-11-01T00:00:0%s|title=t|reply=r\n' decide:D1 2 approve:x 3 > "$HD/beside-b.state"
+hev() { ( . "${READER%/reader.sh}/lib/reader.sh" && reader_events "$HP" ); }
+expect_eq "files beside a page with no log yield no event" "" "$(hev)"
+printf 'run/v1|ev=published|row=T2|commit=c2|kind=queue|at=2026-11-03T00:00:05Z\n' > "$HD/run.log"
+expect_eq "…and once it has a log, its events are the log's lines, byte for byte" "$(cat "$HD/run.log")" "$(hev)"
+hkey() { TMPDIR="$HT" bash -c '. "$1/proof.sh" && _proof_facts "$2" >/dev/null && printf "%s" "$_PROOF_FACTS_KEY"' _ "${READER%/reader.sh}/lib" "$HP"; }
+HT="$(mktemp -d)"; printf -- '---\ncanonical_sdlc_version: 15\n---\n# half\n' > "$HP"; printf 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | —\n' > "$HD/debt.md"
+HK1="$(hkey)"; printf '# l\n\n## Δ0 — D4 put (orchestrator 2026-11-01 9:00 AM PST): the fourth\n' > "$HD/design-ledger.md"
+printf 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | burned T9\n' > "$HD/debt.md"; HK2="$(hkey)"
+printf 'run/v1|ev=step|n=4|at=2026-11-03T00:00:06Z\n' >> "$HD/run.log"; HK3="$(hkey)"
+expect_eq "the fold's key names the log and no other file of the record: an old home edited keeps it, the log appended moves it" \
+  "1|same|moved" "$([ -n "$HK1" ] && echo 1)|$([ "$HK1" = "$HK2" ] && echo same || echo moved)|$([ "$HK2" = "$HK3" ] && echo same || echo moved)"
+rm -rf "$HT"
+section "ASK-LOG"
+# The asks library writes each act on an ask as an ask event in the run's log, at its own clock, and reads the log as
+# one list. fails-when: an act writes a file of the record but the log, an act leaves no event or one off the library's
+# clock, or a round the log opens again is numbered off its count.
+AR="$(mktemp -d)"; AP="$AR/.bionic/docs/plans/epic-x/askl.plan.md"; AD="$AR/.bionic/docs/record/askl"; T0=1793577600
+mkdir -p "${AP%/*}" "$AD"; printf '# askl\n' > "$AP"
+ao() {  # <epoch> <owed.sh function> [args] -> its answer, the run askl bound, the clock fixed at <epoch>
+  local e="$1"; shift
+  OWED_ROOT="$AR" OWED_PLAN="$AP" OWED_SID=s1 BIONIC_NOW_EPOCH="$e" \
+    bash -c '. "$1/roots.sh" && . "$1/owed.sh" && shift && "$@"' _ "${READER%/reader.sh}/lib" "$@" 2>/dev/null
+}
+ao $((T0 + 60)) owed_open waive:new "t new" "poker: r new"; ao $((T0 + 120)) owed_answer waive:new no
+ao $((T0 + 180)) owed_mark_sent waive:new; ao $((T0 + 240)) owed_close waive:new waive
+ao $((T0 + 300)) owed_open approve:step2 "t2" "poker: r2"; ao $((T0 + 360)) owed_close approve:step2 card
+ao $((T0 + 420)) owed_open approve:step2 "t2" "poker: r2"; printf 'run/v1|ev=approval|key=step2|by=me|at=2026-11-02T00:08:00Z\n' >> "$AD/run.log"
+expect_eq "each act is an ask event in the run's log: open, answer, sent, close of the one; open, close, open of the other" \
+  "waive:new waive:new waive:new waive:new approve:step2 approve:step2 approve:step2" \
+  "$(awk -F'|' '$2 == "ev=ask" { for (i = 3; i <= NF; i++) if ($i ~ /^key=/) printf "%s ", substr($i, 5) }' "$AD/run.log" 2>/dev/null | sed 's/ $//')"
+expect_eq "…and the log is the one file of the record" "run.log" "$(ls "$AD")"
+expect_eq "every round reads as one list, on the library's clock, the round opened again numbered 2" \
+  "approve:step2 1 closed 2026-11-02T00:05:00Z 2026-11-02T00:06:00Z|approve:step2 2 open 2026-11-02T00:07:00Z -|waive:new 1 closed 2026-11-02T00:01:00Z 2026-11-02T00:04:00Z" \
+  "$(ao "$T0" owed_rounds 'approve:step2|waive:.*' | tr '\t' ' ' | LC_ALL=C sort | paste -sd'|' -)"
+expect_eq "the open list: the round open, with its title and prompt" "approve:step2 - t2 poker: r2" "$(ao "$T0" owed_list | tr '\t' ' ' | paste -sd'|' -)"
+expect_eq "the answer reads on its closed round" "no 2026-11-02T00:02:00Z" "$(ao "$T0" owed_answer_of waive:new | cut -f1-2 | tr '\t' ' ')"
+expect_eq "the reader gives a round whole, folded once: opened, sent, answered and closed in four events, one line" \
+  "run/v1|ev=ask|key=waive:new|state=closed|by=waive|at=2026-11-02T00:04:00Z|opened=2026-11-02T00:01:00Z|sent=2026-11-02T00:03:00Z|round=1|answer=no|answered=2026-11-02T00:02:00Z|event=-" \
+  "$(. "${READER%/reader.sh}/lib/reader.sh" && reader_ask_rounds "$AP" | /usr/bin/grep '|key=waive:new|')"
+expect_eq "the library's open list and the reader's open asks agree, an approval with no reply beside the open round" "approve:step2|approve:step2 " \
+  "$(ao "$T0" owed_list | cut -f1 | paste -sd' ' -)|$(W=askl; D="$AR/.bionic/docs"; keys asks)"
+
+section "ASK-DOORS"
+# The doors that close an ask which no verb's own suite pins: a passing reading proof-add registers closes its
+# question's waiver, and the Stop over an approved plan closes the step asks the cards left open. fails-when: either
+# leaves its ask open on the run's list, or the Stop closes the step asks of a plan not approved.
+# FIXTURE FIDELITY: session-poker-3 §FACT's shape (s42_plan, s47_plan), a linked worktree with real commits, roster rows
+# from the production writer; the Stop is the shipped hook.
+. "$(dirname "$0")/lib/bound-marker.sh"; . "$(dirname "$0")/lib/roster-row.sh"
+POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"; . "$(dirname "$0")/session-poker.prelude.sh"
+AL="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"; POKE_BOUND=180
+al() { bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && shift && "$@"' _ "$AL" "$@" 2>/dev/null; }
+reg() { al owed_list_plan "$2" "$1" | cut -f1 | LC_ALL=C sort | paste -sd' ' -; }   # <root> <plan> -> the open keys
+RF="$(make_repo ask-doors)"; ( cd "$RF" && git commit -q --allow-empty -m init ); git -C "$RF" config user.name "Dana Fixture"
+RF_B="$(git -C "$RF" rev-parse HEAD)"; PF="$(s42_plan "$RF" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${RF_B:0:8}
+  branch: wave/01-fixture")"
+RF_DIR="$RF/.bionic/docs/record/wave-01-fixture"; printf 'run/v1|ev=published|row=T2|at=2026-10-04T00:30:00Z\n' >> "$RF_DIR/run.log"
+( cd "$RF" && git worktree add -q -b wave/01-fixture "$RF/.worktrees/01-fixture" "$RF_B" ) >/dev/null 2>&1; new_roster "$RF"
+printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=w-aud agent_id=a-w-aud subagent_type=bionic:auditor \
+  files=.bionic/docs/record/wave-01-fixture/ev-fail.md,.bionic/docs/record/wave-01-fixture/ev-pass.md)" >> "$(roster_of "$RF")"
+rec() { printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: %s\nscope: piece\n\nwhat the reader found\n' "${RF_B:0:10}" "$2" "$3" > "$RF_DIR/$1"; }
+rec ev-fail.md "$(s57_commit "$RF/.worktrees/01-fixture" lib/a.sh C1)" fail
+RF_SUM="$(cksum < "$PF")"
+poke "$RF" proof-add review record/wave-01-fixture/ev-fail.md --question evidence --reader w-aud
+expect_eq "a registered proof leaves the plan byte for byte as it was and adds one proof event to the run's log" "$RF_SUM|1" \
+  "$(cksum < "$PF")|$(/usr/bin/grep -c '^run/v1|ev=proof|kind=review|head=[0-9a-f]*|evidence=record/wave-01-fixture/ev-fail.md|question=evidence|' "$RF_DIR/run.log")"
+expect_eq "a failing reading registered (exit 0) opens its waiver on the run's list at once" "0|waive:evidence" "$RC|$(reg "$RF" "$PF")"
+rec ev-pass.md "$(s57_commit "$RF/.worktrees/01-fixture" lib/a.sh C2)" pass
+poke "$RF" proof-add review record/wave-01-fixture/ev-pass.md --question evidence --reader w-aud
+expect_eq "a passing reading of the question registered (exit 0) closes it, the closer named" "0||yes" "$RC|$(reg "$RF" "$PF")|$(al owed_lines "$PF" "$RF" \
+  | /usr/bin/grep -q '|key=waive:evidence|state=closed|by=passing reading|' && echo yes)"
+printf '| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | walked |\n\nverdict: CONFIRMED — one row\n' > "$RF_DIR/walk.md"
+RF_SUM="$(cksum < "$PF")"; poke "$RF" proof-add walk record/wave-01-fixture/walk.md
+expect_eq "a registered walk discharges the criterion it confirms by one proof naming it, the plan byte for byte as it was" \
+  "0|$RF_SUM|1|state=discharged by=proof" "$RC|$(cksum < "$PF")|$(/usr/bin/grep -c '^run/v1|ev=proof|ac=AC-1\.1|evidence=record/wave-01-fixture/walk\.md|' \
+  "$RF_DIR/run.log")|$(bash "$READER" "$PF" cell AC-1.1 | paste -sd' ' -)"
+SW_KEYS="approve:step0 approve:step1 approve:step2 approve:step3"
+for a in 0 1; do
+  SR="$(make_repo "sweep$a")"; new_roster "$SR"
+  SW="$(SP_APPROVED_LINE="$([ "$a" = 1 ] && echo 'approved-by: Dana Fixture 2026-10-21T12:00:00Z "approved"')" \
+    s47_plan "$SR" 8 "| T1 | 4 | build | a work row | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"; bound_marker "$SR" "$SID" "$SW"
+  for k in $SW_KEYS; do OWED_PLAN="$SW" OWED_ROOT="$SR" OWED_SID=sw-sid al owed_open "$k" "approval: $k" "Do you approve?"; done
+  SB="$(reg "$SR" "$SW")"; s31_stop "$SR" "$(s31_transcript "$SR" "carry on")"
+  SWEPT="${SWEPT:-}$a:$SB>$(reg "$SR" "$SW")>$(al owed_lines "$SW" "$SR" | /usr/bin/grep -c '|state=closed|by=plan approved-by|') "
+done
+expect_eq "the Stop over a plan with no approved-by: closes no step ask; over one carrying it, all four, the closer named" \
+  "0:$SW_KEYS>$SW_KEYS>0 1:$SW_KEYS>>4 " "$SWEPT"
+
+section "HANDS"
+# Each act a person takes by hand is one hand event the hands question answers, saying what it was and why, written
+# through the one writer, which refuses an act with no reason. fails-when: an amend, a hold, an extension, an adoption,
+# a by-hand landing or a person's stop of a run leaves no event or one with no reason; the writer writes one with no
+# reason; the tick's withdrawal of a request for the load is answered as an act by hand.
+# FIXTURE FIDELITY: §ASK-DOORS' bound plan and roster rows; the verbs are the shipped ones, the run a stand-in shim.
+HR="$(make_repo hands)"; HP="$(s34_plan "$HR" 4)"; new_roster "$HR"; HD="$HR/.bionic/docs/record/wave-01-fixture"
+hw() {  # <what> -> `<what>:<why>` for each answer of the hands question that names it, `|` between
+  bash "$READER" "$HP" hands | awk -F'|' -v w="$1" '{ a = ""; y = ""; for (i = 2; i <= NF; i++) { if ($i == "what=" w) a = w
+    if (index($i, "why=") == 1) y = substr($i, 5) } if (a != "") printf "%s%s:%s", (n++ ? "|" : ""), a, y }'
+}
+lh() { bash -c '. "$1/line.sh" && shift && line_hand_event "$@"' _ "$AL" "$@"; }   # <plan> <what> <why> [key=value]
+lh "$HP" probe 'a reason given' row=T1; LH_RC=$?
+expect_eq "the writer appends one hand event with its what and its why (exit 0)" "0|probe:a reason given" "$LH_RC|$(hw probe)"
+for y in '' '  ' '-'; do lh "$HP" probe "$y" 2>/dev/null; LH_NO="${LH_NO:-}$?"; done
+expect_eq "…and refuses each act with no reason, exit 2, writing nothing (an empty, a blank, a dash)" "222|probe:a reason given" \
+  "$LH_NO|$(hw probe)"
+s30_row "$HR" deliverable="$HR/w1.md" "$(said "$HR" w1)"; echo done > "$HR/w1.md"
+poke "$HR" amend w1 --files+ lib/z.sh --reason 'the brief missed lib/z.sh'; AM_RC="$RC"
+poke "$HR" hold w1 'kept for a second pass'; HO_RC="$RC"
+poke "$HR" extend w1 'more to read'
+expect_eq "an amend, a hold and an extension each leave one hand event with the verb's reason (exits)" \
+  "0 0 0|amend:the brief missed lib/z.sh|extend:more to read|hold:kept for a second pass" \
+  "$AM_RC $HO_RC $RC|$(hw amend)|$(hw extend)|$(hw hold)"
+HPRED="9f1e2d3c-4b5a-6978-8899-aabbccddeeff"; roster_header > "$(roster_of "$HR" "$HPRED")"
+for n in a1 a2; do roster_row_fixture status=identified session="$HPRED" name="w-$n" agent_id="a$n" plan="$HP" >> "$(roster_of "$HR" "$HPRED")"; done
+poke "$HR" adopt --why 'the session was cleared at 8:21'
+expect_eq "an adoption leaves one hand event per row adopted, with its reason (exit 0 or 1, open rows found)" \
+  "yes|adopt:the session was cleared at 8:21|adopt:the session was cleared at 8:21" "$( [ "$RC" -le 1 ] && echo yes)|$(hw adopt)"
+mkdir -p "$TMPROOT/hshim"; printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$TMPROOT/hshim/booked.sh"; HL="$HR/.bionic/tmp/runs/h.log"
+mkdir -p "${HL%/*}"; : > "$HL"
+perl -MPOSIX -e 'my $l = shift; exit 0 if fork; POSIX::setsid(); open(my $f, ">", "$l.pid"); print $f "$$\n"; close $f; exec @ARGV' \
+  "$HL" bash "$TMPROOT/hshim/booked.sh" --run-log "$HL"
+i=0; while [ ! -s "$HL.pid" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+poke "$HR" stop-run "$HL"; SR0="$RC"
+expect_true "a person's stop of a run with no reason is refused, the run still alive" kill -0 "$(cat "$HL.pid")"
+poke "$HR" stop-run "$HL" --why 'hung on a closed pipe'
+expect_eq "…and with one stops it and leaves one hand event naming it (exits)" "2 0|stop-run:hung on a closed pipe" "$SR0 $RC|$(hw stop-run)"
+mkdir -p "$BIONIC_GATE_DIR/requests"
+sg() {  # <id> <why> [--waiting] -> stop_run_gate as the verb and the tick call it, the session bound to the plan
+  printf 'key=k%s\nkind=work\nwho=%s:w-q%s\nasked=1000\nholder=-\n' "$1" "$SID" "$1" > "$BIONIC_GATE_DIR/requests/$1"
+  ( cd "$HR" && CLAUDE_CODE_SESSION_ID="$SID" SR_WHY="$2" SR_MACHINE="${SR_MACHINE:-}" P="$HP" bash -c 'H="$1"; shift; say() { :; }; die() { :; }
+    resolve_run() { POKER_RUN_PLAN="$P"; POKER_RUN_OPEN=yes; }; for l in roots session gate slots run line; do . "$H/../payload/scripts/lib/$l.sh"; done
+    . "$H/poker/roster.sh"; REPO_REAL="$PWD"; SR_REPORT_ONLY=no; stop_run_gate "$@"' _ "$BIONIC_HOOKS_DIR" "$1" ${3:+"$3"} ) >/dev/null 2>&1
+}
+sg 901 'a person stopped it'; SR_MACHINE=tick sg 902 'stood down for the load' --waiting
+expect_eq "a request a person stops is a hand event; the tick's withdrawal for the load is none" \
+  "stop-run:a person stopped it" "$(hw stop-run | tr '|' '\n' | /usr/bin/grep -v 'closed pipe')"
+LR2="$TMPROOT/hland"; git init -q "$LR2" && git -C "$LR2" commit -q --allow-empty -m init && mkdir -p "$LR2/.bionic/tmp"
+LB="$(git -C "$LR2" rev-parse HEAD)"; SPW="${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh"
+( cd "$LR2" && bash "$SPW" create "$LB" wave/20-demo && bash "$SPW" create "$LB" wt/20-T1 ) >/dev/null 2>&1
+LT="$(git -C "$LR2" worktree list --porcelain | sed -n 's/^worktree //p' | /usr/bin/grep '20-T1$')"
+[ -n "$LT" ] && echo w > "$LT/t1.txt" && git -C "$LT" add t1.txt && git -C "$LT" commit -qm T1
+LP="$LR2/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${LP%/*}"
+printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/20-demo\n---\n# plan\n' > "$LP"
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LP" > "$LR2/.bionic/tmp/engaged-$SID.state"
+( cd "$LR2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SPW" land "$LT" --by-hand --reason 'no Lands-on could be read' ) >/dev/null 2>&1; LH_RC=$?
+expect_eq "a by-hand landing is one published landing of the hand kind with its reason, answered by hands (exit)" \
+  "0|hand|no Lands-on could be read" "$LH_RC|$(bash "$READER" "$LP" hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(kind|why)=/) printf "|%s", substr($i, index($i, "=") + 1) }' | cut -c2-)"
+section "SESSION"
+# An order, a handoff and a session are their events in the log, each answered by the last of its kind; a session
+# counts once, by its first act. fails-when: a later bind of a session counts it again or replaces its first act.
+E=1793606400; ut() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+W=sesspast; plan sesspast <<EOF2
+run/v1|ev=order|act=given|said=stop|at=$(ut "$E")
+run/v1|ev=bind|session=s-one|by=write|at=$(ut "$E")
+run/v1|ev=handoff|path=h/old.md|at=$(ut "$E")
+run/v1|ev=order|act=lifted|said=stop|at=$(ut $((E + 60)))
+run/v1|ev=bind|session=s-two|by=engage|at=$(ut $((E + 61)))
+run/v1|ev=bind|session=s-one|by=bind|at=$(ut $((E + 62)))
+run/v1|ev=handoff|path=h/new.md|at=$(ut $((E + 63)))
+EOF2
+expect_eq "the order lifted, the newer handoff, each session once in the order it bound, by its first act" \
+  "none|h/new.md|s-one:write s-two:engage" "$(ask order | sed -n 's/^order=//p')|$(ask handoff | sed -n 's/^path=//p')|$(ask sessions \
+    | awk -F'|' '{ for (i = 2; i <= NF; i++) { split($i, k, "="); f[k[1]] = k[2] } printf "%s%s:%s", (NR > 1 ? " " : ""), f["session"], f["by"] }')"
+
+section "HELD"
+# each plan this suite built asked of the held place cold and of the whole fold: `<compared> <with a step>|<the plans that disagree>`
+held() { TMPDIR="$(mktemp -d)" bash -c '. "$1/lib/proof.sh"; _proof_reader_load; n=0; s=0; bad=""; for p in "$2"/*.plan.md; do n=$((n + 1))
+  w="$(reader_q_step "$p"; if reader_q_approved "$p" step3; then echo approved=1; else echo approved=0; fi)"; [ "$(proof_step_held "$p")" = "$w" ] || bad="$bad ${p##*/}"
+  case "$w" in n=[1-9]*) s=$((s + 1)) ;; esac
+  [ "$(proof_order_held "$p")|$(proof_sessions_held "$p")" = "$(reader_q_order "$p")|$(reader_q_sessions "$p")" ] || bad="$bad ${p##*/}:order-sessions"; done
+  echo "$n $s|$bad"' _ "${READER%/*}" "$D/plans/epic-x"; }
+HELD="$(held)"; HN="${HELD%%|*}"
+expect_eq "the held place, the order and the sessions answer as the whole fold on every plan this suite built, a step on five or more" \
+  "1 1|" "$([ "${HN% *}" -ge 20 ] && echo 1) $([ "${HN#* }" -ge 5 ] && echo 1)|${HELD#*|}"
+
+# A TURN'S END DROPS NO HELD PLACE. The place reads steps, abandons, approvals, orders and binds alone, so its key is the
+# log less the appender's stop events. The held file is planted with a step no event holds (n=7): an answer of 7 came
+# from the file. A step event after a stop, or a line in no stop event's shape, drops it, and the log is read again.
+HS="$(cd "$(mktemp -d)" && pwd -P)"; HT="$(cd "$(mktemp -d)" && pwd -P)"; mkdir -p "$HS/docs/plans/epic-x" "$HS/docs/record/held-stop"
+HP="$HS/docs/plans/epic-x/held-stop.plan.md"; HL="$HS/docs/record/held-stop/run.log"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# held\n' > "$HP"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:01:00Z\n' > "$HL"
+hs_ask() { TMPDIR="$HT" bash -c '. "$1/lib/proof.sh" && proof_step_held "$2" | sed -n "s/^n=//p"' _ "${READER%/*}" "$HP" 2>/dev/null; }
+hs_file() { ls -d "$HT"/bionic-place-*/[!.]* 2>/dev/null | head -1; }
+hs_plant() { local f; f="$(hs_file)"; awk '$0 == "n=4" || $0 == "n=5" { $0 = "n=7" } { print }' "$f" > "$f.t" && mv "$f.t" "$f"; }
+hs_stop() { RUN_LOG="$HL" bash -c '. "$1/lib/log.sh" && log_append stop session=s1 turn="$2" current=4 state=ok ceiling= width=4 open=0 free=4 ready= launched= declined= missed=0 idle= room=4' _ "${READER%/*}" "$1"; }
+expect_eq "HS0 meta: the place is folded from the log and held in a file" "4|n=4" "$(hs_ask)|$(/usr/bin/grep -x 'n=4' "$(hs_file)" 2>/dev/null)"
+hs_plant; hs_stop t1
+expect_eq "HS1 after a stop event the next ask is answered from the held file" "7|1" "$(hs_ask)|$(/usr/bin/grep -c '^run/v1|ev=stop|' "$HL")"
+printf 'run/v1|ev=step|n=5|at=2026-10-04T00:03:00Z\n' >> "$HL"
+expect_eq "HS2 a step event after the stop drops the held place, and the new step is read" "5" "$(hs_ask)"
+hs_plant; HS_PL="$(/usr/bin/grep -x 'n=7' "$(hs_file)" 2>/dev/null)"
+printf 'run/v1|ev=stop|session=s1|turn=t2|at=2026-10-04T00:04:00Z\n' >> "$HL"
+expect_eq "HS3 a line in no stop event's shape drops the held place too" "n=7|5" "$HS_PL|$(hs_ask)"
+rm -rf "$HS" "$HT"
+
+finish

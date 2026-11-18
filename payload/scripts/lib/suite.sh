@@ -167,3 +167,15 @@ bionic_suite_exec() {  # [--admit <id>] <tree> <suite> [args...] -> the suite's 
   shift "$_BIONIC_SUITE_SHIFT"
   ( _bionic_suite_run "$_BIONIC_SUITE_ADMIT" "$@" )
 }
+
+# A RUN THE MACHINE REFUSED A PROCESS did not run, so nothing in it was judged. Under memory pressure the
+# machine refuses new processes for a second at a time; bash 3.2, which the suites run under, gives up at
+# the first refusal and prints one line of its own, `<script>: fork: Resource temporarily unavailable`
+# (bash 5 writes `fork: retry: ` while it retries), and the suite fails with nothing wrong in the code.
+# Both judges read this one condition, and only for a run that failed: tests/run.sh reports the suite
+# not run, as the gate's refusal (75), and line.sh's `_line_verdict` gives `none`, so the landing runs it
+# again and stalls, naming both logs, at the second. A green is never read here. The line must be whole,
+# start to end, so a test that quotes it inside its own words, or a tool that decorates it, stays red.
+bionic_fork_refused() {  # <log> -> 0 when a line of it is the shell's own refusal of a process
+  LC_ALL=C grep -Eq '^[^ ]+: fork: (retry: )?Resource temporarily unavailable$' "$1" 2>/dev/null
+}

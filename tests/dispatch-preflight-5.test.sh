@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for hooks/dispatch-preflight.sh — THE START GATE. The fifth shard: §AGREE and §PROTOTYPE
-# (wave-38 T21; REQ-13 AC-13.1, AC-13.2; design ledger Δ9, D16).
+# Tests for hooks/dispatch-preflight.sh — THE START GATE. The fifth shard: §AGREE and §PROTOTYPE.
 # §QUESTIONS holds the other half: a row's declared questions are the set a reader's brief is compared to.
 #
 # A STEP-2 PROTOTYPE THE WALL ADMITS. steps/2.md sanctions a prototype at Step 2, before the plan
@@ -184,15 +183,13 @@ section "§PROTOTYPE — a confined prototype is admitted before approval and ow
 # prototype owns no plan row: it is admitted with no `Row:`, and a `Row:` on one is refused. A
 # writer brief without the kind is refused before approval, as before.
 #
-# FIXTURES: make_repo's plan, its approval line taken out and `current:` set to 2; a linked tree
+# FIXTURES: make_repo's run, its log at step 2 with no approval; a linked tree
 # under .worktrees/ marked for the agent. README.md is tracked at the head.
 #
 # fails-when: a confined prototype is refused before approval; one is admitted that names a
 # tracked path, a path outside both places, a tree not made for it, or a Row:.
-pt_unapprove() {  # <repo> — the bound plan at Step 2, with no approved-by: line
-  local p="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-  /usr/bin/awk '/^approved-by:/ { next } /^current:/ { print "current: 2"; next } { print }' "$p" > "$p.tmp" \
-    && mv "$p.tmp" "$p"
+pt_unapprove() {  # <repo> — the bound run at Step 2, its log holding no approval
+  printf 'run/v1|ev=step|n=%s|at=2026-09-07T19:0%s:00Z\n' 1 1 2 2 > "$1/.bionic/docs/record/wave-01-test/run.log"
 }
 pt_tree() {  # <repo> <tree name> <marker name> -> a linked tree under .worktrees/, marked
   local t="$1/.worktrees/$2"
@@ -222,8 +219,8 @@ pt_repo() {  # <name> -> an unapproved Step-2 fixture with the tree made for w99
 }
 
 REPO=$(pt_repo rpt1)
-PT_PLAN="$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-expect_absent "PT.0 precondition: the plan carries no approved-by: line" "approved-by:" "$(cat "$PT_PLAN")"
+expect_eq "PT.0 precondition: the run is at step 2 and approved nowhere" "n=2|1" \
+  "$(bash "$DP5_LIB/../reader.sh" "$(pf_plan_path "$REPO")" step | head -1)|$(bash "$DP5_LIB/../reader.sh" "$(pf_plan_path "$REPO")" approved step3; echo $?)"
 expect_true "PT.0b precondition: the throwaway tree is a linked worktree" test -f "$REPO/.worktrees/w99-proto/.git"
 expect_eq "PT.0c precondition: …marked for the agent" "w99-proto" \
   "$( ( . "$DP5_LIB/worktree.sh" >/dev/null 2>&1; worktree_marker "$REPO/.worktrees/w99-proto" ) )"
@@ -290,26 +287,25 @@ expect_contains "PT.8c …naming it" ".worktrees/w99-proto/lib/try.sh is outside
 
 # --- PT.9: the confinement holds after approval too: what it may write decides, not when ---
 REPO=$(make_repo rpt9 yes); write_attestation "$REPO" "$SID_A"; pt_tree "$REPO" w99-proto w99-proto >/dev/null
-expect_contains "PT.9 precondition: this plan is approved" "approved-by:" \
-  "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
+expect_status "PT.9 precondition: this run is approved" 0 "$(bash "$DP5_LIB/../reader.sh" "$(pf_plan_path "$REPO")" approved step3; echo $?)"
 pt_gate "$REPO" "$(pt_brief "$PT_OK_FILES, README.md")"
 expect_eq "PT.9b a prototype naming a tracked path is refused on an approved plan" "deny" "$GATE_VERDICT"
 expect_contains "PT.9c …naming it" "README.md is tracked" "$GATE_ERR"
 
-# --- PT.10: the evidence gate still refuses a matrix AC naming a prototype row (its existing arm) ---
-# Driven as it stands (lib/walls.sh validate_prototype_no_matrix_row): a plan at `current: 4` whose
-# `## Tasks` names T12 `kind: prototype` and whose AC-1 block names `task: T12`. The control
-# repoints AC-1 at the build row T13 and changes nothing else.
+# --- PT.10: the evidence gate still refuses a criterion naming a prototype row (its existing arm) ---
+# Driven as it stands (lib/walls.sh validate_prototype_no_matrix_row): a run at 15 at Step 4 whose
+# `## Tasks` names T12 `kind: prototype` and whose `## Eval design` Task cell for its criterion names T12. The
+# control repoints that cell at the build row T13 and changes nothing else.
 EG_GATE="${BIONIC_HOOKS_DIR}/bash-walls.sh"   # the evidence gate is a wall of bash-walls.sh
 PT_EG_SID="5d4c3b2a-9e8f-4a76-8b1c-2d3e4f506172"
-pt_eg_plan() {  # <dir> <AC-1's task> -> writes the plan, echoes its path
-  local p="$1/.bionic/docs/plans/active.md"
-  mkdir -p "$1/.bionic/docs/plans" "$1/.bionic/docs/record" "$1/.bionic/tmp" "$1/.claude/plans"
+pt_eg_plan() {  # <dir> <the criterion's task> -> writes the plan and its run's log, echoes the plan's path
+  local p="$1/.bionic/docs/plans/epic-99-x/wave-01-x.plan.md" n
+  mkdir -p "${p%/*}" "$1/.bionic/docs/record/wave-01-x" "$1/.bionic/tmp" "$1/.claude/plans"
   printf 'generic fixture proof\n' > "$1/.bionic/docs/record/generic-evidence.md"
   cat > "$p" <<EOF
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 intent: build
 rigor: double
 scale: wave
@@ -317,40 +313,30 @@ deploy_target: none
 use_worktree: false
 has_ui: true
 walk: exempt
+working-branch: wave/01-x
+base-sha: abc1234
 ---
-## SDLC State
-current: 4
-approved-by: dana 2026-09-07T19:05Z "Ok, amazing! Approved."
-Step 4:
-  plan-doc: .bionic/docs/plans/wave-01.plan.md#step-4
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T12 | 4 | prototype | E1: refusal wording (attended) | senior-implementor | — | 30m | E1 | record/x.md | pending |
-| T13 | 4 | build | E1: hooks migrated | senior-implementor | T12 | 60m | E1 | hooks/*.sh | pending |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T12 | 4 | prototype | E1: refusal wording (attended) | — | 30 | E1 | record/x.md | — |
+| T13 | 4 | build | E1: hooks migrated | T12 | 60 | E1 | hooks/*.sh | — |
 
-## Verification Matrix
+## Eval design
 
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T0 | pending | see AC-1 | |
-
-AC-1:
-  criterion: the refusal wording is proven
-  provenance: user 2026-09-07 "approved"
-  task: $2
-  fails-when: the wording is untested
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |
+|---|---|---|---|---|---|---|
+| E1 | the wording, read | AC-1 | static | \`tests/a.test.sh\` | the wording is untested | $2 |
 EOF
+  for n in 1 2 3 4; do printf 'run/v1|ev=step|n=%s|at=2026-09-07T19:0%s:00Z\n' "$n" "$n"; done > "$1/.bionic/docs/record/wave-01-x/run.log"
+  printf 'run/v1|ev=approval|key=step3|by=dana|said=Ok, amazing! Approved.|at=2026-09-07T19:05:00Z\n' >> "$1/.bionic/docs/record/wave-01-x/run.log"
   printf '%s' "$p"
 }
 pt_eg_run() {  # <dir> -> PT_EG_RC and PT_EG_ERR (the verbose stream) for a `git commit` there
   local in
   : > "$1/.bionic/tmp/engaged-$PT_EG_SID.state"
-  bound_marker "$1" "$PT_EG_SID" "$1/.bionic/docs/plans/active.md"
+  bound_marker "$1" "$PT_EG_SID" "$1/.bionic/docs/plans/epic-99-x/wave-01-x.plan.md"
   in=$(jq -n --arg c 'git commit -m "x"' --arg cwd "$1" --arg s "$PT_EG_SID" \
          '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   PT_EG_ERR=$(HOME="$1" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PT_EG_SID" BIONIC_WALL_VERBOSE=1 \
@@ -360,7 +346,8 @@ pt_eg_run() {  # <dir> -> PT_EG_RC and PT_EG_ERR (the verbose stream) for a `git
 PT_EG1="$SANDBOX/pt-eg1"; mkdir -p "$PT_EG1"
 pt_eg_plan "$PT_EG1" T12 >/dev/null
 pt_eg_run "$PT_EG1"
-expect_status "PT.10 AC-13.2 a matrix AC naming the prototype row is refused by the evidence gate" "2" "$PT_EG_RC"
+expect_status "PT.10 AC-13.2 a criterion naming the prototype row is refused by the evidence gate" "2" "$PT_EG_RC"
+expect_contains "PT.10b …for the prototype, naming the Task cell to repoint" "repoint the Task cell of 'AC-1'" "$PT_EG_ERR"
 PT_EG2="$SANDBOX/pt-eg2"; mkdir -p "$PT_EG2"
 pt_eg_plan "$PT_EG2" T13 >/dev/null
 pt_eg_run "$PT_EG2"
@@ -376,31 +363,28 @@ section "§LANDS-CMD — Lands-on: may name a backticked command its Re-executes
 # `Lands-on:` names one of them in backticks. The lift writes the command as ONE lands_on= entry: backticks around
 # its text with `%`, blank, tab, `,`, `|`, `/`, `*`, `?` and `[` percent-encoded (lib/suite.sh `lands_cmd`), so
 # every lands_on= reader (a comma or blank split, the roster's `|` fold, a `${s##*/}` file-name cut) keeps it
-# whole, and `bionic_lands_cmd` gives the command back. The outside-Suites: arm admits it against the brief's
-# Re-executes: runs. A command Re-executes: does not declare is refused, naming it.
+# whole, and `bionic_lands_cmd` gives the command back.
 # FIXTURES: make_repo's approved, bound plan with a `## Tasks` row T23; its tree holds lib/widget.sh, read by
 # tests/widget.test.sh. The brief is BRIEF_FULL's contract with Files:,
 # Suites:, Re-executes: and Lands-on: lines. SYNTHESIZED.
-# fails-when: a declared command on Lands-on: is refused, an undeclared one is admitted, or the row's
-# lands_on= does not give the declared command back byte for byte.
+# fails-when: a declared command on Lands-on: is refused, or the row's lands_on= does not give the declared
+# command back byte for byte.
 lc_gate() {  # <repo tag> <Lands-on line> [<Re-executes line>] -> GATE_*, LC_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  pf_tasks "$REPO" '| T23 | 4 | build | the widget | — | 30 | REQ-1 | a.sh | — |'
   mkdir -p "$REPO/payload/scripts/lib" "$REPO/tests"
   printf 'the widget\n' > "$REPO/payload/scripts/lib/widget.sh"
   printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
   git -C "$REPO" add payload tests >/dev/null 2>&1 && git -C "$REPO" commit -qm "a suite that reads the widget" >/dev/null 2>&1
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf '%s\nFiles: payload/scripts/lib/widget.sh\n%s\n%s' \
-    "$BRIEF_FULL" "${3-Re-executes: \`npx jest --testPathPatterns 'w(a|b)'\`}" "$2")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 "$(printf '%s\nFiles: payload/scripts/lib/widget.sh\n%s\n%s' \
+    "$BRIEF_FULL" "${3-Re-executes: \`npx jest --testPathPatterns 'w(a|b)'\`}" "$2")")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   LC_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
-lc_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
 LC_CMD="npx jest --testPathPatterns 'w(a|b)'"
 LC_TOK="\`npx%20jest%20--testPathPatterns%20'w(a%7Cb)'\`"
 
 LC_LIFT="$( . "$DP5_LIB/brief.sh" 2>/dev/null
-  brief_field "$(lift_contract_fields "Lands-on: widget, \`$LC_CMD\`, tests/x.test.sh")" lands_on)"
+  brief_field "$(brief_contract "Lands-on: widget, \`$LC_CMD\`, tests/x.test.sh")" lands_on)"
 expect_eq "LC.0 the lift writes a backticked command as one encoded entry, in its place among the suites" \
   "widget.test.sh,${LC_TOK},tests/x.test.sh" "$LC_LIFT"
 expect_eq "LC.0b …which lib/suite.sh gives back as the command, and which is no suite name" \
@@ -414,22 +398,6 @@ expect_eq "LC.1b …the row carries the command as its one encoded entry" \
   "widget.test.sh,${LC_TOK}" "$(roster_field "$LC_ROW" lands_on)"
 expect_eq "LC.1c …which gives back the declared command byte for byte, its pipe kept" \
   "$LC_CMD" "$( . "$DP5_LIB/suite.sh"; bionic_lands_cmd "$(roster_field "$LC_ROW" lands_on | cut -d, -f2)")"
-
-lc_gate lc3 'Lands-on: widget, `npx jest other`'
-expect_eq "LC.3 AC-14.3 a Lands-on: naming a command Re-executes: does not declare is refused" "deny" "$GATE_VERDICT"
-expect_contains "LC.3b …its line names the command" 'Lands-on: `npx jest other`' "$(lc_first)"
-expect_contains "LC.3c …as not declared under Re-executes:" "is not under Re-executes:" "$(lc_first)"
-expect_eq "LC.3d …its first line at most 100 columns" "ok" \
-  "$([ "$(bionic_cols "$(lc_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lc_first)")")"
-expect_contains "LC.3e …the detail names the runs it may name from" "Re-executes: \`$LC_CMD\`" "$GATE_VERR"
-expect_eq "LC.3f …and no row is written" "" "$LC_ROW"
-
-lc_gate lc4 "Lands-on: widget, \`$LC_CMD\`" 'Scope constraint: no runs declared.'
-expect_eq "LC.4 a backticked command with no Re-executes: line at all is refused the same way" "deny" "$GATE_VERDICT"
-expect_contains "LC.4b …naming it" "is not under Re-executes:" "$(lc_first)"
-expect_eq "LC.4c …its first line at most 100 columns with a 39-character command" "ok" \
-  "$([ "$(bionic_cols "$(lc_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lc_first)")")"
-expect_contains "LC.4d …the command cut in the line, its start kept" 'Lands-on: `npx jest --testPath' "$(lc_first)"
 
 section "§WAIVER-NONE — \`Deliverable-waiver: none\` is no waiver, so a declared artifact is no conflict"
 # A brief that waives nothing may still carry the scaffold's `Deliverable-waiver:` line with the word `none`. Read as a
@@ -461,10 +429,9 @@ section "§LANDS-NONE — Lands-on: none is admitted only for Files the prose li
 # (SYNTHESIZED); a `prose:` line written to the fixture's .bionic/config.yaml where the case names one.
 ln_gate() {  # <repo tag> <Files value> <prose: line or ''> -> GATE_*, LN_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the notes | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  pf_tasks "$REPO" '| T23 | 4 | build | the notes | — | 30 | REQ-1 | a.sh | — |'
   [ -z "$3" ] || printf '%s\n' "$3" > "$REPO/.bionic/config.yaml"
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf '%s\nFiles: %s\nLands-on: none the row'"'"'s Files are prose' "$BRIEF_FULL" "$2")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 "$(printf '%s\nFiles: %s\nLands-on: none the row'"'"'s Files are prose' "$BRIEF_FULL" "$2")")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   LN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
 ln_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
@@ -498,58 +465,89 @@ expect_eq "LN.5 a Files path under the tracked docs home (docs/adrs/…): admitt
 ln_gate ln6 notes-home/records/x.md 'docs-root: notes-home'
 expect_eq "LN.6 a Files path under a docs-root: set off the default: admitted" "allow" "$GATE_VERDICT"
 
-section "§QUESTIONS — a row's declared questions are the set the wall compares a reader's brief to (AC-5.3)"
+section "§DEBT-ONCE — an admitted launch asks the debt verb once for every concept its Files touch"
 # ============================================================================
 #
-# A review row declares the questions it owes with `task-add --questions`, which writes ` · questions: <q,…>` into its
-# task cell. The wall reaches the row by the brief's `Row:`, lifts the tag with `units_questions`, and compares the
-# brief's `Questions:` to that set in place of the role's full deal; a row with no tag is held to the full deal as ever.
-# A declaration the role is not dealt does not take the deal's place.
-# FIXTURES: make_repo's approved, bound plan at `rigor: double`, `scale: wave`, with a one-row `## Tasks` table whose
-# task cell carries the tag the case names (SYNTHESIZED in the shape task-add writes, which session-poker-4.test.sh
-# §REVIEW-FILES drives through the verb); the brief names the row by `Row:` and carries one record per question.
-# fails-when: a brief equal to the row's declaration is refused for not naming the role's full deal, a brief naming the
-# full deal is admitted over a row declaring less, a declaration outside the role's deal is honoured, or an untagged
-# row stops demanding the full deal.
-qn_gate() {  # <repo tag> <task cell> <role> <Questions: set, comma-joined> -> GATE_*, QN_ROW
-  local n files="" i
+# A brief whose Files: cover a site of a debt the run holds unburned carries one advisory line per item,
+# `debt: <concept> <kind> touches <n> — burn it in this row or say why not`, and each item's touches go up by one
+# through the debt's one writer, `session-poker.sh debt touched`, a process that reads the run whole. So the wall
+# starts it once, naming every concept the brief touches, however many.
+# FIXTURES: make_repo's approved, bound plan with row T23; nine debts of nine concepts written to its run's log by the
+# verb's own `debt add` over a record of nine debt: lines sited at notes/c<i>.md:1; a brief binding T23 whose Files:
+# name the nine notes, admitted with Lands-on: none by the fixture's `prose: notes/`. SYNTHESIZED.
+# THE COUNT: BASH_ENV names a prelude every bash the drive starts reads. In a `session-poker.sh debt touched` process
+# alone (known by its command line: bash 3.2 gives the prelude no $0 or arguments of the script) it writes one `call` line and traces into the same file with the function in PS4, so each entry to lib/proof.sh
+# `_proof_facts` there (the run's facts, read whole) is one read.
+# fails-when: nine concepts start the verb more than once, or it reads the run more than once; the advisory loses an
+# item or its count.
+DO_N=9
+DO_PRE="$SANDBOX/do-prelude.sh"
+cat > "$DO_PRE" <<'DO_PRELUDE'
+case "$(ps -o args= -p $$ 2>/dev/null)" in
+  *"/session-poker.sh debt touched "*) printf 'call\n' >> "$DO_TRACE"; exec 2>>"$DO_TRACE"; PS4='+|DO|${FUNCNAME[0]:-}| '; set -x ;;
+esac
+DO_PRELUDE
+do_repo() {  # <repo tag> -> REPO, its run holding DO_N untouched debts of DO_N concepts
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 6 | review | %s | reader | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' "$2" \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-  n=$(( $(printf '%s' "$4" | tr -cd ',' | wc -c) + 1 )); files=".bionic/docs/record/wq-$1.md"
-  for ((i = 2; i <= n; i++)); do files="$files, .bionic/docs/record/wq-$1-$i.md"; done
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf 'Your task: read the change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh\nRow: T23\nQuestions: %s\nFiles: %s' "$1" "${4//,/, }" "$files")" "wq-$1" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "$3")"
-  QN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+  pf_tasks "$REPO" '| T23 | 4 | build | the notes | — | 30 | REQ-1 | a.sh | — |'
+  printf 'prose: notes/\n' > "$REPO/.bionic/config.yaml"
+  seq 1 "$DO_N" | awk '{ print "debt: duplicate c" $1 " notes/c" $1 ".md:1" }' > "$REPO/.bionic/docs/record/wave-01-test/do-debts.md"
+  (cd "$REPO" && bash "$BIONIC_HOOKS_DIR/session-poker.sh" debt add record/wave-01-test/do-debts.md "$(pf_plan_path "$REPO")" >/dev/null 2>&1)
 }
-qn_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+do_gate() {  # [<extra jq filter>] -> GATE_*, DO_CALLS, DO_READS, DO_SAID (the advisory's debt lines)
+  DO_TRACE="$SANDBOX/do-trace.$RANDOM"; : > "$DO_TRACE"
+  GATE_ENV="BASH_ENV=$DO_PRE DO_TRACE=$DO_TRACE" run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 \
+    "$(printf '%s\nFiles: %s\nLands-on: none the notes are prose' "$BRIEF_FULL" "$(seq 1 "$DO_N" | awk '{ printf "%snotes/c%s.md", (NR > 1 ? ", " : ""), $1 }')")")" \
+    w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${2:-implementor}" | jq -c "${1:-.}")"
+  DO_CALLS="$(/usr/bin/grep -c '^call$' "$DO_TRACE")"
+  DO_READS="$(/usr/bin/grep -c -F '|DO|_proof_facts| local plan=' "$DO_TRACE")"
+  DO_SAID="$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null | /usr/bin/grep '^debt: ')"
+}
+do_touches() {  # -> each debt as <concept>=<touches>, in the run's order
+  (cd "$REPO" && bash "$BIONIC_HOOKS_DIR/session-poker.sh" debt list "$(pf_plan_path "$REPO")" 2>/dev/null) \
+    | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^touches=/) printf "%s%s=%s", (NR > 1 ? " " : ""), $1, substr($i, 9) }'
+}
+do_want() { seq 1 "$DO_N" | awk -v t="$1" '{ printf "%sc%s=%s", (NR > 1 ? " " : ""), $1, t }'; }
+DO_LINES="$(seq 1 "$DO_N" | awk '{ print "debt: c" $1 " duplicate touches 1 — burn it in this row or say why not" }')"
 
-qn_gate qn1 'the audit. The auditor reads it. · questions: evidence' bionic:auditor evidence
-expect_eq "QN.1 AC-5.3 over a row tagged questions: evidence at double, an auditor brief Questions: evidence is admitted" "allow" "$GATE_VERDICT"
-expect_eq "QN.1b …and the row records the set compared" "evidence" "$(roster_field "$QN_ROW" questions)"
+do_repo rdo1
+expect_eq "DO.0 precondition: the run holds nine debts of nine concepts, none touched" "$(do_want 0)" "$(do_touches)"
+do_gate
+echo "      (DO counts: $DO_CALLS calls of debt touched, $DO_READS reads of the run, for $DO_N concepts)"
+expect_eq "DO.1 the brief touching nine concepts is admitted" "allow" "$GATE_VERDICT"
+expect_eq "DO.2 …and the wall starts the debt verb once for all nine" "1" "$DO_CALLS"
+expect_eq "DO.3 …which reads the run once" "1" "$DO_READS"
+expect_eq "DO.4 …each item touched once" "$(do_want 1)" "$(do_touches)"
+expect_eq "DO.5 …and the advisory carries one line per item, at its new count, in its words" \
+  "$DO_LINES" "$DO_SAID"
 
-qn_gate qn2 'the audit. The auditor reads it. · questions: evidence' bionic:auditor evidence,adversarial
-expect_eq "QN.2 AC-5.3 …a brief naming evidence, adversarial over that row is refused" "deny" "$GATE_VERDICT"
-expect_contains "QN.2b …its line names the set the row declares" "dispatch refused — row T23 declares auditor: evidence" "$(qn_first)"
-expect_contains "QN.2c …and the detail the dealt set, evidence alone" "Dealt: evidence" "$GATE_VERR"
-
-qn_gate qn3 'the critic read. The critic reads the code. · questions: adversarial' bionic:critic adversarial
-expect_eq "QN.3 AC-5.3 over a row tagged questions: adversarial, the critic's brief Questions: adversarial is admitted (the role's full deal is adversarial, structure)" \
-  "allow|adversarial" "$GATE_VERDICT|$(roster_field "$QN_ROW" questions)"
-
-qn_gate qn4 'the critic read. The critic reads the code. · questions: adversarial' bionic:critic adversarial,structure
-expect_eq "QN.4 AC-5.3 …and the brief naming the critic's full deal over that row is refused" "deny" "$GATE_VERDICT"
-expect_contains "QN.4b …its line names the row and its set" "dispatch refused — row T23 declares critic: adversarial" "$(qn_first)"
-expect_contains "QN.4c …and the detail says where the set was declared" "declared on row T23 by task-add --questions" "$GATE_VERR"
-expect_contains "QN.4d …and the line to write is the declared set" "    Questions: adversarial" "$GATE_VERR"
-
-qn_gate qn5 'the critic read. The critic reads the code.' bionic:critic adversarial
-expect_eq "QN.5 AC-5.3 over an untagged row the role's full deal is demanded: the critic's adversarial alone is refused" "deny" "$GATE_VERDICT"
-expect_contains "QN.5b …naming the full deal" "double rigor deals critic: adversarial,structure" "$(qn_first)"
-qn_gate qn5c 'the critic read. The critic reads the code.' bionic:critic adversarial,structure
-expect_eq "QN.5c control: the full deal over the untagged row is admitted" "allow|adversarial,structure" "$GATE_VERDICT|$(roster_field "$QN_ROW" questions)"
-
-qn_gate qn6 'the audit. The auditor reads it. · questions: adversarial' bionic:auditor adversarial
-expect_eq "QN.6 a declaration the role is not dealt (adversarial is the critic's at double) does not take the deal's place: the auditor is refused" "deny" "$GATE_VERDICT"
-expect_contains "QN.6b …held to what the rigor deals the auditor" "double rigor deals auditor: evidence" "$(qn_first)"
+section "§DEBT-ADMITTED — a touch is written only for a launch the wall admits"
+# ============================================================================
+#
+# The touch is written past the wall's last refusal, so a launch refused after the debt arm's read leaves every count
+# as it was: here by the roster's own two refusals, a roster that is a link and one that cannot be appended to. A launch
+# admitted with no row (a read-only role from inside an agent) is still a launch, and touches.
+# FIXTURES: §DEBT-ONCE's run and brief; the roster a link to a sandbox file, or a file with no write bit; for the nested
+# launch, the payload given an agent_id and the role bionic:researcher. SYNTHESIZED.
+# fails-when: a refused launch moves a count; an admitted one, with a row or without, does not touch.
+do_repo rda1
+ln -s "$SANDBOX/rda1-elsewhere" "$(roster_path "$REPO" "$SID_A")"
+do_gate
+expect_eq "DA.1 a launch the roster's link refuses, past the debt arm's read: refused, by the link" "deny|symbolic link" \
+  "$GATE_VERDICT|$(printf '%s' "$GATE_ERR$GATE_REASON" | /usr/bin/grep -o 'symbolic link' | head -1)"
+expect_eq "DA.1b …and no count moved" "$(do_want 0)" "$(do_touches)"
+do_repo rda2
+printf '# roster\n' > "$(roster_path "$REPO" "$SID_A")"; chmod 400 "$(roster_path "$REPO" "$SID_A")"
+do_gate
+expect_eq "DA.2 a launch whose roster cannot be appended to: refused, as unwritable" "deny|cannot be written" \
+  "$GATE_VERDICT|$(printf '%s' "$GATE_ERR$GATE_REASON" | /usr/bin/grep -o 'cannot be written' | head -1)"
+expect_eq "DA.2b …and no count moved" "$(do_want 0)" "$(do_touches)"
+chmod 600 "$(roster_path "$REPO" "$SID_A")"
+do_repo rda3
+do_gate '. + {agent_id: "a7f3c2e1"}' bionic:researcher
+expect_eq "DA.3 a read-only role launched from inside an agent: admitted with no row" "allow|0" \
+  "$GATE_VERDICT|$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+expect_eq "DA.3b …its items touched once, in one call" "$(do_want 1)|1" "$(do_touches)|$DO_CALLS"
+expect_eq "DA.3c …and advised at their new counts" "$DO_LINES" "$DO_SAID"
 
 finish

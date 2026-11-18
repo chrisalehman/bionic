@@ -40,7 +40,6 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
-. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
@@ -202,8 +201,6 @@ expect_contains "…and so does lib/patrol.sh's patrol_roster_state, on the same
   "open=3" "$(cat "$SANDBOX/.r22g")"
 
 # ======================== S22b-nla: A LISTAGENTS ANSWER IS NOT A PRECONDITION
-# (wave-12 T1; spec D1 and principle P-A; Chris 2026-09-13 "What the hell. I don't want
-# this to happen to begin with!" — AC-4.1, AC-4.2.)
 #
 # WHAT MOVED. Until 1.7.0 a transcript carrying no fresh ListAgents answer refused the
 # WHOLE dispatch and told the orchestrator to go call the tool first. That is a chore on
@@ -314,8 +311,7 @@ expect_status "r22jd an empty roster needs no live reading -> the same STALE tra
   "0" "$GATE_ST"
 expect_absent "…and says nothing about live-agents" "live-agents:" "$GATE_ERR"
 
-# (e) THE CLOSING MARKER IS UNREACHABLE WHILE THE PANEL IS FRESH (wave-14 AC-3.4,
-# narrowing wave-12 AC-7).
+# (e) THE CLOSING MARKER IS UNREACHABLE WHILE THE PANEL IS FRESH.
 #
 # WHAT THE OLD PIN SAID. AC-7 retired `landing-swept` as this wall's closing signal
 # outright and pinned the retirement on the function's own body at the TOKEN level, so the
@@ -437,7 +433,6 @@ expect_status "r22mkh six thousand acked rows on a stale panel, writers=1 -> ALL
 expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 
 # ================= §budget-roster-one-pass: THE COUNT READS THE ROSTER ONCE, AND COUNTS THE SAME
-# (epic-23 wave-32 T4; REQ-3 AC-3.1, AC-3.3; D3, ruling A-orch-3.)
 #
 # WHAT IT COST. §budget-markers-pipe above spent 351 s of this suite's 739 at b7b5bdbe inside one
 # call to `budget_roster_counts`. Per roster row it ran a command substitution through tr, sed and
@@ -464,14 +459,16 @@ BRC_LIB="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
 BRC_FN="$BRC_DIR/fn.sh"
 sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE" > "$BRC_FN"
 
-# brc_harness <harness path> <function file> [shim dir] — a script that sources the two libraries
-# the function reads, the hook's two constants it uses, and the function, then runs it once:
+# brc_harness <harness path> <function file> [shim dir] — a script that sources the three libraries
+# the function reads, the hook's constants it uses (the session it runs as among them), and the
+# function, then runs it once:
 #   bash <harness> <roster> <ack ledger> <transcript>
 brc_harness() {
   {
     printf '#!/bin/bash\nset -uo pipefail\n'
-    printf '. %q\n. %q\n' "$BRC_LIB/agents.sh" "$BRC_LIB/roster.sh"
+    printf '. %q\n. %q\n. %q\n' "$BRC_LIB/agents.sh" "$BRC_LIB/roster.sh" "$BRC_LIB/alive.sh"
     printf 'ROSTER_VERSION="$ROSTER_SCHEMA_VERSION"\nACK_LEDGER_FILE="$2"\n'
+    printf 'BIONIC_SID=%q CLAUDE_CODE_SESSION_ID=%q\n' "$SID_A" "$SID_A"
     printf '. %q\n' "$2"
     printf 'export BRC_HARNESS_PID=$$\n'
     [ -z "${3:-}" ] || printf 'PATH=%q:"$PATH"\n' "$3"
@@ -617,7 +614,6 @@ else
 fi
 
 # ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
-# (spec R2, AC-27; task S16, closing the Step-5 auditor's F-1.)
 #
 # R2 names two departure modes — "delivered and stopped, or finished and never stopped".
 # S22b counts a row open on PRESENCE, which discharges the first and misses the second:
@@ -645,7 +641,7 @@ section "§WHOLE-RUN-ADMITTED — the dispatch wall holds no whole-run rule: reg
 REPO=$(pf_repo rwr1)
 write_attestation "$REPO" "$SID_A"
 pf_plan "$REPO" "" "$(pf_row T1 4 active 'lib/two.sh')" "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt test T1)"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T12")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T12 w99-T12 "$PF_FULL_BRIEF")" "w99-T12")"
 expect_eq "WA.1 AC-7.3 a whole run with a build row open is ADMITTED by the dispatch wall" "allow" "$GATE_VERDICT"
 expect_status "WA.1 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 expect_contains "WA.1 …its row holds run.sh (the run a second dispatch follows)" "run.sh" \
@@ -661,14 +657,13 @@ section "§LANDS-ON — a brief's Lands-on is held within its Suites and nothing
 # holds payload/scripts/lib/widget.sh, run by widget.test.sh and grepped by reader.test.sh.
 lo_gate() {  # <repo tag> <Lands-on line> -> GATE_*, LO_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  pf_tasks "$REPO" '| T23 | 4 | build | the widget | — | 30 | REQ-1 | a.sh | — |'
   mkdir -p "$REPO/payload/scripts/lib" "$REPO/tests"
   printf 'the widget\n' > "$REPO/payload/scripts/lib/widget.sh"
   printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
   printf '#!/bin/bash\ngrep -c widget "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/reader.test.sh"
   git -C "$REPO" add payload tests >/dev/null 2>&1 && git -C "$REPO" commit -qm "suites that read the widget" >/dev/null 2>&1
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · double · wave.
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 "Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · double · wave.
 Your task: implement the widget behind the existing seam.
 $2
 Expected artifact: .bionic/docs/record/w99-widget.txt
@@ -676,15 +671,101 @@ Exit condition: the artifact exists and the paired suite is green.
 Expected duration: ~25 minutes.
 Progress artifact: .bionic/tmp/w99-widget.progress
 Files: payload/scripts/lib/widget.sh
-Suites: tests/widget.test.sh" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+Suites: tests/widget.test.sh")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   LO_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
 lo_gate lo1 'Lands-on: widget'
 expect_eq "LO-1 one suite on Lands-on, within Suites, is admitted though another suite reads the Files" \
   "allow|widget.test.sh" "$GATE_VERDICT|$(roster_field "$LO_ROW" lands_on)"
 expect_absent "LO-1b …and nothing asks for the other reader" "reader.test.sh" "$GATE_ERR"
-lo_gate lo2 'Lands-on: reader'
-expect_eq "LO-2 control: a Lands-on suite outside Suites is refused on the same tree" "deny" "$GATE_VERDICT"
-expect_contains "LO-2b …for being outside Suites" "is outside Suites:" "$GATE_ERR"
+
+section "§PLACE — the plan's approval and the step a writer is refused at are the run's facts, its log's among them"
+REPO=$(make_repo pl1 yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"
+printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:01Z\n' > "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "PL.1 a writer on a plan approved nowhere is refused at the step its log holds" "deny|Step: 6 " \
+  "$GATE_VERDICT|$(printf '%s\n' "$GATE_OUT$GATE_ERR" | /usr/bin/grep -o 'Step: [0-9]* ' | head -1)"
+# A page at 15 holds its approval in its log, which the approve verb writes; the write hook refuses a state section.
+expect_contains "PL.1b …its detail names the approve verb that records the plan's approval" "session-poker.sh approve plan '<" "$GATE_VERR"
+expect_absent "PL.1c …and no state section" "SDLC State" "$GATE_VERR"
+printf 'run/v1|ev=approval|key=step3|by=u|said=approved|at=2026-11-01T00:00:02Z\n' >> "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "PL.2 …and admitted once its log alone holds the approval" "allow" "$GATE_VERDICT"
+
+section "§WORDS — every refusal of the wall is said by key from lib/dispatch.sh, in the words the wall gave"
+# The library sourced in a shell of its own: each key said once with sample facts, its user line compared with the
+# words the hook printed before they moved; an unknown key answers 2 with no words.
+WORDS_GOT="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 3
+w() { local k="$1" rc=0; shift; dispatch_say "$k" "$@" || rc=$?; printf "%s|%s (%s)|%s\n" "$k" "$DISPATCH_FACT" "$DISPATCH_FIX" "$rc"; }
+w deadline 22 /r; w attest-none "bash /h/p.sh"; w attest-failed out "bash /h/p.sh"; w plan-unreadable /p.md
+w patrol-never /h/sp.sh /s; w patrol-silent 9 3 /h/sp.sh /s; w patrol-stopped /h/sp.sh 9 8 7 6 default /s
+w reviewer-retired bionic:reviewer; w facts-unread w /p.md; w fill-missing w /p.md /lib "a b"; w unapproved w /p.md 3 "a b"
+w unbound w adv "a b"; w name-ambiguous x-T1 "$(printf "T1\nA-T1")" /p.md; w approval-waits T9 release w-T9 /p.md /h
+w approval-unread T9 release w-T9 /p.md; w waits-unread T9 w-T9 /p.md; w nested-writer w id ch ty "a b"; w worktree /c /t /m
+w budget 3 3 4 "" /h/ss.sh "writers=3 source=user" /p.md person wave /h; w in-flight w-1 intended
+w deliverable-outside /x /x /r; w proto-row T1; w proto-tree w-1 t /r/t none "" /s.sh; w proto-path a.sh /rec "" "$(printf "a.sh\ttracked")"
+w no-deliverable; w no-suites; w row-unknown T99 /p.md; w row-mismatch T2 T1 w-T1 /p.md; w lands-none a.sh why a.sh
+w live-writer T1 w-2 abcdef123456 w-1 /t abcdef123456
+for b in unreadable unnamed outside absent unrendered unsummed unsummable edited other-name other-row slot; do w brief-$b w-T1 T1 "" /h T2 x; done
+w roster-link /r; w row-unbuilt /r; w roster-unwritable /r denied /s; w no-such-key a
+printf "detail|%s\n" "$(dispatch_say deadline 22 "" && printf "%s" "$DISPATCH_DETAIL" | head -4 | tail -1)"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib")"
+expect_eq "W.1 each key says the fact and fix the wall gave, and an unknown key answers 2 with no words" "deadline|the wall ran out of time (dispatch again)|0
+attest-none|this repo has no environment attestation (run the preflight probe)|0
+attest-failed|the environment check ran and did not pass (fix what the probe named)|0
+plan-unreadable|the bound plan cannot be read (restore read access to the plan)|0
+patrol-never|no Patrol stamp exists for this session (CronCreate the Patrol job)|0
+patrol-silent|the Patrol fires but never ticks (run the tick; replace the job)|0
+patrol-stopped|the Patrol was armed and stopped firing (re-arm the Patrol, both halves)|0
+reviewer-retired|bionic:reviewer is retired (1.14.0) (dispatch bionic:critic)|0
+facts-unread|the run's facts could not be read (dispatch again)|0
+fill-missing|the approval check lib/fill.sh cannot be loaded (reinstall the plugin)|0
+unapproved|the plan this writer builds is unapproved (get the Step-3 plan approved)|0
+unbound|this session is bound to no run (bind it, or write its plan)|0
+name-ambiguous|the name matches rows T1, A-T1 (add Row: <id>)|0
+approval-waits|row T9 waits for approval:release (record it with the approve verb)|0
+approval-unread|the run's facts could not be read (dispatch again)|0
+waits-unread|row T9's waits could not be read (dispatch again)|0
+nested-writer|a subagent may launch only read-only roles (ask the orchestrator)|0
+worktree|this dispatch came from a worktree (dispatch from the main checkout)|0
+budget|this passes the run's writer budget (land or stand down a row)|0
+in-flight|that name is in flight (use the FILL line's name)|0
+deliverable-outside|the deliverable is outside this repository (name a path inside the repo)|0
+proto-row|a prototype owns no plan row; it names Row: T1 (drop Row:)|0
+proto-tree|throwaway tree not made for w-1 (spawn it for this agent)|0
+proto-path|prototype path a.sh is tracked (drop it from Files:)|0
+no-deliverable|this brief names no deliverable (add an Expected artifact: line)|0
+no-suites|this brief declares no Files: and no Suites: (declare Suites:)|0
+row-unknown|Row: T99 names no plan row (name a ## Tasks row id)|0
+row-mismatch|Row: T2 is not the name's row T1 (rename or drop Row:)|0
+lands-none|Lands-on: none, not prose: a.sh (add suites or prose:)|0
+live-writer|row T1 has a live writer w-2 (session abcdef12) (stop it or ack it)|0
+brief-unreadable|the brief check lib/brief.sh cannot be loaded (reinstall the plugin)|0
+brief-unnamed|the prompt names no brief file of row T1 (run the brief verb)|0
+brief-outside|the brief file is outside this project (run the brief verb)|0
+brief-absent|the brief file the prompt names is not there (run the brief verb)|0
+brief-unrendered|the brief file carries no render mark (run the brief verb)|0
+brief-unsummed|the brief file's mark carries no sum (run the brief verb)|0
+brief-unsummable|the brief file's sum cannot be taken (install shasum or sha256sum)|0
+brief-edited|the brief file was edited after its render (run the brief verb)|0
+brief-other-name|the brief file is for x, not this name (run the brief verb)|0
+brief-other-row|the brief file is row T2's, not row T1's (run the brief verb)|0
+brief-slot|the brief file has a slot left for the orchestrator (fill the row, render again)|0
+roster-link|the roster path is a symbolic link (remove the link)|0
+row-unbuilt|the launch row did not build (run /bionic:doctor)|0
+roster-unwritable|the roster cannot be written (make it writable)|0
+no-such-key| ()|2
+detail|Roster:  (not reached)" "$WORDS_GOT"
+
+# A row that waits for a named approval asks the reader, so an approval its run's log alone holds admits it; an integrate
+# row waits for the release's approval while a release row stands, and not once that row is dropped.
+w2_repo() { REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"
+  pf_tasks "$REPO" '| T8 | 8 | integrate | the merge | — | 20 | REQ-1 | — | — |' '| T9 | 7 | doc | the release | approval:release | 20 | REQ-1 | CHANGELOG.md | — |'
+  W2_I8="$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T8 w-T8 "$BRIEF_FULL")" w-T8)"; }
+w2_repo wa1; W2_PAY="$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T9 w-T9 "$BRIEF_FULL")" w-T9)"; run_gate "$W2_PAY"
+expect_eq "W.2a a row whose deps cell waits on approval:release is refused while no approval stands" "deny" "$GATE_VERDICT"
+run_gate "$W2_I8"; W2_V="$GATE_VERDICT $(printf '%s\n' "$GATE_ERR" | grep -o 'row T8 waits for approval:release' | head -1)"
+printf 'run/v1|ev=approval|key=release|by=u|said=approved|at=2026-11-01T00:00:02Z\n' >> "$PL"; run_gate "$W2_PAY"
+expect_eq "W.2 a row whose deps cell waits on approval:release is admitted on an approval its log alone holds" "allow" "$GATE_VERDICT"
+run_gate "$W2_I8"; W2_V="$W2_V|$GATE_VERDICT"; w2_repo wa2; printf 'run/v1|ev=drop|row=T9|why=w|at=2026-11-01T00:00:02Z\n' >> "$PL"
+run_gate "$W2_I8"; expect_eq "W.3 an integrate row waits for the release's approval: refused, admitted on it, admitted when the release row is dropped" \
+  "deny row T8 waits for approval:release|allow|allow" "$W2_V|$GATE_VERDICT"
 
 finish

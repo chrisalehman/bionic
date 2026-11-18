@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/doctor-restart.test.sh — doctor.sh's "restart needed" row and the tick's restart line
-# (bionic 1.4.0 fold-in, spec AC-37, plan task DOCTOR-RESTART; wave-35 T5 REQ-4 AC-4.5; from
-# wave-36 T2 a content fact: spec D7, AC-1.3, ADR-055).
 #
 # THE CONTRACT UNDER TEST. The CLI snapshots hooks/hooks.json, the skills, the role files and
 # the commands once, at process start; a change on disk afterward registers nothing in a process
@@ -101,9 +99,6 @@ write_record() {  # <sid> <tree> [<commit>] -> PROJ/.bionic/tmp/loaded-<sid>.sta
         find -L commands -maxdepth 1 -type f -name '*.md' 2>/dev/null; } | LC_ALL=C sort ) \
       | while IFS= read -r p; do printf '%s %s\n' "$(sha_line "$tree/$p")" "$p"; done
   } > "${PROJ}/.bionic/tmp/loaded-${sid}.state"
-}
-manifest_lines() {  # <record> -> how many `<64-hex> <path>` lines it holds
-  /usr/bin/grep -cE '^[0-9a-f]{64} ' "$1" 2>/dev/null | tr -d ' '
 }
 
 write_installed_plugins() {  # <installPath> [<lastUpdated>]

@@ -114,9 +114,7 @@
 # declared, the suite basenames it may run, whether that set was DECLARED by the brief (a row
 # 1.14.0 wrote may still say DERIVED, from the map deleted at wave-31), and — for a repository whose tests are
 # not shell suites at all — the author-marked commands the brief declared it will re-run,
-# marks kept, space-joined, capped per brief since T4 (wave-20, REQ-7) — three suite runs for
-# a reader of the evidence question, DP_SUITES_MAX for every other (dp_runs_cap in lib/brief.sh;
-# hooks/dispatch-preflight.sh lifts them from the brief text under `Re-executes:`).
+# marks kept, space-joined, as lib/brief.sh `brief_contract` reads them from the brief's `Re-executes:` line.
 # `re_executes=` is the LAST of the four and TRAILS them,
 # so a row written before the field existed reproduces byte for byte through this writer. They are present-if-passed rather than always-emitted so that the captured
 # rows in `tests/fixtures/roster-row.captured` — real rows written before this task
@@ -133,7 +131,8 @@
 # appends at the END either way.
 
 # THE STOP'S REASON IS A ROW KEY OF ITS OWN (wave-28 T77; A-orch-239 2a). `reason=<why>` rides the closed
-# row `hooks/stop-guard.sh` appends when it honours the orchestrator's recorded stop of an agent the
+# row `stop_guard_unrostered_write` (lib/stop.sh) appends when the stop guard honours the
+# orchestrator's recorded stop of an agent the
 # roster never saw: the sentence the orchestrator gave, so the sweeper and the Patrol see WHY the row is
 # closed. Present-if-passed, after `done=` and before `tool_use_id=`, so a row 1.12.0 wrote is unmoved.
 # It is prose like the rest (the `|` fold applies; nothing compares it back to something a human typed).
@@ -310,7 +309,7 @@ roster_pipe_unescape() {  # <stored value> -> the value as its author typed it
 # tests/session-poker-4.test.sh §LIST reads the `case "$key"` of `roster_row` below and goes red on
 # a key in neither set, so a new field is classified the day it is added.
 ROSTER_LIST_FIELDS="files suites_allowed lands_on re_executes questions claims"
-ROSTER_SCALAR_FIELDS="status session name agent_id launched_at subagent_type model deliverable source duration progress cadence absent waiver suites_source teammate_id adopted_from amended extended held done reason tool_use_id plan lands_red red_evidence pushed row landed landed_at run_pid run_log run_head run_cmd run_started_at run_rc run_ended_at"
+ROSTER_SCALAR_FIELDS="status session name agent_id launched_at subagent_type model deliverable source duration progress cadence absent waiver suites_source teammate_id adopted_from amended extended held done reason tool_use_id plan lands_red red_evidence pushed row landed landed_at run_pid run_log run_head run_cmd run_started_at run_rc run_ended_at brief brief_sum"
 
 roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or a bare word
   local status="" session="" name="" agent_id="" launched_at="" subagent_type=""
@@ -324,7 +323,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
   local has_reason=0
   local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0 has_pushed=0
-  local has_row=0 has_lands_on=0
+  local has_row=0 has_lands_on=0 brief="" brief_sum="" has_brief=0 has_brief_sum=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -377,6 +376,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       pushed)        pushed="$val";       has_pushed=1 ;;
       row)           row="$val";          has_row=1 ;;
       lands_on)      lands_on="$val";     has_lands_on=1 ;;
+      brief)         brief="$val";        has_brief=1 ;;
+      brief_sum)     brief_sum="$val";    has_brief_sum=1 ;;
       landed)        landed="$val";       has_landed=1 ;;
       landed_at)     landed_at="$val";    has_landed_at=1 ;;
       run_pid)        run_pid="$val";        has_run_pid=1 ;;
@@ -418,6 +419,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_pushed" -eq 1 ]; then out="$out|pushed=$pushed"; fi
   if [ "$has_row" -eq 1 ]; then      out="$out|row=$row"; fi
   if [ "$has_lands_on" -eq 1 ]; then out="$out|lands_on=$lands_on"; fi
+  if [ "$has_brief" -eq 1 ]; then    out="$out|brief=$brief"; fi
+  if [ "$has_brief_sum" -eq 1 ]; then out="$out|brief_sum=$brief_sum"; fi
   if [ "$has_run_pid" -eq 1 ]; then        out="$out|run_pid=$run_pid"; fi
   if [ "$has_run_log" -eq 1 ]; then        out="$out|run_log=$run_log"; fi
   if [ "$has_run_head" -eq 1 ]; then       out="$out|run_head=$run_head"; fi
@@ -431,10 +434,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   return 0
 }
 
-# ---------- THE ONE READER OF "IS THIS NAME LIVE" (moved from hooks/stop-guard.sh, T6, ----
-# ---------- A-orch-32; research R1 §5) --------------------------------------------------
+# ---------- THE ONE READER OF "IS THIS NAME LIVE" ----------------------------------------
 #
-# MOVED, NOT RE-SPELLED. `hooks/stop-guard.sh`'s own stop-ambiguity refusal (T29 §7) and
+# MOVED, NOT RE-SPELLED. `stop_guard`'s own stop-ambiguity refusal (lib/stop.sh) and
 # `hooks/session-poker.sh`'s `adopt_write_row` (T6, AC-6.1) both need the identical answer to
 # "does this name already name an open contract on this roster" — the first to refuse a stop
 # that could not tell which of two live rows it meant, the second to keep an adopt from ever
@@ -965,7 +967,7 @@ ruling_stamp() {  # <roster> <id> <writer> <key=value>...
 
 # THE PAGE CLOSES WHERE THE RULING IS READ (wave-34 T4; REQ-3 AC-3.1, D13). The tick's backstop opens
 # `ruling:<id>` on the person's ledger for a ruling a writer ended without reading; whoever then shows
-# it (the ack, a successor's commit, `ready` or `deliver`) has read it, so the item closes with the
+# it (the ack, a successor's commit, `ready` or the tick's landing of a record row) has read it, so the item closes with the
 # stamp. The ledger is wherever lib/owed.sh files the session's asks (the register of the run it is bound to, else
 # its own file beside `roster-<sid>.state`), so the item is looked for through `owed_list`, and lib/owed.sh is
 # loaded only for a roster that names a session.
@@ -1016,7 +1018,7 @@ ruling_fold() {  # <roster> [<writer>]
 }
 
 # THE PLUGIN ROOT A RULING NAMES (wave-34 T4; burns debt ruling-plugin-root): the plugin that holds
-# this library, found here once. The push, the commit wall, `ready` and `deliver` each found it their own
+# this library, found here once. The push, the commit wall, `ready` and the tick's landing of a record row each found it their own
 # way, and two of them spelled it differently (record/wave-33-workhorse/critic-structure.md).
 ruling_plugin_root() {  # -> the plugin root, or <plugin-root>
   ( cd "$_RULING_LIB_DIR/../.." 2>/dev/null && pwd -P ) || printf '<plugin-root>'
@@ -1040,7 +1042,7 @@ ruling_push_claim() {  # <roster> <id> <writer> <call>
   [ "$first" = "$4" ]
 }
 
-# THE GUARD'S READ, for the writer's own commit, `ready` and `deliver`: each ruling of <writer> not
+# THE GUARD'S READ, for the writer's own commit, `ready` and the tick's landing of a record row: each ruling of <writer> not
 # yet shown is stamped shown (by <by>) and printed in the one wording, one per line; nothing when none
 # is unread, which is the guard's pass. Marking it shown is what lets the retry through: the refusal
 # that printed it is the reading, because the writer is the one reading it.
@@ -1067,4 +1069,42 @@ _ruling_unread() {  # <roster> <writer> <by, or empty: stamp nothing>
 $(ruling_fold "$f" "$w")
 RULING_FOLD
   return 0
+}
+
+# THE WALL'S TWO REFUSALS OF A RULING, words and decision, over facts the Bash wall gathers itself: the
+# writer's commit with a ruling unread, and an acknowledgement from anyone but the ruling's writer or
+# not alone in its call. Each stages its refusal with `fold_block` and returns 2, or returns 0 and
+# says nothing, so its caller has loaded lib/fold.sh and folds the call; nothing here reads a payload.
+
+# The commit carries the unread rulings, already shown by `ruling_take_unread`: the refusal is the
+# reading, so the retry passes.
+ruling_unread_refusal() {  # <writer> <rendered unread rulings> -> 0 nothing · 2 block
+  [ -n "${2:-}" ] || return 0
+  fold_block exit2 commit "an orchestrator ruling for you is unread" "read it below, commit again" \
+    "${1:-this writer}, shown now:
+$2"
+  return 2
+}
+
+# An acknowledgement is the writer's receipt that it read the ruling, so one from the main thread or
+# another writer would mark it shown while its writer never saw it. <caller> is the calling agent's
+# roster name and <agent> its id, both empty for the main thread; <alone> is 1 when the ack is the
+# call's one segment. No writer is an id no ruling carries, which the verb itself refuses.
+ruling_ack_refusal() {  # <id> <writer> <caller> <agent> <alone> -> 0 nothing · 2 block
+  local id="${1:-}" w="${2:-}" who="the main thread"
+  [ -n "$w" ] || return 0
+  if [ "${3:-}" = "$w" ]; then
+    [ "${5:-}" = 1 ] && return 0
+    fold_block exit2 ruling-ack "an acknowledgement goes alone in its call" "run the ack by itself" \
+      "ruling $id is yours, $w, and the wall reads one acknowledgement per call. Run it alone:
+    bash <plugin>/hooks/session-poker.sh ruling-ack $id"
+    return 2
+  fi
+  [ -z "${4:-}" ] || who="${3:-an agent no roster row names}"
+  fold_block exit2 ruling-ack "this ruling is ${w}'s to ack" "the addressed writer acks it" \
+    "ruling $id is addressed to $w, not to $who. An acknowledgement is the writer's receipt
+that it read the ruling, so one from anyone else would mark it read while its writer never saw it. It stays unread:
+$w's next tool result carries it, and its commit and ready wait on it until $w runs
+    bash <plugin>/hooks/session-poker.sh ruling-ack $id"
+  return 2
 }

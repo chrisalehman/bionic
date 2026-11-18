@@ -191,8 +191,8 @@ ask: key=finding:F5 holds=nothing title=Finding S3 carried to T83 raised=4:13 PM
 ask: key=finding:F6 holds=nothing title=Finding S3 carried to T83 raised=4:13 PM blocks=no waits=event T83 lands
 ask: key=finding:F7 holds=nothing title=Finding S4 carried to T83 raised=4:13 PM blocks=no waits=event T83 lands
 ask: key=finding:F8 holds=nothing title=Finding S4 carried to T83 raised=4:13 PM blocks=no waits=event T83 lands
-ask: key=waive-row:AC-3.2 holds=nothing title=row waiver AC-3.2 raised=5:01 PM blocks=no waits=event T83 lands
-ask: key=waive-row:AC-4.1 holds=nothing title=row waiver AC-4.1 raised=5:01 PM blocks=no waits=event T83 lands
+ask: key=row:AC-3.2 holds=nothing title=row waiver AC-3.2 raised=5:01 PM blocks=no waits=event T83 lands
+ask: key=row:AC-4.1 holds=nothing title=row waiver AC-4.1 raised=5:01 PM blocks=no waits=event T83 lands
 ask: key=row:AC-5.2 holds=nothing title=matrix ruling AC-5.2 raised=5:02 PM blocks=no waits=event T86 lands
 ask: key=row:AC-6.1 holds=nothing title=matrix ruling AC-6.1 raised=5:02 PM blocks=no waits=event T86 lands
 ask: key=row:AC-7.3 holds=nothing title=matrix ruling AC-7.3 raised=5:02 PM blocks=no waits=event T86 lands'
@@ -917,37 +917,40 @@ SV_NOW=1791324000     # 2026-10-06T22:00:00Z = 3:00 PM PDT
 SV_R="$TMPROOT/verb"; SV_D="$SV_R/.bionic/docs/record/wave-02-fx"; SV_P="$SV_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
 SV_GATE="$TMPROOT/gate"; mkdir -p "$SV_GATE/requests" "$SV_GATE/cost" "$SV_D" "${SV_P%/*}" "$SV_R/.bionic/tmp"
 ( cd "$SV_R" && git init -q . )
-SV_ROW() { printf '| %s | %s | build | %s · complexity: standard | — | — | %s | 30 | REQ-1 | lib/%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$1" "$5"; }
+SV_ROW() { printf '| %s | %s | build | %s · complexity: standard | %s | 30 | REQ-1 | lib/%s.sh | — |\n' "$1" "$2" "$3" "$4" "$1"; }   # <id> <step> <task> <deps>, its state the log's
 {
-  printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n'
-  printf 'goals: owed · the user says what they owe (record/owed-test.md)\n---\n# fixture plan\n\n## SDLC State\n\n'
-  printf 'approved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 4\n\n- Step 4: implementation opened\n'
-  printf -- '- T1: landed %s 2026-10-06T18:00:00Z — .worktrees/02-T1\n' "$(printf 'c%.0s' $(seq 40))"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-  SV_ROW T1 4 "The first row" — landed
-  SV_ROW T2 4 "The second row" — active
-  SV_ROW T3 8 "Merge it" "approval:release" pending
+  printf -- '---\nwave: wave-02-fx\ncanonical_sdlc_version: 15\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n'
+  printf 'goals: owed · the user says what they owe (record/owed-test.md)\n---\n# fixture plan\n'
+  printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n'
+  printf '|---|---|---|---|---|---|---|---|---|\n'
+  SV_ROW T1 4 "The first row" —
+  SV_ROW T2 4 "The second row" —
+  SV_ROW T3 8 "Merge it" "approval:release"
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$SV_P"
-SV_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "${REPO}/payload/scripts/lib/owed.sh" "$SV_R" "$SV_P")"
+SV_LOG="$SV_D/run.log"   # the run's log: its approval and step, T1's landing, T2's launch, D5 put, both asks opened, and D5 ruled
 {
-  printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T3 — approval:release\n'
-  printf 'owed/v1|key=decide:D5|state=open|sent=-|at=2026-10-06T20:01:00Z|title=reply to D5|reply=D5 · the width: reply with the option number.\n'
-} > "$SV_REG"
-printf '# Design ledger — wave-02-fx\n\n## Δ0 — D5 put (orchestrator 2026-10-06 1:00 PM PDT): the width\n\nNothing waits on it.\n## Δ1 — D5 ruled "1" (Fixture Person 2026-10-06): the width\n' > "$SV_D/design-ledger.md"
+  printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-06T16:00:00Z\nrun/v1|ev=step|n=4|at=2026-10-06T16:00:00Z\n'
+  printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))"
+  printf 'run/v1|ev=dispatch|row=T2|name=w-T2|at=2026-10-06T18:30:00Z\n'
+  printf 'run/v1|ev=decision|entry=Δ0|d=D5|verb=put|by=orchestrator|title=the width|wait=Nothing waits on it.|at=2026-10-06T20:00:00Z\n'
+  printf 'run/v1|ev=ask|key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z\n'
+  printf 'run/v1|ev=ask|key=decide:D5|sent=-|title=reply to D5|at=2026-10-06T20:01:00Z\n'
+  printf 'run/v1|ev=decision|entry=Δ1|d=D5|verb=ruled|said=1|by=Fixture Person|title=the width|at=2026-10-06T20:30:00Z\n'
+} > "$SV_LOG"
 sv_run() {  # <args after `sitrep`…> [stdin from the caller] -> SV_RC, SV_OUT, SV_ERR; the clock is SV_AT, else SV_NOW
   SV_RC=0
   ( cd "$SV_R" && exec env CLAUDE_CODE_SESSION_ID="$SV_SID" BIONIC_NOW_EPOCH="${SV_AT:-$SV_NOW}" BIONIC_GATE_DIR="$SV_GATE" \
       bash "$POKER" sitrep "$@" ) > "$TMPROOT/sv.out" 2> "$TMPROOT/sv.err" || SV_RC=$?
   SV_OUT="$(cat "$TMPROOT/sv.out")"; SV_ERR="$(cat "$TMPROOT/sv.err")"
 }
-expect_contains "VE0 precondition: the register holds D5 open before any read" "|key=decide:D5|state=open|" "$(cat "$SV_REG")"
+sv_asks() { bash -c '. "$1" && owed_lines "$3" "$2"' _ "${REPO}/payload/scripts/lib/owed.sh" "$SV_R" "$SV_P"; }   # -> the run's asks as the asks library lists them
+expect_contains "VE0 precondition: the register holds D5 open before any read" "|key=decide:D5|state=open|" "$(sv_asks)"
 sv_run "$SV_P" < /dev/null
 expect_eq "VE1 the sheet prints (exit 0) and holds the open approval as an ask, naming the task it holds by its card label" "0|ask: key=approve:release holds=8/3" \
   "$SV_RC|$(printf '%s\n' "$SV_OUT" | /usr/bin/grep -o '^ask: key=approve:release holds=8/3')"
 expect_contains "VE2 the sheet settled the register against the ledger: D5, ruled there, is closed on it" \
-  "|key=decide:D5|state=closed|" "$(cat "$SV_REG")"
+  "|key=decide:D5|state=closed|" "$(sv_asks)"
 expect_absent "VE2b …and the sheet shows no D5 (VE1 read the asks of the same sheet)" "decide:D5" "$SV_OUT"
 printf '%s\n' "$SV_OUT" > "$TMPROOT/verb-sheet"
 sv_fact() { sed -n "s/^$1: //p" "$TMPROOT/verb-sheet"; }   # <key> -> the verb sheet's value for it
@@ -1012,7 +1015,7 @@ cp "$SV_SAVED.at" "$TMPROOT/stamp"; printf '%s\t%s\n' "$SV_NOW" "$SV_R/.bionic/d
 sv_run card "$SV_P" <<< "$SV_J"
 expect_eq "VE9e a saved sheet of another plan is no sheet of this one: refused" "1|" "$SV_RC|$SV_OUT"
 cp "$TMPROOT/stamp" "$SV_SAVED.at"
-printf 'owed/v1|key=approve:merge|state=open|sent=-|at=2026-10-06T22:01:00Z|title=approval: merge|reply=poker: WAIT — approval:merge\n' >> "$SV_REG"
+printf 'run/v1|ev=ask|key=approve:merge|sent=-|title=approval: merge|at=2026-10-06T22:01:00Z\n' >> "$SV_LOG"
 SV_AT=$((SV_NOW + 60)) sv_run card "$SV_P" <<< "$SV_J"
 expect_eq "VE10 an ask opened after the sheet was saved is on the card: no task reads it, so it is drawn alone under the Assessment" \
   "0|    • Open, blocking nothing: Approval: merge|" \
@@ -1028,7 +1031,7 @@ expect_eq "VE10c …while the release approval, which holds the merge task, stay
 # naming the row. The verb reads that row as held, so the card draws the ask under Blocked on you.
 # fails-when: the ruling ask reads holds=nothing, so it is drawn under the Assessment with Blocked on you holding
 # only the release approval.
-printf 'owed/v1|key=ruling:r9|state=open|sent=-|at=2026-10-06T22:02:00Z|title=ruling unread: T2|reply=poker: NOT-LANDED T2 — w-T2 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it\n' >> "$SV_REG"
+printf 'run/v1|ev=ask|key=ruling:r9|sent=-|title=ruling unread: T2|prompt=poker: NOT-LANDED T2 — w-T2 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it|at=2026-10-06T22:02:00Z\n' >> "$SV_LOG"
 SV_AT=$((SV_NOW + 120)) sv_run "$SV_P" < /dev/null
 printf '%s\n' "$SV_OUT" > "$TMPROOT/verb-sheet"
 expect_eq "VE10d the verb's sheet reads the ruling ask as holding the row its reply names (4/2), blocking" "ask: key=ruling:r9 holds=4/2 title=ruling unread: T2 raised=3:02 PM blocks=yes waits=user" \
@@ -1044,9 +1047,9 @@ expect_eq "VE10e the call, in words that owe something, prints, the ruling ask u
 # ============================================================
 section "§ONE-READER: the goal's status, the task's title and the goal's measure are each one function the sheet and the cards call"
 # ============================================================
-# FIXTURE FIDELITY: one run of the verbs' own shapes: a wave plan approved at Step 3 whose requirements give it two
-# themes and whose matrix discharges one of the first theme's two criteria and the second theme's one, so the second
-# goal reads met. T1's cell opens on a title with a colon in it, the shape the plan card and the sheet once cut two
+# FIXTURE FIDELITY: one run of the verbs' own shapes: a wave plan at version 15, approved at Step 3 in its run's log,
+# whose requirements give it two themes and whose log holds a criterion's proof for one of the first theme's two
+# criteria and for the second theme's one, so the second goal reads met. T1's cell opens on a title with a colon in it, the shape the plan card and the sheet once cut two
 # ways. The surfaces are the real verbs: `sitrep` for the sheet, `sitrep card` for the sitrep card, `card.sh step3`
 # for the plan's card. The plants are a copy of the tree with the one reading of a fact changed: both surfaces must
 # move with it, so a surface that keeps its own copy reads apart from the sheet and the row reddens.
@@ -1057,19 +1060,25 @@ section "§ONE-READER: the goal's status, the task's title and the goal's measur
 # whether a goal is met by a word of its own (OR-3), or card.sh parses the goal's measure by a grammar of its own (OR-5).
 OR_R="$TMPROOT/one-reader"; OR_D="$OR_R/.bionic/docs/record/wave-02-fx"; OR_P="$OR_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
 OR_Q="$OR_R/.bionic/docs/specs/epic-01-fx/wave-02-fx.requirements.md"
-mkdir -p "$OR_D" "${OR_P%/*}" "${OR_Q%/*}" "$OR_R/.bionic/tmp"; ( cd "$OR_R" && git init -q . ); : > "$OR_D/landing-proofs.log"
-or_plan() {  # <status of the second theme's one criterion> -> the plan, that theme met when it is discharged
+mkdir -p "$OR_D" "${OR_P%/*}" "${OR_Q%/*}" "$OR_R/.bionic/tmp"; ( cd "$OR_R" && git init -q . )
+or_plan() {  # <discharged|pending: the second theme's one criterion> -> the page and its run's log, that theme met when discharged
   {
-    printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nscale: wave\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n---\n'
-    printf '# fixture plan\n\n## Goal\n\nThe fixture ships.\n\n## SDLC State\n\napproved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 4\n\n- Step 4: implementation opened\n'
-    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | The release row: 1.27.0. It names the release it cuts · complexity: standard | — | — | — | 30 | REQ-1 | lib/t1.sh | — | — | active | — | — | — |\n'
-    printf '| T2 | 4 | build | Fix vs. the old path. It does the second thing · complexity: standard | — | — | — | 30 | REQ-2 | lib/t2.sh | — | — | pending | — | — | — |\n'
-    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    printf '| AC-1.1 | T2 | discharged | pending | — |\n| AC-1.2 | T2 | pending | pending | — |\n| AC-2.1 | T2 | %s | pending | — |\n' "$1"
+    printf -- '---\ncanonical_sdlc_version: 15\nwave: wave-02-fx\nrelease: 9.9.0\nscale: wave\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n---\n'
+    printf '# fixture plan\n\n## Goal\n\nThe fixture ships.\n'
+    printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | The release row: 1.27.0. It names the release it cuts · complexity: standard | — | 30 | REQ-1 | lib/t1.sh | — |\n'
+    printf '| T2 | 4 | build | Fix vs. the old path. It does the second thing · complexity: standard | — | 30 | REQ-2 | lib/t2.sh | — |\n'
+    printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+    printf '| REQ-1 | x | AC-1.1 | hermetic | `tests/a.test.sh` | b |\n| REQ-1 | x | AC-1.2 | hermetic | `tests/a.test.sh` | b |\n| REQ-2 | x | AC-2.1 | hermetic | `tests/a.test.sh` | b |\n'
     printf '\n## Not Doing\n\n- nothing\n'
   } > "$OR_P"
+  {
+    for n in 1 2 3 4; do printf 'run/v1|ev=step|n=%s|at=2026-10-06T15:5%s:00Z\n' "$n" "$n"; done
+    printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-06T16:00:00Z\n'
+    printf 'run/v1|ev=dispatch|row=T1|name=w02-T1|at=2026-10-06T16:01:00Z\n'
+    printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/wave-02-fx/a.log|at=2026-10-06T16:02:00Z\n'
+    [ "$1" != discharged ] || printf 'run/v1|ev=proof|ac=AC-2.1|evidence=record/wave-02-fx/a.log|at=2026-10-06T16:03:00Z\n'
+  } > "$OR_D/run.log"
 }
 {
   printf -- '---\nscale: wave\n---\n# fixture requirements\n\n## Goal\n\nThe fixture ships.\n'
@@ -1079,10 +1088,9 @@ or_plan() {  # <status of the second theme's one criterion> -> the plan, that th
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$OR_Q"
 or_plan discharged
-OR_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "${REPO}/payload/scripts/lib/owed.sh" "$OR_R" "$OR_P")"
+or_unask() { awk '!/^run\/v1\|ev=ask\|/' "$OR_D/run.log" > "$OR_D/run.log.t" && mv "$OR_D/run.log.t" "$OR_D/run.log"; }   # -> the run's log holding no ask
 or_ask() {  # -> the register holding one open ask: the second goal's decision, as the tick opens it on a first miss
-  mkdir -p "${OR_REG%/*}"
-  printf 'owed/v1|key=decide:goal:the-pages|state=open|sent=-|at=2026-10-06T20:00:00Z|title=goal decision: The pages|reply=poker: the goal The pages missed\n' > "$OR_REG"
+  or_unask; printf 'run/v1|ev=ask|key=decide:goal:the-pages|sent=-|title=goal decision: The pages|at=2026-10-06T20:00:00Z\n' >> "$OR_D/run.log"
 }
 OR_J="purpose: The fixture plan ships its rows; on course.
 call: Let 4/1 land.
@@ -1105,7 +1113,7 @@ OR_LIBF="$OR_T/payload/scripts/lib/plan.sh"; OR_LIB_ORIG="$TMPROOT/or-plan.orig"
 or_plant() { sed "$1" "$OR_LIB_ORIG" > "$OR_LIBF"; ! cmp -s "$OR_LIB_ORIG" "$OR_LIBF"; }   # <sed> -> the copy's lib/plan.sh so edited; rc 1 when it changed nothing
 
 # the task's title: the sheet and the plan's card cut the cell one way
-or_plan discharged; : > "$OR_REG"; or_run "$BIONIC_HOOKS_DIR"
+or_plan discharged; or_unask; or_run "$BIONIC_HOOKS_DIR"
 expect_eq "OR-0 precondition: the sheet, the sitrep card and the plan's card each print, T1's title read on both" "yes|yes|yes" \
   "$([ -n "$(or_desc T1)" ] && echo yes)|$([ -n "$(or_goals)" ] && echo yes)|$([ -n "$(or_title T1)" ] && echo yes)"
 expect_eq "OR-1 a title holding a colon is one title on the sheet and on the plan's card" \
@@ -1139,7 +1147,7 @@ expect_eq "OR-3 the one status reading planted to call a met goal achieved: the 
   "0|name=The pages status=achieved|0|0" "$OR_PL|$(printf '%s\n' "$OR_SHEET" | /usr/bin/grep -o 'name=The pages status=achieved')|$(or_goal_ask | paste -sd'|' -)"
 
 # the goal's measure: the sheet's words and the card's counts are one grammar
-: > "$OR_REG"; or_run "$BIONIC_HOOKS_DIR"
+or_unask; or_run "$BIONIC_HOOKS_DIR"
 expect_eq "OR-4 precondition: the card's Goals cell carries each theme's counts from the sheet's measure" \
   "The run closes itself on course, 1 of 2, REQ-1 open · The pages met, 1 of 1" "$(or_goals)"
 or_plant 's/criteria discharged/criteria done/g'; OR_PL=$?

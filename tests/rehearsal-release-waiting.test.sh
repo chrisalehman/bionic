@@ -14,8 +14,8 @@
 # exactly the state's asks; a judgment written from the sheet, answering every open ask, renders through
 # `sitrep card` (rc 0, every line at most 100 columns); a judgment that drops one is refused (rc 1, stdout empty).
 #
-# FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts, a
-# plan in its Step-3 shape and the release check's closure. Every later state is a command's: the poker's verbs,
+# FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts and
+# the release check's closure, with no plan: its run starts at the configuration card. Every state is a command's: the poker's verbs,
 # the door's landing, the sweeper's ack, close-out. What `rehearse` writes by hand is what a run's people and agents
 # write by hand: the plan's prose, a review's record, a row's code, a criterion's evidence. Each command it runs is
 # logged beside the sandbox (`rehearsal.log`), and each section reads the commands its state turns on from that log.
@@ -52,7 +52,10 @@ if [ "$RT_RC" = 0 ]; then
   expect_eq "RW-1b …through the door's landing, the regression run and the release approval card's own verb" \
     "yes|yes|yes" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'regression-run')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'release-approval')" -ge 1 ] && echo yes)"
   # The release landed past the whole run with its check passing, so it moved no code: no merge without a pass is asked.
-  rt_sheet_and_card RW "approve:merge approve:release" "approve:merge>8/4 approve:release>8/4" approve:release
+  # The goal the rehearsal writes as not met owes its decision from the first tick that reads it, holding nothing.
+  # The integrate row waits on the release's approval by its kind and the release row beside it, so the release's ask
+  # holds the merge row, as that row's own line on the sheet says (FA-6); no merge is asked.
+  rt_sheet_and_card RW "approve:release decide:goal:asks" "approve:release>8/4 decide:goal:asks>nothing" ""
 fi
 
 # ============================================================
@@ -76,8 +79,8 @@ rt_facts_state release-waiting
 RT_ROOT="$WORLD_ROOT/release-waiting/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
 if [ -f "$RT_PLAN" ]; then
   rt_poker sitrep "$RT_PLAN"
-  expect_eq "FA-6 release-waiting: the merge row names every read it waits on, in words: its step and both approvals" \
-    "note=waits on step 8, your approval of the release and your approval of the merge" \
+  expect_eq "FA-6 release-waiting: the merge row names what it waits on, in words: its step, the reviews and the release's approval" \
+    "note=waits on step 8, the reviews and your approval of the release" \
     "$(rt_taskline "$RT_OUT" T4 | /usr/bin/grep -o 'note=.*$')"
   # The whole run's head F, read off the plan's regression proof, and the working head H, off the branch's ref; the
   # count between them is git's, so the line is held to the history and not to the printer's own arithmetic.

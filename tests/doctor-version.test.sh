@@ -1,8 +1,5 @@
 #!/bin/bash
 # tests/doctor-version.test.sh — doctor.sh's installed-vs-latest version row
-# (F5, epic-19 wave-01, spec AC-F5; design ledger
-# .bionic/docs/record/epic-19/step2-design-ledger.md, T4 "OK"; grounding
-# .bionic/docs/record/epic-19/step1-fixes-grounding.md item 5).
 #
 # THE CONTRACT UNDER TEST. Doctor's BIONIC NATIVE table carries a `version`
 # row, answered per feed kind (payload/scripts/lib/detect.sh:detect_
@@ -852,5 +849,19 @@ UNK_OUT="$(run_doctor_only NOPE "$HOME2")"; UNK_RC=$?
 expect_eq "75: an unknown section name exits 2 with nothing on stdout" "2:" "${UNK_RC}:${UNK_OUT}"
 expect_match "76: …and the refusal on stderr lists NATIVE among the valid names" \
   "doctor.sh: unknown section 'NOPE'*NATIVE*" "$(cat "$DOCTOR_ERR_FILE" 2>/dev/null)"
+
+section "Section V14: a plan at version 14 is an older run's document, and the doctor says nothing of it"
+V14="$(mktemp -d -p "$TMP")"; ( cd "$V14" && git init -q . ); V14P="$V14/.bionic/docs/plans/epic-99-fixture"; mkdir -p "$V14P"
+v14_page() {  # <path> <current> -> an older run's page: version 14 in the header, its step in a state section
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\nrigor: single\nscale: wave\n---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n' "$2" > "$1"
+}
+v14_page "$V14P/wave-01-open.plan.md" 4
+v14_page "$V14P/wave-02-closed.plan.md" 9
+bash -c '. "$1/proof.sh" && proof_step_event "$2" 9 delivered=x' _ "$PAYLOAD/scripts/lib" "$V14P/wave-02-closed.plan.md" >/dev/null 2>&1
+V14_OUT="$(run_doctor_only PROJECT "$HOME2" "$V14")"
+expect_match "V14.1: the PROJECT table over two plans at 14, one open and one closed, reads no active run" \
+  "*active run*none*" "$V14_OUT"
+expect_no_match "V14.2: …and names neither plan, nor version 14" "*wave-0[12]*" "$V14_OUT"
+expect_no_match "V14.3: …nor a run at version 14" "*version 14*" "$V14_OUT"
 
 finish

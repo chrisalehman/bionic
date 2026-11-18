@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh",
             "timeout": 10
           }
         ]
@@ -131,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh",
             "timeout": 10
           }
         ]

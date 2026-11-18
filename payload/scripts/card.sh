@@ -50,7 +50,7 @@
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #     bash card.sh early <plan>                         (the CARD-EARLY line, or what the release approval card settles)
-#     bash card.sh task-cell <id> <cell> [<id> <cell>]...  (a Tasks cell judged by the Step-3 card's title cap and sentence rule; task-add's and task-set's)
+#     bash card.sh task-cell <id> <cell> [<id> <cell>]...  (a Tasks cell judged by the Step-3 card's title cap and sentence rule; task-add's)
 #     bash card.sh release                 < facts      (the release approval card, from the facts its verb gathers)
 #     bash card.sh sitrep <sheet>          < judgment   (the sitrep card, from the sheet and the model's judgment)
 #     bash card.sh sitrep-check <sheet>    < card       (the sitrep card's check alone, over a card drawn elsewhere)
@@ -706,25 +706,29 @@ _card_split() {  # <line> — sets CARD_CELLS[]
 # budget. Nothing else is rewritten — the text, the provenance and the counts are
 # the artifact's own (A-T11.2).
 
-_CARD_AWK='
+# The words a decision row is drawn from, once its title and the text after it are known: the leading label and a
+# closing period off the title, the opening punctuation off the rest, whose first sentence is the concept and the
+# remainder the detail `explain` prints. Shared by the parse and by the loader, which cuts an untitled bullet.
+_CARD_DEC_AWK='
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
 function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); return trim(s) }
 # The first sentence of a cell the card shows on one line. A ledger cell and a
 # design bullet each carry their whole story; the card carries the opening of it
 # and the artifact path is the depth (steps/1.md: "never a paragraph").
 function firstsent(s) { if (match(s, /\. /)) return substr(s, 1, RSTART); return s }
-# A TITLE\047S sentence ends at a period followed by a space and an uppercase letter or the end of the cell, so
-# `vs. the` and `e.g. a` never end it and no word list is kept; the bash side (lib/plan.sh plan_cut) reads the same rule. The
-# concept sentence that follows a title stays firstsent: the text after it may open on a backtick or a bracket.
-function titlesent(s,   r, off, p, c) {
-  r = s; off = 0
-  while (match(r, /\. /)) {
-    p = RSTART; c = substr(r, p + 2, 1)
-    if (c == "" || c ~ /[[:upper:]]/) return substr(s, 1, off + p)
-    off += p + 1; r = substr(r, p + 2)
-  }
-  return s
+function dec_out(id, serves, title, detail,   sent) {
+  gsub(/\*\*/, "", detail)
+  title = clean(title)
+  sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", title)
+  sub(/\.$/, "", title)
+  gsub(/\t/, " ", detail); detail = trim(detail)
+  while (detail ~ /^(\.|:|—|--)/) { sub(/^(\.|:|—|--)[ \t]*/, "", detail) }
+  sent = firstsent(detail); detail = substr(detail, length(sent) + 1)
+  print "DROW" OFS id OFS title OFS clean(serves) OFS trim(sent)
+  print "DDET" OFS id OFS clean(detail)
 }
+'
+_CARD_AWK="${_CARD_DEC_AWK}"'
 function cells(line, arr,   n, i) {
   gsub(/\\\|/, "\001", line)
   sub(/^[ \t]*\|/, "", line); sub(/\|[ \t]*$/, "", line)
@@ -769,22 +773,13 @@ function flush_dec(   line, id, serves, title, detail, sent) {
     serves = id; sub(/^D[0-9]+;[ \t]*/, "", serves)
     sub(/;.*$/, "", id)
     line = decl_splice(line)
-    if (match(line, /^\*\*[^*]+\*\*/)) {
-      title = substr(line, 3, RLENGTH - 4)
-      detail = substr(line, RLENGTH + 1)
-    } else {
-      gsub(/\*\*/, "", line)
-      title = titlesent(line); detail = substr(line, length(title) + 1)
+    if (match(line, /^\*\*[^*]+\*\*/)) dec_out(id, serves, substr(line, 3, RLENGTH - 4), substr(line, RLENGTH + 1))
+    else {
+      # A bullet with no bold span is titled by its first sentence, which lib/plan.sh plan_cut ends: the loader
+      # cuts it, so the rule has one home.
+      gsub(/\*\*/, "", line); gsub(/\t/, " ", line)
+      print "DCUT" OFS id OFS serves OFS line
     }
-    gsub(/\*\*/, "", detail)
-    title = clean(title)
-    sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", title)
-    sub(/\.$/, "", title)
-    gsub(/\t/, " ", detail); detail = trim(detail)
-    while (detail ~ /^(\.|:|—|--)/) { sub(/^(\.|:|—|--)[ \t]*/, "", detail) }
-    sent = firstsent(detail); detail = substr(detail, length(sent) + 1)
-    print "DROW" OFS id OFS title OFS clean(serves) OFS trim(sent)
-    print "DDET" OFS id OFS clean(detail)
     return
   }
   # AN UNTAGGED BULLET IS THE ARTIFACT\047S DEFECT: the section parses one shape, and a bullet out of it
@@ -828,31 +823,15 @@ function flush_adr(   line, path, rest, id) {
   }
 }
 function flush_all() { flush_nd(); flush_req(); flush_dec(); flush_adr(); flush_worth() }
-BEGIN { OFS = "\t"; ERRMSG = ""; mrows = 0; enum = 0 }
-NR == 1 && $0 == "---" { fm = 1; next }
-fm == 1 && $0 == "---" { fm = 0; next }
-fm == 1 {
-  k = $0; sub(/:.*$/, "", k); v = $0; sub(/^[^:]*:[ \t]*/, "", v)
-  if (k == "scale") SCALE = v
-  else if (k == "base-sha") BASE = v
-  else if (k == "rigor") RIGOR = v
-  else if (k == "walk") WALK = v
-  else if (k == "adrs") ADRS = v
-  else if (k == "design-ledger") LEDGER = v
-  else if (k == "requirements") REQSF = v
-  else if (k == "spec") SPECF = v
-  else if (k == "design") DPTR = v
-  next
-}
+BEGIN { OFS = "\t"; ERRMSG = ""; enum = 0 }
 /^## / {
   flush_all()
   h = substr($0, 4); sub2 = ""
   if (h == "Goal") { sec = "goal"; sawgoal = 1 }
   else if (h == "Design") { sec = "design"; sawdesign = 1 }
   else if (h == "Not Doing") sec = "nd"
-  else if (h == "Tasks") { sec = "tasks"; sawtasks = 1; trow = 0 }
+  else if (h == "Tasks") { sec = "tasks"; sawtasks = 1 }
   else if (h == "Eval design") { sec = "eval"; saweval = 1; erow = 0 }
-  else if (h == "Verification Matrix") { sec = "matrix"; mrow = 0 }
   else if (h ~ /^Requirements/) sec = "reqs"
   else sec = ""
   next
@@ -922,23 +901,6 @@ sec == "reqs" && rid != "" {
   else if (rsentdone != 1) { sline = $0; gsub(/\t/, " ", sline); rsent = rsent (rsent == "" ? "" : " ") trim(sline) }
   next
 }
-sec == "tasks" && /^[ \t]*\|/ {
-  trow++
-  # THE SERVES COLUMN IS FOUND BY ITS HEADER, because a `reads` or `base` column may sit before
-  # it; the eighth cell is the fallback for a header that does not name it.
-  if (trow == 1) { n = cells($0, c); servc = 8; for (i = 1; i <= n; i++) if (tolower(c[i]) == "serves") servc = i }
-  if (trow <= 2) next
-  n = cells($0, c)
-  if (n < 6) next
-  # THE WHOLE CELL TRAVELS WITH THE ROW: the card takes its title from it, and `show task` prints it.
-  # The cell travels raw too, last, because the sentence after the title is refused for a backtick
-  # the cleaned cell no longer carries.
-  sv = (servc <= n) ? c[servc] : ""
-  if (sv !~ /[A-Za-z0-9]/) sv = ""
-  tr = craw[4]; gsub(/\t/, " ", tr)
-  print "TROW" OFS c[1] OFS c[4] OFS c[3] OFS c[6] OFS c[5] OFS sv OFS tr
-  next
-}
 # THE APPROACH CELL IS THE REQUIREMENT\047S PROOF IN ONE PLAIN LINE, the same on every row of the requirement:
 # the card prints it once per requirement, so a second approach on a later row would never reach the card, and
 # a backticked token is an identifier where the cell is the proof said in plain words. Both are refused here,
@@ -960,14 +922,6 @@ sec == "eval" && /^[ \t]*\|/ {
   if (!(r in eapp)) { eapp[r] = c[2]; enum++; eord[enum] = r }
   ecnt[r, c[4]]++
   tot[c[4]]++
-  next
-}
-sec == "matrix" && /^[ \t]*\|/ {
-  mrow++
-  if (mrow <= 2) next
-  n = cells($0, c)
-  if (n < 2 || c[1] !~ /^AC-/) next
-  mrows++
   next
 }
 sub2 == "dec" {
@@ -1002,20 +956,10 @@ END {
   # THE EVAL TABLE IS A WAVE OBLIGATION (D8). At task scale the design is a paragraph in
   # the session plan and there is no eval-design wall at all, so demanding the table here
   # refused the very artifact the arm exists to render (research R3: exit 64 at d7e841c).
-  if (verb == "step2" && !saweval && SCALE != "task") err("the spec has no ## Eval design table")
+  if (verb == "step2" && !saweval && scale != "task") err("the spec has no ## Eval design table")
   if (ERRMSG != "") { print "ERR" OFS ERRMSG; exit 0 }
-  print "META" OFS "base" OFS BASE
-  print "META" OFS "rigor" OFS RIGOR
-  print "META" OFS "walk" OFS WALK
-  print "META" OFS "scale" OFS SCALE
   print "META" OFS "design" OFS DESIGN
-  print "META" OFS "adrs" OFS ADRS
-  print "META" OFS "ledger" OFS LEDGER
-  print "META" OFS "reqs" OFS REQSF
   print "META" OFS "approach" OFS APPROACH
-  print "META" OFS "mrows" OFS mrows
-  print "META" OFS "spec" OFS SPECF
-  print "META" OFS "dptr" OFS DPTR
   for (i = 1; i <= ncrit; i++) print "CROW" OFS crow[i]
   for (i = 1; i <= enum; i++) {
     r = eord[i]
@@ -1038,9 +982,35 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_ND=(); WCARD_RROW=(); WCARD_DROW=(); WCARD_OROW=(); WCARD_EROW=(); WCARD_TROW=()
   WCARD_RDET=(); WCARD_DDET=()
   WCARD_ADRK=(); WCARD_ADRV=()
-  local out line key rest k v wide=""
-  out="$(awk -v verb="$1" "$_CARD_AWK" "$2" 2>/dev/null)" || {
+  local out line key rest k v wide="" _wc_rc
+  # THE HEADER IS THE READER-OWNED PARSER'S (lib/plan-read.sh `plan_read_header`), one read of every key: what the
+  # artifact points at, its scale, rigor and walk. The scale goes to the parse, which owes an Eval design unless it is task.
+  while IFS= read -r line; do
+    k="${line%%=*}"; v="${line#*=}"
+    case "$k" in
+      scale) WCARD_SCALE="$v" ;;            base-sha) WCARD_BASE="$v" ;;
+      rigor) WCARD_RIGOR="$v" ;;            walk) WCARD_WALK="$v" ;;
+      adrs) WCARD_ADRS="$v" ;;              design-ledger) WCARD_LEDGER="$v" ;;
+      requirements) WCARD_REQS="$v" ;;      spec) WCARD_SPEC="$v" ;;
+      design) WCARD_DPTR="$v" ;;
+    esac
+  done < <(plan_read_header "$2" 2>/dev/null)
+  out="$(awk -v verb="$1" -v scale="$WCARD_SCALE" "$_CARD_AWK" "$2" 2>/dev/null)" || {
     WCARD_ERR="the artifact could not be parsed"; return 1; }
+  # A decision with no bold span is titled by its first sentence: plan_cut ends it, the one home of that rule, and the
+  # words after the cut are drawn as every other decision's are.
+  case "$out" in *"DCUT$CARD_TAB"*)
+    out="$(while IFS= read -r line; do
+        case "$line" in
+          (DCUT"$CARD_TAB"*)
+            rest="${line#DCUT"$CARD_TAB"}"; k="${rest%%"$CARD_TAB"*}"; rest="${rest#*"$CARD_TAB"}"
+            v="${rest%%"$CARD_TAB"*}"; rest="${rest#*"$CARD_TAB"}"
+            plan_cut "$rest" || :
+            printf 'DCUT\t%s\t%s\t%s\t%s\n' "$k" "$v" "$PLAN_CUT_HEAD" "${rest:${#PLAN_CUT_HEAD}}" ;;
+          (*) printf '%s\n' "$line" ;;
+        esac
+      done <<< "$out" | awk -F'\t' "$_CARD_DEC_AWK"'BEGIN { OFS = "\t" } $1 == "DCUT" { dec_out($2, $3, $4, $5); next } { print }')" ;;
+  esac
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     key="${line%%"$CARD_TAB"*}"; rest="${line#*"$CARD_TAB"}"
@@ -1050,13 +1020,8 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
         k="${rest%%"$CARD_TAB"*}"; v="${rest#*"$CARD_TAB"}"
         [ "$v" != "$rest" ] || v=""
         case "$k" in
-          base) WCARD_BASE="$v" ;;       rigor) WCARD_RIGOR="$v" ;;
-          walk) WCARD_WALK="$v" ;;       adrs) WCARD_ADRS="$v" ;;
-          ledger) WCARD_LEDGER="$v" ;;   reqs) WCARD_REQS="$v" ;;
           approach) WCARD_APPROACH="$v" ;;
-          scale) WCARD_SCALE="$v" ;;     design) WCARD_DESIGN="$v" ;;
-          mrows) WCARD_MROWS="$v" ;;
-          spec) WCARD_SPEC="$v" ;;       dptr) WCARD_DPTR="$v" ;;
+          design) WCARD_DESIGN="$v" ;;
         esac ;;
       ND)   WCARD_ND[${#WCARD_ND[@]}]="$rest" ;;
       WORTH) WCARD_WORTH[${#WCARD_WORTH[@]}]="$rest" ;;
@@ -1067,7 +1032,6 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
       DDET) WCARD_DDET[${#WCARD_DDET[@]}]="$rest" ;;
       OROW) WCARD_OROW[${#WCARD_OROW[@]}]="$rest" ;;
       EROW) WCARD_EROW[${#WCARD_EROW[@]}]="$rest" ;;
-      TROW) WCARD_TROW[${#WCARD_TROW[@]}]="$rest" ;;
       EAPP) [ -n "$wide" ] || {
               _bionic_cols_into "${rest#*"$CARD_TAB"}"
               [ "$BIONIC_COLS" -le "$CARD_APPROACH_CAP" ] \
@@ -1080,6 +1044,24 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   # AN APPROACH OVER THE CAP IS THE ARTIFACT'S DEFECT, refused as the parse's own are; a parse error the awk
   # found was returned above, so it is the one named when the spec carries both.
   [ -z "$wide" ] || { WCARD_ERR="$wide"; return 1; }
+  # THE TASKS ROWS AND THE MATRIX'S ARE THE PLAN'S TABLES AS THE SCHEDULER AND THE READER READ THEM: `units_rows`, the
+  # by-name map over lib/plan-read.sh's table walk, whose rows the chain and the batches below are drawn from too, and
+  # the criteria the reader lists (`reader_cells`), counted. A row is
+  # `id, task, kind, deps, role, serves, the task cell as written`, its backticks off all but the last; the role is
+  # left empty here, since a page holds no agent cell, and `_card_task_rows` reads it from the cell's tag.
+  if [ "$1" = step3 ]; then
+    _card_units_rows "$2"
+    while IFS= read -r line; do
+      [ -n "$line" ] && WCARD_TROW[${#WCARD_TROW[@]}]="$line"
+    done < <(printf '%s\n' "$CARD_UROWS" | awk -F'\t' '
+      function clean(s) { gsub(/`/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      $1 != "" { sv = clean($8); if (sv !~ /[A-Za-z0-9]/) sv = ""
+        print clean($1) "\t" clean($4) "\t" clean($3) "\t" clean($6) "\t\t" sv "\t" $4 }')
+    # the criteria are the reader's list, one fold; a run whose facts could not be read is no count of them
+    WCARD_MROWS="$(_proof_ask "$2" reader_cells "$2")"; _wc_rc=$?
+    case "$_wc_rc" in 0) WCARD_MROWS="$(printf '%s\n' "$WCARD_MROWS" | grep -c .)" ;; 1) WCARD_MROWS=0 ;;
+      *) WCARD_ERR="the run's facts could not be read, so its criteria are not counted"; return 1 ;; esac
+  fi
   # THE WRITERS ARE A PERSON'S CAP, READ BY FIELD (wave-28 T9; D15): `budget_cap` (lib/run.sh)
   # answers from a `parallel-budget:` line whose `source=` is `user` or `override`, one whole
   # `writers=` field. The card's own awk used to cut the first SUBSTRING `writers=`, so
@@ -1088,9 +1070,8 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_WRITERS="$(budget_cap "$2")"; WCARD_WRITERS="${WCARD_WRITERS#writers=}"
   # WHAT THE ARTIFACT IS FOR is the one reader's, the one the sitrep's sheet carries as run.goal.
   WCARD_GOAL="$(plan_goal_paragraph "$2")"
-  # THE WORKING BRANCH IS THE ANSWER OF lib/run.sh `plan_working_branch` (wave-35 T7; D14), the reader `ready`,
-  # the walls and the judge ask: SDLC State, then frontmatter. The card used to read the frontmatter alone,
-  # so a plan naming its branch under SDLC State showed `not declared` for a branch `ready` lands on.
+  # THE WORKING BRANCH IS THE ANSWER OF lib/run.sh `plan_working_branch`, the one reader `ready`, the walls and the
+  # judge ask, so the card never shows `not declared` for a branch `ready` lands on.
   WCARD_WB="$(plan_working_branch "$2")"
   WCARD_IB="$(plan_integration_branch "$2")"
   # THE ONE ASSIGNMENT OF THE SCALE: the Step-2 card's artifact arms read it, and a whole
@@ -1360,9 +1341,19 @@ _card_regression_line() {  # <scale> [<plan>] -> the line; returns 1 on a word t
 # THE DEPTH IS READ OFF THE DERIVED GRAPH (wave-26 D12): `units_edges`, the edges the tick
 # itself waits on — a read of what another row writes as much as a deps id — so the batches
 # and the chain below are one graph, not a second walk over the deps cell.
+# The plan's rows, read once per plan in this process: the Tasks block, the chain and the batches are one reading.
+CARD_UROWS=""; CARD_UROWS_OF=""
+_card_units_rows() {  # <plan> -> sets CARD_UROWS to its `units_rows` answer; 1 when it has no table
+  if [ "$CARD_UROWS_OF" != "${1:-}" ]; then
+    CARD_UROWS_OF="${1:-}"; CARD_UROWS="$(units_rows "${1:-}" 2>/dev/null)" || CARD_UROWS=""
+  fi
+  [ -n "$CARD_UROWS" ]
+}
+
 _card_batch_rows() {  # <plan> -> `<batch>\t<step>\t<id>` per row, in table order
   local rows edges
-  rows="$(units_rows "${1:-}" 2>/dev/null)" || return 1
+  _card_units_rows "${1:-}" || return 1
+  rows="$CARD_UROWS"
   [ -n "$rows" ] || return 1
   edges="$(units_edges "${1:-}" 2>/dev/null)" || edges=""
   { printf '%s\n' "$rows" | awk -F'\t' '$1 != "" { print "N\t" $1 "\t" $2 }'
@@ -1387,76 +1378,37 @@ _card_batch_rows() {  # <plan> -> `<batch>\t<step>\t<id>` per row, in table orde
     }'
 }
 
-# _card_project <plan> <ids> <terminal word> <current token> <out path>
+# _card_project_open <plan> <temporary directory> -> the copy's path, its run approved; 1 when it cannot be written
+# _card_project <copy> <step> <ids> -> 0 once the copy's run stands at <step> with <ids> landed besides what it held
 #
-# The copy described above. FENCE-AWARE and header-keyed for the same reason
-# `lib/units.sh` is both: a plan documenting its own table inside a fence is prose, and
-# the status column is wherever that table's header put it.
+# THE COPY IS A RUN OF ITS OWN: the page as written, in a project of its own that the card's temporary directory
+# holds, so the reader joins it to a record of its own beside it (lib/reader.sh `reader_record`) and never to the real
+# run's, and nothing is written beside the plan or into its record. Its log is written by the run's own writers alone,
+# one for each event type: the approval and the step by lib/proof.sh's, a landing by the line's
+# (lib/line.sh `line_published_event`). The line's writer finds a run's log through the project's git root, so the
+# temporary directory is made one.
+_card_project_open() {
+  local copy="${2:-}/.bionic/docs/plans/run/${1##*/}"
+  git init -q "${2:-}" >/dev/null 2>&1 && mkdir -p "${copy%/*}" && cp "${1:-}" "$copy" || return 1
+  declare -F proof_approval_event >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/proof.sh" >/dev/null 2>&1 || return 1
+  declare -F line_log >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/line.sh" >/dev/null 2>&1 || return 1
+  # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and the fill offers nothing to a run
+  # whose plan stands unapproved, so a copy without the approval would answer every batch with nothing.
+  proof_approval_event "$copy" step3 by=card said=projected || return 1
+  printf '%s' "$copy"
+}
 _card_project() {
-  awk -v want="${2:-}" -v word="${3:-landed}" -v cur="${4:-}" '
-    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
-    # THE ESCAPE IS FOLDED BEFORE THE SPLIT AND RESTORED AFTER IT, exactly as
-    # `lib/units.sh` does and for the same reason: this repo writes `\|` inside ledger
-    # cells, and a raw split on `|` opens a field the header does not have — so the
-    # status cell is rewritten one column left of where it is, the row stays pending,
-    # and the batch width is wrong rather than absent. `unesc` rebuilds by
-    # concatenation rather than through a gsub replacement, where a backslash is the
-    # one character whose meaning is not the character.
-    function esc(v)   { gsub(/\\[|]/, SUBSEP, v); return v }
-    function unesc(v,   parts, m, i, out) {
-      m = split(v, parts, SUBSEP)
-      out = parts[1]
-      for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
-      return out
-    }
-    BEGIN { n = split(want, a, " "); for (i = 1; i <= n; i++) W[a[i]] = 1 }
-    /^[ \t]*```/ { fence = !fence; print; next }
-    fence { print; next }
-    /^## / {
-      insdlc  = ($0 ~ /^##[ \t]+SDLC State([ \t].*)?$/)
-      intasks = ($0 ~ /^##[ \t]+[Tt]asks([ \t].*)?$/)
-      print; next
-    }
-    # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and a
-    # table with a `reads` column reads `approval:plan` by default, so an unapproved copy would
-    # answer every batch with nothing. A second `approved-by:` beside a real one changes nothing.
-    insdlc && /^[ \t]*current[ \t]*:/ && !seen {
-      print "current: " cur; print "approved-by: projection"; seen = 1; next
-    }
-    intasks && /^[ \t]*\|/ {
-      n = split(esc($0), f, "|")
-      if (!hdr) {
-        for (i = 1; i <= n; i++) {
-          t = tolower(trim(f[i]))
-          if (t == "id" && idc == 0) idc = i
-          if (t == "status" && stc == 0) stc = i
-        }
-        if (idc > 0) hdr = 1
-        print; next
-      }
-      if (idc > 0 && stc > 0 && idc <= n && stc <= n && (trim(f[idc]) in W)) {
-        f[stc] = " " word " "
-        line = f[1]
-        for (i = 2; i <= n; i++) line = line "|" f[i]
-        print unesc(line); next
-      }
-      print; next
-    }
-    { print }
-    END {
-      # A plan with no `## SDLC State` section has no `current:` to project onto, and a
-      # ledger with no current is not live — so the section is appended rather than the
-      # batch silently reading zero.
-      if (!seen) { print ""; print "## SDLC State"; print ""; print "current: " cur; print "approved-by: projection" }
-    }' "${1:-}" > "${5:-/dev/null}"
-  # THE PROJECTION PATH IS REWRITTEN PER BATCH with a different `current:`, and fill.sh
-  # memoises that field per process by path — so the writer forgets it (wave-19 critic C2).
+  local copy="${1:-}" id
+  for id in ${3:-}; do line_published_event "$copy" "row=$id" kind=projection by=card why=projected || return 1; done
+  proof_step_event "$copy" "${2:-}" || return 1
+  # THE COPY'S PATH STANDS WHILE ITS RUN MOVES, and fill.sh memoises the run's place per process by path, so the writer
+  # forgets it.
   fill_current_forget
 }
 
 _card_batch_widths() {  # <plan> <rung> -> one `batch <k> · <n> of <rung>` per batch
-  local plan="${1:-}" rung="${2:-}" rows maxk k prior step
-  local tmpd proj idsf n
+  local plan="${1:-}" rung="${2:-}" rows maxk k landed step
+  local tmpd copy idsf n out=""
   case "$rung" in ''|*[!0-9]*) return 1 ;; esac
   [ "$rung" -gt 0 ] || return 1
   rows="$(_card_batch_rows "$plan")" || return 1
@@ -1464,34 +1416,35 @@ _card_batch_widths() {  # <plan> <rung> -> one `batch <k> · <n> of <rung>` per 
   maxk="$(printf '%s\n' "$rows" | awk -F'\t' 'BEGIN { m = 0 } $1 + 0 > m { m = $1 + 0 } END { print m + 0 }')"
   [ "$maxk" -gt 0 ] || return 1
   tmpd="$(mktemp -d "${TMPDIR:-/tmp}/card-batch.XXXXXX")" || return 1
-  proj="${tmpd}/plan.md"
   idsf="${tmpd}/ids"
+  copy="$(_card_project_open "$plan" "$tmpd")" || { rm -rf "$tmpd"; return 1; }
   k=1
   while [ "$k" -le "$maxk" ]; do
-    prior="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '$1 + 0 < k { printf "%s ", $3 }')"
+    # THE COPY'S RUN GOES FORWARD ONE BATCH AT A TIME: the rows of the batch before this one land, so every earlier
+    # batch stands landed when this one is asked.
+    landed="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '$1 + 0 == k - 1 { printf "%s ", $3 }')"
     : > "$idsf"
-    # ONE PROJECTION PER BATCH, AT THE STEP THE RUN WILL BE ON WHEN IT COMES UP (wave-20
-    # REQ-5, Δ1, Δ6). Readiness is the prerequisite graph, so a work row in batch k is
-    # ready at any step once batches 1..k-1 have landed, and the per-step loop this
-    # replaced asked the same set once per step it held. What the step still decides is
-    # the gate acts: an `integrate` or `close` row waits for `current:` to reach its own
-    # step, so the batch is asked at its HIGHEST step cell — every gate act in it is then
-    # reached — and never below 4, where nothing fills (the tick never runs a batch there).
+    # ONE PROJECTION PER BATCH, AT THE STEP THE RUN WILL BE ON WHEN IT COMES UP. Readiness is the prerequisite graph,
+    # so a work row in batch k is ready at any step once batches 1..k-1 have landed. What the step still decides is
+    # the gate acts: an `integrate` or `close` row waits for the run to reach its own step, so the batch is asked at
+    # its HIGHEST step cell — every gate act in it is then reached — and never below 4, where nothing fills (the tick
+    # never runs a batch there).
     step="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '
       BEGIN { m = 4 }
       $1 + 0 == k && $2 ~ /^[0-9]+$/ && $2 + 0 > m { m = $2 + 0 }
       END { print m }')"
-    _card_project "$plan" "$prior" landed "$step" "$proj"
-    fill_ready_set "$proj" "$rung" 0 >> "$idsf"
+    _card_project "$copy" "$step" "$landed" || { rm -rf "$tmpd"; return 1; }
+    fill_ready_set "$copy" "$rung" 0 >> "$idsf"
     # DISTINCT IDS, counted with a counter rather than `length(array)`: this platform's
     # awk is the 2007 one-true-awk and does not answer that for an array.
     n="$(awk 'NF && !($1 in seen) { seen[$1] = 1; c++ } END { print c + 0 }' "$idsf")"
     [ "$n" -le "$rung" ] || n="$rung"
-    printf '    batch %s · %s of %s\n' "$k" "$n" "$rung"
+    out="${out}$(printf '    batch %s · %s of %s' "$k" "$n" "$rung")"$'\n'
     k=$(( k + 1 ))
   done
   rm -rf "$tmpd"
-  return 0
+  # A BATCH WHOSE PROJECTION COULD NOT BE WRITTEN IS NO COUNT, so the lines are printed only once every batch's was.
+  printf '%s' "$out"
 }
 
 # ── THE LONGEST CHAIN AND THE PEAK WIDTH (wave-26 D12, AC-7.1) ───────────────
@@ -1511,7 +1464,7 @@ _card_batch_widths() {  # <plan> <rung> -> one `batch <k> · <n> of <rung>` per 
 _card_chain() {  # <plan> <writer ceiling>
   local rows out line rest
   CARD_CHAIN=""; CARD_CHAIN_MIN=0; CARD_PEAK=0; CARD_CHAIN_ERR=""
-  rows="$(units_rows "${1:-}" 2>/dev/null)" || rows=""
+  _card_units_rows "${1:-}"; rows="$CARD_UROWS"
   CARD_EDGES="$(units_edges "${1:-}" 2>/dev/null)" || CARD_EDGES=""
   out="$( { printf '%s\n' "$rows" | awk -F'\t' '
               $1 != "" && ($10 == "pending" || $10 == "active") {
@@ -1534,16 +1487,18 @@ _card_chain() {  # <plan> <writer ceiling>
   return 0
 }
 
-# THE DEPENDS COLUMN OF A TABLE WITH A `reads` COLUMN (review 9, answer (b)). There the deps cell
-# holds only `ext:` tokens, because a row waits on what it reads, so the cell alone shows a dash
-# for a row that waits on another through a read. Each task row's depends becomes the ids
-# `units_edges` puts before it (the edges `_card_chain` already fetched), once each and in table
-# order, then the deps cell's `ext:` tokens; a row with neither keeps a dash. The edges join open
-# rows only, so a predecessor that has landed no longer shows: what remains is what it waits for.
-# A deps-only table is left as the plan wrote it.
-_card_reads_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
+# THE DEPENDS COLUMN IS WHAT A ROW WAITS ON, not its deps cell as typed, on a table with a `reads` column
+# and on a page at 15. There the cell names only some of a row's waits: a row waits on what it reads, or
+# at 15 on what its kind waits on by default (a regression on the builds), so the cell alone shows a dash
+# for a row that waits on three. Each task row's depends becomes the ids `units_edges` puts before it
+# (the edges `_card_chain` already fetched), once each and in table order, then the deps cell's own
+# `approval:` and `ext:` tokens, which are waits no edge carries; a row with none keeps a dash. The edges
+# join open rows only, so a predecessor that has landed no longer shows: what remains is what it waits
+# for. A table whose deps cells hold every edge is left as the plan wrote it.
+_card_edge_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
   local out line
-  units_has_column "${1:-}" reads || return 0
+  units_has_column "${1:-}" reads \
+    || [ "$(plan_read_header "${1:-}" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ] || return 0
   [ "${#WCARD_TROW[@]}" -gt 0 ] || return 0
   out="$( { printf '%s\n' "${CARD_EDGES:-}"; printf '\034\n'; printf '%s\n' "${WCARD_TROW[@]}"; } | awk -F'\t' '
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
@@ -1558,7 +1513,7 @@ _card_reads_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
         k = split(f[4], tok, ",")
         for (t = 1; t <= k; t++) {
           v = trim(tok[t])
-          if (v ~ /^ext:/) dep = dep (dep == "" ? "" : ", ") v
+          if (v ~ /^(approval|ext):/) dep = dep (dep == "" ? "" : ", ") v
         }
         if (dep == "") dep = "—"
         f[4] = dep
@@ -1578,7 +1533,7 @@ _card_reads_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
 # declared the row count, so the schedule is not capped.
 _card_chain_ceil() {  # <plan>
   local ceil="$WCARD_WRITERS"
-  case "$ceil" in ''|*[!0-9]*|0) ceil="$(units_rows "${1:-}" 2>/dev/null | grep -c .)" ;; esac
+  case "$ceil" in ''|*[!0-9]*|0) _card_units_rows "${1:-}"; ceil="$(printf '%s' "$CARD_UROWS" | grep -c .)" ;; esac
   [ "${ceil:-0}" -gt 0 ] 2>/dev/null || ceil=1
   printf '%s' "$ceil"
 }
@@ -2216,11 +2171,11 @@ _card_step2_explain() {  # <D-id or number>
 # nor its eval counts. What it adds is the plan's own shape: each task with the criteria it
 # serves, and the longest chain and the peak width the derived graph gives, at every scale.
 _card_step3() {  # <citation path> <artifact path as given>
-  # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column of a
-  # table with a `reads` column, and the graph is fetched once for both.
+  # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column, and the
+  # graph is fetched once for both.
   CARD_CHAIN_RC=0
   _card_chain "$2" "$(_card_chain_ceil "$2")" || CARD_CHAIN_RC=1
-  _card_reads_depends "$2"
+  _card_edge_depends "$2"
   printf 'Step 3 · Plan\n\n'
   _card_branches
   printf '\n'
@@ -2238,17 +2193,33 @@ _card_step3() {  # <citation path> <artifact path as given>
   printf 'show evals <req> · show task <n> · explain <decision>\n'
 }
 
-# THE TASK ROWS: the title alone, `serves` in a column of its own, and the depends cell with each
-# run of three or more consecutive ids folded to a range; the task's sentence goes under the row.
-# The whole cell is `show task`'s.
+# THE TASK ROWS: the title alone, `serves` in a column of its own, the depends cell with each run of
+# three or more consecutive ids folded to a range, and the role the task asks for; the task's sentence
+# goes under the row. The whole cell is `show task`'s.
 _card_task_rows() {  # sets CARD_ROWS[] from WCARD_TROW[]
   local row serves
   CARD_ROWS=()
   for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
     _card_split "$row"
     serves="${CARD_CELLS[5]:-}"; [ -n "$serves" ] || serves="—"
-    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}${CARD_CELLS[4]:-}${CARD_TAB}$(_card_cell_sentence "${CARD_CELLS[6]:-}")"
+    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}$(_card_task_role "${CARD_CELLS[2]:-}" "${CARD_CELLS[6]:-}")${CARD_TAB}$(_card_cell_sentence "${CARD_CELLS[6]:-}")"
   done
+}
+
+# THE ROLE A TASK ASKS FOR is the one its cell's complexity tag names, on a row a writer runs: the plan step tags every
+# step-four task `complexity: complex` or `complexity: standard`, and the agent column says who is asked, so the person
+# approving a plan sees it before anything launches. This is the one home of the kinds whose role the card prints,
+# build and test; a review, a verify, a document, the merge and the close draw the dash whatever their tag says. A
+# launch in the log names the writer that came, not the role, and is not read here. A cell with no tag, or a word the
+# step does not define, draws the dash: no role is guessed.
+# lib/fill.sh `fill_readonly_ids` answers a different question, who takes a writer's slot, so it is not asked here.
+_card_task_role() {  # <kind> <Tasks cell> -> senior-implementor, implementor or —, on stdout
+  local re='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
+  case "${1:-}" in build|test) ;; *) printf '—'; return 0 ;; esac
+  if [[ "${2:-}" =~ $re ]]; then
+    case "${BASH_REMATCH[2]}" in complex) printf 'senior-implementor'; return 0 ;; standard) printf 'implementor'; return 0 ;; esac
+  fi
+  printf '—'
 }
 
 # Consecutive ids in a depends cell are one range: four ids in a row print as the first and the last
@@ -2387,9 +2358,11 @@ _card_stem() {  # <path> -> the name without `.<kind>.md`: wave-01-x.plan.md -> 
   printf '%s' "${b%.*}"
 }
 
-# WHETHER THE APPROVAL IS ALREADY RECORDED. A card is a question only while its answer is owed: a step
-# below the plan's `current:` was answered to get past it, and `approved-by:` is the person's answer to the
-# plan, which the Stop's sweep takes for every step. A dispatched writer checking its exit asks nobody
+# WHETHER THE APPROVAL IS ALREADY RECORDED. A card is a question only while its answer is owed, and the run's log
+# says whether it is, as the reader answers it over the proof library's kept fold: a step below the reader's step
+# was answered to get past it, and an approval of this step or a later one standing answers this one (the plan's
+# approval is Step 3's, which the Stop's sweep takes for every step). A cancelled approval stands no more, so the
+# card asks again whatever the plan's own text still says. A dispatched writer checking its exit asks nobody
 # anything, so a render under a writer's name owes nothing either. The writer is told where the renderer
 # stands, as the gate tells it: the `bionic-agent` marker in the git directory of the linked tree it runs
 # in. The artifact's directory is not asked, because a bound plan resolves under the project's root and a
@@ -2403,12 +2376,16 @@ _card_writer() {  # -> 0 when the working tree is a linked tree marked with a di
   [ -n "$gitdir" ] && [ "$gitdir" != "$common" ] && [ -s "$gitdir/bionic-agent" ]
 }
 _card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or the renderer is a writer
-  local step
+  local facts
   _card_writer && return 0
-  fill_current_forget
-  fill_plan_approved "$2" && return 0
-  step="$(fill_step_token "$2")"
-  [ -n "$step" ] && [ "$1" -lt "$step" ] 2>/dev/null
+  _proof_reader_load || return 1
+  facts="$(_proof_facts "$2")" || return 2
+  ( reader_facts() { printf '%s' "$facts"; }
+    m="$1"
+    while [ "$m" -le 3 ] 2>/dev/null; do reader_q_approved "$2" "step$m" && exit 0; m=$((m + 1)); done
+    s="$(reader_q_step "$2" | sed -n 's/^n=//p')"; s="${s%[ab]}"
+    case "$s" in ''|*[!0-9]*) exit 1 ;; esac
+    [ "$1" -lt "$s" ] )
 }
 
 _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
@@ -2593,6 +2570,15 @@ _card_review_failing() {
     eg_review_failing_line )
 }
 
+# _card_live_exit -> the repair the evidence gate gives a criterion live past the step that owes it, pending or blocked
+# and owed now, as the wall spells it (payload/scripts/lib/walls.sh `matrix_live_row_exit`), with %s where it names
+# the criterion. Nothing when walls.sh cannot be loaded, and then no refusal is settled as that one, so the page stays
+# early.
+_card_live_exit() {
+  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F matrix_live_row_exit >/dev/null 2>&1 || exit 1
+    matrix_live_row_exit '%s' )
+}
+
 # _card_fmt_is <format> <line> -> 0 when <line> is <format> with each %s standing for any text. Each piece between the
 # placeholders is matched as a literal, so no character of the judge's words is read as a pattern.
 _card_fmt_is() {
@@ -2616,9 +2602,12 @@ _card_fmt_is() {
 
 # _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a decision the page puts, the
 # items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles. THE PAGE'S OWN
-# DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`), a T4 row whose
-# user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `confirm-row`, or
-# waived), and a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
+# DEFAULTS: a matrix row the auditor has not confirmed, or one that awaits its person's confirmation, the judge's two lines
+# (`cur8_unruled_line`; waived with the user's words, `waive <AC>`), a T4 row whose
+# user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `approve <AC>`, or
+# waived), a criterion owed now that nothing discharged, which the dry commit refuses with the wall's repair for a
+# live row on the line after its refusal (`_card_live_exit`; waived with the user's words, `waive <AC>`, or run), and
+# a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
 # evidence that was never recorded. The judge's unproved regression, a head with no pass at it whose floor its
 # landings cover or no run reaches, is the page's own decision too (`approve:merge-unproved`, lib/proof.sh
 # `proof_merge_ask`); an owed floor is no decision and stays early. Anything else the check prints is
@@ -2635,13 +2624,16 @@ _card_fmt_is() {
 # and its line for a failing one, are known the same way, by the wall's own spellings (`_card_review_fact`,
 # `_card_review_failing`).
 _card_settles() {
-  local l q k judge=0 reading=0 any=0 unap stale rfact rfail
+  local l q k judge=0 reading=0 any=0 held=0 unap stale rfact rfail live await
   local -a _cs_f=()
-  unap="$(_card_judge_line cur8_unapproved_line)"; stale="$(_card_judge_line cur8_stale_line)"
-  rfact="$(_card_review_fact)"; rfail="$(_card_review_failing)"
+  unap="$(_card_judge_line cur8_unapproved_line)"; stale="$(_card_judge_line cur8_stale_line)"; await="$(_card_judge_line cur8_awaiting_line)"
+  rfact="$(_card_review_fact)"; rfail="$(_card_review_failing)"; live="$(_card_live_exit)"
   while IFS= read -r l; do
     if { [ -n "$unap" ] && _card_fmt_is "poker: $unap" "$l"; } || { [ -n "$stale" ] && _card_fmt_is "poker: $stale" "$l"; }; then
       CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1; continue
+    fi
+    if [ -n "$await" ] && _card_fmt_is "$await" "$l"; then
+      q="${l#"${await%%"%s"*}"}"; CF_SETTLE="${CF_SETTLE}row:${q%% *}"$'\n'; any=1; continue
     fi
     if [ -n "$rfact" ]; then
       case "$l" in "bionic: commit refused — $rfact "*) reading=1; any=1; continue ;; esac
@@ -2657,9 +2649,19 @@ _card_settles() {
         q="${l#bionic: commit refused — }"; k="${q#* has placeholder }"; k="${k%% evidence (*}"; q="${q%% *}"
         [ "$k" = "$(_card_t4_confirm_key)" ] || return 1
         CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
+      # Any other refusal of the dry commit is held, and is the page's only when the repair it prints is the wall's for
+      # a live row: the person waives that criterion or it is run, the decision the page puts for a row not run.
+      "bionic: commit refused — "*) [ -n "$live" ] || return 1; held=1 ;;
+      "Fix: "*)
+        [ "$held" = 1 ] || continue
+        _card_fmt_is "Fix: $live" "$l" || return 1
+        q="${l#"Fix: ${live%%"%s"*}"}"; q="${q%"${live#*"%s"}"}"
+        [ -n "$q" ] || return 1
+        CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1; held=0 ;;
       "bionic: "*) return 1 ;;
       "- "*) [ "$reading" = 1 ] && return 1 ;;
-      "poker: current "*" --check: would refuse"|"poker: REFUSED — the commit gate refused the plan with current: "*) : ;;
+      "poker: current "*" --check: would refuse") : ;;
+      "poker: REFUSED — the commit gate refused the plan with current: "*) [ "$held" = 0 ] || return 1 ;;
       "poker: REFUSED — current: "*", and these do not (facts_state):") judge=1; any=1 ;;
       "poker: REFUSED"*) return 1 ;;
       *"	"*)
@@ -2678,7 +2680,7 @@ _card_settles() {
   done <<CF_CHECKED
 $1
 CF_CHECKED
-  [ "$any" = 1 ]
+  [ "$held" = 0 ] && [ "$any" = 1 ]
 }
 
 # ── THE RELEASE APPROVAL CARD ────────────────────────────────────────────────
@@ -2697,7 +2699,7 @@ CF_CHECKED
 #               nothing)
 #   reply       <the word a reply names the first decision's other choice by>
 #   goal        <status> <mark> <name> <reading> <evidence>
-#   handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
+#   sofar | handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
 #   findings    <n> <fixed> <awaiting your decision> <carried> <the rows that fix them, space-separated>
 #   finding     <F|A|C> <severity> <sentence>
 #
@@ -2749,7 +2751,7 @@ _card_release_dec_of() {  # <key> -> the decision number the card gives it; 1 wh
 
 _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on stderr on a fact it does not know
   local l t title=0
-  RL_EARLY=""; RL_PREVIEW=no; RL_ACT=0; RL_ACW=0; RL_REPLY=""; RL_N=0; RL_HH=""; RL_TR=""; RL_TACC=""; RL_TREG=""
+  RL_EARLY=""; RL_PREVIEW=no; RL_ACT=0; RL_ACW=0; RL_REPLY=""; RL_N=0; RL_SF=""; RL_HH=""; RL_TR=""; RL_TACC=""; RL_TREG=""
   RL_FN=0; RL_FNF=0; RL_FNA=0; RL_FNC=0; RL_FROWS=""
   RL_MISS=(); RL_CHK=(); RL_ASIDE=(); RL_GOAL=(); RL_REVIEW=(); RL_FIND=()
   RL_DKIND=(); RL_DKEY=(); RL_DPICK=(); RL_DSUBJ=(); RL_DLAB=(); RL_OLAB=(); RL_DPH=(); RL_OPH=()
@@ -2772,6 +2774,7 @@ _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on std
         RL_DPH[RL_N]="${CARD_CELLS[7]:-}"; RL_OPH[RL_N]="${CARD_CELLS[8]:-}"; RL_N=$((RL_N + 1)) ;;
       reply) RL_REPLY="${CARD_CELLS[1]:-}" ;;
       goal) RL_GOAL[${#RL_GOAL[@]}]="${l#goal"$CARD_TAB"}" ;;
+      sofar) RL_SF="${CARD_CELLS[1]:-}" ;;
       handholds) RL_HH="${CARD_CELLS[1]:-}" ;;
       ratio) RL_TR="${CARD_CELLS[1]:-}" ;;
       acceptance) RL_TACC="${CARD_CELLS[1]:-}" ;;
@@ -2864,8 +2867,9 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
     printf 'Goals — %d of %d reached\n' "$r" "${#RL_GOAL[@]}"
     while IFS= read -r g; do [ -z "$g" ] || _card_hang 3 "$g"; done <<< "$lines"
   fi
-  if [ -n "$RL_HH" ] || [ -n "$RL_TR" ]; then
+  if [ -n "$RL_SF" ] || [ -n "$RL_HH" ] || [ -n "$RL_TR" ]; then
     printf '\n'
+    [ -z "$RL_SF" ] || _card_hang 3 "$RL_SF"
     [ -z "$RL_HH" ] || _card_hang 3 "$RL_HH"
     [ -z "$RL_TR" ] || _card_hang 3 "$RL_TR"
   fi
@@ -3667,7 +3671,7 @@ case "$1" in
     exit 0 ;;
   task-cell)
     # A TASKS CELL, JUDGED BY THE STEP-3 CARD'S OWN TITLE CAP AND SENTENCE RULE where a verb writes it
-    # (task-add, task-set): the refusal is the card's, word for word, every refused cell named in it, exit 1.
+    # (task-add): the refusal is the card's, word for word, every refused cell named in it, exit 1.
     [ "$#" -ge 3 ] && [ $(( ($# - 1) % 2 )) -eq 0 ] || _card_usage "task-cell takes <id> <cell> pairs (got $(( $# - 1 )) arguments)"
     shift
     CARD_TITLE_BAD=""

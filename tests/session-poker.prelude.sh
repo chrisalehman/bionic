@@ -1,5 +1,4 @@
 # tests/session-poker.prelude.sh — THE HALF OF THE SESSION-POKER SUITE EVERY SHARD SHARES
-# (wave-30 T2; design-ledger Δ7, D8).
 #
 # Sourced by tests/session-poker.test.sh, -2, -3 and -4, after tests/lib/assert.sh, the four
 # fixture libraries and the POKER seam. It is not a suite: the runner launches `*.test.sh`
@@ -203,17 +202,6 @@ said() {  # <dir> <name> -> the `done=<path>` argument, the marker written
   printf 'done=%s/%s.done' "$1" "$2"
 }
 
-# The same, onto ANOTHER session's roster file in the same .bionic/tmp — the shape §8's
-# `adopt` reads. `session=` is forced to match the filename, because that is the invariant
-# the writer keeps and a fixture that broke it would be testing a state the fleet cannot
-# produce.
-add_row_to() {  # <repo> <session-id> <key=value>...
-  local repo="$1" sid="$2"; shift 2
-  local f; f="$(roster_of "$repo" "$sid")"
-  [ -f "$f" ] || roster_header > "$f"
-  mkrow session="$sid" "$@" >> "$f"
-}
-
 # THE ACK IS PLANTED THROUGH THE REAL VERB, never by hand-writing a ledger line. `acked=`
 # reaches the poker on the verdict line (hooks/session-sweeper.sh:715), and the only writer
 # of the ledger that line is computed from is `ack` itself — a fabricated ledger would pin
@@ -232,45 +220,17 @@ ack_rows() {  # <repo> <name>...
 # WHY EVERY DISARM FIXTURE BELOW GREW A PLAN. `open == 0` used to be the whole DISARM
 # predicate, and it is also what a live wave looks like between two batches — so the tick
 # ended the Patrol of runs with days of work left (epic-20 W1 dogfood, idea §B-4). DISARM
-# now needs the RUN to say it is delivered: `current: 9` with `delivered:` on the `Step 9:`
-# line, read out of the newest plan carrying an unfenced `## SDLC State`. A fixture that
-# writes no plan is therefore a fixture that cannot DISARM, which is AC-13's second half.
+# now needs the RUN to say it is delivered: its step 9 event carrying `delivered=`, read from
+# the run's log. A fixture that writes no plan is therefore a fixture that cannot DISARM.
 #
-# CLOCK DISCIPLINE HOLDS: nothing here sleeps. `touch` after the write is what makes a
-# fixture the newest candidate, exactly as `backdate` drives staleness above.
-plan_body() {  # <current> [evidence text for the Step-<current> line] -> a whole plan file
-  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: %s\n' "$1"
-  # Past Step 3 the plan carries its approval, the fact the fill keys on (wave-26 T13; D3).
-  case "${1%[ab]}" in [4-9]) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
-  printf '\n- Step %s: %s\n' "$1" "${2:-evidence for this step}"
-}
-
-write_plan() {  # <repo> <body> [path relative to <docs-root>/plans]
-  local repo="$1" body="$2" rel="${3:-epic-99-fixture/wave-01-fixture.plan.md}"
-  local f="$repo/.bionic/docs/plans/$rel"
-  mkdir -p "$(dirname "$f")"
-  printf '%s' "$body" > "$f"
-  touch "$f"
-}
-
-# The shorthand every DISARM fixture uses: a run that reached Step 9 and recorded a
-# delivery. `delivered:` is the token the close-out step writes and the only one run_state
-# accepts.
+# The shorthand every DISARM fixture uses: a run at 15 that reached Step 9 and recorded a
+# delivery in its log.
 delivered_plan() {  # <repo>
-  write_plan "$1" "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')"
+  local p; p="$(sp_plan_at_step "$1" 9)"
+  printf 'run/v1|ev=step|n=9|delivered=bionic 9.9.9; report: record/fixture/close-out.md|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$p")"
 }
 
 # ---------- the session binding (wave-session-bound-run, AC-2/AC-3/AC-6/AC-8) ----------
-#
-# A plan the fixture can NAME. `write_plan` writes one and says nothing about where; the
-# three sections below bind to a path, refuse a path, and assert a path appears nowhere, so
-# each of them needs the path back. Same layout, one place, and the path is echoed rather
-# than recomputed at every call site.
-plan_at() {  # <repo> <relative path under <docs-root>/plans> <body> -> the absolute path
-  write_plan "$1" "$3" "$2"
-  printf '%s/.bionic/docs/plans/%s' "$1" "$2"
-}
-
 marker_of() { printf '%s/.bionic/tmp/engaged-%s.state' "$1" "${2:-$SID}"; }
 
 # THE BOUND FIXTURE, in hooks/engage.sh's exact two-line shape — the same posture
@@ -280,20 +240,6 @@ marker_of() { printf '%s/.bionic/tmp/engaged-%s.state' "$1" "${2:-$SID}"; }
 # verb §16 is testing.
 bind_marker() {  # <repo> <plan path|none> [sid]
   bound_marker "$1" "${3:-$SID}" "$2"
-}
-
-# THE PHYSICAL SPELLING OF A PATH. `$TMPROOT` comes from `mktemp -d`, which on macOS hands
-# back `/var/folders/...` — a symlink to `/private/var/folders/...`. A BOUND session reads its
-# plan out of the marker and gets back whatever spelling was written there; an UNBOUND one
-# gets the spelling the hook's own root walk produced, which is physical because every verb
-# resolves its root with `pwd -P`. Both are the same file and the difference is real, so the
-# fallback assertion below states which one it expects rather than papering over it.
-real_path_of() {  # <path> -> the same file with its directory resolved
-  printf '%s/%s' "$(cd "$(dirname "$1")" && pwd -P)" "$(basename "$1")"
-}
-
-file_mode() {  # <file> -> the three-digit mode, on either stat
-  stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1" 2>/dev/null
 }
 
 stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
@@ -339,7 +285,7 @@ poke_bind() {  # <repo> -> binds an empty engaged marker to the root's open run,
 }
 poke() {  # <repo> <args...> -> sets OUT, RC; POKE_BASH names the interpreter (default: PATH's bash)
   local repo="$1"; shift
-  case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
+  case "${1:-}" in tick) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
   ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" "${POKE_BASH:-bash}" "$POKER" "$@" ) \
     > "$TMPROOT/poke.out" 2>&1 &
   local p=$! i=0
@@ -354,31 +300,44 @@ poke() {  # <repo> <args...> -> sets OUT, RC; POKE_BASH names the interpreter (d
   fi
   OUT="$(cat "$TMPROOT/poke.out")"
 }
+# said_as <shape> <repo> <words>... -> this session's transcript under SAID_CFG, at the repository's own project name,
+# gains each of <words> as a prompt in the shape of tests/fixtures/transcript-move/<shape>.jsonl (`typed`: the person
+# typed it; `sdk`: a program sent it), and the session's load record stands under the repository: the two witnesses
+# lib/said.sh asks before it reads a word. Appended, so words given earlier stay. SAID_CFG is a config of its own, so a
+# tick elsewhere in the suite, which takes the first transcript of this session it finds under the config, never reads
+# it: a verb that holds words runs as `CLAUDE_CONFIG_DIR="$SAID_CFG" poke …`.
+SAID_CFG="$TMPROOT/said-cfg"
+said_as() {
+  local fx="$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move/$1.jsonl" d t
+  d="$SAID_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$2")"
+  mkdir -p "$d" "$2/.bionic/tmp"; [ -s "$d/$SID.jsonl" ] || cat "${fx%/*}/frame.jsonl" > "$d/$SID.jsonl"
+  [ -f "$2/.bionic/tmp/loaded-$SID.state" ] || printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$2" > "$2/.bionic/tmp/loaded-$SID.state"
+  for t in "${@:3}"; do jq -c --arg t "$t" '.message.content = $t' "$fx" >> "$d/$SID.jsonl"; done
+}
+
+# ta_add <repo> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [--born <b>] [--questions <q>]
+#   -> OUT, RC: the orchestrator's edit of the row, by the header, then the plan kept for s42_unchanged, then task-add of it;
+#   TA_PASTE=1 pastes the lines a short row's refusal prints, as the orchestrator does, and runs the verb again.
+ta_add() {
+  local repo="$1" b="" q="" p t; shift
+  while [ $# -ge 2 ]; do case "${*: -2:1}" in --born) b="${*: -1}" ;; --questions) q="${*: -1}" ;; *) break ;; esac; set -- "${@:1:$(($# - 2))}"; done
+  p="$(sed -n 's/^plan=//p' "$(marker_of "$repo")" 2>/dev/null)"; [ -f "$p" ] || { poke_bind "$repo"; p="$(sed -n 's/^plan=//p' "$(marker_of "$repo")")"; }
+  t="$4"; case "$b" in '') ;; regression:*) t="$t · born: regression" ;; *) t="$t · born: review" ;; esac; [ -z "$q" ] || t="$t · questions: $q"
+  ta_put "$p" "$(TA_V="$(printf '%s\t' "$1" "$2" "$3" "$t" "$5" "$6" "$7" "$8" "$9" "${10:-}")" awk '
+    BEGIN { split("id step kind task agent deps size serves files reads", k, " "); split(ENVIRON["TA_V"], v, "\t"); for (i in k) val[k[i]] = v[i]; val["status"] = "pending" }
+    /^## / { t = ($0 ~ /^## [Tt]asks/) } t && /^\| *id *\|/ { n = split($0, h, "|"); r = "|"
+      for (c = 2; c < n; c++) { x = tolower(h[c]); gsub(/^ +| +$/, "", x); r = r " " (val[x] == "" ? "—" : val[x]) " |" }; print r; exit }' "$p")"
+  cp "$p" "$TMPROOT/s42-before"; poke "$repo" task-add "$1" ${b:+--born "$b"}
+  [ "${TA_PASTE:-}$RC" = 11 ] && [ "${OUT/ is short /}" != "$OUT" ] && { ta_put "$p" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^| T')"; poke "$repo" task-add "$1" ${b:+--born "$b"}; }; :
+}
+ta_put() {  # <plan> <Tasks lines> -> each line written over the row of its id, or after the table's last row
+  TA_V="$2" awk 'BEGIN { n = split(ENVIRON["TA_V"], v, "\n"); for (i = 1; i <= n; i++) { split(v[i], c, "|"); k = c[2]; gsub(/ /, "", k); if (k != "") { row[k] = v[i]; o[++m] = k } } }
+    /^## / { t = ($0 ~ /^## [Tt]asks/) } { L[NR] = $0 } t && /^\|/ { last = NR; split($0, c, "|"); k = c[2]; gsub(/ /, "", k); if (k in row) { L[NR] = row[k]; put[k] = 1 } }
+    END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) for (j = 1; j <= m; j++) if (!(o[j] in put)) print row[o[j]] } }' "$1" > "$1.ta" && mv "$1.ta" "$1"
+}
 
 # ── hoisted from Section 6: fake_config_dir — Sections 41 and 43–45 build config dirs with it. ──
-# ============================================================
-# THE BLIND-WALL DETECTOR, RETIRED (bionic 1.4.0, task ADOPT, spec AC-7)
-# ============================================================
-#
-# It compared main-thread `Agent` tool_uses in the transcript against rows on the roster
-# and raised a NOTIFY when dispatches outnumbered them. The condition it looked for was
-# real: the dispatch wall lived in the governing skill's frontmatter, and a skill's
-# registrations do not survive a session continue, a `/clear` + resume or a
-# `/reload-plugins` — so the wall went silently absent and dispatches launched unrostered.
-#
-# Every wall is registered in hooks/hooks.json now and survives all three, so that
-# condition cannot arise the way it did. What could still arise was the detector's own
-# false positive: it had no "no active run" branch, so a session that had simply not
-# engaged a run — no roster, because nothing was dispatched — read as a session whose wall
-# had died. That fired for real on 2026-09-02 at 20:07Z, against this wave's own
-# orchestrator, which is how it came to be in scope.
-#
-# The registration is pinned instead, in tests/hook-adoption.test.sh and
-# tests/cross-gate-agreement.test.sh §L: every hook named once in hooks.json, none in the
-# frontmatter. That is a claim about a file on disk rather than an inference from a
-# transcript, and it goes red when the wiring changes rather than when a session is idle.
-#
-# ONE HELPER SURVIVES THE RETIREMENT: `fake_config_dir`. Section 8 builds a predecessor's
+# `fake_config_dir`: Section 8 builds a predecessor's
 # subagent transcript under it, and `adopt` resolves the observe address through
 # CLAUDE_CONFIG_DIR — so without it that section would read the real ~/.claude.
 fake_config_dir() {  # <label> -> a CLAUDE_CONFIG_DIR with a projects/ tree
@@ -387,22 +346,17 @@ fake_config_dir() {  # <label> -> a CLAUDE_CONFIG_DIR with a projects/ tree
   printf '%s' "$c"
 }
 
-# ── hoisted from Section 11: wave_plan, wave_plan_at, SP_TASKS_HEADER, SP_APPROVED_LINE, plant_answer, poke_pressure, RUNG_N, poke_rung — every later shard plants plans and answers and ticks under a pinned pressure with them. ──
+# ── hoisted from Section 11: wave_plan_at, SP_TASKS_HEADER, SP_APPROVED_LINE, plant_answer, poke_pressure, RUNG_N, poke_rung — every later shard plants plans and answers and ticks under a pinned pressure with them. ──
 # A plan carrying BOTH halves the scheduler reads: the frontmatter `parallel-budget:` line
 # and the machine-readable task table. Written as one builder because a fixture that
 # carried only one of them would be testing a plan shape the wave never produces.
 #
 # The budget line's shape is byte-identical to what Step 0 writes and to what
 # hooks/dispatch-preflight.sh's budget arm reads (L-RESOURCES/2): one string, four fields.
-wave_plan() {  # <repo> <budget line body, or "-" for none> <table row>...
-  local repo="$1"; shift
-  wave_plan_at "$repo" 'epic-99-fixture/wave-01-fixture.plan.md' "$@" >/dev/null
-}
-
-# THE SAME PLAN, AT A PATH THE CALLER NAMES, and echoing that path back. Section 18 needs
+#
+# AT A PATH THE CALLER NAMES, and echoing that path back. Section 18 needs
 # TWO budgeted plans in one root — one bound, one not — which a fixed filename cannot
-# describe. `wave_plan` is now a two-line delegate to this, so every Section 11/12 case
-# still writes exactly the file it always wrote.
+# describe.
 # THE ONE `## Tasks` HEADER EVERY FIXTURE PLAN IN THIS SUITE CARRIES (REQ-1e). The tick
 # reads the table through payload/scripts/lib/units.sh now, which keys every column off
 # this header row by NAME — so a fixture that named fewer columns would be testing a
@@ -430,6 +384,7 @@ wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table
     local row
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
+  sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -472,50 +427,60 @@ poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
   BIONIC_PROBE_FREE_MB="$free" BIONIC_PROBE_LOAD_1M="$load" poke "$repo" "$@"
 }
 
-# THE SAME, FOR THE BAND THE RUNG IS COMPUTED FROM (S8). `free_mb`/`load_1m` decide the
-# advisory `state=` arm (HOLD/EMERGENCY); the BAND behind `pressure_level` is decided by the
-# free and swap PERCENTAGES, which are a different pair of readings on the same record
-# (lib/resources.sh `pressure_band`). Both seams are pinned, so a case can put the machine in
-# one state and the ring in another band — which is exactly the separation the design asks
-# for: HOLD is advice to the model, the rung is regulation.
-#
-# A RING PER CASE, always empty at entry. `pressure_level` medians every sample inside the
-# smoothing window, so a ring shared between cases would let an earlier case's band decide a
-# later case's fill width. The tick takes its own sample, so an empty ring plus these two
-# pins is a ring holding exactly one reading of the band the case named.
-RUNG_N=0
-poke_rung() {  # <repo> <free_pct> <swap_pct> <args...>
-  local repo="$1" fp="$2" sp="$3"; shift 3
-  RUNG_N=$((RUNG_N + 1))
-  local ring="$TMPROOT/ring-$RUNG_N.ring"
-  rm -f "$ring"
-  BIONIC_PRESSURE_RING="$ring" BIONIC_PROBE_FREE_PCT="$fp" BIONIC_PROBE_SWAP_PCT="$sp" \
-    poke "$repo" "$@"
+# sp_at15 <plan> -> the page a builder here wrote at 14, rewritten as a run at 15 holds it, and that run's log written
+#   whole beside it (<docs>/record/<stem>/run.log). The header gains the version and the branches the state section named;
+#   the state section, the dispatch ledger and the matrix go; each Tasks row keeps its nine authored cells, read by the
+#   table's own header names (an escaped bar a cell's own), its artifact cell when the template has one; and the log holds a step event for each step to current:, the plan's approval when the
+#   section carried approved-by:, then per row its dispatch (an agent cell on a row not pending), its tree (a worktree
+#   cell) and its landing (status landed). The matrix's criterion is an Eval design row. Instants are fixed and
+#   increasing, so the fold reads the lines in the order written.
+sp_at15() {
+  local p="$1" d n
+  d="${p%/*}"; case "$d" in */plans/*) d="${d%/plans/*}" ;; *) d="${d%/plans}" ;; esac
+  n="$(basename "$p" .plan.md)"; mkdir -p "$d/record/$n" || return 1
+  awk -v lf="$d/record/$n/run.log" '
+    function none(s) { gsub(/—|-/, "", s); return s == "" }
+    function ev(s) { printf "run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n", s, ++t > lf }
+    function cell(r, k) { return (k in col) ? r[col[k]] : "—" }
+    NR == FNR { if (/^current: /) cur = $2; if (/^approved-by: /) ok = 1
+      if (/^  base-sha: /) base = $2; if (/^  branch: /) br = $2; if (/^working-branch: /) br = $2
+      if (/^integration-branch: /) ib = $2; next }
+    FNR == 1 && /^---$/ { fm = 1; print; next }
+    fm && /^canonical_sdlc_version:/ { next }
+    fm && /^---$/ { fm = 0; print "canonical_sdlc_version: 15"; if (br != "") print "working-branch: " br
+      if (base != "") print "base-sha: " base; if (ib != "") print "integration-branch: " ib; print
+      for (i = 1; i <= cur; i++) ev("step|n=" i); if (ok) ev("approval|key=step3|by=fixture|said=approved"); next }
+    /^## / { skip = ($0 ~ /^## (SDLC State|Dispatch ledger|Verification Matrix)/); tab = ($0 ~ /^## Tasks/); hd = 0
+      if ($0 ~ /^## Verification Matrix/) eval = 1 }
+    skip { next }
+    tab && /^\| *id *\|/ { m = split($0, h, "|"); for (i = 2; i < m; i++) { k = tolower(h[i]); gsub(/^ +| +$/, "", k); col[k] = i }
+      print "| id | step | kind | task | deps | size | serves | Files | artifact |"; print "|---|---|---|---|---|---|---|---|---|"; hd = 1; next }
+    tab && hd && /^\|---/ { next }
+    tab && hd && /^\|/ { l = $0; gsub(/\\\|/, "\001", l); split(l, r, "|"); for (i in r) { gsub(/^[ \t]+|[ \t]+$/, "", r[i]); gsub(/\001/, "\\|", r[i]) }
+      printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", cell(r, "id"), cell(r, "step"), cell(r, "kind"), cell(r, "task"), cell(r, "deps"), cell(r, "size"), cell(r, "serves"), cell(r, "files"), cell(r, "artifact")
+      if (!none(cell(r, "agent")) && cell(r, "status") != "pending") ev("dispatch|row=" cell(r, "id") "|name=" cell(r, "agent"))
+      if (!none(cell(r, "worktree"))) ev("tree|row=" cell(r, "id") "|path=.worktrees/" cell(r, "worktree"))
+      if (cell(r, "status") == "landed") ev("published|row=" cell(r, "id")); next }
+    { print }
+    END { if (eval) { print "\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
+      print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p"
 }
 
-# ── hoisted from Section 11: count_lines_matching — Sections 50, 55 and 67 count lines with it. ──
-# How many times a line appears in an output — "exactly one rung line per tick" is a claim
-# about a COUNT, and `expect_contains` cannot make it.
-count_lines_matching() {  # <needle> <output> -> integer
-  local n
-  n="$(printf '%s\n' "$2" | /usr/bin/grep -c -- "$1" 2>/dev/null)" || n=0
-  case "${n:-}" in ''|*[!0-9]*) n=0 ;; esac
-  printf '%s' "$n"
-}
-
-# ── hoisted from Section 11: mk_rung_repo — Section 41 builds its rung repos with it. ──
-mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready tasks
-  local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=18 source=user" \
-    "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
-    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
-    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
-    "| THREE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
-    "| FOUR | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
-  printf '%s' "$r"
+# sp_fact <plan> <line> -> a proof or waiver line in the shape lib/proof.sh's proof_line and proof_waiver_line print
+#   appended to the run's log as the event the verbs write for it (`proof` with the line's fields, `waiver` with by= and
+#   said=), its instant the line's own. A log's order is its age, as the state section's place was.
+sp_fact() {
+  local l="$2" log; log="$(plan_fixture_log "$1")"; mkdir -p "${log%/*}" || return 1
+  case "$l" in
+    'proved: '*) printf '%s\n' "${l#proved: }" | awk '{ o = "run/v1|ev=proof"; for (i = 1; i <= NF; i++) if ($i ~ /^at=/) a = $i; else o = o "|" $i
+      print o "|" a }' >> "$log" ;;
+    'waived: '*) printf '%s\n' "$l" | sed -E 's/^waived: question=([^ ]*) head=([^ ]*) by (.*) ([0-9]{4}-[^ ]*Z) "(.*)"$/run\/v1|ev=waiver|question=\1|head=\2|by=\3|said=\5|at=\4/' >> "$log" ;;
+    *) return 1 ;;
+  esac
 }
 
 # ── hoisted from Section 12: sp_plan_at_step — Sections 37–40, 50, 55 and 67 write plans with it. ──
+# sp_at15 rewrites each page as a run at 15 holds it.
 sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   local repo="$1" current="$2"; shift 2
   local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" row
@@ -529,11 +494,12 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
     printf '%s' "$SP_TASKS_HEADER"
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
+  sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
 
-# ── hoisted from Section 19: s20_ack — Section 35 plants acks with it. ──
+# ── hoisted from Section 19: s20_ack — session-poker-4 plants acks with it. ──
 s20_ack() {  # <repo> <name> <at> — the sweeper ledger's ack line, in its writer's shape
   local le; le="$1/.bionic/tmp/sweeper-${SID}.state"
   [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
@@ -541,24 +507,8 @@ s20_ack() {  # <repo> <name> <at> — the sweeper ledger's ack line, in its writ
     "$3" "$SID" "$2" >> "$le"
 }
 
-# ── hoisted from Section 26: ack_ledger_of — Section 35 reads the ack ledger with it. ──
+# ── hoisted from Section 26: ack_ledger_of — the release approval prelude reads the ack ledger with it. ──
 ack_ledger_of() { printf '%s/.bionic/tmp/sweeper-%s.state' "$1" "${2:-$SID}"; }
-
-# ── hoisted from Section 27: S27_OUT, poke_split, last_line — §REPORT-INCL reads stdout alone with them. ──
-# STDOUT ALONE, because "the decision line is the LAST line" is a claim about the machine
-# channel. `poke` merges stderr into OUT, which is right for every other case in this file
-# and cannot answer this one: a `die` WARN on stderr would read as the last line.
-S27_OUT=""; S27_ERR=""
-poke_split() {  # <repo> <args...> -> sets S27_OUT (stdout), S27_ERR (stderr), RC
-  local repo="$1"; shift
-  case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
-  ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) \
-    > "$TMPROOT/s27.out" 2> "$TMPROOT/s27.err"
-  RC=$?
-  S27_OUT="$(cat "$TMPROOT/s27.out")"; S27_ERR="$(cat "$TMPROOT/s27.err")"
-}
-
-last_line() { printf '%s\n' "$1" | tail -1; }
 
 # ── hoisted from Section 30: s30_row, s30_last, s30_field — Section 43, AMEND-ROOT, Section 66, Section 67, §SEV and §REPORT-INCL write and read rows with them. ──
 s30_row() {  # <repo> <key=value>... — one live row through the one writer
@@ -597,6 +547,13 @@ s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 
 # ── hoisted from Section 34: s34_plan — Sections 37, 42, 49, 51 and §ROW-LABEL build the gate-admitted plan with it. ──
 s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the session is bound to it
+  local f; f="$(s34_page "$@")"
+  sp_at15 "$f"
+  bound_marker "$1" "$SID" "$f" >/dev/null 2>&1
+  printf '%s' "$f"
+}
+# s34_page <repo> <current> [step-4 block body] -> the path of s34_plan's page as a builder writes it, before sp_at15
+s34_page() {
   local repo="$1" cur="$2" block="${3:-}" f
   f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   mkdir -p "$(dirname "$f")" "$repo/.bionic/docs/specs/epic-99-fixture"
@@ -607,6 +564,7 @@ s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the sessi
   branch: wave/01-fixture'
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'epic: epic-99-fixture\nwave: wave-01-fixture\n'  # the header names the Step-1 documents
     printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
@@ -627,7 +585,6 @@ s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the sessi
     printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
   } > "$f"
-  bound_marker "$repo" "$SID" "$f" >/dev/null 2>&1
   printf '%s' "$f"
 }
 
@@ -643,15 +600,12 @@ s34_gate() {
   GATE_RC=$?
 }
 
-# ── hoisted from Section 42: s42_plan, s42_numstat, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
+# ── hoisted from Section 42: s42_plan, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
 s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, committed
   local p; p="$(s34_plan "$1" "$2" "${3:-}")"
-  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
-  printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n' >> "$p"
   ( cd "$1" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
   printf '%s' "$p"
 }
-s42_numstat() { git -C "$1" diff --numstat | awk '{ printf "%s %s;", $1, $2 }'; }
 s42_snap() {  # <repo> <plan> -> commit the plan and keep a byte copy for the cmp rows
   ( cd "$1" && git add -f "$2" && git commit -qm snap ) >/dev/null 2>&1
   cp "$2" "$TMPROOT/s42-before"
@@ -660,12 +614,9 @@ s42_unchanged() {  # <label> <want rc> <plan>
   expect_eq "$1 — refused (exit $2)" "$2" "$RC"
   expect_true "$1 — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$3"
 }
-# s42_builds_landed <plan> -> the fixture's active build row T2 written landed, as T1 is: a whole
-# read is registered only once no build row is pending or active (wave-27 T45; D10).
-s42_builds_landed() {
-  awk '/^\| T2 \| 4 \| build \|/ { $0 = "| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |" } { print }' \
-    "$1" > "$1.tmp" && mv "$1.tmp" "$1"
-}
+# s42_builds_landed <plan> -> the fixture's active build row T2 landed, as T1 is, by its `published` event: a whole read
+# is registered only once no build row is pending or active.
+s42_builds_landed() { printf 'run/v1|ev=published|row=T2|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$1")"; }
 
 # ── hoisted from Section 47 §WAIT: s47_plan, s47_lines — Section 59, §SEV, §RC-DEFER and §MOVE-PASTED write reads tables and read tick lines with them. ──
 s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, current: 4
@@ -681,6 +632,7 @@ s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, 
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
+  sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -690,7 +642,7 @@ s47_lines() { printf '%s\n' "$OUT" | /usr/bin/grep "^poker: $1 " ; }  # <WAIT|FI
 s46_last() {  # <plan> <kind> -> proof_last's answer, from the library itself
   bash -c '. "$1" && proof_last "$2" "$3"' _ "$S46_LIB" "$1" "$2" 2>/dev/null
 }
-s46_proved() { /usr/bin/grep -E '^proved: ' "$1"; }  # <plan> -> its proof lines
+s46_proved() { bash -c '. "$1" && proof_lines "$2"' _ "$S46_LIB" "$1" 2>/dev/null; }  # <plan> -> the run's proofs through the proof library's reader, each in an older plan's line shape
 
 # ── hoisted from Section 48 §READY-EARLY (review half): s48_row, s48_fill_has — Section 59 reads rows and FILL lines with them. ──
 s48_row() {  # <plan> <id> -> the row's cells, `|`-joined and trimmed: id|…|status|reads
@@ -724,9 +676,9 @@ s59_world() {
   R59W="$(make_repo "$lab")"; new_roster "$R59W"; ( cd "$R59W" && git commit -q --allow-empty -m init )
   # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
   # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
-  P59W="$(s42_plan "$R59W" 4 "  worktree: .worktrees/01-fixture
+  P59W="$(s34_page "$R59W" 4 "  worktree: .worktrees/01-fixture
   base-sha: $(git -C "$R59W" rev-parse --short=8 HEAD)
-  branch: wave/01-fixture")"
+  branch: wave/01-fixture")"; bound_marker "$R59W" "$SID" "$P59W" >/dev/null 2>&1
   # EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a
   # review row is ready again only past a commit that owes, so A, B and C each change a.sh.
   ( cd "$R59W" && git worktree add -q -b wave/01-fixture "$R59W/.worktrees/01-fixture" \
@@ -736,9 +688,8 @@ s59_world() {
   S59W_B="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD~1 2>/dev/null)"
   S59W_C="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
   st="${st//@A/$S59W_A}"; st="${st//@B/$S59W_B}"; st="${st//@C/$S59W_C}"
-  printf '%s\n' "$@" > "$R59W.rows"; printf '%s\n' "$st" > "$R59W.st"
-  awk -v sf="$R59W.st" -v rf="$R59W.rows" '
-    /^current: / && !wb { print; print "working-branch: wave/01-fixture"; while ((getline l < sf) > 0) if (l != "") print l; wb = 1; next }
+  printf '%s\n' "$@" | sp_q_rows > "$R59W.rows"
+  awk -v rf="$R59W.rows" '
     /^\| id \| step \|/ { intab = 1
       print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
       print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
@@ -746,8 +697,16 @@ s59_world() {
       next }
     intab && /^\|/ { next }
     { intab = 0; print }' "$P59W" > "$P59W.tmp" && mv "$P59W.tmp" "$P59W"
+  sp_at15 "$P59W"; printf '%s\n' "$st" | while IFS= read -r l; do [ -z "$l" ] || sp_fact "$P59W" "$l"; done
   ( cd "$R59W" && git add -f "$P59W" && git commit -qm rows ) >/dev/null 2>&1
   rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"
+}
+
+# sp_q_rows -> stdin's Tasks rows with a reads cell last, each live read's questions (`live:head:<q>[+<q>]`) moved to
+#   the task cell's ` · questions: <q>[,<q>]` tag, where task-add writes them on a nine-cell row at 15.
+sp_q_rows() {
+  awk -F'|' -v OFS='|' 'match($(NF - 1), /live:head:[a-z+]+/) { q = substr($(NF - 1), RSTART + 10, RLENGTH - 10); gsub(/\+/, ",", q)
+    sub(/ +$/, "", $5); $5 = $5 " · questions: " q " " } { print }'
 }
 
 # ── hoisted from Section 59 §RANGE-Q: S59W_T5 — the hoisted s60_world plants the floor row with it. ──
@@ -765,13 +724,12 @@ S60_T8="| T8 | 4 | build | another fix | implementor | — | 30 | REQ-4, REQ-5 |
 s60_whole() {  # <head> <scope> -> a structure reading's proof line
   printf 'proved: kind=review head=%s at=2026-10-04T10:01:00Z evidence=record/wave-01-fixture/st-whole.md question=structure reader=w-rev result=pass scope=%s' "$1" "$2"
 }
-s60_world() {  # <label> <whole head @A|@C> <scope> -> R59W, P59W: §59's shape plus a matrix
+s60_world() {  # <label> <whole head @A|@C> <scope> -> R59W, P59W: §59's shape plus criteria under five requirements
   s59_world "$1" "$(s60_whole "$2" "$3")" "$S60_T1" "$S60_T7" "$S60_T8" "$(s59w_q T3 structure)" "$S59W_T5"
-  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n' >> "$P59W"
-  printf '| AC-%s | T2 | pending | record/wave-01-fixture/x.md | |\n' 1.1 2.1 2.2 4.1 5.1 >> "$P59W"
+  printf '| REQ-%s | fixture | AC-%s | hermetic | `tests/a.test.sh` | the fixture is wrong |\n' 2 2.1 2 2.2 4 4.1 5 5.1 >> "$P59W"
   ( cd "$R59W" && git add -f "$P59W" && git commit -qm matrix ) >/dev/null 2>&1
   S60_INIT="$(git -C "$R59W" rev-parse "$S59W_A~1" 2>/dev/null)"
-  S60_REC="$R59W/.bionic/docs/record/wave-01-fixture/landing-proofs.log"; mkdir -p "${S60_REC%/*}"; : > "$S60_REC"
+  S60_REC="$R59W/.bionic/docs/record/wave-01-fixture/run.log"; mkdir -p "${S60_REC%/*}"
 }
 
 # ── hoisted from Section 60 §MOVED: s60_tick — §LINE-TELL ticks §60's world with it. ──

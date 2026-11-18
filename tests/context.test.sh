@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/context.test.sh — payload/scripts/lib/context.sh: THE ONE CONTEXT PREAMBLE
-# (epic-23 wave-11-lean-spine, REQ-1f (ii) and REQ-1h; AC-1f.2, AC-1h.1, AC-1h.2;
-# spec Design §1 "ContextPreamble", §2 D6).
 #
 # WHAT IS UNDER TEST. Six lines that fifteen hooks used to carry a private copy of —
 # read the payload, find the cwd, find the root, resolve the session id, ask whether
@@ -67,8 +65,8 @@ SID="c0ntext1-2222-3333-4444-555555555555"
 # mk_repo <name> <state> -> a project root. state = bare|engaged|open|closed
 #   bare    : a directory with a .bionic, no engagement marker, no plan
 #   engaged : the marker for $SID, no plan
-#   open    : engaged, plus a plan at `current: 4`
-#   closed  : engaged, plus a plan at `current: 9` carrying a delivered Step-9 line
+#   open    : engaged, plus a plan page at 15 whose run's log stands at step 4
+#   closed  : engaged, plus a plan page at 15 whose run's log stands at step 9, delivered
 mk_repo() {
   local name="$1" state="$2"
   local root="$SANDBOX/repos/$name"
@@ -76,26 +74,12 @@ mk_repo() {
   case "$state" in
     engaged|open|closed) : > "$root/.bionic/tmp/engaged-$SID.state" ;;
   esac
-  local cur="" step9=""
-  case "$state" in
-    open)   cur="4"; step9="- Step 9: (pending)" ;;
-    closed) cur="9"; step9="- Step 9: delivered: record/x.md" ;;
-  esac
+  local cur=""
+  case "$state" in open) cur=4 ;; closed) cur=9 ;; esac
   if [ -n "$cur" ]; then
-    cat > "$root/.bionic/docs/plans/epic-99/wave-01.plan.md" <<PLAN
----
-canonical_sdlc_version: 14
----
-
-# fixture plan
-
-## SDLC State
-
-current: $cur
-
-- Step 4: implementation
-$step9
-PLAN
+    printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# fixture plan\n' > "$root/.bionic/docs/plans/epic-99/wave-01.plan.md"
+    mkdir -p "$root/.bionic/docs/record/wave-01"
+    printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$cur" > "$root/.bionic/docs/record/wave-01/run.log"
   fi
   printf '%s' "$root"
 }
@@ -341,6 +325,10 @@ REC=$(probe "$SANDBOX" "$(payload "$R_CLOSED")" CLAUDE_CODE_SESSION_ID="$SID" BI
 expect_eq "a closed run still identifies the session (return 0)" "0" "$(field "$REC" rc)"
 expect_eq "…and reports the verdict rather than acting on it" "none" "$(field "$REC" run_word)"
 expect_eq "…with no plan path on the 'none' verdict" "" "$(field "$REC" run_plan)"
+printf 'run/v1|ev=step|n=4|at=2026-10-05T00:00:00Z\n' >> "$R_CLOSED/.bionic/docs/record/wave-01/run.log"
+REC=$(probe "$SANDBOX" "$(payload "$R_CLOSED")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=1)
+expect_eq "…the pair: the same unbound root, its run taken back to step 4, falls back to that plan" \
+  "fallback $R_CLOSED/.bionic/docs/plans/epic-99/wave-01.plan.md" "$(field "$REC" run_word) $(field "$REC" run_plan)"
 
 # a BOUND session: the marker names a plan, and the verdict is bound-open
 R_BOUND=$(mk_repo verdict-bound open)

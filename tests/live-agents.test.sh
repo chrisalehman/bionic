@@ -1,6 +1,5 @@
 #!/bin/bash
 # tests/live-agents.test.sh — payload/scripts/lib/agents.sh: the live-agent set reader
-# (wave-roster-lifecycle S4, spec AC-6; design ledger D1′/D2′).
 #
 # WHAT THIS SUITE OWNS. One question, asked of a transcript file: WHICH AGENTS DID THE
 # HARNESS SAY WERE ALIVE, and IS THAT ANSWER STILL THIS TURN'S. Design principle D0 —

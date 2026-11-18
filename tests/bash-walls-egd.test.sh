@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/bash-walls-egd.test.sh — the §EG-DERIVE sections of the one-process PreToolUse|Bash
-# hook, split out of tests/bash-walls.test.sh at wave-30 T9 (D8, REQ-4 AC-4.1).
+# tests/bash-walls-egd.test.sh — the §EG-DERIVE sections of the one-process PreToolUse|Bash hook.
 #
 # NOTHING HERE READS A CLOCK (wave-35 T11; REQ-2 AC-2.2, D11). §EG-DERIVE's cost rows (EGD-7b,
 # EGD-7f, EGD-8 and the per-reading mutant EGD-mut4) count what a commit or a derivation does
@@ -32,11 +31,10 @@ section "§EG-DERIVE — the commit wall reads a reading's result as the judge d
 # its findings derive at their effective ratings, which the judge reads (lib/proof.sh
 # `_proof_reading_result`). The wall used to read the `result=` the review registered, so after a re-rating
 # the judge and the wall answered a section two ways (§EG-6's promise). The collector (hooks/bash-walls.sh)
-# now hands the wall the derived result for the plan it judges. AN OLD `check:` LINE RE-RATES NOTHING
-# (wave-31 T32; D6): a reader's rating is final, so a plan still carrying one is judged as written, by the
-# wall and the judge alike. FIXTURE FIDELITY: §EG-6's repository, plan writer and gate drive; the records
-# are in the shape the producing verb reads (`reviewed:`, `findings:`, `finding:`, `shown:`), the judge
-# half is `facts_state` over the same plan text.
+# now hands the wall the derived result for the plan it judges. FIXTURE FIDELITY: §EG-6's repository and
+# gate drive, its plan writer's text made the run at 15 it stands for (the prelude's eg6_world: the readings
+# and the moves written into the run's log as the events a run at 15 holds); the records are in the shape the producing verb
+# reads (`reviewed:`, `findings:`, `finding:`, `shown:`), the judge half is `facts_state` over the same run.
 EGD_REC="$R_EG6/.bionic/docs/record/w28t60"
 mkdir -p "$EGD_REC"
 egd_rec() {  # <file> <result> <finding line> -> a one-finding adversarial reading record, the finding shown
@@ -46,15 +44,22 @@ egd_rec() {  # <file> <result> <finding line> -> a one-finding adversarial readi
 egd_rec adv fail "finding: 1 S2 on x.sh:9 - data lost on a second run"
 egd_rec flag flag "finding: 1 S3 off x.sh:9 - a message the reader could not rate"
 EGD_DEFERRED='moved: record/w28t60/adv.md#1 to=defer by=Dana at=2026-10-07T12:00:00Z words="defer it to the next wave" why="the user ruled it"'
-EGD_REFUTED='check: record/w28t60/adv.md#1 S2 on "data lost on a second run" refuted by=record/w28t60/chk.md'
-EGD_SETTLED='check: record/w28t60/flag.md#1 S3 off "a message the reader could not rate" settled=S1:on by=record/w28t60/chk.md'
 egd_judge() {  # <question> -> the judge's state of its piece line, over the plan eg6_gate wrote last
-  bash -c '. "$1" && facts_state "$2" "$3"' _ "$EG6_LIB" "$R_EG6/.bionic/docs/plans/active.md" "$H_EG6" 2>/dev/null \
+  bash -c '. "$1" && facts_state "$2" "$3"' _ "$EG6_LIB" "$EG6_PAGE" "$H_EG6" 2>/dev/null \
     | awk -F'\t' -v q="$1" '$1 == "review" && $2 == q && $4 == "piece" { print $5 }'
 }
 egd_lib() {  # <plan> <evidence> <written> -> the result the judge derives
   bash -c '. "$1" && _proof_reading_result "$2" "$3" "$4" "$5"' _ "$EG6_LIB" "$1" "$R_EG6/.bionic/docs" "$2" "$3" 2>/dev/null
 }
+# eg6_world writes the text's review, its move and its waiver into the run's log as the events a run at 15 holds.
+expect_eq "EGD-0 eg6_world writes the text's review, move and waiver into the run's log" \
+  "run/v1|ev=proof|kind=review|head=$H_EG6|evidence=record/w28t60/adv.md|question=adversarial|reader=w-read|result=fail|scope=piece|at=2026-10-04T12:00:00Z
+run/v1|ev=finding|ref=record/w28t60/adv.md#1|to=defer|by=Dana|words=defer it to the next wave|why=the user ruled it|at=2026-10-07T12:00:00Z
+run/v1|ev=waiver|question=structure|head=$H_EG6|by=Dana|said=ship it|at=2026-10-07T12:00:01Z" \
+  "$(eg6_world "$R_EG6" "$(eg6_plan 6 wave "$(eg6_reading "$H_EG6" adversarial fail record/w28t60/adv.md)
+$EGD_DEFERRED
+waived: question=structure head=$H_EG6 by Dana 2026-10-07T12:00:01Z \"ship it\"")"
+    /usr/bin/grep -E '^run/v1[|]ev=(proof[|]kind=review|finding|waiver)[|]' "$(plan_fixture_log "$EG6_PAGE")")"
 
 # ---------- a finding moved to defer: the reading written result=fail is derived to flag ----------
 EGD_BASE="$(eg6_reading "$H_EG6" evidence pass)
@@ -68,26 +73,16 @@ expect_eq "EGD-1c …and the judge reads that piece line as failing, on the same
 eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
 $EGD_DEFERRED")"
 expect_eq "EGD-2c precondition: the judge derives flag for the reading its proof line writes as fail (its only finding moved to defer)" \
-  "flag|covered" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
+  "flag|covered" "$(egd_lib "$EG6_PAGE" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
 expect_status "EGD-2 §EG-6 AC-8.6 the only finding moved to defer by a moved: line, the Step-6 commit is admitted" 0 "$ST"
 expect_absent "EGD-2b …and no reading question is named unanswered" "a review question is unanswered" "$ERR"
-eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
-$EGD_REFUTED")"
-expect_eq "EGD-2d §FINAL-RATING an old refuted check: line re-rates nothing (wave-31 T32): the judge derives fail and holds the piece line failing" \
-  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
-expect_status "EGD-2e …and the wall agrees: the commit is refused, as EGD-1" 2 "$ST"
 
-# ---------- an old check: line settling a finding to fix on a reading written flag re-rates nothing ----------
+# ---------- a reading written flag that no move re-rates ----------
 EGD_FLAGBASE="$(eg6_reading "$H_EG6" evidence pass)
 $(eg6_reading "$H_EG6" structure pass)
 $(eg6_reading "$H_EG6" adversarial flag record/w28t60/flag.md)"
 eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE")"
 expect_status "EGD-3 the reading written result=flag and no line re-rating it: the commit is admitted (the control)" 0 "$ST"
-eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE
-$EGD_SETTLED")"
-expect_eq "EGD-4 §FINAL-RATING the judge derives flag for it beside an old check: line settling it to S1 on, and holds the piece line covered (wave-31 T32)" \
-  "flag|covered" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/flag.md flag)|$(egd_judge adversarial)"
-expect_status "EGD-4b …and the wall agrees: the commit is admitted, as EGD-3" 0 "$ST"
 
 # ---------- a moved finding: the reading written flag is derived to fail at the moved priority ----------
 { printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: flag\nscope: piece\nfindings: 1\n' "${H_EG6:0:10}" "$H_EG6"
@@ -101,7 +96,7 @@ expect_status "EGD-5 a reading written flag whose one finding is a deferral, no 
 eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE
 $EGD_MOVED")"
 expect_eq "EGD-6 precondition: the judge derives fail for it once a moved: line sends the finding to fix, and holds the piece line failing" \
-  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/mv.md flag)|$(egd_judge adversarial)"
+  "fail|failing" "$(egd_lib "$EG6_PAGE" record/w28t60/mv.md flag)|$(egd_judge adversarial)"
 expect_status "EGD-6b §EG-6 AC-8.6 the moved priority is the one the wall reads: the commit is refused" 2 "$ST"
 expect_contains "EGD-6c …naming the reading failing at its derived result" \
   "- adversarial: the newest review is result=fail (evidence=record/w28t60/mv.md)" "$ERR"
@@ -111,8 +106,8 @@ EGD_MUT="$SANDBOX/derive-mutant"
 mkdir -p "$EGD_MUT/hooks"
 cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$EGD_MUT/scripts"
 cp "$HOOK" "$EGD_MUT/hooks/bash-walls.sh"
-EGD_NEEDLE='r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT;'
-anchor file payload/scripts/lib/walls.sh 'r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT;'
+EGD_NEEDLE='r[PROOF_QUESTION] = ((pe SUBSEP PROOF_RESULT) in D) ? D[pe SUBSEP PROOF_RESULT] : PROOF_RESULT;'
+anchor file payload/scripts/lib/walls.sh 'r[PROOF_QUESTION] = ((pe SUBSEP PROOF_RESULT) in D) ? D[pe SUBSEP PROOF_RESULT] : PROOF_RESULT;'
 EGD_N="$EGD_NEEDLE" awk 'BEGIN { n = ENVIRON["EGD_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "r[PROOF_QUESTION] = PROOF_RESULT;" substr($0, i + length(n)); print }' \
   "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" > "$EGD_MUT/scripts/lib/walls.sh"
 expect_eq "EGD-mut0 the mutant library differs from the shipped one in one line" "1" \
@@ -172,10 +167,10 @@ egd_names() {  # <path> -> how many times the trace names <path>: every read of 
 }
 egd_gate_count() {  # <plan text> -> EGD_CN (commands the commit ran) and ST, traced
   : > "$EGD_TRACE"
-  printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"
-  bw_bind "$R_EG6"
+  eg6_world "$R_EG6" "$1"
+  [ ! -f "$R_EG6/.bionic/tmp/engaged-$SID.state" ] || bound_marker "$R_EG6" "$SID" "$EG6_PAGE"
   run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')" BASH_ENV="$EGD_PRELUDE" EGD_TRACE_OUT="$EGD_TRACE"
-  EGD_CN="$(egd_marks)"; EGD_PN="$(egd_names "$R_EG6/.bionic/docs/plans/active.md")"
+  EGD_CN="$(egd_marks)"; EGD_PN="$(egd_names "$EG6_PAGE")"
 }
 egd_hook() {  # <name> <scripts dir> <code> -> a copy of the hook that runs <code> just before it folds the verdict
   local d="$SANDBOX/egd-hook-$1"
@@ -183,9 +178,6 @@ egd_hook() {  # <name> <scripts dir> <code> -> a copy of the hook that runs <cod
   EGD_CODE="$3" awk 'BEGIN { c = ENVIRON["EGD_CODE"] } index($0, "bionic_fold \"$EVENT\"") == 1 { print c } { print }' \
     "$EGD_HOOK_KEEP" > "$d/hooks/bash-walls.sh"
   printf '%s' "$d/hooks/bash-walls.sh"
-}
-egd_seen() {  # -> `seen|<lines handed>` once the copy has run, `unseen|` before
-  if [ -f "$EGD_NOBS" ]; then printf 'seen|%s' "$(grep -c . "$EGD_NOBS")"; else printf 'unseen|'; fi
 }
 EGD_SCRIPTS="$BIONIC_SCRIPTS_DIR/payload/scripts"
 EGD_N=88
@@ -240,9 +232,11 @@ expect_true "EGD-7f0 …the tracer counted both commits reading the plan, and bo
 expect_eq "EGD-7f …and the commit that derives reads the plan as many times over $EGD_N readings as over $EGD_NS: one pass, whatever the count of readings" \
   "$EGD_P6S" "$EGD_P6L"
 # the derivation alone, over a plan the size of this wave's: one pass
-EGD_TPLAN="$SANDBOX/egd-time.plan.md"; EGD_TPLAN8="$SANDBOX/egd-time8.plan.md"
-egd_tplan() {  # <readings body> <dest> -> the bound plan's text over that body, then 3000 prose lines
-  { eg6_plan 6 wave "$1"; printf '\n## Notes\n\n'; for _egd_i in $(seq 1 3000); do printf 'prose line %s of the plan body\n' "$_egd_i"; done; } > "$2"
+EGD_TPLAN="$SANDBOX/egd-time/.bionic/docs/plans/epic-01-time/t88.plan.md"; EGD_TPLAN8="${EGD_TPLAN%/*}/t8.plan.md"
+egd_tplan() {  # <readings body> <dest> -> the run at 15 eg6_world builds over that body, its page at <dest> with 3000 prose lines more, its log beside it
+  eg6_world "$R_EG6" "$(eg6_plan 6 wave "$1")"; mkdir -p "${2%/*}" "$(dirname "$(plan_fixture_log "$2")")"
+  cp "$(plan_fixture_log "$EG6_PAGE")" "$(plan_fixture_log "$2")"
+  { cat "$EG6_PAGE"; printf '\n## Notes\n\n'; for _egd_i in $(seq 1 3000); do printf 'prose line %s of the plan body\n' "$_egd_i"; done; } > "$2"
 }
 egd_tplan "$EGD88_PLAN_BODY" "$EGD_TPLAN"
 egd_tplan "$EGD8_PLAN_BODY" "$EGD_TPLAN8"
@@ -269,9 +263,6 @@ rm -f "$EGD_NOBS"
 eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
 $EGD_DEFERRED")"
 expect_status "EGD-9d …and the reading moved to defer is admitted (EGD-2)" 0 "$ST"
-rm -f "$EGD_NOBS"
-eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
-$EGD_REFUTED")"
 
 # ---------- the facts are for one plan: BIONIC_DEBTS_PLAN other than the plan judged ----------
 EGD_OTHER="$(egd_hook other "$EGD_SCRIPTS" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'; BIONIC_DEBTS_PLAN=/nonexistent/other.plan.md")"
@@ -299,15 +290,12 @@ proof_readings_derived() {
   local plan="${1:-}" tree="${2:-}" droot="" ev res lines
   [ -f "$plan" ] || return 0
   droot="$(docs_root "$tree" 2>/dev/null)"
-  lines="$(awk "$(proof_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+  lines="$(proof_lines "$plan" | awk "$(proof_awk)"'
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
       m = split($0, f, /[ \t]+/); ev = ""
       for (i = 2; i <= m; i++) if (f[i] ~ /^evidence=/) ev = substr(f[i], 10)
       if (ev != "" && !((ev SUBSEP PROOF_RESULT) in seen)) { seen[ev SUBSEP PROOF_RESULT] = 1; print ev "\t" PROOF_RESULT }
-    }' "$plan")"
+    }')"
   while IFS='	' read -r ev res; do
     [ -n "$ev" ] || continue
     printf '%s\t%s\t%s\n' "$ev" "$res" "$(_proof_reading_result "$plan" "$droot" "$ev" "$res")"
@@ -360,12 +348,12 @@ section "§JURIS — the commit wall's jurisdiction: an outside commit it can pl
 # shell; builtins and `GIT_*=` prefixes stay out. A commit the reader places outside the root but
 # cannot exempt is refused with a jurisdiction message naming the split, and the bound plan is
 # never read for it. FIXTURE FIDELITY: §18's shape, a real engaged repository under `block_plan`
-# (current: 5, a placeholder Step-5 line), so every commit the gate still judges is refused by the
+# (a run at 15 at Step 5, no proof of the whole run), so every commit the gate still judges is refused by the
 # plan, and a real `git init`-ed scratch repository beside it.
 JUR_R="$(mk_repo juris)"; block_plan "$JUR_R"
 JUR_S="$SANDBOX/scratchpad/juris-scratch"
 mkdir -p "$JUR_S"; git -C "$JUR_S" init -q 2>/dev/null
-JUR_PLAN_TEXT="Plan: $JUR_R/.bionic/docs/plans/active.md"
+JUR_PLAN_TEXT="Plan: $JUR_R/.bionic/docs/plans/epic-x/wave-x.plan.md"
 JUR_SPLIT="git -C $JUR_S commit"
 jur_line() {  # -> the one boundary line an exempt commit into the scratch repository gets
   printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here' "$JUR_S" "$JUR_R"
@@ -528,13 +516,13 @@ section "§PROSE — a commit whose every path is under the tracked docs home is
 # it). Those files are prose, but the judge knew only the state home's prefix and a short list, so a commit of
 # `docs/designs/` after a review read `owes`, and the regression walk named it unproved. The cover for every
 # question and the regression's walk now read the tracked home too. FIXTURE FIDELITY: a real repository and a
-# plan file in the shape the judge reads (`## SDLC State` with no readings), the judge's own functions
+# page at 15 whose log holds no readings, the judge's own functions
 # (`facts_cover`, `_proof_past_f`) sourced from the library and run over it.
 PR_R="$SANDBOX/prose"; mkdir -p "$PR_R/.bionic/docs/plans"
 git -C "$PR_R" init -q && git -C "$PR_R" config user.email t@example.com && git -C "$PR_R" config user.name t
 printf 'a\n' > "$PR_R/a.sh"; git -C "$PR_R" add a.sh; git -C "$PR_R" commit -qm base
 PR_BASE="$(git -C "$PR_R" rev-parse HEAD)"
-printf -- '---\ncurrent: 6\n---\n\n## SDLC State\n\n' > "$PR_R/.bionic/docs/plans/p.plan.md"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n' > "$PR_R/.bionic/docs/plans/p.plan.md"
 pr_commit() {  # <message> <path>... -> the new head; each path gets a line of text
   local m="$1" f; shift
   for f in "$@"; do case "$f" in */*) mkdir -p "$PR_R/${f%/*}" ;; esac; printf 'x %s\n' "$m" >> "$PR_R/$f"; done
@@ -579,15 +567,15 @@ section "§PROSE-CONFIG — a path the project lists under prose: in .bionic/con
 # built-in list by lib/prose.sh. One list feeds the review cover, the regression walk and the floor line that
 # `current 8 --check` prints (`facts_state`'s regression line), so a configured path reads prose at all three or
 # at none. FIXTURE FIDELITY: §PROSE's helpers over a second real repository on a working branch, its config in the
-# shape config_value reads, a floor proof line written by the library's own writer at the base.
+# shape config_value reads, a page at 15 whose log holds a floor proof the library's own writer appended at the base.
 PR_R="$SANDBOX/prose-config"; mkdir -p "$PR_R/.bionic/docs/plans"   # §PROSE's helpers read $PR_R when called
 git -C "$PR_R" init -q && git -C "$PR_R" config user.email t@example.com && git -C "$PR_R" config user.name t
 printf 'a\n' > "$PR_R/a.sh"; git -C "$PR_R" add a.sh; git -C "$PR_R" commit -qm base; git -C "$PR_R" checkout -qb wave/01-prose
 PC_BASE="$(git -C "$PR_R" rev-parse HEAD)"
 printf 'prose: CONTEXT.md, scripts/perf/\n' > "$PR_R/.bionic/config.yaml"
-PC_FLOOR="$(bash -c '. "$1" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w/floor.log ""' _ "$EG6_LIB" "$PC_BASE" 2>/dev/null)"
-{ printf -- '---\nrigor: single\nscale: task\ncurrent: 6\n---\n\n## SDLC State\n\nworking-branch: wave/01-prose\n'
-  printf -- '- Step 4: dispatched\n  base-sha: %s\n%s\n' "$PC_BASE" "$PC_FLOOR"; } > "$PR_R/.bionic/docs/plans/p.plan.md"
+printf -- '---\ncanonical_sdlc_version: 15\nrigor: single\nscale: task\nworking-branch: wave/01-prose\nbase-sha: %s\n---\n' "$PC_BASE" > "$PR_R/.bionic/docs/plans/p.plan.md"
+mkdir -p "$PR_R/.bionic/docs/record/p"
+bash -c '. "$1" && proof_event "$2" kind=regression "head=$3" evidence=record/w/floor.log' _ "$EG6_LIB" "$PR_R/.bionic/docs/plans/p.plan.md" "$PC_BASE" 2>/dev/null
 pc_floor() {  # <head> -> the regression line `current 8 --check` prints, the judge's facts_state at <head>, its exit dropped
   git -C "$PR_R" update-ref refs/heads/wave/01-prose "$1"
   bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_state "$2" "$3"' _ "$EG6_LIB" "$PR_R/.bionic/docs/plans/p.plan.md" "$1" 2>/dev/null \

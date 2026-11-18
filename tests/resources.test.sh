@@ -31,9 +31,7 @@
 #   * The four budget fixtures are the plan's, and the fourth (18c / 128 GB / 1700 GB) is
 #     THIS machine, measured 2026-09-02: `sysctl -n hw.ncpu` = 18, `hw.memsize` =
 #     137438953472 (128 GiB), `df -Pg .` Available = 1710 GB, `sysctl -n vm.loadavg` =
-#     { 4.34 2.63 2.18 }, `uname -s` = Darwin. Its expected budget is the hand-derived
-#     budget this wave is running under (plan frontmatter `parallel-budget:`), so the
-#     library reproducing it is what retires the hand derivation.
+#     { 4.34 2.63 2.18 }, `uname -s` = Darwin. Its expected budget is hand-derived.
 #   * The pressure readings are INJECTED, chosen to sit either side of the constants. The
 #     emergency figure is anchored on the measured ~188 MB kill.
 #   * The v1 attestation fixture is a real record shape: the field set hooks/preflight-probe.sh

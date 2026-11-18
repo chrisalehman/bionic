@@ -42,7 +42,6 @@ if [ -z "${BASH_SOURCE[0]:-}" ]; then
 fi
 
 # ── HAND-RUN PARITY: ONE INTERPRETER, HOWEVER THE SUITE WAS STARTED ──────────
-# (wave-01 verification-cannot-lie S2, spec AC-2; ADR-001 "one interpreter".)
 #
 # Every payload script and hook pins `#!/bin/bash` — 3.2 on a Mac — and the CLI runs a hook
 # by path, so the shebang picks the interpreter. A suite, though, is typed: `bash
@@ -84,8 +83,6 @@ fi
 # already first on PATH. The runner itself keeps whatever interpreter the
 # caller typed, and must — it sources this seam part-way through its own run,
 # so re-executing it there would start the run again from the top.
-# Before Step 6 the exported marker happened to cover this; now that the marker
-# no longer decides, the exemption has to be said out loud.
 #
 # WHAT IT WILL NOT DO. `$0` must be a readable file: sourced into an interactive shell
 # there is nothing to re-execute, and guessing would exec the shell's own name. `/bin/bash`
@@ -158,14 +155,6 @@ fi
 # non-zero, pins nothing, leaves PATH alone and prints this seam's line once, naming the check; the caller
 # adds nothing to it. The reason is also left in _BIONIC_PIN_WHY (empty when the pin was built), for the
 # hand-run path below, which prints its own line instead. A root made here is mode 0700.
-# Provenance, one line each: T87 (wave-27, pass 75) the root and the pin are judged as paths, never by what a
-# link points at (-O and -d follow one); T36 (Chris "D3: 1") the parent is judged too, a shared /tmp safe
-# through its sticky bit; T54 the parent is read through a symlink (`ls -ldL`); T56 every link on the path is
-# judged by the directory that holds it; T57, T59 the walk judges every directory, with ACLs and owners;
-# T61 the owner of `/` is trusted; T63 a missing path is refused, never "not open"; T65 the root's and the pin's
-# own entries are read without following, and PATH carries the physical path; T67 an entry that is absent at the
-# owner read, and a mkdir that fails, are refused; one function for the root and the pin; T69 a relative root is refused; T73 the pin's `cd`
-# is physical, and a root with a control character is refused first.
 # Never judged: where PATH's other entries lead, and what `bash -> /bin/bash` points at (/bin/bash is the
 # system's own, replaceable only by root).
 _bionic_pin_judge() {  # _bionic_pin_judge <path> — prints why <path> cannot hold the pin; nothing when it can

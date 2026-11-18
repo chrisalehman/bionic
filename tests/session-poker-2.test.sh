@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/session-poker.sh — shard 2 of 4: Sections 35 through 55.
+# Tests for hooks/session-poker.sh — shard 2 of 4: Sections 36 through 55.
 #
 # THE SUITE IS FOUR SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its
 # hermetic posture and its clock discipline are written once, in tests/session-poker.test.sh's
@@ -30,187 +30,6 @@ POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
 # ============================================================
-section "Section 35: fill-report — missed opportunity, HOLD and declines, from the fill ledger (wave-20 REQ-5, AC-5.6; Δ2)"
-# ============================================================
-#
-# THE MEASURE (ADR-036 decision 4). Every Stop of an engaged run appends a `fill-ledger/v1`
-# line; `fill-report` folds the lines by turn key (the last line of a turn wins — a refused
-# Stop and its re-entry are one turn), orders them by `at`, and gives each line the interval
-# up to the next. Missed minutes are the intervals whose line is `state=ok`, `missed>0` and
-# undeclined; HOLD minutes are `state=hold|emergency` with a row ready; declined minutes are
-# listed per reason. While the run is open the last line's interval runs to now; once it is
-# closed, nothing after the last line is counted.
-#
-# THE FIXTURE: 10 minutes missed and 5 of HOLD, with a superseded line inside the missed turn
-# (at 10:02, missed=1) that an unfolded sum would count as 3.5 more minutes.
-s35_iso_epoch() {  # <ISO Z> -> epoch seconds, BSD or GNU date
-  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null || date -u -d "$1" +%s
-}
-s35_line() {  # <at> <turn> <state> <ready> <launched> <declined> <missed>
-  printf 'fill-ledger/v1|at=%s|session=%s|turn=%s|current=5|state=%s|ceiling=8|width=8|open=2|free=6|ready=%s|launched=%s|declined=%s|missed=%s\n' \
-    "$1" "$SID" "$2" "$3" "$4" "$5" "$6" "$7"
-}
-s35_fixture() {  # <repo> <last line's missed> -> the plan path; writes plan + ledger
-  local r="$1" plan led
-  plan="$(plan_at "$r" epic-99-fixture/wave-35-fill.plan.md "$(plan_body 5)")"
-  led="$r/.bionic/docs/record/wave-35-fill/fill-ledger.log"
-  mkdir -p "${led%/*}"
-  {
-    s35_line 2026-09-23T10:00:00Z u-t1 ok ''    W-T1 ''          0
-    s35_line 2026-09-23T10:02:00Z u-t2 ok T2    ''   ''          1
-    s35_line 2026-09-23T10:05:30Z u-t2 ok T2    ''   ''          1
-    s35_line 2026-09-23T10:15:30Z u-t3 hold T4  ''   ''          1
-    s35_line 2026-09-23T10:20:30Z u-t4 ok ''    W-T4 ''          0
-    s35_line 2026-09-23T10:25:30Z u-t5 ok T5    ''   'mid-merge' 1
-    s35_line 2026-09-23T10:30:30Z u-t6 ok T6    ''   ''          "$2"
-  } > "$led"
-  printf '%s' "$plan"
-}
-S35_NOW="$(( $(s35_iso_epoch 2026-09-23T10:30:30Z) + 120 ))"
-
-R35="$(make_repo s35)"
-P35="$(s35_fixture "$R35" 0)"
-OUT="$( cd "$R35" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35" 2>&1 )"; RC=$?
-expect_eq "35a fill-report exits 0" "0" "$RC"
-expect_contains "35b AC-5.6 the fixture's 10 missed minutes, exactly" "missed=10|" "$OUT"
-expect_contains "35c …and its 5 HOLD minutes, separately" "hold=5|" "$OUT"
-expect_contains "35d …and the declined minutes, with their reason" "declined=5|" "$OUT"
-expect_contains "35e …the reason listed on its own line" "mid-merge" "$OUT"
-expect_contains "35f …the superseded line folded away: six turns, not seven" "turns=6|" "$OUT"
-expect_contains "35g …the line is the report's schema" "fill-report/v1|plan=wave-35-fill|" "$OUT"
-
-# 35h: THE OPEN RUN'S LAST INTERVAL RUNS TO NOW. The last line misses one ready row, two minutes
-# ago: open, those two minutes are missed; closed, nothing after the last line counts.
-R35H="$(make_repo s35h)"
-P35H="$(s35_fixture "$R35H" 1)"
-OUT="$( cd "$R35H" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35H" 2>&1 )"
-expect_contains "35h an open run's last interval runs to now: 10 + 2 missed" "missed=12|" "$OUT"
-printf '%s' "$(plan_body 9 'delivered: bionic 9.9.9; report: record/x.md')" > "$P35H"
-OUT="$( cd "$R35H" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35H" 2>&1 )"
-expect_contains "35i …and a delivered run's does not: 10 missed" "missed=10|" "$OUT"
-expect_contains "35j …and says the run is closed" "open=no" "$OUT"
-
-# 35k: WITH NO OPERAND, the session's own run — the bound plan, as every verb resolves it.
-R35K="$(make_repo s35k)"
-P35K="$(s35_fixture "$R35K" 0)"
-bind_marker "$R35K" "$P35K"
-OUT="$( cd "$R35K" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report 2>&1 )"
-expect_contains "35k with no operand the bound run's ledger is read" "plan=wave-35-fill|" "$OUT"
-expect_contains "35l …with the same answer" "missed=10|" "$OUT"
-
-# 35m: a plan with no ledger yet says so, and reports zeros rather than failing.
-R35M="$(make_repo s35m)"
-P35M="$(plan_at "$R35M" epic-99-fixture/wave-36-none.plan.md "$(plan_body 5)")"
-poke "$R35M" fill-report "$P35M"
-expect_eq "35m a run with no ledger exits 0" "0" "$RC"
-expect_contains "35n …and names the file it looked for" "record/wave-36-none/fill-ledger.log" "$OUT"
-
-# 35o: an operand that names no plan is a refusal, exit 2.
-poke "$R35M" fill-report "$R35M/no-such.plan.md"
-expect_eq "35o a plan that does not exist is refused (exit 2)" "2" "$RC"
-poke "$R35M" fill-report a b
-expect_eq "35p two operands is a usage error (exit 2)" "2" "$RC"
-
-# 35q: A REFUSED TURN IS ONE TURN IN THE REPORT, END TO END (wave-20 T11b; review R3, critic C1).
-# The ledger above is hand-written; this one is written by the REAL stop hook over a transcript
-# in the CLI's own shape. One prompt, a launch, a refusal (T2 ready and left out), the Stop
-# hook's feedback record — the synthetic user record the CLI writes after every Stop refusal —
-# a second launch, and the re-entry Stop. Two ledger lines, one prompt: the report counts one.
-S35Q_STOP="$(dirname "$POKER")/stop.sh"
-R35Q="$(make_repo s35q)"
-P35Q="$(plan_at "$R35Q" epic-99-fixture/wave-35q-refused.plan.md "$(
-  printf -- '---\ngoverning-skill: canonical-sdlc\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n---\n\n'
-  plan_body 4
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
-  printf '| T1 | 4 | build | first | implementor | — | 30m | REQ-x | a.sh | pending | — |\n'
-  printf '| T2 | 4 | build | second | implementor | — | 30m | REQ-x | b.sh | pending | — |\n')")"
-bind_marker "$R35Q" "$P35Q"
-roster_header > "$R35Q/.bionic/tmp/roster-$SID.state"
-S35Q_TR="$R35Q/s35q-transcript.jsonl"
-S35Q_RING="$TMPROOT/s35q.ring"; printf '1700000000|80|0|1.0|8\n' > "$S35Q_RING"
-s35q_agent() {  # <tool_use id> <name>
-  jq -nc --arg i "$1" --arg n "$2" '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:$i,name:"Agent",input:{name:$n,description:"task",subagent_type:"bionic:implementor",prompt:"x"}}]}}' >> "$S35Q_TR"
-  jq -nc --arg i "$1" '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:$i,is_error:false,content:"Spawned"}]}}' >> "$S35Q_TR"
-  roster_row_fixture status=intended session="$SID" name="$2" agent_id="a${2}000000000001" deliverable= \
-    >> "$R35Q/.bionic/tmp/roster-$SID.state"
-}
-s35q_stop() {  # <stop_hook_active true|false> -> the hook's stdout
-  jq -nc --arg c "$R35Q" --arg s "$SID" --arg t "$S35Q_TR" --argjson a "$1" \
-    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:$a}' \
-    | ( cd "$R35Q" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PRESSURE_RING="$S35Q_RING" \
-          BIONIC_NOW_EPOCH=1700000000 bash "$S35Q_STOP" 2>/dev/null )
-}
-jq -nc '{type:"user",uuid:"u-35q-1",timestamp:"2026-09-23T10:00:00.000Z",isSidechain:false,message:{role:"user",content:"dispatch the batch"}}' > "$S35Q_TR"
-s35q_agent toolu_35Q1 W-T1
-S35Q_OUT1="$(s35q_stop false)"
-expect_contains "35q precondition: the first Stop is refused for the row left out" "ready with room:" "$S35Q_OUT1"
-jq -nc '{type:"user",isMeta:true,uuid:"u-35q-fb",timestamp:"2026-09-23T10:00:30.000Z",isSidechain:false,userType:"external",message:{role:"user",content:"Stop hook feedback:\nbionic: stop refused — rows are ready"}}' >> "$S35Q_TR"
-s35q_agent toolu_35Q2 W-T2
-s35q_stop true >/dev/null
-S35Q_LED="$R35Q/.bionic/docs/record/wave-35q-refused/fill-ledger.log"
-OUT="$( cd "$R35Q" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35Q" 2>&1 )"
-expect_contains "35r T11b fill-report folds the refused turn's two lines into one turn" "turns=1|" "$OUT"
-expect_contains "35s …and the turn's final line is the one that saw both launches: nothing missed" \
-  "|launched=W-T1,W-T2|" "$(tail -n 1 "$S35Q_LED" 2>/dev/null)"
-
-# ---------- §REPORT (wave-26 T16, D17; AC-6.8): idle minutes and peak width, from stamps the code wrote ----------
-#
-# The ledger line ends with `idle=` (the ready rows no launch and no decline covered while a slot was
-# free) and `room=`; `fill-report` adds `idle minutes: <n>` (the interval from a line whose idle= is
-# non-empty to the next line, once per interval) and `peak width: <n>` (the most roster rows open at
-# one instant: `launched_at` to the sweeper ledger's ack stamp, the one close rule; no ack, open to now).
-#
-# THE FIXTURE: idle=T2 at 10:00, then a 12-minute interval to 10:12 (an 8-minute one after it has
-# idle= empty and counts nothing). Four roster rows: A 10:00-10:10, B 10:05-10:15, C 10:08-open,
-# D 10:20-open. Three are open at 10:08-10:10 and never more, so the peak is 3: four rows launched
-# would read 4, and the two open now would read 2.
-s35r_line() {  # <at> <turn> <idle> <room>
-  printf 'fill-ledger/v1|at=%s|session=%s|turn=%s|current=5|state=ok|ceiling=8|width=8|open=2|free=%s|ready=T2|launched=|declined=|missed=1|idle=%s|room=%s\n' \
-    "$1" "$SID" "$2" "$4" "$3" "$4"
-}
-R35R="$(make_repo s35r)"
-P35R="$(plan_at "$R35R" epic-99-fixture/wave-35-rp.plan.md "$(plan_body 5)")"
-L35R="$R35R/.bionic/docs/record/wave-35-rp/fill-ledger.log"
-mkdir -p "${L35R%/*}"
-{
-  s35r_line 2026-09-23T10:00:00Z u-r1 T2 3
-  s35r_line 2026-09-23T10:12:00Z u-r2 ''  2
-  s35r_line 2026-09-23T10:20:00Z u-r3 ''  0
-} > "$L35R"
-new_roster "$R35R"
-add_row_to "$R35R" "$SID" name=rp-a launched_at=2026-09-23T10:00:00Z
-add_row_to "$R35R" "$SID" name=rp-b launched_at=2026-09-23T10:05:00Z
-add_row_to "$R35R" "$SID" name=rp-c launched_at=2026-09-23T10:08:00Z
-add_row_to "$R35R" "$SID" name=rp-d launched_at=2026-09-23T10:20:00Z
-s20_ack "$R35R" rp-a 2026-09-23T10:10:00Z
-s20_ack "$R35R" rp-b 2026-09-23T10:15:00Z
-OUT="$( cd "$R35R" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35R" 2>&1 )"; RC=$?
-expect_eq "35t fill-report exits 0 on the idle/width fixture" "0" "$RC"
-expect_contains "35u AC-6.8 the planted 12-minute interval, exactly" "idle minutes: 12" "$OUT"
-expect_contains "35v AC-6.8 the instant three rows overlap, exactly" "peak width: 3" "$OUT"
-# A PLAN THAT SAYS OTHERWISE CHANGES NOTHING: the report reads the ledger and the roster, never prose.
-OUT_R1="$OUT"
-printf '\nThe run sat idle for 99 minutes at 2026-01-01T00:00:00Z and ran 9 wide at 2026-01-01T00:00:00Z.\n' >> "$P35R"
-OUT="$( cd "$R35R" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35R" 2>&1 )"
-expect_eq "35w a plan carrying a misleading time and width changes nothing in the report" "$OUT_R1" "$OUT"
-# THE ZERO CASE, so 35u cannot pass on a constant: no line names an idle row, and an old-shape line
-# (no idle= field at all) reads as none. The roster is the same, so the width still reads 3.
-R35Z="$(make_repo s35z)"
-P35Z="$(plan_at "$R35Z" epic-99-fixture/wave-35-rz.plan.md "$(plan_body 5)")"
-L35Z="$R35Z/.bionic/docs/record/wave-35-rz/fill-ledger.log"
-mkdir -p "${L35Z%/*}"
-{
-  s35r_line 2026-09-23T10:00:00Z u-z1 '' 3
-  s35_line 2026-09-23T10:12:00Z u-z2 ok T2 '' '' 1
-} > "$L35Z"
-cp "$(roster_of "$R35R")" "$(roster_of "$R35Z")"
-cp "$(ack_ledger_of "$R35R")" "$(ack_ledger_of "$R35Z")"
-OUT="$( cd "$R35Z" && BIONIC_NOW_EPOCH="$S35_NOW" CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" fill-report "$P35Z" 2>&1 )"
-expect_contains "35x no idle row names a zero, and an old-shape line is none" "idle minutes: 0" "$OUT"
-expect_contains "35y …while the same roster still reads its peak" "peak width: 3" "$OUT"
-
-# ============================================================
 section "Section 36: prompt — the canonical Patrol prompt (wave-20 REQ-6, AC-6.1; D6)"
 # ============================================================
 #
@@ -235,25 +54,19 @@ expect_eq "36g prompt takes no arguments (exit 2)" "2" "$RC"
 
 
 # ============================================================
-section "Section 37: T10b — the release waits for its step and the tick names the hold; task-add keeps author text byte for byte (critic C3, review R6)"
+section "Section 37: the release fills once its waits are met, at any step; task-add keeps author text byte for byte"
 # ============================================================
 #
-# C3: at current: 5, with its Step-5 dependency landed, the Step-7 release row (kind `doc`) was
-# ready, so the tick ordered `FILL` for a release before any auditor or critic verdict. Δ6's
-# accepted reading holds a gate act until `current:` reaches its step; the release is the
-# Document step's gate act. The tick's no-FILL line now NAMES each row held for its step, so a
-# reader of the line can tell "nothing is ready" from "the release waits for Step 7".
+# A RELEASE ROW WAITS ON WHAT ITS DEPS AND ITS KIND NAME, and on no step: the person approves the
+# release at the merge, which waits on that approval.
 R37A="$(make_repo s37-held)"; new_roster "$R37A"
 sp_plan_at_step "$R37A" 5 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 5 | verify | the live bed, landed | implementor | T1 | 15m | REQ-x | — | landed |" \
   "| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 15m | REQ-x | CHANGELOG.md | pending |" > /dev/null
 poke_pressure "$R37A" 8192 1.0 tick
-expect_absent "37a C3 at current: 5 the landed-dep Step-7 release row is not filled" \
-  "poker: FILL" "$OUT"
-# A TABLE WITHOUT `reads` KEEPS THE RELEASE'S STEP HOLD (wave-26 T13, A-T13.1): it has no
-# `approval:release` to wait on, so its step is the one thing holding it. The hold is named on
-# the row's own WAIT line now, not inside the no-FILL sentence.
+expect_contains "37a at current: 5 the release row at 15, its waits met, is filled: no step holds it" \
+  "poker: FILL T3" "$OUT"
 
 # 37c — AT ITS STEP THE RELEASE FILLS. Same table at current: 7.
 R37C="$(make_repo s37-at-step)"; new_roster "$R37C"
@@ -264,16 +77,27 @@ sp_plan_at_step "$R37C" 7 \
 poke_pressure "$R37C" 8192 1.0 tick
 expect_contains "37c at current: 7 the release row is filled" "poker: FILL T3" "$OUT"
 
-# 37d–37f — TASK-ADD ACCEPTS A STEP-HELD ROW, AND KEEPS ITS TEXT (R6). The hold is a
-# schedule fact, not a broken invariant, so the validator stays silent and the dry commit
-# admits it. Author text reached awk through -v, which read `\n` and `\t` as escapes; now a
-# backslash, an author-escaped `\|` and a `$` land in the row exactly as typed.
+# 37d–37i — A ROW IS ADDED BY AN EDIT AND task-add RECORDS ITS BIRTH, writing no plan. A step hold is a schedule
+# fact, not a broken invariant. A row the plan lacks and a short row are refused in different words, the short one
+# with the line the verb would accept, which it then accepts as pasted.
 S37_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R37D="$(make_repo s37-task-add)"; ( cd "$R37D" && git commit -q --allow-empty -m init )
 P37D="$(s34_plan "$R37D" 5)"
-poke "$R37D" task-add T7 7 doc 'Keep C:\new\table, a\|b, $5. The release keeps its text as typed.' bionic:implementor 'T5' 30 REQ-5 '—'
-expect_eq "37d task-add of a Step-7 doc row at current: 5 is accepted (exit 0)" "0" "$RC"
-expect_contains "37f …with its - T7: line" "- T7: pending dispatch — added by task-add" "$(cat "$P37D")"
+L37D="${P37D%/plans/*}/record/$(basename "$P37D" .plan.md)/run.log"; s37() { cmp -s "$TMPROOT/s42-before" "$P37D" && echo same; }
+ta_add "$R37D" T7 7 doc 'Keep C:\new\table, a\|b, $5. The release keeps its text as typed.' bionic:implementor 'T5' 30 REQ-5 '—'
+expect_eq "37d task-add of a Step-7 doc row edited in at current: 5 is accepted (exit 0)" "0" "$RC"
+expect_eq "37f …the plan's sum the same across it, no line of its own written, its birth one born event in the run's log" "same|0|1" \
+  "$(s37)|$(/usr/bin/grep -c '^- T7: ' "$P37D")|$(/usr/bin/grep -c '|ev=born|row=T7|' "$L37D")"
+poke "$R37D" task-add T9; expect_eq "37g a row the plan does not hold is refused in its own words, nothing born" "1|holds no row T9|0" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -o 'holds no row T9')|$(/usr/bin/grep -c '|ev=born|row=T9|' "$L37D")"
+ta_add "$R37D" T8 5 verify 'Verify the fixture. The floor runs once.' bionic:test-runner — 30 REQ-5 '—'
+expect_eq "37h a verify row whose Files name no record is short: refused with the line it would accept, the plan the same, nothing born" "1|is short|same|0" \
+  "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -o 'is short')|$(s37)|$(/usr/bin/grep -c '|ev=born|row=T8|' "$L37D")"
+S37_LINE="$(printf '%s\n' "$OUT" | /usr/bin/grep '^| T8 |')"; ta_put "$P37D" "$S37_LINE"; poke "$R37D" task-add T8
+expect_eq "37i its own printed line pasted in, the verb accepts it with no further edit" "0|T8.md|1" "$RC|$(printf '%s' "$S37_LINE" | /usr/bin/grep -o 'T8\.md' | head -1)|$(/usr/bin/grep -c '|ev=born|row=T8|' "$L37D")"
+cp "$P37D" "$TMPROOT/s42-before"; poke "$R37D" task-add T7 --drop 'the person no longer wants it'
+expect_eq "37j --drop of a pending row is accepted, the plan the same, its one drop event holding the words" "0|same|1" "$RC|$(s37)|$(/usr/bin/grep -c '|ev=drop|row=T7|why=the person no longer wants it|' "$L37D")"
+S37_D=""; for a in T1 T2 T9; do poke "$R37D" task-add "$a" --drop 'gone'; S37_D="$S37_D$RC"; done; poke "$R37D" task-add T5 --drop 'a|b'; S37_D="$S37_D$RC"
+expect_eq "37k a landed row, a row in flight and a row the plan lacks are refused, words holding a bar are a usage error: nothing dropped" "1112|1" "$S37_D|$(/usr/bin/grep -c '|ev=drop|' "$L37D")"
 POKE_BOUND="$S37_BOUND_WAS"
 
 
@@ -328,7 +152,7 @@ section "Section 39: the tick lints the ledger — poker: LEDGER <id> <finding> 
 # ============================================================
 #
 # THE SAME READER THE GATE ASKS. `units_findings` names every ledger defect — a status off
-# the enum, a landed row with no `- T<n>:` line, an active row whose agent cell names no row
+# the enum, a landed row the reader does not answer landed, an active row whose agent cell names no row
 # on this session's roster — and the tick prints each one, every interval, as
 # `poker: LEDGER <id> <kind> [<value>]`, after the HELD lines and before the FILL line. The
 # finding reaches the orchestrator, who owns the ledger, before a writer's commit meets it.
@@ -338,31 +162,26 @@ P39A="$(sp_plan_at_step "$R39A" 4 \
   "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | active, launched | w-T2 | — | 15m | REQ-x | b.sh | active |" \
   "| T3 | 4 | build | active, agent names no roster row | implementor | — | 15m | REQ-x | c.sh | active |" \
-  "| T4 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | d.sh | doing |" \
-  "| T5 | 4 | build | active, self-owned | — | — | 15m | REQ-x | e.sh | active |" \
+  "| T4 | 4 | build | active, another name no roster row carries | w-T4 | — | 15m | REQ-x | d.sh | active |" \
   "| T6 | 4 | build | waits on CI | implementor | T1, ext:ci-6 | 15m | REQ-x | f.sh | pending |" \
   "| T7 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | g.sh | pending |")"
 poke_pressure "$R39A" 8192 1.0 tick
-expect_contains "39a AC-4.2 a landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_absent "39a AC-4.2 a landed row with no line, which the reader answers landed, ticks no LEDGER line" "poker: LEDGER T1" "$OUT"
 expect_contains "39b …an active row whose agent is not on the roster ticks a launch line, naming the cell" \
   "poker: LEDGER T3 launch implementor" "$OUT"
-expect_contains "39c …a status off the enum ticks a status line, naming the value" "poker: LEDGER T4 status doing" "$OUT"
+expect_contains "39c …and a second such row a line of its own, naming its launch's name" "poker: LEDGER T4 launch w-T4" "$OUT"
 expect_absent "39d …the launched active row is not a finding" "poker: LEDGER T2" "$OUT"
-expect_absent "39e …nor is the self-owned one" "poker: LEDGER T5" "$OUT"
-expect_eq "39f …exactly three LEDGER lines" "3" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: LEDGER ')"
+expect_eq "39f …exactly two LEDGER lines" "2" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: LEDGER ')"
 S39_HELD="$(s38_line_no 'poker: HELD ')"; S39_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S39_FILL="$(s38_line_no 'poker: FILL ')"
 expect_true "39g …and the LEDGER lines sit after the HELD line and before the FILL line (held=$S39_HELD ledger=$S39_LEDGER fill=$S39_FILL)" \
   test "$S39_HELD" -gt 0 -a "$S39_LEDGER" -gt "$S39_HELD" -a "$S39_FILL" -gt "$S39_LEDGER"
 expect_contains "39h …and the fill is unchanged by the lint" "poker: FILL T7" "$OUT"
 
-# 39i — THE LEDGER REPAIRED: T1's line written, T3's cell naming its roster row, T4 back on
-# the enum. No LEDGER line.
+# 39i — THE LEDGER REPAIRED: T3 launched again under its roster row's name, T4's launch taken back. No LEDGER line.
 mkrow name=w-T3 agent_id=a-w-T3 >> "$(roster_of "$R39A")"
-awk '{ print } $0 == "- Step 4: in progress" { print "- T1: bash suite 9/9 green" }' "$P39A" \
-  | sed -e 's/| active, agent names no roster row | implementor |/| active, agent names no roster row | w-T3 |/' \
-        -e 's/| d.sh | doing |/| d.sh | pending |/' > "$P39A.new" && mv "$P39A.new" "$P39A"
+printf 'run/v1|ev=%s|at=2026-10-04T00:3%s:00Z\n' 'dispatch|row=T3|name=w-T3' 0 'cancel|of=dispatch|row=T4|name=w-T4' 1 >> "$R39A/.bionic/docs/record/wave-01-fixture/run.log"
 poke_pressure "$R39A" 8192 1.0 tick
-expect_contains "39i precondition: T1's line is in the plan" "- T1: bash suite 9/9 green" "$(cat "$P39A")"
+expect_contains "39i the repaired ledger's tick still reaches its fill" "poker: FILL " "$OUT"
 expect_absent "39j a repaired ledger ticks no LEDGER line" "poker: LEDGER" "$OUT"
 
 # 39k — AN EMPTY ROSTER LAUNCHES NOBODY. The tick reaches its fill arm only with a roster file
@@ -381,11 +200,9 @@ expect_contains "39k an empty roster: the agent-named active row ticks a launch 
 section "Section 40: HELD and LEDGER print in EVERY tick state — no roster, no room, over the share, no budget (wave-21 T13; REQ-3 AC-3.3, REQ-4 AC-4.1/AC-4.2; wave-28 T13)"
 # ============================================================
 #
-# THE AUDIT'S REFUTATION, PINNED (record/wave-21-fixit-188/audit-3b45d05.md). Through T5 the
-# HELD and LEDGER lines printed only inside the FILL branch, and three reachable states never
-# reach it: the first tick of a run (no roster file yet: rung, QUIET, exit), HOLD or EMERGENCY
-# under machine pressure, and a plan with no `parallel-budget`. The commit gate reads the
-# ledger in every one of them, so a plan the gate refused ticked clean. Every case here holds
+# THREE REACHABLE STATES NEVER REACH THE FILL BRANCH: the first tick of a run (no roster file yet:
+# rung, QUIET, exit), HOLD or EMERGENCY under machine pressure, and a plan with no `parallel-budget`.
+# The commit gate reads the ledger in every one of them, so the tick does too. Every case here holds
 # an ext:-held row and a defective ledger row, and expects each line EXACTLY ONCE — printed
 # before the state split, never a second time inside an arm. Sections 38/39 pin the probes to
 # a healthy machine; these pin them to the states those sections never reach.
@@ -398,38 +215,38 @@ s40_count() { printf '%s\n' "$OUT" | /usr/bin/grep -c "^$1" 2>/dev/null; }
 S40_CFG="$(fake_config_dir s40)"; mkdir -p "$S40_CFG/bionic"; printf '80\n' > "$S40_CFG/bionic/share"
 export CLAUDE_CONFIG_DIR="$S40_CFG"
 
-# 40a — THE FIRST TICK: armed, nothing dispatched, no roster file. With no roster the reader
-# takes its no-roster rule, the gate's: an agent-named active row with no line is an
-# `evidence` finding, not a `launch` one.
+# 40a — THE FIRST TICK: armed, no roster file. With no roster the tick reads the ledger as the gate does: a row the
+# log holds launched under a name is launched, so it is no finding, whatever name it carries.
 R40A="$(make_repo s40-no-roster)"
 poke "$R40A" arm
-sp_plan_at_step "$R40A" 4 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40a | 15m | REQ-x | b.sh | pending |" \
-  "| T3 | 4 | build | active, agent-named, no line | w-T3 | — | 15m | REQ-x | c.sh | active |" > /dev/null
+P40A="$(sp_plan_at_step "$R40A" 4 \
+  "| T1 | 4 | build | launched under a name no roster row carries | w-T9 | — | 15m | REQ-x | a.sh | active |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40a | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | active, agent-named, no line | w-T3 | — | 15m | REQ-x | c.sh | active |")"
 poke_pressure "$R40A" 8192 1.0 tick
 expect_contains "40a AC-3.3 the first tick prints the ext:-held row's HELD line" "poker: HELD T2 ext:ci-40a" "$OUT"
-expect_contains "40a2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
-expect_contains "40a3 AC-4.1 …and the agent-named active row owes its line, as the gate's no-roster rule says" \
-  "poker: LEDGER T3 evidence" "$OUT"
+expect_absent "40a2 AC-4.2 …and the row launched under a name no roster row carries ticks no LEDGER line, as the gate reads it" "poker: LEDGER T1" "$OUT"
+expect_absent "40a3 AC-4.1 …nor does the other launched row" "poker: LEDGER T3" "$OUT"
+s40_find() { bash -c '. "$1/units.sh" && units_findings "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$P40A" "$1"; }
+expect_eq "40a3b …the gate's reading of the same world admits both rows, and with a roster naming neither it names each launch" \
+  "|launch T1 w-T9 launch T3 w-T3" "$(s40_find '')|$(new_roster "$R40A"; s40_find "$(roster_of "$R40A")" | paste -sd' ' -; rm -f "$(roster_of "$R40A")")"
 expect_eq "40a4 …each HELD line once" "1" "$(s40_count 'poker: HELD ')"
-expect_eq "40a5 …each LEDGER line once" "2" "$(s40_count 'poker: LEDGER ')"
-S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
-S40_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S40_QUIET="$(s38_line_no 'poker: QUIET')"
-expect_true "40a6 …after the gate line and before the QUIET line (gate=$S40_RUNG held=$S40_HELD ledger=$S40_LEDGER quiet=$S40_QUIET)" \
-  test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_LEDGER" -gt "$S40_HELD" -a "$S40_QUIET" -gt "$S40_LEDGER"
+expect_eq "40a5 …and no LEDGER line" "0" "$(s40_count 'poker: LEDGER ')"
+S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"; S40_QUIET="$(s38_line_no 'poker: QUIET')"
+expect_true "40a6 …after the gate line and before the QUIET line (gate=$S40_RUNG held=$S40_HELD quiet=$S40_QUIET)" \
+  test "$S40_RUNG" -gt 0 -a "$S40_HELD" -gt "$S40_RUNG" -a "$S40_QUIET" -gt "$S40_HELD"
 
 # 40b — NO ROOM: a roster, a ready row, and a five-minute load over the share. No fill, and
 # the lint still runs: a busy machine has nothing to do with the ledger.
 R40B="$(make_repo s40-hold)"; new_roster "$R40B"
 sp_plan_at_step "$R40B" 4 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40b | 15m | REQ-x | b.sh | pending |" \
-  "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+  "| T1 | 4 | build | launched under a name no roster row carries | w-T9 | — | 15m | REQ-x | a.sh | active |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40b | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | ordinary, ready | implementor | — | 15m | REQ-x | c.sh | pending |" > /dev/null
 BIONIC_PROBE_BUSY_CORES_5M=7.0 poke "$R40B" tick
 expect_absent "40b precondition: …and fills nothing" "poker: FILL" "$OUT"
 expect_contains "40b AC-3.3 with no room the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40b" "$OUT"
-expect_contains "40b2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40b2 AC-4.2 …and the row launched under a name no roster row carries ticks a LEDGER line" "poker: LEDGER T1 launch w-T9" "$OUT"
 expect_eq "40b3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40b4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
@@ -445,12 +262,12 @@ expect_eq "40b8 …and LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # 40c — OVER THE SHARE: the same pair with memory used past the share.
 R40C="$(make_repo s40-emergency)"; new_roster "$R40C"
 sp_plan_at_step "$R40C" 4 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40c | 15m | REQ-x | b.sh | pending |" > /dev/null
+  "| T1 | 4 | build | launched under a name no roster row carries | w-T9 | — | 15m | REQ-x | a.sh | active |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40c | 15m | REQ-x | b.sh | pending |" > /dev/null
 BIONIC_PROBE_USED_PCT=90 poke "$R40C" tick
 expect_contains "40c precondition: the tick is over the share" "poker: over share — used=90% admitted: none" "$OUT"
 expect_contains "40c AC-3.3 over the share the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40c" "$OUT"
-expect_contains "40c2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40c2 AC-4.2 …and the row launched under a name no roster row carries ticks a LEDGER line" "poker: LEDGER T1 launch w-T9" "$OUT"
 expect_eq "40c3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40c4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 
@@ -458,34 +275,34 @@ expect_eq "40c4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # no-budget note — and the lint does not wait on a budget it has no use for.
 R40D="$(make_repo s40-no-budget)"; new_roster "$R40D"
 P40D="$(sp_plan_at_step "$R40D" 4 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40d | 15m | REQ-x | b.sh | pending |")"
+  "| T1 | 4 | build | launched under a name no roster row carries | w-T9 | — | 15m | REQ-x | a.sh | active |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40d | 15m | REQ-x | b.sh | pending |")"
 /usr/bin/grep -v '^parallel-budget:' "$P40D" > "$P40D.new" && mv "$P40D.new" "$P40D"
 poke_pressure "$R40D" 8192 1.0 tick
 expect_absent "40d precondition: the tick names no budget key on a plan with no line" "parallel-budget" "$OUT"
 expect_contains "40d AC-3.3 with no budget the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40d" "$OUT"
-expect_contains "40d2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40d2 AC-4.2 …and the row launched under a name no roster row carries ticks a LEDGER line" "poker: LEDGER T1 launch w-T9" "$OUT"
 expect_eq "40d3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40d4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 
 # 40e — DISARM: the terminal tick (critic-4e6d4a9 I3). An empty roster on a run that says it is
-# delivered — `current: 9`, `delivered:` on the Step-9 line, armed before that — decides DISARM,
+# delivered — its step 9 carrying `delivered=`, armed before that — decides DISARM,
 # and a delivered run whose ledger still carries a finding is one the gate would refuse, so this
 # last tick says so. No other case ticks DISARM over a plan with a hold and a finding, so the
 # report's call on that arm was unpinned: deleting it left every suite green.
 R40E="$(make_repo s40-disarm)"; new_roster "$R40E"
 armed_ago "$R40E"
 P40E="$(sp_plan_at_step "$R40E" 9 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40e | 15m | REQ-x | b.sh | pending |")"
-sed -e 's/^- Step 9: in progress$/- Step 9: delivered: bionic 9.9.9; report: record\/fixture\/close-out.md/' \
-  "$P40E" > "$P40E.new" && mv "$P40E.new" "$P40E" && touch "$P40E"
+  "| T1 | 4 | build | launched under a name no roster row carries | w-T9 | — | 15m | REQ-x | a.sh | active |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40e | 15m | REQ-x | b.sh | pending |")"
+L40E="$R40E/.bionic/docs/record/wave-01-fixture/run.log"
+printf 'run/v1|ev=step|n=9|delivered=bionic 9.9.9; report: record/fixture/close-out.md|at=2026-10-04T00:30:00Z\n' >> "$L40E"
 poke_pressure "$R40E" 8192 1.0 tick
-expect_contains "40e precondition: the plan's Step-9 line records the delivery" \
-  "- Step 9: delivered: bionic 9.9.9" "$(cat "$P40E")"
+expect_contains "40e precondition: the run's step 9 records the delivery" \
+  "|ev=step|n=9|delivered=bionic 9.9.9" "$(cat "$L40E")"
 expect_contains "40e precondition: …and the tick decides DISARM" "decision=DISARM" "$OUT"
 expect_contains "40e AC-3.3 the DISARM tick prints the ext:-held row's HELD line" "poker: HELD T2 ext:ci-40e" "$OUT"
-expect_contains "40e2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40e2 AC-4.2 …and the row launched under a name no roster row carries ticks a LEDGER line" "poker: LEDGER T1 launch w-T9" "$OUT"
 expect_eq "40e3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40e4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
@@ -658,7 +475,6 @@ poke "$R41H" hold w-nobody "x"
 expect_eq "41c10 hold refuses a name with no row (exit 1)" "1" "$RC"
 # A REASON THAT IS ONLY BLANKS IS NO REASON (wave-24 T27; Step-6 review C3): the tick would
 # print a hold with nothing after its dash. The usage error, and no row is written.
-S41H_ROWS="$(grep -c '|name=w-1|' "$(roster_of "$R41H")")"
 poke "$R41H" hold w-1 "   "
 expect_eq "41c11 C3 hold with a blank reason is the usage error (exit 2)" "2" "$RC"
 poke "$R41H" hold w-1 "
@@ -776,6 +592,23 @@ BIONIC_PROBE_USED_PCT=90 poke "$R41X" tick
 expect_contains "41h2 the second tick over the same facts still prints in full" "poker: over share" "$OUT"
 expect_absent "41h3 …never as unchanged" "unchanged since" "$OUT"
 unset CLAUDE_CONFIG_DIR
+
+# ============================================================
+section "§NAMES-ACT: the tick's no-FILL lines name what the page or the log holds and the verb that writes it"
+# ============================================================
+# A run at 15 holds its approval in its log and its plan under the docs root, never in a state section, which the write
+# hook refuses. A page whose log holds no approval, and a root that holds no plan, each name the verb that clears them.
+# fails-when: a line names a state section, or names no verb.
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
+RNA="$(make_repo names-act)"; new_roster "$RNA"
+SP_APPROVED_LINE="" sp_plan_at_step "$RNA" 4 "| T1 | 4 | build | the first | implementor | — | 30 | REQ-1 | a.sh | pending |" >/dev/null
+poke "$RNA" tick; NA_FILL="$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: no FILL')"
+expect_contains "NA-1 a page at 15 whose log holds no approval: the line names the approve verb" "approve plan '<" "$NA_FILL"
+expect_absent "NA-1b …and no state section" "SDLC State" "$NA_FILL"
+RNB="$(make_repo names-none)"; new_roster "$RNB"; poke "$RNB" tick
+NA_NONE="$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^poker: (note: no FILL|QUIET)')"
+expect_contains "NA-2 a root with no run's plan: the FILL line and the QUIET line each name the bind verb" "2" "$(printf '%s\n' "$NA_NONE" | /usr/bin/grep -c 'bind <plan>')"
+expect_absent "NA-2b …and no state section" "SDLC State" "$NA_NONE"
 
 # ============================================================
 finish

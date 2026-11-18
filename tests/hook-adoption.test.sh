@@ -1,16 +1,14 @@
 #!/bin/bash
 # tests/hook-adoption.test.sh — ADOPT: every hook on the library spine, always-on.
-# (bionic 1.4.0, wave-bionic-1.4.0-update task ADOPT; spec AC-7, AC-8, AC-9, AC-12,
-# AC-16; design §2 "order in every hook: load, active_run, own work".)
 #
 # WHAT IS UNDER TEST. Not a library — a CONVENTION, held across eighteen files that
 # the CLI invokes independently. Three claims, each of which has its own way of going
 # silently wrong:
 #
-#   1. THE IDIOM IS ONE TEXT. Every hook carries `bionic_loader_pin`'s block byte for
-#      byte, under a `BIONIC_LIB_WANT=` line naming exactly what it sources. A hand
-#      edit to one copy is the drift this pins; a copy that wants a library it never
-#      sources is the drift the WANT/source pairing pins.
+#   1. THE STUB IS ONE TEXT. Every hook carries the stub `bionic_loader_pin` prints byte
+#      for byte, directly under a `BIONIC_LIB_WANT=` line naming exactly what it sources.
+#      A hand edit to one copy is the drift this pins; a copy that wants a library it
+#      never sources is the drift the WANT/source pairing pins.
 #   2. THE FACTS HAVE ONE OWNER. No hook resolves a project root, a session id or an
 #      active run by restating the algorithm. `project_root`, `session_id`,
 #      `active_run` — the library answers, and the hook asks.
@@ -44,6 +42,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 HOOKS="$BIONIC_HOOKS_DIR"
 REPO="$BIONIC_SCRIPTS_DIR"
@@ -64,14 +63,11 @@ trap 'rm -rf "$SANDBOX"' EXIT
 #
 # RUN-SCOPED IS NOT THE SAME AS ADOPTED. hooks/protect-main.sh and
 # hooks/protect-database.sh guard damage that is wrong in every project the session
-# ENGAGED bionic in, wave or no wave, so they never consult the run. (Machine-wide is what
-# they were until 2026-09-03; Chris's ruling put every wall behind the engagement marker,
+# ENGAGED bionic in, wave or no wave, so they never consult the run. (Every wall sits behind the engagement marker,
 # which is why protect-database now carries a loader at all — the predicate lives in the
 # library. Its direction is OPEN: a wall whose scope it cannot read must not bind a
 # session that never consented.) Everything else is a
 # governance hook: it has nothing to say outside a run and must say nothing.
-# background-suite-guard runs only behind agent-context-guard, whose own roster
-# check already scopes it, so it loads the library without the run predicate.
 # engage.sh is the one `yes` that is not a gate. It reads the run to decide what to write
 # into the marker's `plan=` field and writes the marker either way — engagement is what
 # decides WHETHER a wall acts, the plan only WHAT — so the third column here records that
@@ -84,7 +80,7 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # only where a hook reads the plan for DATA: dispatch-preflight for the budget ceiling,
 # context-spend for the step boundary, patrol-duties-gate for the plan basename,
 # patrol-revive for the run its Patrol serves. landing-gate, execution-recorder and
-# stop-guard read nothing out of the plan: they are the roster lifecycle, which begins
+# the stop of an agent read nothing out of the plan: they are the roster lifecycle, which begins
 # before a plan exists (a run's Step 0 precedes its plan) and outlives the run that
 # created it, so their `active_run` reads are gone and their rows say `no`.
 # THE FIVE PreToolUse|Bash WALLS ARE ONE ROW (epic-23 wave-11-lean-spine, T23).
@@ -105,46 +101,46 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # is false. Each wall's own scoping is driven in its own suite, through this process.
 ADOPTED='
 bash-walls|closed|no
-dispatch-preflight|open|yes
-canonical-sdlc-governing-skill|open|yes
-stop|open|no
+dispatch-preflight|closed|yes
+canonical-sdlc-governing-skill|closed|yes
+stop|closed|no
 execution-recorder|open|no
-stop-guard|open|no
-agent-context-guard|open|no
 preflight-probe|open|no
 stop-orders|open|no
 session-sweeper|open|no
 stop-check|open|no
 engage|open|no
-permission-answer|open|yes
+permission-answer|closed|yes
 '
 
-BLOCK="$SANDBOX/canonical-block.txt"
+BLOCK="$SANDBOX/canonical-stub.txt"
 ( . "$LOADER_LIB" && bionic_loader_pin ) > "$BLOCK" 2>"$SANDBOX/.pinerr"
+NSTUB=$(wc -l < "$BLOCK" | tr -d ' ')
 
-# extract_block <file> -> the marker-delimited span, markers inclusive
+# extract_block <file> -> the stub's count of lines directly under the hook's WANT line
 extract_block() {
-  awk '/^# --- bionic-loader\/v2 BEGIN$/{f=1} f{print} f&&/^# --- bionic-loader\/v2 END$/{exit}' "$1"
+  awk -v n="$NSTUB" 'f && c < n { print; c++ } /^BIONIC_LIB_WANT=/ && !f { f = 1 }' "$1"
 }
-# want_line <file> -> the line immediately ABOVE the BEGIN marker
+# want_line <file> -> the hook's WANT line
 want_line() {
-  awk '/^# --- bionic-loader\/v2 BEGIN$/{print prev; exit} {prev=$0}' "$1"
+  /usr/bin/grep -m1 '^BIONIC_LIB_WANT=' "$1"
 }
+expect_contains "the stub is printed, and it sources the loader" '. "$_bl_l"; bionic_load' "$(cat "$BLOCK")"
 
-section "1 — one idiom, byte for byte, under a WANT line that matches what is sourced"
+section "1 — one stub, byte for byte, under a WANT line that matches what is sourced"
 
-while IFS='|' read -r name class scoped; do
+while IFS='|' read -r name _; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
   if [ ! -f "$f" ]; then no "$name.sh exists" "$f"; continue; fi
 
-  expect_eq "$name carries the canonical loader block byte for byte" \
+  expect_eq "$name carries the loader's stub byte for byte, directly under its WANT line" \
     "$(cat "$BLOCK")" "$(extract_block "$f")"
 
   wl=$(want_line "$f")
   case "$wl" in
-    BIONIC_LIB_WANT=\"*\") ok "$name declares BIONIC_LIB_WANT on the line above the block" ;;
-    *) no "$name declares BIONIC_LIB_WANT on the line above the block" "line above BEGIN was: [$wl]" ;;
+    BIONIC_LIB_WANT=\"*\") ok "$name declares BIONIC_LIB_WANT" ;;
+    *) no "$name declares BIONIC_LIB_WANT" "read: [$wl]" ;;
   esac
 
   # Every wanted basename is actually sourced out of $BIONIC_LIB, and nothing is
@@ -155,14 +151,6 @@ while IFS='|' read -r name class scoped; do
   sourced=$(grep -oE '^\. "\$BIONIC_LIB/[a-z.-]+\.sh"' "$f" | sed -E 's|^\. "\$BIONIC_LIB/||; s|"$||' | sort | tr '\n' ' ' | sed 's/ $//')
   expect_eq "$name sources exactly the libraries it wants" \
     "$(printf '%s' "$wants" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')" "$sourced"
-
-  # THE FAIL DIRECTION IS DECLARED, not inferred. Exactly one of the two calls
-  # appears, and the closed pair passes the command text so the repair allowlist
-  # has something to match.
-  n_closed=$(grep -c 'loader_fail_closed "' "$f")
-  n_open=$(grep -c 'loader_fail_open "' "$f")
-  case "$class" in
-  esac
 done <<EOF
 $ADOPTED
 EOF
@@ -195,7 +183,7 @@ expect_eq "no hook still defines a private resolve_project_root (POKER landed th
 # so the ask is now either call, and a hook that resolves no root at all still fails.
 # ONE LINE, and it has to be: the membership test below is a `case` glob on `" $name "`,
 # and a newline between two names is not the space that pattern needs.
-CTX_CALLERS=" agent-context-guard bash-walls canonical-sdlc-governing-skill dispatch-preflight execution-recorder permission-answer session-start stop stop-guard "
+CTX_CALLERS=" bash-walls canonical-sdlc-governing-skill dispatch-preflight execution-recorder permission-answer session-start stop "
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
@@ -231,12 +219,10 @@ section "3 — one session id: every reader asks the library"
 # also applies the one shape guard they used to carry six copies of between them. So each
 # hook is asked for whichever call is its own, and the roster below is split on that line
 # rather than the list being shortened: a hook that asks for NEITHER still fails.
-SID_VIA_LIB='agent-context-guard bash-walls
+SID_VIA_LIB='bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-stop session-start stop-guard permission-answer'
+stop session-start permission-answer'
 SID_DIRECT='preflight-probe stop-orders session-sweeper stop-check engage'
-SID_READERS="$SID_VIA_LIB
-$SID_DIRECT"
 for name in $SID_VIA_LIB; do
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
@@ -317,6 +303,14 @@ fi
 # THE `no` ROWS ARE STRICTER THAN THEY WERE: a hook that is not run-scoped must call NEITHER
 # reader. Under the old text a non-run-scoped hook could have picked up `session_run` and
 # stayed green, which is exactly the direction this wave made reachable.
+# A HOOK THAT IS NOT RUN-SCOPED MAY ASK THE SESSION'S RUN IN ONE FUNCTION, ADMITTED BY NAME, as long as no verb is
+# gated on the answer: stop-orders' stopped_row_back asks which run the session is bound to only to find the row a
+# stopped agent held, and does nothing when there is none. Its top level, every verb's entry and any other function
+# are still read.
+HA_ADMIT="stop-orders:stopped_row_back"
+ha_text() {  # <hook name> <file> -> the hook's text less the one function the roster admits for it
+  awk -v fn="$(printf '%s\n' $HA_ADMIT | sed -n "s/^$1://p")" 'fn != "" && index($0, fn "() {") == 1 { skip = 1 } !skip { print } skip && /^}/ { skip = 0 }' "$2"
+}
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
@@ -328,7 +322,7 @@ while IFS='|' read -r name class scoped; do
   # or BIONIC_RUN_PLAN, and for a hook outside the preamble it is still the call itself.
   # A hook that reverted to the PROJECT-keyed `active_run` fails either way.
   if grep -qE 'session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN' "$f"; then found=yes; else found=no; fi
-  if grep -qE 'active_run "|session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN' "$f"; then found_any=yes; else found_any=no; fi
+  if ha_text "$name" "$f" | grep -qE 'active_run "|session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN'; then found_any=yes; else found_any=no; fi
   case "$scoped" in
     yes) expect_eq "$name gates on the session-keyed run verdict" "yes" "$found" ;;
     no)  expect_eq "$name is NOT run-scoped and reads neither run predicate" "no" "$found_any" ;;
@@ -336,6 +330,9 @@ while IFS='|' read -r name class scoped; do
 done <<EOF
 $ADOPTED
 EOF
+{ cat "$HOOKS/stop-orders.sh"; printf '%s\n' 'second_fn() {' '  r="$(session_run "$a" "$b")"' '}'; } > "$SANDBOX/so-planted.sh"
+expect_eq "stop-orders: the admitted function asks the session's run, and a second function that asks it is still read" "yes yes" \
+  "$(awk '/^stopped_row_back\(\)/,/^}/' "$HOOKS/stop-orders.sh" | grep -qE 'session_run "' && echo yes || echo no) $(ha_text stop-orders "$SANDBOX/so-planted.sh" | grep -qE 'session_run "' && echo yes || echo no)"
 
 # THE ONE SURVIVING `active_run` CALLER, NAMED RATHER THAN EXCUSED. The evidence gate keeps
 # `active_run "$PROJECT_DIR"` on its unbound arm on purpose (S3 assumption 3): the fallback
@@ -397,10 +394,9 @@ section "5b — the artifact wall is armed by the PROJECT, not by the run (ADOPT
 # with this lifecycle, claiming nothing, is not this gate's business.
 SID="ad0pt111-2222-3333-4444-555555555555"
 
-# mk_root <name> <state>  -> a project root; state = none|closed|open
+# mk_root <name> <state>  -> a project root; state = none|open
 #   none   : a real directory, no .bionic anywhere above it (HOME is the sandbox)
-#   closed : .bionic with a plan at `current: 9` carrying a delivered Step-9 line
-#   open   : the same plan at `current: 4`
+#   open   : .bionic with a run at Step 4: a page at 15 and its log
 mk_root() {
   # TWO STATEMENTS, NOT ONE. `local a="$1" b="$SANDBOX/x/$a"` expands every word BEFORE it
   # assigns any of them, so the second reference reads an EMPTY $a and every fixture lands
@@ -422,36 +418,7 @@ mk_root() {
   # line every silence assertion below would hold for the wrong reason and the §5
   # anti-vacuity control would have nothing left to discriminate.
   : > "$root/.bionic/tmp/engaged-$SID.state"
-  local cur="4" step9="- Step 9: (pending)"
-  case "$state" in
-    closed) cur="9"; step9="- Step 9: delivered: record/x.md" ;;
-    # open9 is the evidence gate's control pair: the SAME plan as `closed`, one line
-    # different. A run at step 9 without a `delivered:` line is still open (AC-8), and
-    # the gate then has step-9 evidence to demand — so the two fixtures differ by
-    # exactly the fact under test and nothing else.
-    open9)  cur="9" ;;
-  esac
-  cat > "$root/.bionic/docs/plans/epic-99/wave-01.plan.md" <<PLAN
----
-canonical_sdlc_version: 14
-intent: build
-rigor: double
-scale: wave
----
-
-# fixture plan
-
-## SDLC State
-
-integration-branch: main
-intent: build
-rigor: double
-scale: wave
-current: $cur
-
-- Step 4: implementation
-$step9
-PLAN
+  plan_fixture "$root/.bionic/docs/plans/epic-99/wave-01.plan.md" wave >/dev/null
   printf '%s' "$root"
 }
 
@@ -471,7 +438,7 @@ seed_hook() {  # <hook> <root>
   mkdir -p "$root/.bionic/tmp" 2>/dev/null || true
   : > "$root/.bionic/tmp/engaged-$SID.state"
   case "$hook" in
-    stop|execution-recorder|stop-guard|agent-context-guard|bash-walls)
+    stop|stop@TaskStop|execution-recorder|bash-walls)
       {
         roster_header
         roster_row_fixture status=intended session="$SID" name=w1-impl agent_id= \
@@ -543,7 +510,8 @@ payload_for() {
       # commit is the only Bash command of the five walls' subjects that exactly one of
       # them answers, which is what lets section 5 read a silence as that wall's.
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"git commit -m wip"}}' ;;
-    stop-guard)
+    # The orchestrator's stop of an agent, which the same hook answers by this payload's event.
+    stop@TaskStop)
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"TaskStop",tool_input:{task_id:"w1-impl"}}' ;;
     execution-recorder)
       # The COMPLETION arm, over the row seed_hook plants: it needs an agentId and a
@@ -565,11 +533,8 @@ payload_for() {
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Agent",tool_input:{description:"d",subagent_type:"implementor",prompt:"Do the thing.\nExpected artifact: '"$cwd"'/.bionic/docs/record/x.md\n"}}' ;;
     canonical-sdlc-governing-skill)
       jq -n --arg s "$SID" --arg c "$cwd" --arg p "$cwd/.bionic/docs/plans/epic-99/wave-01.plan.md" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$p,content:"x"}}' ;;
-    # THE FIVE §5 AND §5c NEVER DROVE, added by T10 for §5d. Each is the smallest payload
-    # that reaches that hook's own work: an agent context for the two agent-scoped guards,
-    # a refusable command for the two damage walls, and a startup event for the reporter.
-    agent-context-guard)
-      jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,agent_id:"aw1impl-1111111111111111",hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"echo hi"}}' ;;
+    # Each is the smallest payload that reaches that hook's own work: a startup event for
+    # the reporter, and the carrier's question for the permission hook.
     session-start)
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"SessionStart",source:"startup"}' ;;
     # The carrier's question: a command whose rm target is a variable, which it answers deny.
@@ -614,9 +579,7 @@ drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_FIRST"
 expect_eq "a project's FIRST artifact, written into .bionic before any run exists, is gated" \
   "2" "$DRV_ST"
 
-section "5d — ONE session-id guard: a malformed or empty key silences all fifteen (REQ-1h, AC-1h.2)"
-#
-# (epic-23 wave-11-lean-spine, added by T10.)
+section "5d — ONE session-id guard: a malformed or empty key silences all seven, and the stop of an agent (REQ-1h, AC-1h.2)"
 #
 # WHAT THIS IS FOR. The T10 census measured the shape guard
 # `case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac` in exactly SIX of the fifteen preamble
@@ -637,15 +600,11 @@ section "5d — ONE session-id guard: a malformed or empty key silences all fift
 # stderr is correct behaviour for an empty key and is not what this section is about. What
 # must be uniform is that no hook ACTS: exit 0, nothing on the user stream, no state written.
 
-GUARD_FIFTEEN='agent-context-guard bash-walls
+# Each hook that asks bionic_context, by name. `stop@TaskStop` is hooks/stop.sh again, driven by
+# the orchestrator's stop of an agent rather than a turn's end: the same file, another event.
+GUARD_FIFTEEN='bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-stop session-start stop-guard permission-answer'
-
-# A wall for agent-context-guard to hand its payload to: it takes the wall's path as $1 and
-# exits 0 without one, so every row below it would be silent for the wrong reason.
-GUARD_WALL="$SANDBOX/guard-wall.sh"
-printf '#!/bin/bash\nprintf "the wall ran\\n"\nexit 0\n' > "$GUARD_WALL"
-chmod +x "$GUARD_WALL"
+stop session-start stop@TaskStop permission-answer'
 
 # drive_sid <hook> <root> <env-sid> <payload-sid> -> GS_ST / GS_OUT / GS_ERR
 #
@@ -653,13 +612,11 @@ chmod +x "$GUARD_WALL"
 # treats the payload as a witness: a guard applied to the payload read rather than to the
 # resolved value would pass every row here with the env channel clean.
 drive_sid() {
-  local hook="$1" root="$2" esid="$3" psid="$4" pay args
+  local hook="$1" root="$2" esid="$3" psid="$4" pay
   pay=$(payload_for "$hook" "$root" | jq --arg s "$psid" '.session_id=$s')
-  args=()
-  [ "$hook" = "agent-context-guard" ] && args=("$GUARD_WALL")
   GS_OUT=$(printf '%s' "$pay" | env HOME="$SANDBOX/home" \
       BIONIC_PLUGINS_DIR="$SANDBOX/plugins" CLAUDE_CODE_SESSION_ID="$esid" \
-      bash "$HOOKS/$hook.sh" "${args[@]+"${args[@]}"}" 2>"$SANDBOX/.gerr")
+      bash "$HOOKS/${hook%@*}.sh" 2>"$SANDBOX/.gerr")
   GS_ST=$?
   GS_ERR=$(cat "$SANDBOX/.gerr")
   return 0
@@ -715,22 +672,22 @@ for hook in $GUARD_FIFTEEN; do
   expect_eq "$hook: an empty session id -> exit 0" "0" "$GS_ST"
 done
 
-# ── stop-guard's SECOND key, which the guard above cannot see ────────────────
+# ── the stop of an agent's SECOND key, which the guard above cannot see ────────────────
 #
-# The census measured stop-guard reading its session key TWICE from two sources: the
-# resolved value for the engagement guard, and a raw payload read further down that builds
+# The orchestrator's stop of an agent once read its session key TWICE from two sources: the
+# resolved value for the engagement guard, and a raw payload read further down that built
 # the roster filename. With a clean environment value and a malformed payload value the
 # engagement guard passes on the good key and the roster path is built from the bad one —
 # so the guard rows above are all green while the hook addresses a file outside the state
-# directory. AC-1h.2 names this one hook for that reason.
-SG_DIV=$(sidguard_fixture stop-guard "sidguard-stopguard-divergent")
-drive_sid stop-guard "$SG_DIV" "$SID" 'bad/../id'
-expect_absent "stop-guard: a malformed PAYLOAD key never reaches a path it builds" \
+# directory. That is why this event is driven alone here.
+SG_DIV=$(sidguard_fixture stop@TaskStop "sidguard-stopguard-divergent")
+drive_sid stop@TaskStop "$SG_DIV" "$SID" 'bad/../id'
+expect_absent "the stop of an agent: a malformed PAYLOAD key never reaches a path it builds" \
   "bad/../id" "$GS_OUT$GS_ERR"
 # `bad/../id` interpolated into `<root>/.bionic/tmp/roster-<sid>.state` resolves to
 # `<root>/.bionic/tmp/id.state` — one directory up from where the key was supposed to keep
 # it. Nothing may appear there.
-expect_eq "stop-guard: …and the traversed key addressed no file" "no" \
+expect_eq "the stop of an agent: …and the traversed key addressed no file" "no" \
   "$([ -e "$SG_DIV/.bionic/tmp/id.state" ] && echo yes || echo no)"
 # THE STATIC HALF, which is what actually closes it (AC-1h.2's own measurement): the raw
 # read is gone, so there is one source and the divergence has nowhere to enter.

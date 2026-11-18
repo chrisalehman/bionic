@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for tests/lib/release-check.sh — this repo's `release-check:` command (wave-31 T1; spec
-# D1, REQ-3 AC-3.5).
+# Tests for tests/lib/release-check.sh — this repo's `release-check:` command.
 #
 # THE CONTRACT THE DELETED PIN SUITE HELD THAT NO OTHER SUITE HOLDS: the CHANGELOG's newest
 # heading equals `.version` in payload/.claude-plugin/plugin.json. The release check runs the
@@ -42,21 +41,14 @@
 #   §CORR           the 1.19.0 entry against wave-36's REQ-8 and REQ-9 (AC-8.1, AC-8.3, AC-8.4, AC-9.1,
 #                   AC-9.2): the block exists at its own heading, dated; the Corrections
 #                   section names the two refusals 1.18.0 introduced, the text-only floor arm, D22's two
-#                   deferred sentences and the corrected fix count; Known limits carries every `deferred:`
-#                   stated sentence of the bound plan; Migration names every row that added a refusal; every
+#                   deferred sentences and the corrected fix count; Known limits states its own count;
+#                   Migration names every row that added a refusal; every
 #                   build row names its record; the 1.18.0 block is as released; help.md and version.md
 #                   read the version and `render.sh --check` is green. Each rule has a doctored copy.
-#   §REL-1.27.0     the 1.27.0 entry: the version pair reads 1.27.0, the entry is dated, names ADR-071,
-#                   and its Migration paragraph names the rows that changed what a script may meet.
-#                   The release check is run on a repository holding the real entry and the run's real deferred lines
-#                   (this run states none, so the Known limits arms hold at zero): every deferred sentence stands under
-#                   Known limits and the check passes; the same entry with its Known limits removed fails one line for
-#                   each deferred sentence, and passes when there are none; one planted deferral keeps the omission arm live.
-#   §REL-1.28.0     the 1.28.0 entry: its block's own heading reads 1.28.0, the version pair agrees at the newest heading,
-#                   the entry is dated, names its two ADRs and every row that changed what a script may meet, each with a
-#                   doctored copy, against a pinned 1.28.0 manifest. The release check is run on a repository holding the
-#                   real entry and this run's real deferred lines: every deferred sentence stands under Known limits and it
-#                   passes; with its Known limits removed it fails one line for each; one planted deferral keeps that arm live.
+#   §REL-1.28.0     the release check run on a repository holding the real 1.28.0 entry and its run's own deferred
+#                   and moved lines, cut from the closed plan as finding events into tests/fixtures/release-check/: a
+#                   deferral the person later moved to fixed is not held, every other deferred sentence stands under
+#                   Known limits and the check passes; with its Known limits removed it fails one line for each.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -194,27 +186,34 @@ section "§LIMITS — the shipped release's Known limits carry every deferred se
 
 # FIXTURE FIDELITY: a real repository whose committed CHANGELOG's newest entry has a `### Known limits` part, and
 # the run's plan on disk under the project's docs root (never committed, as `.bionic/` is ignored in a real
-# project), in the shapes the writers write: frontmatter `release:` and `fix-policy:`, `deferred:` lines under
-# `## SDLC State` with the ` stated="…"` field `finding-stated` appends (a `"` written `\"`, a `\` written `\\`).
+# project): a page at version 15 whose header names `release:` and `fix-policy:`, and beside it the run's log, its step
+# and each deferral a `finding` event whose `stated=` sentence is escaped as the move verb writes it.
 # Three deferrals: #1 and #2 stated and deferred by the policy, #4 stated but rated fix (S2 on under S1,S2-on), so
 # only #1 and #2 are held. #3, deferred and unstated, is kept apart (LIM_UNSTATED, LIM_DASH): a deferral rated
 # defer with no sentence refuses the release, so it joins a plan only where that refusal is the thing proved.
 # SYNTHESIZED: the sentences, the versions, the records.
 LIM_A='The first limit says "quoted" words and a back\slash.'
 LIM_B='The second limit is long enough that a changelog wraps it across two lines.'
-lim_plan() {  # <repo> <release> [<deferred lines>] -> the run's plan under the repository's docs root
-  local d="$1/.bionic/docs/plans/epic-01"
-  mkdir -p "$d"
-  { printf -- '---\nfix-policy: S1,S2-on\nrelease: %s\n---\n\n# fixture run\n\n## SDLC State\n\ncurrent: 7\n' "$2"
-    printf '%s\n' "${3-}"
-    printf '\n## Tasks\n'; } > "$d/wave-01.plan.md"
+lim_plan() {  # <repo> <release> [<finding events>] -> the run's page under the repository's docs root, and its log
+  local d="$1/.bionic/docs"
+  mkdir -p "$d/plans/epic-01" "$d/record/wave-01"
+  printf -- '---\ncanonical_sdlc_version: 15\nfix-policy: S1,S2-on\nrelease: %s\n---\n\n# fixture run\n' "$2" > "$d/plans/epic-01/wave-01.plan.md"
+  { printf 'run/v1|ev=step|n=7|at=2025-12-31T00:00:00Z\n'; [ -z "${3-}" ] || printf '%s\n' "$3"; } > "$d/record/wave-01/run.log"
 }
-LIM_DEFERRED='deferred: record/w/critic.md#1 S3 on "a first title" stated="The first limit says \"quoted\" words and a back\\slash."
-deferred: record/w/critic.md#2 S3 on "a second title" stated="The second limit is long enough that a changelog wraps it across two lines."
-deferred: record/w/critic.md#4 S2 on "fixed instead" stated="A sentence the policy fixes is no limit."'
-LIM_UNSTATED='deferred: record/w/critic.md#3 S3 on "an unstated one"'
-LIM_DASH='deferred: record/w/critic.md#3 S3 on "an unstated one" stated="-"'
-LIM_FIXED='deferred: record/w/critic.md#4 S2 on "fixed instead" stated="A sentence the policy fixes is no limit."'
+# The move verb writes a stated sentence through its own escape, and the one reader of it unescapes, so a deferral's
+# sentence is escaped here by that function, taken from where it lives, never by a rule restated in this suite.
+eval "$(sed -n '/^deferral_escape() {/,/^}/p' "${BIONIC_HOOKS_DIR}/poker/proof.sh")"
+lim_def() {  # <ref> <severity> <reach> <title> [<stated>] -> one deferral as the move verb writes it into the run's log
+  printf 'run/v1|ev=finding|ref=%s|severity=%s|reach=%s|to=deferred|title=%s%s|at=2026-01-01T00:00:00Z' "$1" "$2" "$3" "$4" \
+    "${5+|stated=$(deferral_escape "$5")}"
+}
+expect_eq "(l0) setup: the move verb's escape is loaded and escapes a quote and a backslash" 'a \"b\" c\\d' "$(deferral_escape 'a "b" c\d')"
+LIM_DEFERRED="$(lim_def record/w/critic.md#1 S3 on 'a first title' "$LIM_A")
+$(lim_def record/w/critic.md#2 S3 on 'a second title' "$LIM_B")
+$(lim_def record/w/critic.md#4 S2 on 'fixed instead' 'A sentence the policy fixes is no limit.')"
+LIM_UNSTATED="$(lim_def record/w/critic.md#3 S3 on 'an unstated one')"
+LIM_DASH="$(lim_def record/w/critic.md#3 S3 on 'an unstated one' -)"
+LIM_FIXED="$(lim_def record/w/critic.md#4 S2 on 'fixed instead' 'A sentence the policy fixes is no limit.')"
 lim_changelog() {  # <repo> <Known limits body of 2.3.4> [<older entry body>] -> commit a CHANGELOG whose newest entry is 2.3.4
   { printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n### Known limits\n\n%s\n\n' "$2"
     printf '## 0.0.1 — 2026-01-01\n\n- first\n%s\n' "${3-}"; } > "$1/CHANGELOG.md"
@@ -286,7 +285,7 @@ expect_contains "(L2-2) …the same line, naming the finding" "$(L2_LINE)" "$OUT
 expect_eq "(L2-2) …and it is the only release-check line" "1" "$(lines_of "$OUT")"
 
 R="$TMP/l2-stated"; fx_repo "$R" 2.3.4 2.3.4
-lim_plan "$R" 2.3.4 'deferred: record/w/critic.md#3 S3 on "an unstated one" stated="The third limit is stated and carried."'
+lim_plan "$R" 2.3.4 "$(lim_def record/w/critic.md#3 S3 on 'an unstated one' 'The third limit is stated and carried.')"
 lim_changelog "$R" "- Known limit: The third limit is stated and carried."
 run_check "$R"
 expect_status "(L2-3) the same deferral with its sentence stated and carried in Known limits: the check passes" 0 "$RC"
@@ -397,12 +396,12 @@ expect_contains "(L3-4) MUTANT …by the line naming the finding" "no stated sen
 
 section "§FROM-REPORT — release-note renders the landing numbers at a head; the check holds the entry to them"
 
-# FIXTURE FIDELITY: the run's plan names 2.3.4, and its landing record holds, in the line's event shapes, a queue
+# FIXTURE FIDELITY: the run's plan names 2.3.4, and its log holds, in the line's event shapes, a queue
 # landing at L1 and a hand landing at L2. The entry is rendered at L2 for 01:30 and committed as E, which a hand
 # landing carries at 02:00; a third row lands L3 on top at 03:00. The poker runs from the fixture as a user runs it.
 # SYNTHESIZED: the events.
 POKER="${BIONIC_SCRIPTS_DIR}/hooks/session-poker.sh"; RN_PLAN=".bionic/docs/plans/epic-01/wave-01.plan.md"
-rn_pub() { printf 'line/v1|ev=published|row=%s|commit=%s|kind=%s|by=t|why=w|at=%s\n' "$@" >> "$RN_REC"; }
+rn_pub() { printf 'run/v1|ev=published|row=%s|commit=%s|kind=%s|by=t|why=w|at=%s\n' "$@" >> "$RN_REC"; }
 rn_commit() {  # <file> -> commit a change to it, print the head
   printf '%s\n' "$1" > "$R/$1"; git -C "$R" add -- "$1"; git -C "$R" commit -q -m "$1"; git -C "$R" rev-parse HEAD
 }
@@ -413,11 +412,11 @@ rn_entry() {  # <release-note output> -> commit a CHANGELOG whose 2.3.4 entry ca
 rn_note() { (cd "$R" && bash "$POKER" release-note "$@" "$RN_PLAN" 2>&1; echo "rc=$?"); }
 rn_check() { OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD="$1" bash "$CHECK" "$LIST" 2>&1)"; RC=$?; }
 R="$TMP/rn"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4
-RN_REC="$R/.bionic/docs/record/wave-01/landing-proofs.log"; mkdir -p "${RN_REC%/*}"
+RN_REC="$R/.bionic/docs/record/wave-01/run.log"
 L1="$(rn_commit l1)"; L2="$(rn_commit l2)"
-{ printf 'line/v1|ev=ready|row=T1|commit=%s|at=2026-01-02T00:00:00Z\n' "$L1"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=-|admitted=1767312060|width=2|promised=60|actual=90|at=2026-01-02T00:05:00Z\n' "$L1"
-} > "$RN_REC"; rn_pub T1 "$L1" queue 2026-01-02T00:10:00Z; rn_pub T2 "$L2" hand 2026-01-02T01:00:00Z
+{ printf 'run/v1|ev=ready|row=T1|commit=%s|at=2026-01-02T00:00:00Z\n' "$L1"
+  printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=-|admitted=1767312060|width=2|promised=60|actual=90|at=2026-01-02T00:05:00Z\n' "$L1"
+} >> "$RN_REC"; rn_pub T1 "$L1" queue 2026-01-02T00:10:00Z; rn_pub T2 "$L2" hand 2026-01-02T01:00:00Z
 LR1="$(cd "$R" && bash "$POKER" landing-report --rows "$RN_PLAN" 2>&1)"
 B="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; RN1="$(rn_note)"; A="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ON="$(printf '%s\n' "$RN1" | sed -n 's/^`landing-report --rows` at [0-9a-f]* on \(.*\):$/\1/p')"
@@ -622,8 +621,9 @@ cl_cksum() { cksum | sed 's/[[:space:]]*$//'; }
 # corrects it and the block itself is never edited).
 BLOCK_1180_CKSUM="2015167781 19033"
 
-PLAN_36="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-36-zero-machine-errors.plan.md"
 PLUGIN_JSON="${BIONIC_SCRIPTS_DIR}/payload/.claude-plugin/plugin.json"
+# a released record's name holds a verb since removed, read from the deletion list so that no line of this suite spells it
+RC_TS="$(/usr/bin/grep -o '`task[-]set`' "${BIONIC_SCRIPTS_DIR}/tests/fixtures/deletion-list.txt" | tr -d '`')"
 # Every landed build row of the run and the record that proves it; the entry names each record
 ROWS_1190="T1:T1-run-on-branch.md T2:T2-restart-truth.md T3:T3-placement.md T4:T4-jurisdiction.md
 T5:T5-reads-index.md T6:T6-pinned-text.md T7:T7-cover-judge.md T8:T8-fixed-move.md T9:T9-run-sessions.md
@@ -632,15 +632,10 @@ T14:T14-close-out-state.md T15:T15-doctrine.md T24:T24-block-heading.md T25:T25-
 T27:T27-consumers.md T28:T28-verbs-ask-the-judge.md T29:T29-launch-arm-and-adopt.md
 T30:T30-start-hook-bash5.md T31:T31-fix-seen-by-asker.md T32:T32-one-width-fact.md T33:T33-said-no-pipe.md
 T34:T34-taking-lock-stale.md T35:T35-floor-is-a-fact.md T36:T36-stop-wall-pins.md T37:T37-shell-lint-reds.md
-T38:T38-one-roster-reader.md T39:T39-sp2-pins.md T40:T40-tick-asks-once.md T41:T41-task-set-files.md
+T38:T38-one-roster-reader.md T39:T39-sp2-pins.md T40:T40-tick-asks-once.md T41:T41-$RC_TS-files.md
 T42:T42-born-floor-backed.md T43:T43-two-cd-chain.md T44:T44-walk-pointer.md T47:T47-adopt-lands-on-whole.md"
 # The rows that added a refusal; the Migration paragraph names each (AC-9.2)
 MIG_ROWS="T4 T7 T8 T13 T14 T25 T27 T31 T32 T35 T42"
-# D22's two deferred sentences, as wave-35's continuation states them and 1.18.0's Known limits omitted them
-D22_A='`task-add --born` still admits a finding the person moved to defer when its reader'"'"'s rating is inside the fix policy; the guard reads a move to fix, not a move to defer.'
-D22_B='a dead session'"'"'s open row whose files are already sweepable still holds its plan row, and the refusal'"'"'s remedy (`adopt`) lists nothing for that session; `session-poker.sh sweep` clears it.'
-# The text-only floor arm's sentence (A-orch-50)
-TEXT_ONLY='from Step 7 the commit wall refuses a plan that claims a regression and carries no `proved: kind=floor` line, and it reads text only, so a floor line that owes suites passes it and the judge holds them at `current 7` and `current 8`.'
 
 # cl_part <file> <version> <heading> — the lines of the block's `### <heading>` part, up to the next `### ` or `## `
 cl_part() {
@@ -662,18 +657,19 @@ cl_lead() {
 flat() { tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g'; }
 # has <text> <phrase> — 0 when the phrase is in the text, white space squeezed on both sides
 has() { local t p; t="$(printf '%s' "$1" | flat)"; p="$(printf '%s' "$2" | flat)"; case "$t" in *"$p"*) return 0 ;; esac; return 1; }
-# plan_deferred — the stated sentence of each `deferred:` line of the bound plan, one per line
-plan_deferred() { sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p' "$1"; }
-# plan_deferred_open <plan> — the stated sentences of the deferrals no `moved: <id> to=fixed` line has closed, the ones the
-# check holds the entry to; a plan whose later rows fixed a deferred finding states more sentences than the entry owes
-plan_deferred_open() {
-  awk 'FNR == NR { if ($1 == "moved:" && $3 == "to=fixed") fixed[$2] = 1; next }
-       $1 == "deferred:" && !($2 in fixed) { print }' "$1" "$1" | sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p'
+# plan_deferred <events> [open] — the stated sentence of each deferral, one per line; with `open`, only those of the
+# deferrals no later finding event moved to fixed, the ones the check holds the entry to
+plan_deferred() {
+  awk -F'|' -v open="${2:-}" '
+    { delete f; for (i = 3; i <= NF; i++) { k = substr($i, 1, index($i, "=") - 1); f[k] = substr($i, length(k) + 2) } }
+    $2 != "ev=finding" { next }
+    FNR == NR { if (f["to"] == "fixed") fixed[f["ref"]] = 1; next }
+    f["to"] == "deferred" && ("stated" in f) && !(open != "" && (f["ref"] in fixed)) { print f["stated"] }' "$1" "$1"
 }
 
-# corr_check <file> <plugin.json> <plan> — one `corr:` line per broken rule; no output when all hold
+# corr_check <file> <plugin.json> — one `corr:` line per broken rule; no output when all hold
 corr_check() {
-  local f="$1" pj="$2" plan="$3" blk cor lim mig lead s n pair row rec cnt stated actual t13 t13hit
+  local f="$1" pj="$2" blk cor lim mig lead s n pair row rec stated actual t13 t13hit
   blk="$(cl_block "$f" 1.19.0)"
   [ -n "$blk" ] || { echo "corr: no 1.19.0 block"; return 0; }
   grep -q -E '^## 1\.19\.0 — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]$' <<<"$blk" || echo "corr: the 1.19.0 heading carries no date"
@@ -701,17 +697,6 @@ corr_check() {
   has "$cor" 'three fixes' && has "$cor" 'T34' && has "$cor" 'A-orch-48' || echo "corr: Corrections does not correct the count of fixes the review ordered"
   lim="$(cl_part "$f" 1.19.0 'Known limits')"
   [ -n "$lim" ] || echo "corr: no Known limits section"
-  if [ -r "$plan" ]; then
-    cnt=0
-    while IFS= read -r s; do
-      [ -n "$s" ] || continue
-      cnt=$((cnt + 1))
-      has "$lim" "$s" || echo "corr: Known limits lacks the deferred sentence: $s"
-    done <<EOT
-$(plan_deferred "$plan")
-EOT
-    [ "$cnt" -gt 0 ] || echo "corr: the plan holds no deferred sentence to pin"
-  fi
   stated="$(printf '%s\n' "$lim" | flat | sed -n 's/.*The count of Known limits in this block is \([0-9][0-9]*\)\..*/\1/p')"
   actual="$(printf '%s\n' "$lim" | grep -c -E '^- Known limit' || true)"
   if [ -z "$stated" ]; then echo "corr: the count of Known limits is not stated"
@@ -723,14 +708,6 @@ EOT
   has "$blk" 'T33, T36, T37, T38, T39 and T40' && has "$blk" '`born: floor`' || echo "corr: the entry does not name the six rows born: floor"
   [ "$(cl_block "$f" 1.18.0 | cl_cksum)" = "$BLOCK_1180_CKSUM" ] || echo "corr: the 1.18.0 block is not as released"
   return 0
-}
-# pair_check <file> <plugin.json> — one `corr:` line when plugin.json does not read the newest heading (the live pair,
-# whichever release is newest; the 1.19.0 rules above hold that block at its own heading)
-pair_check() {
-  local ver pv
-  ver="$(grep -m 1 '^## ' "$1" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
-  pv="$(jq -r '.version // empty' "$2" 2>/dev/null)"
-  [ -n "$ver" ] && [ "$pv" = "$ver" ] || echo "corr: plugin.json reads ${pv:-nothing}, not the newest heading ${ver:-none}"
 }
 # help_check — the rendered pages read the plugin's version and are the pages render.sh renders
 help_check() {
@@ -749,7 +726,7 @@ expect_eq "(c0) the table of build rows holds 36 rows" "36" "$(printf '%s\n' $RO
 expect_eq "(c1) …and the rendered pages read plugin.json's version and are the rendered pages" "" "$(help_check)"
 
 # --- doctored copies: each rule has one that goes red, named by its rule
-cor_check() { corr_check "$1" "$PLUGIN_JSON" ""; }
+cor_check() { corr_check "$1" "$PLUGIN_JSON"; }
 doctor c_no119 sed 's/^## 1\.19\.0 — /## 1.18.9 — /'
 expect_contains "(c2a) no 1.19.0 block: red" "corr: no 1.19.0 block" "$(cor_check "$TMP/doctored.c_no119")"
 doctor c_nocor sed 's/^### Corrections to 1\.18\.0/### Notes/'
@@ -762,9 +739,6 @@ doctor c_count sed 's/three fixes/four fixes/g'
 doctor c_d22a sed 's/still admits a finding the person moved to defer/admits a finding/'
 doctor c_d22b sed 's/lists nothing for that session/lists nothing/'
 doctor c_floorarm sed 's/it reads text only/it reads the tree/'
-if [ -r "$PLAN_36" ]; then
-  FIRST_DEFERRED="$(plan_deferred "$PLAN_36" | head -n 1)"
-fi
 doctor c_klcount sed 's/The count of Known limits in this block is [0-9]*\./The count of Known limits in this block is 99./'
 expect_contains "(c2l) a stated count that is not the bullets counted: red" "corr: the count says 99" "$(cor_check "$TMP/doctored.c_klcount")"
 doctor c_klnone sed 's/The count of Known limits in this block is/The Known limits here number/'
@@ -774,135 +748,39 @@ doctor c_t13 sed 's/`debt adopt` and the Step-1 card now refuse/the card now ref
 doctor c_rec sed 's/`T27-consumers\.md`/the record/g'
 doctor c_born sed 's/T33, T36, T37, T38, T39 and T40/the six rows/'
 doctor c_edit1180 awk '{ print } /^## 1\.18\.0 — /{ print "" }'
-printf '{\n  "name": "bionic",\n  "version": "1.18.0"\n}\n' > "$TMP/plugin.old.json"
 doctor c_nodate sed 's/^## 1\.19\.0 — .*/## 1.19.0 —/'
 
-# rel_check <file> <plugin.json> <version> <adr> <rows> — one `rel:` line per broken rule; no output when all hold
-rel_check() {
-  local f="$1" pj="$2" ver="$3" adr="$4" rows="$5" blk mig s vre
-  vre="${ver//./\\.}"
-  blk="$(cl_block "$f" "$ver")"
-  [ -n "$blk" ] || { echo "rel: no $ver block"; return 0; }
-  grep -q -E "^## $vre — 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]\$" <<<"$blk" || echo "rel: the $ver heading carries no date"
-  mig="$(cl_lead "$f" "$ver" | awk '/^\*\*Migration\.\*\*/ { m = 1 } m')"
-  [ -n "$mig" ] || echo "rel: no Migration paragraph"
-  for s in $rows; do
-    grep -q -w -- "$s" <<<"$mig" || echo "rel: Migration does not name $s"
-  done
-  has "$blk" "$adr" || echo "rel: the entry does not name $adr"
-  [ "$(jq -r '.version // empty' "$pj" 2>/dev/null)" = "$ver" ] || echo "rel: plugin.json does not read $ver"
-}
-# rel_world <dir> <changelog> <version> <plan> [<extra deferred line>] — a committed repository holding <changelog> as its
-# CHANGELOG and the run's real deferred lines as its plan, each with the moved: lines that later changed its state, so the
-# declared check judges the entry as the door will
+# rel_world <dir> <changelog> <version> <events> — a committed repository holding <changelog> as its CHANGELOG and, in
+# its run's log, the run's finding events from <events>: each deferral and each later move of one, so the declared check
+# judges the entry as the door will
 rel_world() {
-  fx_repo "$1" 2.3.4 "$3" && lim_plan "$1" "$3" "$(/usr/bin/grep -E '^(deferred|moved): ' "$4")${5:+
-$5}" &&
+  fx_repo "$1" 2.3.4 "$3" && lim_plan "$1" "$3" "$(/usr/bin/grep '^run/v1|ev=finding|' "$4")" &&
   { cat "$2"; printf '\n## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$1/CHANGELOG.md" &&
   git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the $3 entry"
 }
 
-section "§REL-1.27.0 — the 1.27.0 entry names its rows and carries the run's deferred sentences"
+section "§REL-1.28.0 — the real 1.28.0 entry passes over its run's deferrals, a deferral later moved to fixed not held"
 
-REL_PLAN="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-44-every-hand.plan.md"
-# The rows whose Migration bullets name what a script of yours may meet at 1.27.0
-REL_MIG_ROWS="T1 T2 T3 T4 T5 T13 T14"
-
-printf '{\n  "name": "bionic",\n  "version": "1.27.0"\n}\n' > "$TMP/plugin.1270.json"
-expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$TMP/plugin.1270.json" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
-doctor r27_nomig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T14/, "Tnn") } { print }'
-expect_contains "(n2) a Migration paragraph that does not name T14: red" "rel: Migration does not name T14" "$(rel_check "$TMP/doctored.r27_nomig" "$TMP/plugin.1270.json" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
-doctor r27_noadr sed 's/ADR-071/the fourth record/g'
-expect_contains "(n2) an entry that does not name ADR-071: red" "rel: the entry does not name ADR-071" "$(rel_check "$TMP/doctored.r27_noadr" "$TMP/plugin.1270.json" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
-expect_contains "(n2) a manifest that reads another version: red" "rel: plugin.json does not read 1.27.0" "$(rel_check "$CL" "$TMP/plugin.old.json" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
-
-if [ -r "$REL_PLAN" ]; then
-  REL_N="$(plan_deferred "$REL_PLAN" | /usr/bin/grep -c .)"
-  # A plan that states no deferral holds the arms below at zero; one that gains a deferral turns them to the
-  # strict form (the check fails without the Known limits, one line each) with no edit here.
-  if [ "$REL_N" -gt 0 ]; then REL_WANT=1; else REL_WANT=0; fi
-  expect_true "(n0) setup: the count of the run's deferred sentences is read" [ "$REL_N" -ge 0 ]
-  cl_block "$CL" 1.27.0 | awk '/^### / { skip = ($0 == "### The landing numbers") } !skip' > "$TMP/rel.entry"
-  cl_block "$CL" 1.27.0 | awk '/^### / { skip = ($0 == "### The landing numbers" || $0 == "### Known limits") } !skip' > "$TMP/rel.nolimits"
-  expect_nonempty "(n0) setup: the entry's Known limits are cut out of a block that exists" "$(cat "$TMP/rel.nolimits")"
-  R="$TMP/rel-real"; rel_world "$R" "$TMP/rel.entry" 1.27.0 "$REL_PLAN"
-  run_check "$R"
-  expect_status "(n3) the real entry, every deferred sentence of the run's plan under Known limits: the check passes" 0 "$RC"
-  if [ "$REL_N" -gt 0 ]; then
-    expect_contains "(n3) …carrying each deferred sentence" "known-limits: 1.27.0 carries the $REL_N deferred sentences" "$OUT"
-  else
-    expect_contains "(n3) …saying the plan states none" "known-limits: 1.27.0 — " "$OUT"
-    expect_contains "(n3) …in those words" "states no deferred sentence" "$OUT"
-  fi
-  R="$TMP/rel-nolimits"; rel_world "$R" "$TMP/rel.nolimits" 1.27.0 "$REL_PLAN"
-  run_check "$R"
-  expect_status "(n4) the same entry with its Known limits removed: the check fails only when a sentence is deferred" "$REL_WANT" "$RC"
-  if [ "$REL_N" -gt 0 ]; then
-    expect_eq "(n4) …one line for each deferred sentence" "$REL_N" "$(lines_of "$OUT")"
-    expect_contains "(n4) …naming a finding" "omit the deferred sentence of record/" "$OUT"
-  else
-    expect_contains "(n4) …the plan states none, so none is omitted" "states no deferred sentence" "$OUT"
-  fi
-  # One planted deferral keeps the omission arm live whatever this run states: the same entry, no Known limits.
-  R="$TMP/rel-planted"; rel_world "$R" "$TMP/rel.nolimits" 1.27.0 "$REL_PLAN" 'deferred: record/w/planted.md#1 S3 on "a planted title" stated="The planted limit is stated and the entry omits it."'
-  run_check "$R"
-  expect_status "(n5) one deferred sentence planted in the run's plan, the entry without Known limits: the check fails" 1 "$RC"
-  expect_contains "(n5) …naming the planted finding" "omit the deferred sentence of record/w/planted.md#1" "$OUT"
-fi
-
-section "§REL-1.28.0 — the 1.28.0 entry names its rows and its ADRs and carries the run's deferred sentences"
-
-REL_PLAN="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-45-whole-run.plan.md"
-# The rows whose Migration bullets name what a script of yours may meet at 1.28.0
-REL_MIG_ROWS="T1 T2 T3 T5 T6 T7 T8 T9 T10 T11 T12 T13 T14 T15 T16 T17 T18 T24 T25 T28 T31 T32 T33"
-# The two ADRs this release records
-REL_ADR_A="ADR-072"
-REL_ADR_B="ADR-073"
-
-expect_eq "(n1) the version pair reads the newest heading" "" "$(pair_check "$CL" "$PLUGIN_JSON")"
-expect_eq "(n1) …the 1.28.0 block's own heading reads 1.28.0" "1.28.0" "$(cl_block "$CL" 1.28.0 | head -1 | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
-printf '{\n  "name": "bionic",\n  "version": "1.28.0"\n}\n' > "$TMP/plugin.1280.json"
-expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")$(rel_check "$CL" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
-doctor r28_nomig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T33/, "Tnn") } { print }'
-expect_contains "(n2) a Migration paragraph that does not name T33: red" "rel: Migration does not name T33" "$(rel_check "$TMP/doctored.r28_nomig" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
-doctor r28_noadr sed "s/$REL_ADR_A/the first record/g"
-expect_contains "(n2) an entry that does not name $REL_ADR_A: red" "rel: the entry does not name $REL_ADR_A" "$(rel_check "$TMP/doctored.r28_noadr" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
-doctor r28_noadr2 sed "s/$REL_ADR_B/the second record/g"
-expect_contains "(n2) an entry that does not name $REL_ADR_B: red" "rel: the entry does not name $REL_ADR_B" "$(rel_check "$TMP/doctored.r28_noadr2" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
-expect_contains "(n2) a manifest that reads another version: red" "rel: plugin.json does not read 1.28.0" "$(rel_check "$CL" "$TMP/plugin.1270.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
-
-if [ -r "$REL_PLAN" ]; then
-  REL_N="$(plan_deferred_open "$REL_PLAN" | /usr/bin/grep -c .)"
-  # A plan that states no deferral holds the arms below at zero; one that gains a deferral turns them to the
-  # strict form (the check fails without the Known limits, one line each) with no edit here.
-  if [ "$REL_N" -gt 0 ]; then REL_WANT=1; else REL_WANT=0; fi
-  expect_true "(n0) setup: the count of the run's deferred sentences is read" [ "$REL_N" -ge 0 ]
-  cl_block "$CL" 1.28.0 | awk '/^### / { skip = ($0 == "### The landing numbers") } !skip' > "$TMP/rel28.entry"
-  cl_block "$CL" 1.28.0 | awk '/^### / { skip = ($0 == "### The landing numbers" || $0 == "### Known limits") } !skip' > "$TMP/rel28.nolimits"
-  expect_nonempty "(n0) setup: the entry's Known limits are cut out of a block that exists" "$(cat "$TMP/rel28.nolimits")"
-  R="$TMP/rel28-real"; rel_world "$R" "$TMP/rel28.entry" 1.28.0 "$REL_PLAN"
-  run_check "$R"
-  expect_status "(n3) the real entry, every deferred sentence of the run's plan under Known limits: the check passes" 0 "$RC"
-  if [ "$REL_N" -gt 0 ]; then
-    expect_contains "(n3) …carrying each deferred sentence" "known-limits: 1.28.0 carries the $REL_N deferred sentences" "$OUT"
-  else
-    expect_contains "(n3) …saying the plan states none" "known-limits: 1.28.0 — " "$OUT"
-    expect_contains "(n3) …in those words" "states no deferred sentence" "$OUT"
-  fi
-  R="$TMP/rel28-nolimits"; rel_world "$R" "$TMP/rel28.nolimits" 1.28.0 "$REL_PLAN"
-  run_check "$R"
-  expect_status "(n4) the same entry with its Known limits removed: the check fails only when a sentence is deferred" "$REL_WANT" "$RC"
-  if [ "$REL_N" -gt 0 ]; then
-    expect_eq "(n4) …one line for each deferred sentence" "$REL_N" "$(lines_of "$OUT")"
-    expect_contains "(n4) …naming a finding" "omit the deferred sentence of record/" "$OUT"
-  else
-    expect_contains "(n4) …the plan states none, so none is omitted" "states no deferred sentence" "$OUT"
-  fi
-  # One planted deferral keeps the omission arm live whatever this run states: the same entry, no Known limits.
-  R="$TMP/rel28-planted"; rel_world "$R" "$TMP/rel28.nolimits" 1.28.0 "$REL_PLAN" 'deferred: record/w/planted.md#1 S3 on "a planted title" stated="The planted limit is stated and the entry omits it."'
-  run_check "$R"
-  expect_status "(n5) one deferred sentence planted in the run's plan, the entry without Known limits: the check fails" 1 "$RC"
-  expect_contains "(n5) …naming the planted finding" "omit the deferred sentence of record/w/planted.md#1" "$OUT"
-fi
+# The run's deferrals and their moves, cut from its closed plan as the log holds a finding: each deferral dated before
+# the first move, each move at its own instant; a move's words, session and why are kept, since a move to defer or fix
+# without them reads as no move, and its author is a stand-in. A deferral the person moved to fixed is owed no Known
+# limit, so the real entry passes only when the check reads the move.
+REL_PLAN="${BIONIC_SCRIPTS_DIR}/tests/fixtures/release-check/wave-45-findings.txt"
+REL_N="$(plan_deferred "$REL_PLAN" open | /usr/bin/grep -c .)"
+expect_true "(n0) setup: the run's deferred sentences are read, at least one" [ "$REL_N" -gt 0 ]
+expect_true "(n0) setup: …and fewer than its deferrals, so a move to fixed is in the fixture" \
+  [ "$REL_N" -lt "$(plan_deferred "$REL_PLAN" | /usr/bin/grep -c .)" ]
+cl_block "$CL" 1.28.0 | awk '/^### / { skip = ($0 == "### The landing numbers") } !skip' > "$TMP/rel28.entry"
+cl_block "$CL" 1.28.0 | awk '/^### / { skip = ($0 == "### The landing numbers" || $0 == "### Known limits") } !skip' > "$TMP/rel28.nolimits"
+expect_nonempty "(n0) setup: the entry's Known limits are cut out of a block that exists" "$(cat "$TMP/rel28.nolimits")"
+R="$TMP/rel28-real"; rel_world "$R" "$TMP/rel28.entry" 1.28.0 "$REL_PLAN"
+run_check "$R"
+expect_status "(n3) the real entry, every deferred sentence of the run's plan under Known limits: the check passes" 0 "$RC"
+expect_contains "(n3) …carrying each deferred sentence" "known-limits: 1.28.0 carries the $REL_N deferred sentences" "$OUT"
+R="$TMP/rel28-nolimits"; rel_world "$R" "$TMP/rel28.nolimits" 1.28.0 "$REL_PLAN"
+run_check "$R"
+expect_status "(n4) the same entry with its Known limits removed: the check fails" 1 "$RC"
+expect_eq "(n4) …one line for each deferred sentence" "$REL_N" "$(lines_of "$OUT")"
+expect_contains "(n4) …naming a finding" "omit the deferred sentence of record/" "$OUT"
 
 finish

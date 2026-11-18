@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/permission-effects.test.sh — the effects reader judged THROUGH THE HOOK (epic-23
-# wave-25-never-paused T16; Step-6 review B1, B2).
+# tests/permission-effects.test.sh — the effects reader judged THROUGH THE HOOK.
 #
 # WHAT IT OWNS. The places where payload/scripts/lib/cmd-class.sh `cmd_effects` used to be
 # confident and wrong, driven end to end: a real PermissionRequest payload into
@@ -68,27 +67,19 @@ mkdir -p "$TREE/a/sub" "$TREE/sub"
 PLAN="$P/.bionic/docs/plans/epic-99/$PLAN_BASE.plan.md"
 cat > "$PLAN" <<PEPLAN
 ---
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 intent: build
 rigor: double
 scale: wave
 working-branch: $BRANCH
+integration-branch: main
 spec: specs/epic-99/$PLAN_BASE.spec.md
 requirements: specs/epic-99/$PLAN_BASE.requirements.md
 ---
 
 # fixture plan
-
-## SDLC State
-
-integration-branch: main
-intent: build
-rigor: double
-scale: wave
-current: 4
-
-- Step 4: tasks in flight
 PEPLAN
+printf 'run/v1|ev=step|n=4|at=2026-10-03T00:00:00Z\n' > "$P/.bionic/docs/record/$PLAN_BASE/run.log"
 : > "$P/.bionic/docs/specs/epic-99/$PLAN_BASE.spec.md"
 : > "$P/.bionic/docs/specs/epic-99/$PLAN_BASE.requirements.md"
 printf 'plan=%s\n' "$PLAN" > "$P/.bionic/tmp/engaged-$SID.state"

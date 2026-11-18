@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/binding.test.sh — payload/scripts/lib/binding.sh: WHICH refusal, not just that
-# there was one (epic-23 wave-18-fixit-185, REQ-2 AC-2.2; spec §2 D5).
+# tests/binding.test.sh — payload/scripts/lib/binding.sh: WHICH refusal, not just that there was one.
 #
 # WHAT IT OWNS. `bind_plan` has five refusal causes and one exit status for all of them,
 # so every caller that wanted to say why had to re-derive the reason from the filesystem
@@ -71,14 +70,21 @@ call_bind() {  # <root> <sid> <plan|none> -> sets BIND_ST / BIND_WHY / BIND_ERR
   BIND_ERR=$(cat "$SANDBOX/.err" 2>/dev/null)
 }
 
-open_body()   { printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n'; }
-closed_body() { printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: close-out delivered: yes\n'; }
+# page15 <plan> <step> [line end] -> a plan page at 15 under plans/ or incidents/ and its run's log,
+# <docs>/record/<stem>/run.log, at <step>: open below 9, delivered at 9. A plan at 15 holds no state section; its
+# header says 15 and its log where it stands.
+page15() {
+  local l="${1%/plans/*}"; l="${l%/incidents/*}/record/$(basename "$1" .plan.md)/run.log"
+  mkdir -p "${1%/*}" "${l%/*}"
+  printf -- "---${3:-\n}canonical_sdlc_version: 15${3:-\n}---${3:-\n}" > "$1"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$2" > "$l"
+}
 
 make_repo() {  # <name> -> an engaged-looking root holding one OPEN plan
   local d="$SANDBOX/$1"
-  mkdir -p "$d/.bionic/docs/plans/epic-01-demo" "$d/.bionic/tmp"
+  mkdir -p "$d/.bionic/tmp"
   git -C "$d" init -q . 2>/dev/null
-  open_body > "$d/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+  page15 "$d/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" 4
   printf '%s' "$d"
 }
 
@@ -137,7 +143,7 @@ expect_eq "…and so does a path whose directory does not exist" "unresolvable" 
 
 # (e) :117 — the path resolves, and is simply not a member of the open-run set.
 CLOSED="$R1/.bionic/docs/plans/epic-01-demo/wave-09-closed.plan.md"
-closed_body > "$CLOSED"
+page15 "$CLOSED" 9
 call_bind "$R1" "$SID" "$CLOSED"
 expect_eq "a CLOSED plan of this root refuses (exit 1)" "1" "$BIND_ST"
 expect_eq "…and names the open-run set" "not-an-open-run" "$BIND_WHY"
@@ -148,7 +154,7 @@ expect_eq "…and so does an open plan of ANOTHER root" "not-an-open-run" "$BIND
 NOTPLAN="$R1/.bionic/docs/plans/epic-01-demo/notes.md"
 printf '# just notes\n' > "$NOTPLAN"
 call_bind "$R1" "$SID" "$NOTPLAN"
-expect_eq "…and so does a file under plans/ carrying no ## SDLC State" "not-an-open-run" "$BIND_WHY"
+expect_eq "…and so does a file under plans/ carrying neither a state section nor a header at 15" "not-an-open-run" "$BIND_WHY"
 call_bind "$R1" "$SID" "$P1"
 expect_eq "…paired: the root's open plan on the same fixture is accepted (exit 0)" "0" "$BIND_ST"
 
@@ -237,7 +243,7 @@ expect_eq "…paired: the same id as a real marker holds it" "$TSID" "$HOLD_IDS"
 section "7 — the bind verb's act admits a delivered plan: the session reads it bound-closed (wave-36 T14; D13, AC-7.7; ruling r1791955629-34788)"
 # ============================================================
 #
-# `task-set --reason` amends a delivered plan from the session bound to it, and after a close-out the session has no
+# A session reads a delivered plan bound-closed once it binds it, and after a close-out the session has no
 # marker, so `bind` must be able to reach that state. Only the bind VERB's act (`bind`) admits a delivered plan;
 # engagement (`engage`), the governing skill's Write (`write`) and an act-less call keep §2's refusal, so the
 # newest-plan fallback and engagement are unchanged. A plan neither open nor delivered (abandoned) is still refused.
@@ -259,9 +265,9 @@ call_bind_act() {  # <root> <sid> <plan|none> <act> -> sets BIND_ST / BIND_WHY /
 R7="$(make_repo r7)"
 P7="$R7/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
 D7="$R7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md"
-closed_body > "$D7"
+page15 "$D7" 9
 A7="$R7/.bionic/docs/plans/epic-01-demo/wave-03-abandoned.plan.md"
-printf -- '---\ncanonical_sdlc_version: 14\nabandoned: 2026-10-01 superseded\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n' > "$A7"
+page15 "$A7" 4; printf 'run/v1|ev=abandon|why=superseded|at=2026-10-04T00:01:00Z\n' >> "$R7/.bionic/docs/record/wave-03-abandoned/run.log"
 call_bind_act "$R7" "$SID" "$P7" bind
 expect_eq "7a paired positive: the root's open plan binds by the verb's act, bound-open" "0||bound-open $P7" "$BIND_ST|$BIND_WHY|$BIND_RUN"
 call_bind_act "$R7" "$SID" "$D7" bind
@@ -278,74 +284,82 @@ for act in engage write; do
     "$BIND_ST|$BIND_WHY|$(grep -m1 '^plan=' "$(marker_of "$R7")")"
 done
 OTHER7="$(make_repo r7-other)"
-closed_body > "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md"
+page15 "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md" 9
 call_bind_act "$R7" "$SID" "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md" bind
 expect_eq "7e a delivered plan of ANOTHER root is refused not-an-open-run" "1|not-an-open-run" "$BIND_ST|$BIND_WHY"
 
 # ============================================================
-section "SIZE — a plan carrying 3,000 session lines binds once as present, and a session not on it is recorded exactly once"
+section "8 — the run's sessions are events: a first engagement is one bind event, a session the run holds adds none, the plan is never written"
 # ============================================================
 #
-# `bind_record_session` asks `bind_sessions` whether the line of this session is already there. A reader that quits at the
-# first match leaves the writer a closed pipe, and under `set -o pipefail`, which every caller of the library runs under, a
-# writer killed that way fails the pipeline and a session already on the plan reads absent: the call answers `recorded`
-# and the plan gains a second line. `bind_sessions` ends in `return 0`, which masks its own writer, so the quitting form
-# does not bite through it on this library; the presence read still reads to the end, so that no change to that function
-# can make it bite. The rows build a plan whose id stream (over 100 KB) outruns one 64 KB pipe buffer, with the line of
-# this session FIRST, where an early quit happens, and SZ-3 shows this plan is one a quitting reader bites on.
-# fails-when: the presence read quits early, the call answers recorded and the plan gains a second line (SZ-1).
-sz_plan() {  # <path> <with|without> -> a plan of 3,000 distinct session lines, the line of this session first when "with"
-  {
-    printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n'
-    [ "$2" = with ] && printf -- '- session: %s bound 2026-10-01T00:00:00Z by engage\n' "$SID"
-    awk 'BEGIN { for (i = 1; i <= 3000; i++) printf "- session: %08d-0000-4000-8000-000000000000 bound 2026-10-01T00:00:00Z by bind\n", i }'
-    printf '\n## Notes\n\nafter the state.\n'
-  } > "$1"
+# `bind_record_session` asks the reader which sessions the run holds and appends a bind event, through the one writer,
+# for a session it lacks. FIXTURE FIDELITY: a fresh root's open plan bound by engagement's act twice; then a run whose
+# log carries 3,000 bind events (over 100 KB, past one 64 KB pipe buffer), this session's event first, where a reader
+# that quit early would read it absent. fails-when: an engagement writes the plan, a held session is appended again, or
+# a session missing from 3,000 is not appended once.
+rlog() { cat "$1" 2>/dev/null | awk -v s="|session=$SID|" -v b="|by=$2|" 'index($0, "run/v1|ev=bind|") == 1 && index($0, s) && index($0, b) { n++ } END { print n + 0 }'; }  # <log> <act> -> this session's bind events by that act
+R8="$(make_repo r8)"; P8="$R8/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"; S8="$(cksum < "$P8")"
+call_bind_act "$R8" "$SID" "$P8" engage; A8="$BIND_ST"; call_bind_act "$R8" "$SID" "$P8" engage
+expect_eq "8a a first engagement binds (exit 0) and is one bind event by engage; a second adds none; the plan's sum is unchanged" \
+  "0|0|1|$S8" "$A8|$BIND_ST|$(rlog "$R8/.bionic/docs/record/wave-01/run.log" engage)|$(cksum < "$P8")"
+sz_plan() {  # <name> <with|without> -> a page at 15 whose run's log holds 3,000 distinct bind events, the event of this session first when "with"
+  local p="$SZ/.bionic/docs/plans/epic-01-demo/$1.plan.md"
+  page15 "$p" 4
+  { [ "$2" = with ] && printf 'run/v1|ev=bind|session=%s|by=engage|at=2026-10-01T00:00:00Z\n' "$SID"
+    awk 'BEGIN { for (i = 1; i <= 3000; i++) printf "run/v1|ev=bind|session=%08d-0000-4000-8000-000000000000|by=bind|at=2026-10-01T00:00:00Z\n", i }'; } >> "$SZ/.bionic/docs/record/$1/run.log"
+  printf '%s' "$p"
 }
-sz_call() {  # <bindlib> <plan> <act> -> prints "<rc>|<BIND_SESSION>|" from one call, under pipefail as the callers run
-  bash -c '
-      set -uo pipefail
-      . "$1" || exit 9
-      . "$2" || exit 9
-      rc=0
-      bind_record_session "$3" "$4" "$5" || rc=$?
-      printf "%s|%s|" "$rc" "${BIND_SESSION:-}"
-    ' _ "$RUNLIB" "$1" "$2" "$SID" "$3" 2>/dev/null
+sz_call() {  # <plan> -> "<rc>|<BIND_SESSION>" from one call, under pipefail and set -u as the callers run, the reader loaded and its translation not
+  bash -c 'set -uo pipefail; . "$1" || exit 9; . "$2" || exit 9; . "${1%/*}/reader.sh" || exit 9; rc=0; bind_record_session "$3" "$4" bind || rc=$?; printf "%s|%s" "$rc" "${BIND_SESSION:-}"' \
+    _ "$RUNLIB" "$BINDLIB" "$1" "$SID" 2>/dev/null
 }
-sz_count() { grep -c -- "^- session: $SID " "$1"; }
+SZ="$SANDBOX/size"; SZW="$(sz_plan with with)"; SZO="$(sz_plan without without)"; SZS="$(cksum < "$SZW")|$(cksum < "$SZO")"
+expect_eq "8b the run's log is over 64 KB and carries the bind event of this session once, among 3,001 bind events" "yes|1|3001" \
+  "$([ "$(wc -c < "$SZ/.bionic/docs/record/with/run.log")" -gt 65536 ] && echo yes)|$(grep -c -- "^run/v1|ev=bind|session=$SID|" "$SZ/.bionic/docs/record/with/run.log")|$(grep -c '^run/v1|ev=bind|' "$SZ/.bionic/docs/record/with/run.log")"
+expect_eq "8c a session the run holds is present (exit 1) and appends nothing; one it lacks is recorded (exit 0), then present" \
+  "1|present 0|recorded 1|present" "$(sz_call "$SZW") $(sz_call "$SZO") $(sz_call "$SZO")"
+expect_eq "8d …one bind event of this session for the run that lacked it, none for the other; neither plan written" "0|1|$SZS" \
+  "$(rlog "$SZ/.bionic/docs/record/with/run.log" bind)|$(rlog "$SZ/.bionic/docs/record/without/run.log" bind)|$(cksum < "$SZW")|$(cksum < "$SZO")"
 
-SZ="$SANDBOX/size"; mkdir -p "$SZ"
-sz_plan "$SZ/with.plan.md" with
-expect_eq "SZ-1 the plan is over 64 KB (the writer cannot fit one pipe buffer)" "yes" \
-  "$([ "$(wc -c < "$SZ/with.plan.md")" -gt 65536 ] && echo yes || echo no)"
-expect_eq "SZ-1 the plan carries the line of this session once, among 3,000 session lines" "1|3001" \
-  "$(sz_count "$SZ/with.plan.md")|$(grep -c '^- session: ' "$SZ/with.plan.md")"
-cp "$SZ/with.plan.md" "$SZ/with.before"
-expect_eq "SZ-1 a session already on a 3,000-line plan binds once as present: exit 1, BIND_SESSION present" "1|present|" \
-  "$(sz_call "$BINDLIB" "$SZ/with.plan.md" bind)"
-expect_true "SZ-1 …and the plan is byte-identical after" cmp -s "$SZ/with.plan.md" "$SZ/with.before"
+# ============================================================
+section "9 — a page at 15 is a run: the walk finds it, engagement binds it, an unbound session falls back to it"
+# ============================================================
+#
+# A plan at 15 holds no state section: its header says 15 and its run's log says where it stands. The walk keeps its
+# two protections at 15: a header inside a fenced block is prose, and a page whose lines end in a bare CR still has
+# lines. A page whose header does not say 15 is judged by its state section, as before.
+# fails-when: an open page at 15 is missing from the open-run set, refused by engagement or not the unbound fallback;
+# or a fenced header, or a page at 14 with no state section, is listed.
+R9="$(make_repo r9)"; D9="$R9/.bionic/docs/plans/epic-01-demo"
+page15 "$D9/wave-02-cr.plan.md" 4 '\r'; page15 "$D9/wave-03-fenced.plan.md" 4; page15 "$D9/wave-04.plan.md" 4
+printf '# notes\n```\n---\ncanonical_sdlc_version: 15\n---\n```\n' > "$D9/wave-03-fenced.plan.md"
+printf -- '---\ncanonical_sdlc_version: 14\n---\n' > "$D9/wave-04.plan.md"
+expect_eq "9a the walk lists the open page at 15 and the CR-only one; not the fenced header, nor the page at 14 with no state section" \
+  "wave-01.plan.md wave-02-cr.plan.md" "$(bash -c '. "$1"; open_runs "$2"' _ "$RUNLIB" "$R9" 2>/dev/null | sed 's#.*/##' | sort | paste -sd' ' -)"
+call_bind_act "$R9" "$SID" "$D9/wave-01.plan.md" engage
+expect_eq "9b engagement binds the page at 15 (exit 0, no refusal) and the session reads it bound-open" "0||bound-open $D9/wave-01.plan.md" "$BIND_ST|$BIND_WHY|$BIND_RUN"
+R9U="$(make_repo r9u)"
+unbound_marker "$R9U" "$SID"
+expect_eq "9c an unbound session reads the root's one page at 15 as its fallback" "fallback $R9U/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" \
+  "$(bash -c '. "$1"; session_run "$2" "$3"' _ "$RUNLIB" "$R9U" "$SID" 2>/dev/null)"
 
-sz_plan "$SZ/without.plan.md" without
-expect_eq "SZ-2 control: the same plan without a line for this session carries none" "0|3000" \
-  "$(sz_count "$SZ/without.plan.md")|$(grep -c '^- session: ' "$SZ/without.plan.md")"
-expect_eq "SZ-2 a session not on the plan is recorded: exit 0, BIND_SESSION recorded" "0|recorded|" \
-  "$(sz_call "$BINDLIB" "$SZ/without.plan.md" bind)"
-expect_eq "SZ-2 …a second call over the same plan answers present" "1|present|" \
-  "$(sz_call "$BINDLIB" "$SZ/without.plan.md" bind)"
-expect_eq "SZ-2 …so the plan gained exactly one line, that of this session, over the two calls" "1|3001" \
-  "$(sz_count "$SZ/without.plan.md")|$(grep -c '^- session: ' "$SZ/without.plan.md")"
-
-# SZ-3: a quitting reader over the raw id stream, put into a copy of the library, turns SZ-1's answer into `recorded`. The
-# mutant is proved to differ from the library and to carry that reader before its answer is read, so a sed that matched
-# nothing cannot pass for a mutant that was caught; the same plan, read to the end, binds as present in SZ-1.
-SZ_MUT="$SZ/binding-mutant.sh"
-sed 's/^  case "\$nl\$ids\$nl" in .*$/  if _bind_session_ids "$plan" | grep -qxF -- "$sid"; then BIND_SESSION="present"; return 1; fi/' "$BINDLIB" > "$SZ_MUT"
-expect_eq "SZ-3 the mutant carries the quitting reader over the id stream once" "1" \
-  "$(grep -c 'if _bind_session_ids "\$plan" | grep -qxF -- "\$sid"; then BIND_SESSION="present"' "$SZ_MUT")"
-expect_true "SZ-3 …and the mutant parses" bash -n "$SZ_MUT"
-cp "$SZ/with.before" "$SZ/mutant.plan.md"
-expect_eq "SZ-3 the quitting reader answers recorded on the plan SZ-1 binds as present" "0|recorded|" \
-  "$(sz_call "$SZ_MUT" "$SZ/mutant.plan.md" bind)"
-expect_eq "SZ-3 …and the plan gains the second line" "2" "$(sz_count "$SZ/mutant.plan.md")"
+# An incident lays its run out in a directory of its own, its plan named for the directory; at 15 the walk finds it
+# as it finds a wave's, so engagement binds it and the commit gate judges a commit under it on what its step owes.
+# A plan named plain at 15 joins no record of its own and is no run. fails-when: the walk admits a page at 15 under
+# plans/ alone, so the incident is missing from the open-run set, its engagement is refused, and a commit under it is
+# judged on another run's plan or on none.
+R9I="$(make_repo r9i)"; I9="$R9I/.bionic/docs/incidents/0002-db-outage"
+page15 "$I9/0002-db-outage.plan.md" 4; page15 "$R9I/.bionic/docs/incidents/0003-plain/plan.md" 4
+expect_eq "9d the walk lists an incident's page at 15 named for its directory beside the wave's; not one named plain" \
+  "0002-db-outage.plan.md wave-01.plan.md" "$(bash -c '. "$1"; open_runs "$2"' _ "$RUNLIB" "$R9I" 2>/dev/null | sed 's#.*/##' | sort | paste -sd' ' -)"
+call_bind_act "$R9I" "$SID" "$I9/0002-db-outage.plan.md" engage
+expect_eq "9e engagement binds the incident's page at 15 (exit 0, no refusal) and the session reads it bound-open" \
+  "0||bound-open $I9/0002-db-outage.plan.md" "$BIND_ST|$BIND_WHY|$BIND_RUN"
+git -C "$R9I" -c user.name=f -c user.email=f@x.invalid -c commit.gpgsign=false commit -q --allow-empty -m seed
+G9="$(cd "$R9I" && jq -n --arg c "git commit -m x" --arg cwd "$R9I" --arg s "$SID" '{session_id:$s, tool_input:{command:$c}, cwd:$cwd}' \
+  | HOME="$R9I" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "$REPO_ROOT/hooks/bash-walls.sh" 2>&1; printf '|rc=%s' "$?")"
+expect_contains "9f a commit under the bound incident is refused (exit 2)" "|rc=2" "$G9"
+expect_contains "…judged on the incident's own plan" "incidents/0002-db-outage/0002-db-outage.plan.md" "$G9"
+expect_contains "…for a fact its step truly owes: the Step-3 approval that admits Step 4" "the log holds no Step-3 approval" "$G9"
 
 finish

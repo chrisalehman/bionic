@@ -1,5 +1,4 @@
 # tests/cross-gate-agreement.prelude.sh — THE HALF OF THE CROSS-GATE AGREEMENT SUITE BOTH PARTS SHARE
-# (wave-39 T36; D1, D13, REQ-3 AC-3.3).
 #
 # Sourced by tests/cross-gate-agreement-1.test.sh and -2.test.sh, after tests/lib/resolve-roots.sh,
 # plan-fixture.sh and assert.sh. It is not a suite: the runner launches `*.test.sh` only. It sits beside the
@@ -19,27 +18,10 @@
 # WHAT IT NEVER HOLDS. A fixture: a repository one section builds and a later one reads is not a helper, so
 # those sections share a part instead. None crosses the cut today.
 #
-# THE OLD FILE'S GOVERNING HEADER FOLLOWS, unchanged but for its usage line, since no cross-gate-agreement.test.sh
-# remains to hold it.
-#
-# CROSS-COMPONENT INSTRUMENT PROOFS — epic-15 wave-01R, task 4/6.
-#
-# Serves AC-9 (N-way agreement over every copy of a duplicated concept,
-# including the actively-maintained origin; one-copy mutation goes red) and the
-# cross-script share of AC-8 (no command text in any written artefact;
-# unpredictable temp names across all four scripts).
-#
-# Governing design: design/orchestrator-subagent-coordination.md §8, §9.
-# Known-failure checklist: .bionic/docs/record/epic-15-w1r-known-failure-checklist.md
-# A8 (duplicated logic with only a 2-way agreement test — the origin missing
-# from the test meant to catch drift) and A9 (green suites hid undiscriminated
-# parser edges: quoted values, absolute paths, duplicate directive lines,
-# indentation — proven by a one-copy mutation staying green).
-#
 # WHAT THIS SUITE IS FOR, and what it deliberately is not:
 #
-#   The per-script suites (hooks/{preflight-probe,dispatch-preflight,stop-check,
-#   stop-guard}.test.sh) each drive ONE component against its own contract. Every
+#   The per-script suites (preflight-probe, dispatch-preflight, stop-check and stop
+#   suites) each drive ONE component against its own contract. Every
 #   one of them is green while four byte-identical copies of active-wave
 #   detection drift apart, because no single-component suite ever asks the other
 #   copies the same question. This suite asks all four the SAME question with the
@@ -53,10 +35,8 @@
 # THE TWO ROOTS ARE DELIBERATELY DIFFERENT. `$CLAUDE_CONFIG_DIR` is NOT
 # `$HOME/.claude` here, because "where Claude Code stores session and project
 # metadata" is computed at three sites in this wave and holding the two roots
-# equal makes every disagreement between them invisible. That is not
-# hypothetical: this file previously pinned the equal case, and behind it the
-# observation resolved NOTHING while the recorder wrote a record and the stop
-# gate spent it (Step-6 critic, issue 1). Every metadata fixture below is
+# equal makes every disagreement between them invisible.
+# Every metadata fixture below is
 # planted under $CLAUDE_CONFIG_DIR, which is what the platform does when the
 # variable is set; §C case 5 plants under $HOME/.claude and proves it is NOT
 # seen.
@@ -71,10 +51,10 @@
 # about the world. `BIONIC_WALL_VERBOSE=1` is the knob that asks a wall for its facts.
 export BIONIC_WALL_VERBOSE=1
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-. "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
@@ -84,21 +64,12 @@ REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 # reviewer can re-take it by hand:
 #   W1R_PARTY_DP=/tmp/mutant.sh bash tests/cross-gate-agreement-1.test.sh   (either part)
 PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
-PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
-# THE EVIDENCE GATE IS A FUNCTION BEHIND hooks/bash-walls.sh (T23). The party this
-# variable names is still "the process a git commit reaches"; it is the compound now.
-PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/bash-walls.sh}"
-# The recorder moved out of the stop gate at task 4/4: observations are written
-# post-execution by their own script, from the producer's own printed output.
+# The stop gate is hooks/stop.sh, which answers the orchestrator's stop of an agent by its event.
+PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop.sh}"
 PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 
 PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
 OBSERVE="$BIONIC_HOOKS_DIR/stop-check.sh"
-# THE OBSERVATION'S OWN LIBRARY (epic-23 wave-15, REQ-2; ADR-028). The resolution, the file
-# facts and the classification moved out of the verb and out of hooks/stop-guard.sh into one
-# sourced file, so the copies this suite used to hold to each other are one definition — and
-# the comparisons below point at it rather than at whichever carrier they were written for.
-OBSERVE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/observe.sh"
 SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # The landing gate (epic-16 wave-01) is a fifth party and an overridable one for
 # the same reason the four above are: §J drives a MUTATED COPY of it to prove the
@@ -111,9 +82,6 @@ SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # below plants a tree and drives the unmutated hook against its own doctored library.
 PARTY_LG="${W1R_PARTY_LG:-$BIONIC_HOOKS_DIR/stop.sh}"
 PARTY_LG_SRC="${W1R_PARTY_LG_SRC:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
-# §J also drives a mutated copy of the SWEEPER, to prove the opposite direction:
-# a change to the predicate moves both answers rather than splitting them.
-PARTY_SW="$SWEEPER"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-agreement.XXXXXX")" && pwd -P)"
 BG_PIDS=""
@@ -153,31 +121,6 @@ printf '5:0.1:30:1000\n' > "$BIONIC_GATE_DIR/cost/fixture.test.sh"
 # So it is unset here and pinned per call, to the fixture session, everywhere a party has to
 # resolve anything.
 unset CLAUDE_CODE_SESSION_ID
-
-# ok/no/expect_eq/expect_contains/expect_absent/expect_true/expect_false migrated onto
-# tests/lib/assert.sh (S5a, AC-12). The framework's expect_contains/expect_absent are a
-# quoted `case` glob, never `grep -F` — no pipe, so the epic-17-w1 SIGPIPE-141 flake this
-# block used to describe by hand cannot recur, and no 64 KiB haystack limit either. The
-# ONE semantic difference measured against the private definitions this file used to carry
-# (byte-identical to the framework's except here): `grep -F` treats a NEWLINE inside the
-# needle as alternation ("either line matches"), while the framework's `case` requires the
-# whole multi-line needle as one contiguous substring. Exactly one call site in this file
-# passed a two-line needle (§B2, "the two-line shape, plan first") — verified line-by-line
-# that its fixture always produces the two lines adjacent and in order, so the tighter
-# contiguous check is not a narrowing here; see that assertion's own comment.
-
-# SUBSTRING, AS A FUNCTION RATHER THAN A `case` INSIDE `$( … )`. bash 3.2 — what
-# `/bin/bash` is on macOS, and what this file's shebang names — mis-parses a `case` inside
-# a command substitution: the multi-line form is a hard syntax error, and the ONE-LINE form
-# is worse, because it parses and then evaluates to the tail of its own source text
-# (measured: `expected 'no', got ' echo yes ;; *) echo no ;; esac)'`). §BP below sweeps for
-# both shapes. Step-6 review C-2.
-cg_contains() {  # <haystack> <needle> -> yes|no
-  case "$1" in
-    *"$2"*) printf 'yes' ;;
-    *)      printf 'no'  ;;
-  esac
-}
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -221,15 +164,6 @@ mk_stop_payload() {  # <sid> <transcript> <cwd> <task_id>
       tool_input:{task_id:$k}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
-mk_bash_payload() {  # <sid> <transcript> <cwd> <command>
-  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg m "$4" \
-    '{session_id:$s, transcript_path:$t, cwd:$c,
-      prompt_id:"f3cd7d62-305d-47ed-9eaf-46fb12d4f4ed",
-      permission_mode:"bypassPermissions", effort:{level:"high"},
-      hook_event_name:"PreToolUse", tool_name:"Bash",
-      tool_input:{command:$m}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
-}
-
 # The recorder's event. FAITHFUL to .bionic/docs/record/w3-slice1-posttooluse-probe.md
 # capture A (orchestrator-invoked PostToolUse|Bash), field for field including the
 # tool_response object; capture A carries no top-level agent_id, which is the
@@ -265,58 +199,6 @@ mk_agent_post() {  # <sid> <transcript> <cwd> <tool_use_id> [name] [agentId]
       tool_use_id:$u, duration_ms:6}'
 }
 
-# The TEAMMATE completion (epic-16 wave-01 task 0). FAITHFUL to
-# .bionic/docs/record/landing-wave-capture-probe.md §3-A and the live re-capture
-# task 0 took through the pty harness: `tool_response.status` is
-# `teammate_spawned`, and `agent_id`/`teammate_id` both carry the ADDRESSING form
-# `<name>@session-<id8>` — never the transcript form, which no PostToolUse
-# payload contains. This is the dispatch mode every interactive session on this
-# machine really uses; `mk_agent_post` above is the async one.
-mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <tool_use_id>
-  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" --arg u "$6" \
-    '{session_id:$s, transcript_path:$t, cwd:$c,
-      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
-      permission_mode:"bypassPermissions", effort:{level:"high"},
-      hook_event_name:"PostToolUse", tool_name:"Agent",
-      tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
-                  run_in_background:true, name:$n},
-      tool_response:{status:"teammate_spawned", prompt:"go",
-                     teammate_id:$a, agent_id:$a, agent_type:"implementor",
-                     model:"claude-opus-5", name:$n, color:"blue",
-                     tmux_session_name:"in-process", tmux_window_name:"in-process",
-                     tmux_pane_id:"in-process", team_name:"session-6c85684c",
-                     is_splitpane:false, plan_mode_required:false},
-      tool_use_id:$u, duration_ms:9}'
-}
-
-# The SubagentStart event (task 1). VERBATIM shape from capture probe §3-C: six
-# keys and no `tool_name` at all, which is why the recorder's third arm cannot sit
-# behind the tool-name gate its other two share. `agent_type` is the teammate's
-# NAME here — the platform's own rename — and `agent_id` is the TRANSCRIPT form.
-mk_start_payload() {  # <sid> <transcript> <cwd> <name> <transcript-id>
-  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" \
-    '{session_id:$s, transcript_path:$t, cwd:$c,
-      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
-      agent_id:$a, agent_type:$n, hook_event_name:"SubagentStart"}'
-}
-
-# The SubagentStop event (task 5). FAITHFUL to capture probe §3-D, a live teammate
-# stop: `agent_type` carries the name, `agent_id` the transcript form,
-# `background_tasks[]` its task-id key. Only the four fields the gate reads vary.
-mk_substop_payload() {  # <cwd> <sid> <agent_type> <stop_hook_active true|false>
-  jq -n --arg c "$1" --arg s "$2" --arg a "$3" --argjson h "$4" \
-    '{session_id:$s, transcript_path:("/tmp/transcripts/" + $s + ".jsonl"), cwd:$c,
-      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
-      permission_mode:"bypassPermissions",
-      agent_id:"aprobemate-4da9be517e8f90bd", agent_type:$a,
-      effort:{level:"high"}, hook_event_name:"SubagentStop", stop_hook_active:$h,
-      agent_transcript_path:("/tmp/transcripts/" + $s + "/subagents/agent-aprobemate-4da9be517e8f90bd.jsonl"),
-      last_assistant_message:"DONE\n\nRan the task; report written.",
-      background_tasks:[{id:"tooha5cgi", type:"teammate", status:"running",
-                         description:"run the task and report"}],
-      session_crons:[]}'
-}
-
 # The LANDING SWEEP's event (epic-16 wave-03, T4c). FAITHFUL to
 # .bionic/docs/record/session-20260814-wave-detector-terminal-state/t4b-probe-report.md
 # §2.1 (the eleven-key Stop envelope) and §2.2 (the `background_tasks[]` row shape,
@@ -337,46 +219,11 @@ mk_stopsweep_payload() {  # <cwd> <sid> <stop_hook_active true|false> [live-agen
       background_tasks:$bg, session_crons:[]}'
 }
 
-# The landing gate's OTHER arm (session-20260815 T2): a named teammate is judged at its own
-# SubagentStop rather than by disappearing from `background_tasks[]`, which it never does.
-# Key set from t1-probe-report.md §2.1; `agent_type` carries the dispatch NAME for a teammate.
-mk_substop_payload() {  # <cwd> <sid> <agent-id> <agent-type> <stop_hook_active true|false>
-  jq -n --arg c "$1" --arg s "$2" --arg a "$3" --arg t "$4" --argjson h "$5" \
-    '{session_id:$s, transcript_path:("/tmp/transcripts/" + $s + ".jsonl"),
-      agent_transcript_path:("/tmp/transcripts/" + $s + "/subagents/agent-" + $a + ".jsonl"),
-      cwd:$c, prompt_id:"e30e6fb0-3868-467c-b092-ca03e55b4cd5",
-      permission_mode:"bypassPermissions", effort:{level:"high"},
-      agent_id:$a, agent_type:$t,
-      hook_event_name:"SubagentStop", stop_hook_active:$h,
-      last_assistant_message:"Done.", background_tasks:[], session_crons:[]}'
-}
-
-# THE PRODUCER→RECORDER PAIR, DRIVEN END TO END. Since task 4/4 the recorder
-# reads no command line: it copies the machine line the observation printed. So
-# the only honest way to ask "what did the recorder write for this command" is to
-# RUN the observation and hand its real stdout to the real recorder — which is
-# also what makes the two halves one fact rather than two parsers (F-1).
-run_pair() {  # <repo> <transcript> <sid> <args…> -> recorder's exit status; sets PAIR_OUT
-  local repo="$1" tr="$2" sid="$3"; shift 3
-  # The sid is pinned on the observation too, not only stamped into the payload: since S6 it
-  # is how hooks/stop-check.sh finds the transcript carrying the live set.
-  PAIR_OUT=$( cd "$repo" && env CLAUDE_CODE_SESSION_ID="$sid" bash "$OBSERVE" "$@" 2>/dev/null )
-  mk_bash_post "$sid" "$tr" "$repo" "bash ~/.claude/hooks/stop-check.sh $*" "$PAIR_OUT" \
-    | bash "$PARTY_ER" >/dev/null 2>&1
-}
-
 # THE SESSION ROSTER, in the shape its writer writes it — field for field from
 # hooks/dispatch-preflight.sh's `ROW=` line. Both the producer (classification,
 # contract state) and the stop gate (the foreign-stop rule) read this file, which
 # is precisely why it is planted from ONE helper here: a fixture written twice is
 # two shapes, and this suite exists to catch exactly that.
-# RENAMED OFF THE WRITER'S NAME (S17). This helper used to be called `roster_row`, which is
-# now the production writer's own name — sourcing tests/lib/roster-row.sh with a private
-# `roster_row` still defined would have shadowed the one writer with a fixture, which is the
-# exact inversion this wave exists to end (S14 renamed dispatch-preflight's reader for the
-# same reason). The row itself now comes from `roster_row_fixture`, so the fields this
-# fixture used to omit — `source=`, `claims=`, `cadence=`, `waiver=`, `plan=` — are the
-# writer's own defaults rather than absent, and the header line is `roster_header`'s.
 cg_roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
   local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
   local f="$repo/.bionic/tmp/roster-$sid.state"
@@ -460,13 +307,10 @@ cg_live() {  # <transcript> <name[:status]>...
 #     "does this repo present a plan whose `current:` names a valid step?"
 #
 #   dispatch-preflight  refuse (exit 2, no attestation planted)  <=> yes
-#   stop-guard          refuse (exit 2, target unresolvable)     <=> yes
-#   evidence-gate       "has no 'Step N:' line" (exit 2)         <=> yes, and N
-#                       is the derived value itself — the only party that
-#                       reports it, which is why the fixtures below are built so
-#                       that a MIS-PARSE FLIPS THE PREDICATE rather than merely
-#                       changing a value. A fixture whose mis-parse is invisible
-#                       to two of three parties proves nothing about them (A9).
+#   stop gate           refuse (exit 2, target unresolvable)     <=> yes
+#
+# The evidence gate is no party: it reads a run's step from its log, and a plan at 14
+# is a document to it, so no party reads these plans' state sections as a run.
 #
 # Deliberately out of the battery, and why:
 #   * `current: T<n>` — not a step at any scale since wave-31 (one ledger shape, D2):
@@ -523,53 +367,6 @@ verdict_er() {  # <repo> -> yes|no|other:<detail>
   if [ "$st" -ne 0 ]; then echo "other:exit-$st"; return; fi
   if [ -n "$out" ]; then echo "other:output"; return; fi
   if grep -q 'status=confirmed' "$roster" 2>/dev/null; then echo yes; else echo no; fi
-}
-
-# The evidence gate is the only party that reports the DERIVED VALUE, so its
-# answer is `yes:<value>` where the others answer `yes`. Callers split on `:`.
-# THE EVIDENCE GATE JUDGES ONLY A BOUND SESSION'S RUN (wave-23-fixit-1810, REQ-1, D1; spec
-# Δ1). These parties drive an engaged, UNBOUND session — the empty marker new_repo plants —
-# and since that wave the gate announces an unbound session's newest-plan fallback and acts
-# on nothing, so it would answer "no" on every fixture and this battery would lose its
-# fifth voice. So for the drive alone the session is bound to the plan the PARTY'S OWN
-# library resolves as the newest open run — the shipped one here, the mutant under §A2 —
-# and the empty marker is put back after. The gate then derives `current:` from exactly the
-# plan the library found, which is what this battery has always compared; a library that
-# finds no open run leaves the marker empty, and the gate answers "no" as the others do.
-cg_eg_libdir() {
-  local h; h="$(dirname "$PARTY_EG")"
-  if [ -r "$h/../scripts/lib/run.sh" ]; then printf '%s' "$h/../scripts/lib"
-  else printf '%s' "$h/../payload/scripts/lib"; fi
-}
-cg_eg_bind() {  # <repo> <sid> -> 0 when an EMPTY marker was bound for this drive
-  local m="$1/.bionic/tmp/engaged-$2.state" p
-  [ -f "$m" ] && [ ! -L "$m" ] && [ ! -s "$m" ] || return 1
-  p=$(bash -c '. "$1/run.sh" 2>/dev/null && active_run "$2"' _ "$(cg_eg_libdir)" "$1" 2>/dev/null) || p=""
-  [ -n "$p" ] || return 1
-  printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$p" > "$m"; chmod 600 "$m"
-  return 0
-}
-cg_eg_unbind() { : > "$1/.bionic/tmp/engaged-$2.state"; }
-
-verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
-  local out st _b=0
-  # BIONIC_WALL_VERBOSE=1 (task 13, ruling D-1). The gate's user line is one sentence
-  # now and the DERIVED VALUE this party reports — the step number the plan has no line
-  # for — lives in `detail`. Reading the line alone would make every row here
-  # `other:<prefix>`; the knob is how the party keeps reporting a value at all.
-  cg_eg_bind "$1" "$SID_A" && _b=1
-  out=$(mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$1" "git commit -m x" \
-        | env -u CLAUDE_PROJECT_DIR BIONIC_WALL_VERBOSE=1 bash "$PARTY_EG" 2>&1); st=$?
-  [ "$_b" = 1 ] && cg_eg_unbind "$1" "$SID_A"
-  if [ "$st" -eq 0 ]; then echo no; return; fi
-  case "$out" in
-    *"has no 'Step "*)
-      printf 'yes:%s\n' \
-        "$(printf '%s' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)" ;;
-    *"missing a valid 'current: N' line"*) echo no ;;
-    *"empty '## SDLC State' section"*)     echo "other:empty-section" ;;
-    *) echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)" ;;
-  esac
 }
 
 # The landing gate holds a FIFTH byte-identical copy of active-wave detection
@@ -667,7 +464,8 @@ engage_sids() {  # <repo> <sid>...
   for s in "$@"; do : > "$r/.bionic/tmp/engaged-$s.state"; done
 }
 
-# write_live_plan <plan path> <state-body> — write_plan, then BIND the repo's three fixture
+# write_live_plan <plan path> <step> — the page a run at 15 holds at <step>, approved
+# (tests/lib/plan-fixture.sh), then BIND the repo's three fixture
 # sessions to that plan (wave-23-fixit-1810, REQ-1, D1). new_repo engages them with an EMPTY
 # marker — engaged and unbound — and an unbound session's newest-plan fallback is announced
 # and never acted on: the dispatch wall refuses its writers with the bind instruction. A
@@ -675,7 +473,7 @@ engage_sids() {  # <repo> <sid>...
 # session running that wave, so it writes its plan through here. The repo is the path up to
 # its `.bionic/`.
 write_live_plan() {
-  write_plan "$1" "$2"
+  plan_fixture --current "$2" "$1" wave >/dev/null
   local _r="${1%%/.bionic/*}" _s
   for _s in "$SID_A" "$SID_B" "$SID_LG"; do bound_marker "$_r" "$_s" "$1"; done
 }
@@ -706,8 +504,8 @@ current-indented|yes|4
 current-duplicate-lines|yes|4
 current-fenced-only|no|-
 newest-plan-wins|yes|8b
-marker-less-newest-loses|yes|4
-fenced-only-newest-loses|yes|4
+marker-less-newest-loses|yes|open-at-14
+fenced-only-newest-loses|yes|open-at-14
 only-marker-less-files|no|-
 nested-two-deep|yes|4
 nested-three-deep|no|-
@@ -885,64 +683,21 @@ plant_hook_tree() {  # <tree root> -> echoes <tree root>/hooks
   printf '%s' "$root/hooks"
 }
 
-# plant_lg_tree <tree root> -> echoes a runnable hooks/stop.sh whose sibling
-# scripts/lib is this checkout's, for a caller that is about to doctor one file in it.
-# The sweep's body lives in the library, so a mutation of the sweep is a library edit and
-# the hook copied here stays stock — which is also what keeps each mutant's doctored file
-# out of every other mutant's tree.
-plant_lg_tree() {  # <tree root> -> the hook to drive
-  local root="$1" h
-  h="$(plant_hook_tree "$root")"
-  cp "$PARTY_LG" "$h/stop.sh"
-  printf '%s' "$h/stop.sh"
-}
-
-# run_battery <mode>  — mode=assert emits one assertion per fixture;
-#                       mode=detect returns 1 at the FIRST disagreement.
+# run_battery assert — one assertion per fixture: the four engagement-scoped parties answer
+# the same on every plan shape, since none of them reads the plan.
 run_battery() {
-  local mode="$1" name want cur repo a b c d e cnorm cval want_sg want_dp want_er want_lg
+  local name want cur repo a b d e
   while IFS='|' read -r name want cur; do
     [ -n "$name" ] || continue
     repo="$SANDBOX/fx/$name/repo"
-    a=$(verdict_dp "$repo"); b=$(verdict_sg "$repo"); c=$(verdict_eg "$repo")
-    d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
-    cnorm="${c%%:*}"; cval=""
-    [ "$cnorm" = "yes" ] && cval="${c#*:}"
-    # T4 (session-20260815-landing-cleanup) DIVERGED stop-guard from the other four
-    # parties here; D8 (T5, epic-23 wave-13) RE-CONVERGED it. verdict_sg always drives
-    # stop-guard with the fixed target "no-such-agent" — non-address-shaped and
-    # non-bash-task-shaped — and since D8 a target wearing neither shape is REFUSED
-    # rather than waved through, so stop-guard's verdict agrees with the other four
-    # parties on every fixture again, exactly as it did before T4 opened the divergence.
-    want_sg="$want"
-    # WHAT THE PARTIES AGREE ABOUT CHANGED AT task-engaged-session, and the change is the
-    # point of that wave. Four of the five no longer read the plan at all: they are scoped
-    # by ENGAGEMENT, and every fixture in this battery is engaged (see `arm_patrol`), so
-    # each of them answers the same thing on all 23 plan shapes. That constancy is the
-    # claim now — a party that still had a plan opinion of its own would break it — and it
-    # is asserted here rather than dropped, because "the plan does not move this gate" is
-    # exactly what a future edit could silently undo. The evidence gate is the one party
-    # that still derives the plan's `current:`, so it keeps the discriminating column and
-    # the derived-value check below.
-    want_dp="yes"; want_er="yes"; want_lg="yes"; want_sg="yes"
-    if [ "$mode" = "assert" ]; then
-      if [ "$a" = "$want_dp" ] && [ "$b" = "$want_sg" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want_er" ] && [ "$e" = "$want_lg" ]; then
-        ok "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want"
-      else
-        no "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want" \
-           "dispatch-preflight=$a stop-guard=$b evidence-gate=$c execution-recorder=$d landing-gate=$e"
-      fi
-      if [ "$want" = "yes" ]; then
-        expect_eq "  and the evidence gate derived current='$cur' for '$name'" "$cur" "$cval"
-      fi
+    a=$(verdict_dp "$repo"); b=$(verdict_sg "$repo"); d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
+    # Every fixture is engaged (see `arm_patrol`), so each party answers yes on all of them;
+    # a party that still had a plan opinion of its own would break that constancy.
+    if [ "$a|$b|$d|$e" = "yes|yes|yes|yes" ]; then
+      ok "the four engagement-scoped parties agree on '$name'"
     else
-      # Detect mode also compares the DERIVED VALUE, so a mutation that selects a
-      # different plan without flipping the predicate is caught too.
-      if [ "$a" != "$want_dp" ] || [ "$b" != "$want_sg" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want_er" ] || [ "$e" != "$want_lg" ] \
-         || { [ "$want" = "yes" ] && [ "$cval" != "$cur" ]; }; then
-        printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s lg=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d" "$e"
-        return 1
-      fi
+      no "the four engagement-scoped parties agree on '$name'" \
+         "dispatch-preflight=$a stop=$b execution-recorder=$d landing-gate=$e"
     fi
   done <<EOF
 $(printf '%s' "$FIXTURES")
@@ -963,117 +718,6 @@ RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
 FILL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/fill.sh"
 [ -r "$FILL_LIB" ] || FILL_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/fill.sh"
 
-# ---- from §I.1 (the copied primitives): fn_body ----
-fn_body() {  # <file> <function name> -> the function's body, signature and its comment stripped
-  awk -v n="$2" '
-    !f && index($0, n "()") == 1 {
-      f = 1; line = $0
-      sub(/^[^{]*\{/, "", line)
-      sub(/^[[:space:]]*#.*$/, "", line)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-      if (line != "") print line
-      if (line ~ /\}$/) exit
-      next
-    }
-    f { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; if ($0 == "}") exit }
-  ' "$1"
-}
-
-# ---- from §O: fn_code ----
-fn_code() {  # <file> <function name> -> fn_body with pure-comment lines stripped too
-  fn_body "$1" "$2" | grep -v '^#'
-}
-
-# ---- from §V: V_ORIGIN, V_HOOKCHAIN, v_hook_val, V_ORIGIN_VAL, v_hookchain_vals, v_hc_chips_ok, v_hc_agree ----
-V_ORIGIN="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
-[ -r "$V_ORIGIN" ] || V_ORIGIN="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
-V_HOOKCHAIN="$BIONIC_SKILLS_DIR/canonical-sdlc/diagrams/hook-chain.svg"
-v_hook_val() { grep -m1 '^SUPPORTED_SDLC_VERSION=' "$1" 2>/dev/null | cut -d= -f2 | tr -cd '0-9'; }
-V_ORIGIN_VAL="$(v_hook_val "$V_ORIGIN")"
-v_hookchain_vals() {  # three chips, one per line, in the order they render:
-                      #   "canonical_sdlc_version == 14" (x2) and
-                      #   "canonical_sdlc_version: 14 is the only value either hook accepts."
-  grep 'class="version-pin"' "$1" 2>/dev/null | while IFS= read -r _vline; do
-    printf '%s\n' "$_vline" | grep -oE 'canonical_sdlc_version[=: ]+[0-9]+' | grep -oE '[0-9]+$'
-  done
-}
-v_hc_chips_ok() {
-  [ "$(v_hookchain_vals "$1" | grep -c '[0-9]')" -ge 1 ] && echo yes || echo no
-}
-v_hc_agree() {
-  local _v _bad=0
-  for _v in $(v_hookchain_vals "$1"); do [ "$_v" = "$2" ] || _bad=1; done
-  [ "$_bad" -eq 0 ] && echo yes || echo no
-}
-
 # ---- from §Section P (the Patrol stamp): PARTY_PK ----
 PARTY_PK="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
-
-# ---- from §S.1: PARTY_PK_S ----
-PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
-
-# ---- from §S: s_backdate ----
-s_backdate() {  # <file> — an hour older than everything else in the fixture
-  touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1 hour' +%Y%m%d%H%M.%S)" "$1"
-}
-
-# ---- from §S.4 (the fixture world and its drivers): s4_plan, s4_bind, s4_attest, s4_stop_payload ----
-s4_plan() {  # <path> <current> [writers]
-  mkdir -p "$(dirname "$1")"
-  {
-    printf -- '---\n'
-    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: double\nscale: wave\n'
-    # INSIDE THE LEADING FRONTMATTER, which is the only place hooks/dispatch-preflight.sh
-    # looks for it. A `parallel-budget:` appended after the body parses as prose and the
-    # ceiling reads as absent, which makes the budget wall inert — and an inert wall is not
-    # an observation.
-    [ -n "${3:-}" ] && printf 'parallel-budget: writers=%s test_jobs=2 model=opus source=user\n' "$3"
-    printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
-    printf 'current: %s\n' "$2"
-    # APPROVED, as write_plan's fixtures are and for its reason (wave-20 T7, AC-9.1).
-    printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n'
-    printf -- '\n- Step 3: prior evidence\n'
-  } > "$1"
-  return 0
-}
-s4_bind() {  # <repo> <sid> <plan>
-  bound_marker "$1" "$2" "$3"
-}
-s4_attest() {  # <repo> <sid>
-  mkdir -p "$1/.bionic/tmp"
-  {
-    printf '# bionic environment attestation — machine-local, safe to delete\n'
-    printf 'version=1\nkind=preflight-attestation\n'
-    printf 'session_id=%s\n' "$2"
-    printf 'written_at=1785790000\n'
-    printf 'repo=%s\n' "$1"
-  } > "$1/.bionic/tmp/preflight-$2.state"
-  chmod 600 "$1/.bionic/tmp/preflight-$2.state"
-}
-s4_stop_payload() {  # <repo> <sid> <transcript>
-  jq -nc --arg c "$1" --arg s "$2" --arg t "$3" \
-    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"Stop", stop_hook_active:false}'
-}
-
-# ---- from §S.4: PARTY_SG_W ----
-PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
-
-# ---- from §S.4: s4_world ----
-s4_world() {  # <name> -> a root with plans A (older, writers=1) and B (newest, writers=1)
-  local r
-  r=$(new_repo "$1")
-  s4_plan "$r/.bionic/docs/plans/epic-99/run-a.md" 4 1
-  s4_plan "$r/.bionic/docs/plans/epic-99/run-b.md" 6 1
-  s_backdate "$r/.bionic/docs/plans/epic-99/run-a.md"
-  # patrol-duties-gate refuses a payload whose transcript is not a regular file; context-spend
-  # needs a last `assistant` line carrying a non-zero usage sum before it will write state.
-  printf '{}\n' > "$r/s4-transcript.jsonl"
-  jq -nc '{type:"assistant",message:{model:"claude-opus-5",usage:{input_tokens:1000,cache_creation_input_tokens:0,cache_read_input_tokens:2000}}}' \
-    > "$r/s4-usage.jsonl"
-  mkdir -p "$r/fakehome/.claude"
-  s4_attest "$r" "$SID_A"
-  s4_attest "$r" "$SID_B"
-  printf '%s' "$r"
-}
 

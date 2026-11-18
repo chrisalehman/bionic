@@ -18,9 +18,7 @@
 # WHAT IT NEVER HOLDS. A fixture: a repository or a run output one section builds and a later one reads is not a
 # helper, so those sections share a part instead.
 #
-# THE SUITE (the old file's own header, whole):
-# The landing line (wave-28 T3, T4; REQ-1 AC-1.1 to AC-1.3, AC-1.5 to
-# AC-1.7, REQ-3 AC-3.1, AC-3.6, AC-3.8, AC-3.9, REQ-5 AC-5.3, REQ-14 AC-14.1; spec D1 to D6, D9, D31).
+# THE SUITE:
 #
 # The line is the landing record's `line/v1` events and their fold (payload/scripts/lib/line.sh);
 # a candidate is built in a landing tree the tool owns (lib/worktree.sh `landing_tree_take`,
@@ -57,18 +55,12 @@ if [ -r "$LINE" ] && . "$LINE" 2>/dev/null; then LL_LOADED=1; fi
 
 # ---------------------------------------------------------------------------- helpers
 ll_world() {  # -> a world root; its plan admitted by the real commit gate (the hand landing writes it)
-  local r p
+  local r
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
-  p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  awk '{ print }
-    /^working-branch: / { print "canonical_sdlc_version: 14" }
-    /^current: 4$/ { print "approved-by: fixture 2026-10-04T00:00Z \"approved\""; print "- Step 4: started"; print "- T1: active"; print "- T2: active" }' \
-    "$p" > "$p.n" && mv "$p.n" "$p"
   printf '%s' "$r"
 }
 ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
-ll_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
 ll_carrier() {  # -> `<pid>:<start>` of a new live process, kept until the suite exits
   local p
   sleep 900 >/dev/null 2>&1 &
@@ -120,9 +112,12 @@ ll_wait_file() {  # <file> [tenths] -> 0 once it exists
   while [ "$i" -lt "$n" ]; do [ -e "$1" ] && return 0; i=$((i + 1)); sleep 0.1; done
   return 1
 }
-ll_ev() {  # <root> <ev> -> the record's lines of that event
-  grep "^line/v1|ev=$2|" "$(ll_rec "$1")" 2>/dev/null
+ll_ev() {  # <root> <ev> -> the lines of that event in the run's log
+  ll_all "$1" | grep -E "^run/v1[|]ev=$2[|]"
 }
+ll_log() { printf '%s/.bionic/docs/record/wave-x/run.log' "$1"; }
+ll_acts() { /usr/bin/grep -v '|at=2026-10-04T00:0[1-9]:00Z$' "$(ll_log "$1")" 2>/dev/null; }   # <root> -> the log's lines past the world's own events at 15
+ll_all() { cat "$(ll_log "$1")" 2>/dev/null; }   # <root> -> the run's log, which holds its landings
 ll_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }
 
 

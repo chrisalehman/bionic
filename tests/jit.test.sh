@@ -29,7 +29,6 @@ set -uo pipefail
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 JIT_SH="${REPO}/payload/scripts/lib/jit.sh"
-DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
 
 # expect_eq, expect_true, expect_false, expect_match, expect_empty are the
 # framework's (tests/lib/assert.sh) — identical semantics to the private
@@ -126,9 +125,7 @@ expect_eq "jit_offer(explicit n) ran nothing" "0" "$(grep -c . "$CALLS" | tr -d 
 
 section "Group 6: no assume-yes knob (S1-8 stands)"
 #
-# jit.sh must not grow an env-var bypass around consent — the same rule
-# tests/plugin-lib.test.sh used to pin for install_dep itself; that suite was
-# deleted at 8582861 (epic-18 wave-03) and nothing replaced the pin there.
+# jit.sh must not grow an env-var bypass around consent.
 
 # Matches an actual env-var-shaped bypass token (BIONIC_..._YES, ASSUME_YES=,
 # etc.) — not this file's own prose ("no assume-yes knob"), which is
@@ -152,13 +149,6 @@ expect_match "jit_check @playwright/cli absent: names a fix (npm install -g)" \
 # S2's dispatch-paragraph precedent: name the contract, let the script bind —
 # no restated mechanics. One sentence each, at the point an environment-class
 # dependency is assumed.
-
-# wave-11-lean-spine 1b split canonical-sdlc's SKILL.md into a core plus per-step files;
-# jit_check/jit_offer moved with Step 5's prose, so this group reads steps/5.md rather than
-# a single whole-skill path. Group 12 below reads a second split surface, steps/0.md.
-CANONICAL_SKILL_STEP5="${REPO}/skills/canonical-sdlc/steps/5.md"
-BROWSER_SKILL="${REPO}/skills/browser-verify/SKILL.md"
-EXCALIDRAW_SKILL="${REPO}/payload/skills/excalidraw-diagram/SKILL.md"
 
 
 section "Group 9b: the native when-needed row — ONE question, ONE installer (AC-11)"
@@ -228,17 +218,7 @@ section "Group 12: Step-0 model_plan derivation is mechanical, not invented (epi
 # Step 0's prose, this sentence included, into steps/0.md — this group now reads that file
 # rather than a whole-skill path; it remains the one place in the roster already set up to
 # pin literal prose spans of the Step-0 card.
-CANONICAL_SKILL_STEP0="${REPO}/skills/canonical-sdlc/steps/0.md"
 
-# RE-POINTED (epic-22 K1, plan task 15, A-7). K1's Step-0 settings card drops per-line
-# inference rationale — the six "role-file default: agents/<role>.md" annotations that used
-# to sit beside each model value are gone; that string no longer appears anywhere in
-# SKILL.md, so the old grep -c over the whole file now finds 0 by design, not by defect. The
-# provenance sentence stays put (still pinned two assertions above, "rendered role files")
-# and is stated ONCE rather than six times; what this assertion re-points to is the fact the
-# AC actually cares about — that all six dispatched-role tiers are still named, one per line,
-# in the card's Models section (record/wave-01-plugin-only/design-ledger.md §D1).
-#
 # RE-POINTED (wave-27 T11, D6): was a count of six role lines, which a seventh role turned red
 # for no defect. A relation now, naming no count (.claude/rules/test-harness.md): every role
 # render.sh renders has its rendered file and its line in the card's Models section.

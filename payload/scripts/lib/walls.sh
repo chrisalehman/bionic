@@ -52,7 +52,7 @@
 # this repo once the plan's `## Verification Matrix` section passed 64 KB, on a plan
 # whose `stack-health:` line was present and valid. A here-string has no second process
 # to lose, and it forks one fewer than the pipeline did. The same rule holds in
-# hooks/dispatch-preflight.sh (:1200) and hooks/stop-guard.sh, the other readers under
+# hooks/dispatch-preflight.sh and the stop library under hooks/stop.sh, the other readers under
 # `pipefail`; tests/cross-gate-agreement.test.sh pins the idiom's absence repo-wide.
 #
 # ONE CAVEAT THE PIPELINE DID NOT HAVE: `<<<` APPENDS A NEWLINE to its word, so an empty
@@ -339,7 +339,7 @@ _wall_class_read() {  # <whole command text> -> sets _WALL_CLASS_LINES and _WALL
 # reduced head (tier 2) — and each one used to arrive through its own command
 # substitution over its own string: `$(cmd_strip_heredocs …)`, `$(cmd_unwrap_head …)`,
 # an `awk` and a `grep` for the chain split, and a `sed` per segment to trim it.
-# Measured on the bench payload (`ls -la`, tests/bench/hook-latency.sh), that was
+# Measured on the bench payload (`ls -la`), that was
 # TWO awk execs and four bash forks on the hottest path in the tree, of which
 # exactly one awk exec — the class reading — could change the answer.
 #
@@ -462,7 +462,7 @@ EOF
 # heredoc that merely MENTIONED a push was refused.
 #
 # THE COMMAND IS STILL READ BEFORE THE LIBRARY IS, in hooks/bash-walls.sh and not
-# here: the repair allowlist in `loader_fail_closed` needs the text, and it has to be
+# here: the repair commands matched under the loader's stub need the text, and it has to be
 # consulted BEFORE the compound decides to refuse.
 #
 # FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): a wall over an IRREVERSIBLE
@@ -721,10 +721,10 @@ return 0
 
 # ─── wall_evidence_gate — hooks/canonical-sdlc-evidence-gate.sh ──────────────
 #
-# EVIDENCE GATE: blocks git commits during a canonical-sdlc run when the plan file's
-# `## SDLC State` section is missing the current step's evidence. The rule is: the
-# evidence artifact must be recorded in the plan file *before* the commit that closes
-# the step. Plans without `## SDLC State` pass through unblocked — this wall only
+# EVIDENCE GATE: blocks git commits during a canonical-sdlc run when the run's log
+# is missing the current step's evidence. The rule is: the
+# evidence must be recorded in the run's log *before* the commit that closes
+# the step. A page that declares no `canonical_sdlc_version` passes through unblocked — this wall only
 # enforces against canonical-sdlc runs.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
@@ -743,7 +743,7 @@ return 0
 #
 # THIS BODY HAS 32, at up to four frames deep, and 32 of them are inside `validate_matrix`
 # alone — a 300-line function whose refusals fire from inside loops, through helper
-# frames (`block_matrix`, `shape_block`) that were written knowing
+# frames (`block_matrix`) that were written knowing
 # `refuse` never returns. Propagating a return through every one of those call sites is
 # ~50 edits in which a single miss converts a BLOCK into a silent pass: the wall keeps
 # running, the next `fold_block` overwrites the staged object, and the function returns
@@ -786,254 +786,6 @@ return 0
 # WHAT THE BODY ITSELF WRITES TO STDOUT, which it does not today, still reaches the hook's
 # stdout, refusal or not; only its trailing newlines are normalized to one.
 # [WALL: tests/bash-walls.test.sh §11, §STAGE]
-# ─── evidence_line_field — a key read ANYWHERE on a line, not only at its start ───────
-#
-# WHY IT IS NOT `grep -E '^[[:space:]]*<key>:'` (wave-16 REQ-3, AC-3.3; seed B B11). A
-# `## SDLC State` evidence line is a SEMICOLON-SEPARATED RECORD, not a one-key line:
-#
-#     - Step 1: opened 2026-09-19T22:00Z; requirements: specs/<epic>/<wave>.requirements.md; card approved
-#
-# Every pointer read in this file anchored its key at line start, so a record whose pointer
-# is not the FIRST field carried a perfectly good path the gate could not see, and the
-# commit was refused "Step 1's evidence names no requirements file". The value still ends
-# at the first `;` — that truncation has been the contract since plan assumption A17 — and
-# the continuation-line shape (`  requirements: …` on its own line) is unaffected, because
-# a key at line start is a key anywhere on the line.
-#
-# THE LEFT BOUNDARY IS WHAT KEEPS IT HONEST: `pre-requirements:` and `walk-artifact-sha:`
-# are different fields, so the key must be preceded by the start of the line or by a
-# character that cannot be part of a key, and followed by optional blanks and a colon.
-# awk's `match` takes the LEFTMOST match, so a record naming the key twice reads the first.
-#
-# A HERE-STRING, not a pipe: `awk … exit` quits early, and walls.sh header's SIGPIPE rule
-# (T37, wave-14) applies to every early-quitting reader under `pipefail`, not only grep.
-evidence_line_field() {  # <text> <key> -> the value, or empty
-  awk -v k="$2" '
-    {
-      if (match($0, "(^|[^-_[:alnum:]])" k "[[:space:]]*:[[:space:]]*")) {
-        v = substr($0, RSTART + RLENGTH)
-        sub(/;.*$/, "", v)
-        sub(/[[:space:]]+$/, "", v)
-        print v
-        exit
-      }
-    }' <<< "$1"
-}
-
-# ─── plan_bring_forward — every version-14 shape fault, in one pass ──────────
-#
-# WHAT IT IS FOR (spec D8; REQ-3, AC-3.1; research R2 §2c-2d). A plan whose frontmatter
-# says it is at the supported contract version and whose BODY is pre-14 used to meet the fleet one arm
-# at a time — `requirements:`, then `approved-by:`, then `fails-when:`, then the Tasks shape
-# — because every arm refuses by calling `refuse`, and `refuse` EXITS (refuse.sh:91-94).
-# Worse, the reveal order was data-dependent on the previous repair: the "row ahead of the
-# run" arm reads cells a pre-14 table does not have, so widening the table is what CREATES
-# the next refusal (R2 §2d). A writer paid one round trip per fault and could not see the
-# size of the job from the first one.
-#
-# SO IT VALIDATES THE TARGET SHAPE, NOT THE CURRENT ONE, and it is a PREDICATE: it prints,
-# it never refuses, and the two callers — the governing-skill hook at Write/Edit and the
-# evidence gate at commit — render the identical list through the channel ADR-030 opened.
-#
-# WHEN IT FIRES, AND WHY THE TRIGGER IS NARROW. Two conditions, together:
-#   (a) the `## Tasks` table is MISSING at least one required column — the structural
-#       signature of a pre-14 body, and the one fault that cannot be an ordinary typo; and
-#   (b) at least one of the version-14 KEYS the plan owes at this step is absent.
-# Either alone is an ordinary fault with an arm of its own that names the repair better
-# than a list can, and those arms are untouched: a ten-column table with one bad row still
-# gets `units_validate`'s own refusal, and a plan missing only `approved-by:` still gets
-# the arm that explains what an approval is. This is the summary for the case where a
-# reader needs the SHAPE of the job, not the next line of it.
-#
-# THE LANE GUARD IS validate_dispatch_ledger's, verbatim (D7): wave|epic + `rigor: double`
-# + `multi_agent: true`. Below it the checks this function folds are themselves inert, so
-# firing there would invent enforcement rather than summarise it.
-#
-# AT WALLS.SH TOP LEVEL, OUTSIDE `_eg_body`, ON PURPOSE. Sourcing this file must define
-# this function and nothing else the governing-skill hook could collide with — every helper
-# `_eg_body` carries (`frontmatter_get`, `block_get`, `is_placeholder_value`, …) is nested
-# inside it and is not defined by a source. Which is also why this function re-reads the
-# plan from the PATH instead of using them: it is a pure read-only validator over the
-# target shape (research R2 §3(d) route 2), and its callers hand it a path — the gate the
-# bound plan, the hook a temp copy of the posted content.
-#
-# AND IT DERIVES THE STEP ITSELF (wave-16 T25, Step-6 critic §C1). It used to be HANDED the
-# step, and the two callers handed it different facts: the gate passed the body's
-# `current:`, the hook passed the frontmatter's `sdlc-step:`. A frontmatter stamp is written
-# once at Step 0 and almost never moved — this repo's own archive carries `sdlc-step: 3`
-# beside `current: 9` — so the Write-side arm computed against step 3 for the life of the
-# plan, the two `>= 4` classes below were unreachable there, and AC-3.1's "identical lists
-# from both callers" could not hold past Step 3. It failed SILENTLY: the hook simply printed
-# a shorter list. The step is a fact about the plan TEXT this function already holds, so it
-# reads it where the gate reads it — `current:` under `## SDLC State`, `a`/`b` suffix
-# stripped — and no caller can hand it the wrong one.
-_bf_fm_get() {  # <plan text> <frontmatter key> -> its value, or empty
-  awk -v k="$2" '
-    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; next }
-    /^---[[:space:]]*$/ { exit }
-    {
-      if (match($0, "^[[:space:]]*" k "[[:space:]]*:[[:space:]]*")) {
-        v = substr($0, RSTART + RLENGTH); sub(/[[:space:]]+$/, "", v); print v; exit
-      }
-    }' <<< "$1"
-}
-
-_bf_section() {  # <plan text> <exact "## Heading"> -> that section body, fence-aware
-  awk -v want="$2" '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ {
-      if (f) exit
-      if ($0 == want || index($0, want " ") == 1) { f = 1 }
-      next
-    }
-    f { print }
-  ' <<< "$1"
-}
-
-plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
-  # A STRAY SECOND ARGUMENT IS IGNORED, not used, for one release: both callers dropped it
-  # in this task, and a caller this tree has not seen must degrade to the derived step
-  # rather than to a silently different answer.
-  #
-  # THE LIST IS JUDGED AT THE PLAN'S OWN `current:` LINE, ALWAYS — deliberately, not by
-  # omission (wave-16 T27, Step-6 critic §C8, A-T27.1). The evidence gate substitutes
-  # `CURRENT="$_EG_RSTEP"` (walls.sh ~:2430) when a commit comes from a linked worktree
-  # whose `## Tasks` row names a step below the run's `current:`, so that OTHER arms judge
-  # that commit at the row's step — but that substituted value never reaches this function,
-  # with no argument to carry it even if it did. Passing it back in would reopen exactly the
-  # second-source hazard T25/§C1 closed (two callers, two facts); direction is fail-closed,
-  # since a plan-shape summary judged at a later `current:` can only ask for MORE, never
-  # fewer, than the row's own step would.
-  local plan="${1:-}" step
-  local scale rigor multi units_out missing rowfaults
-  local plan_text state b1 matrix first_heading goal_body
-  local faults="" keys=0
-
-  [ -n "$plan" ] && [ -f "$plan" ] || return 0
-
-  # NORMALIZED ONCE, HERE, BEFORE ANY READ (wave-16 T27, Step-6 critic §C7). Every helper
-  # below — `_bf_fm_get`, `_bf_section`, the `first_heading` awk, the `current:` derivation
-  # — now reads `$plan_text`, never the path, so a CRLF plan's headings and keys match the
-  # same way an LF plan's do. Before this, `_bf_section` and `first_heading` read the file
-  # RAW and matched `## SDLC State` by string equality: on a CRLF plan the heading arrived
-  # as `## SDLC State\r`, matched nothing, `state` came back empty, `step` fell through to
-  # 0, `keys` stayed 0, and the predicate returned rc=0 with NOTHING — silently admitting a
-  # pre-14 CRLF plan the same body's LF twin refuses. Inlined rather than calling
-  # `normalize_newlines` (run.sh) by name: this file does not source run.sh, one caller (the
-  # evidence gate) sources both but the other (the governing-skill hook) sources this file
-  # lazily on its own, and a bare function name would make plan_bring_forward's correctness
-  # depend on sourcing order this file does not control. Same translation, same reason
-  # `_units_read` (units.sh:118) and `normalize_newlines` (run.sh:97) already use it: `sub`
-  # trims a trailing CR, `gsub` re-splits a CR-only file into real lines rather than
-  # collapsing it to one — `tr -d '\r'` would do the latter and read a live CR-only plan as
-  # closed, the fail-dangerous direction (.claude/rules/hook-authoring.md).
-  # THE BOM (T8, REQ-11; wave-16 critic-b77d5aa C10; research R4 §D3). `NR==1` compares the
-  # first record to "---" with `==`, which is BOM-insensitive, but every reader downstream
-  # (`_bf_fm_get`, `first_heading`) matches an ANCHORED regex, which a leading BOM defeats —
-  # so a BOM-prefixed pre-14 plan admitted silently until this line stripped it. A STRING
-  # compare, not a regex: octal and `\x` escapes inside an awk REGEX LITERAL do not strip a
-  # BOM on awk 20200816 (measured, R4 D3.4); only `substr`/`==` against the octal STRING
-  # `"\357\273\277"` does. Ordered before the CR translation on the same record so a
-  # BOM+CRLF plan strips both.
-  plan_text="$(awk 'NR==1 && substr($0,1,3)=="\357\273\277" { $0 = substr($0,4) }
-                    { sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
-
-  case "$(_bf_fm_get "$plan_text" scale)" in wave|epic) : ;; *) return 0 ;; esac
-  # THE DOUBLE LEVEL (lib/run.sh `rigor_level`; wave-28 T44; wave-30 T11, D1). This function is
-  # also sourced on its own (the plan-write hook, a suite), so the one definition is loaded from
-  # beside this file when the caller has not loaded it.
-  declare -F rigor_level >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/run.sh" >/dev/null 2>&1
-  [ "$(rigor_level "$(_bf_fm_get "$plan_text" rigor)")" = "double" ] || return 0
-  [ "$(_bf_fm_get "$plan_text" multi_agent)" = "true" ] || return 0
-
-  # (a) THE PRE-14 TABLE. `units_validate` is the one reader of `## Tasks` and already
-  # reports EVERY fault rather than the first (units.sh's own note) — it is the model this
-  # function generalises, and the only public verb that answers both halves here.
-  units_out="$(units_validate "$plan" 2>/dev/null)" || true
-  missing="$(printf '%s\n' "$units_out" | sed -n 's/^## Tasks: missing column //p' \
-             | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')"
-  [ -n "$missing" ] || return 0
-  rowfaults="$(printf '%s\n' "$units_out" | grep -v '^## Tasks: missing column ' || true)"
-
-  # (b) THE KEYS, each under the step guard its own arm carries: `requirements:` from
-  # current 2 (validate_requirements_pointer), `approved-by:` and `fails-when:` from 4
-  # (validate_approved_by, validate_fails_when). A key not yet owed is not a fault.
-  state="$(_bf_section "$plan_text" '## SDLC State')"
-  # THE ONE SOURCE. Same read as the evidence gate's own `CURRENT` (the `current:` line of
-  # `## SDLC State`, first hit, whitespace stripped) and the same `a`/`b` strip the gate
-  # applies at the call site — including the line-ending normalization: `plan_text` above
-  # was already put through the same translation `normalize_newlines` (run.sh) applies to
-  # build the gate's own `SECTION` (walls.sh:1709), so a CRLF plan's `## SDLC State` heading
-  # and its `current:` line are seen exactly as the gate sees them, not raw. Anything else —
-  # absent, a non-numeric value, a word — reads as 0, which is the fallback the old `${2:-0}` default gave
-  # a caller that passed nothing.
-  step="$(printf '%s\n' "$state" \
-          | grep -E '^[[:space:]]*current[[:space:]]*:' \
-          | head -1 \
-          | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-          | tr -d '[:space:]' \
-          | sed -E 's/[ab]$//')"
-  case "$step" in ''|*[!0-9]*) step=0 ;; esac
-  if [ "$step" -ge 2 ]; then
-    b1="$(awk '
-      /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:/ { f = 1; print; next }
-      f {
-        if ($0 ~ /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[ab]?[[:space:]]*:/) exit
-        if ($0 ~ /^[^[:space:]]/) exit
-        print
-      }' <<< "$state")"
-    if [ -z "$(evidence_line_field "$b1" requirements)" ]; then
-      faults="${faults}## SDLC State: the Step 1 evidence names no 'requirements:' pointer
-"
-      keys=$((keys + 1))
-    fi
-  fi
-  if [ "$step" -ge 4 ]; then
-    if [ -z "$(evidence_line_field "$state" approved-by)" ]; then
-      faults="${faults}## SDLC State: no 'approved-by:' line
-"
-      keys=$((keys + 1))
-    fi
-    # THE MATRIX HALF IS COARSER THAN validate_fails_when ON PURPOSE (A-T5): that arm
-    # judges each AC BLOCK and names the row; this one asks whether the section carries the
-    # key AT ALL, which is the question a pre-14 matrix answers no to. Naming one row here
-    # would duplicate `matrix_block` — the twin-that-drifts this repo spends real effort
-    # avoiding — for a list that exists to size the job, not to walk it.
-    matrix="$(_bf_section "$plan_text" '## Verification Matrix')"
-    if grep -qE '^[[:space:]]*\|' <<< "$matrix" \
-       && ! grep -qE '(^|[^-_[:alnum:]])fails-when[[:space:]]*:' <<< "$matrix"; then
-      faults="${faults}## Verification Matrix: no AC block names a 'fails-when:'
-"
-      keys=$((keys + 1))
-    fi
-  fi
-
-  # `## Goal` IS IN THE LIST BUT NOT IN THE TRIGGER. It is a Write-side arm (AC-K5.4) with
-  # no twin at the gate, so letting it ARM this predicate would make the gate refuse plans
-  # it admits today; reporting it once the predicate has already fired costs nothing and is
-  # what makes the Write-side and commit-side lists identical (AC-3.1).
-  first_heading="$(awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / { print; exit }' <<< "$plan_text")"
-  case "$first_heading" in
-    '## Goal'|'## Goal '*)
-      goal_body="$(_bf_section "$plan_text" '## Goal')"
-      grep -qE '[^[:space:]]' <<< "$goal_body" || faults="${faults}## Goal: the section is empty
-" ;;
-    *) faults="${faults}## Goal: the first section is not '## Goal'
-" ;;
-  esac
-
-  [ "$keys" -ge 1 ] || return 0
-
-  printf '## Tasks: the table is missing columns: %s\n' "$missing"
-  [ -n "$rowfaults" ] && printf '%s\n' "$rowfaults"
-  printf '%s' "$faults"
-  return 1
-}
-
 # ── THE JURISDICTION HELPERS, AT FILE SCOPE (wave-27 T80) ──────────────────────
 #
 # The helpers below are the evidence gate's own: from the command text, the payload and
@@ -1446,17 +1198,14 @@ eg_step_reads_readings() {
   [ "$_c" -ge 6 ]
 }
 
-# eg_plan_reads_readings <plan> -> 0 when <plan>'s declared `current:` is such a step: the first
-# `current:` line of the unfenced `## SDLC State`, line endings translated and white space stripped, as the
-# gate's own `CURRENT` reads it. FILE SCOPE, for the collector, which asks before the wall's body has run.
+# eg_plan_reads_readings <plan> -> 0 when the step <plan>'s run stands at is such a step, as the reader answers it
+# (lib/proof.sh `proof_step_held`, loaded by the collector that asks); 1 when it is not, or when the run's place cannot be
+# read, which the gate's own read then refuses by name. FILE SCOPE, for the collector, which asks before the wall's body
+# has run.
 eg_plan_reads_readings() {
-  [ -f "${1:-}" ] || return 1
-  eg_step_reads_readings "$(normalize_newlines "$1" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { flag = 1; next }
-    /^## / { flag = 0 }
-    flag && /^[[:space:]]*current[[:space:]]*:/ { sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit }')"
+  [ -f "${1:-}" ] && declare -F proof_step_held >/dev/null 2>&1 || return 1
+  proof_step_held "$1" >/dev/null || return 1
+  case "$_PROOF_PLACE" in n=*) local n="${_PROOF_PLACE%%$'\n'*}"; eg_step_reads_readings "${n#n=}" ;; *) return 1 ;; esac
 }
 
 # The plan is read off disk when the CALL starts (PLAN is resolved at :245
@@ -1601,11 +1350,8 @@ printed a reason above this line, that is the cause. The commit is still refused
 # ran the eval, copied from the record file the pointer already names, and read by nothing but this loop: a key
 # read by nothing is ceremony. The record file is where the run is shown, and the pointer is checked to name one.
 #
-# AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT (wave-30 T14; REQ-6 AC-6.1, D9).
-# `session-poker.sh matrix-render` writes each AC block's stubs from this list, sourcing this
-# file in a subshell to read it, so the keys Step 3 renders and the keys the Verify gate
-# demands are one list and cannot drift. Its name collides with nothing the two sourcing
-# hooks define.
+# AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT. Its name collides with nothing the
+# two sourcing hooks define.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 keys_for_tier() {
   case "$1" in
@@ -1663,34 +1409,48 @@ matrix_auditor_required() {
   esac
 }
 
-# The `## Verification Matrix` section body of `$PLAN`, newline-normalized. Lines inside ```
-# fenced code blocks are dropped, so a shell pipeline written in leading-pipe continuation
-# style is never mistaken for a table row; every downstream matrix parse (rows, stack-health,
-# false-green, AC blocks) reads this body, so the fence-skip here covers all of them.
+# THE MATRIX IS THE READER'S. Every arm below reads a criterion through two answers, loaded once a pass:
+# MATRIX_CELLS, the reader's line for every criterion (lib/reader.sh `reader_cells`, one fold: its state, tier,
+# evidence, auditor, confirmation and serves, from the run's events), and MATRIX_TASKS, the task that proves each criterion
+# (lib/plan-read.sh `plan_read_criterion_task`), for the plan MATRIX_TASKS_OF names. No arm parses the plan's matrix
+# itself, so the commit gate, the judge and the cards cannot answer one criterion two ways. 2 when the run's facts could not be read: a run
+# read as holding no fact would read every criterion pending, and a pending criterion is relaxed.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-matrix_section() {
-  normalize_newlines "$PLAN" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## Verification Matrix/ { f=1; next }
-    /^## / { f=0 }
-    f'
+# A criterion's verdict, where the reader takes the evidence review's, is the newest evidence review's when it passed
+# and the judge reads the evidence question covered from its head to the working head (lib/proof.sh `facts_cover`, the
+# judge's own walk, over the fold this shell already holds): one fact, one judge, so a release landed after the review
+# leaves the verdict standing and code past it ends it. Otherwise the reader answers at the working head. A caller that
+# names no head asks for no review. A dry copy's facts are its plan's run's; its text is its own.
+matrix_load() {  # <plan> [head]
+  local rc=0 rp h="${2:-}" rv lh
+  rp="$(proof_run_plan "$1")"
+  if [ -n "$h" ]; then
+    rv="$(_proof_ask "$rp" reader_q_reviews "$rp")" || return 2
+    lh="$(printf '%s\n' "$rv" | awk -F'|' '{ q = ""; x = ""; r = ""
+        for (i = 2; i <= NF; i++) { if ($i ~ /^question=/) q = substr($i, 10); if ($i ~ /^head=/) x = substr($i, 6); if ($i ~ /^result=/) r = substr($i, 8) }
+        if (q == "evidence") last = (r == "pass") ? x : "" } END { print last }')"
+    if [ -n "$lh" ] && { [ "$lh" = "$h" ] || facts_cover "$rp" "$lh" "$h" evidence >/dev/null 2>&1; }; then h="$lh"; fi
+  fi
+  MATRIX_CELLS="$(_proof_ask "$rp" reader_cells "$1" "$h")" || rc=$?
+  case "$rc" in 0) ;; 1) MATRIX_CELLS="" ;; *) return 2 ;; esac
+  MATRIX_TASKS="$(plan_read_criterion_task "$1" 2>/dev/null)" || MATRIX_TASKS=""
+  MATRIX_TASKS_OF="$1"
+  return 0
 }
 
-# The indented evidence block under "<AC-id>:" within `$MATRIX` (up to the next
-# non-indented line). The heading matcher is lib/units.sh `units_ac_head_awk`, the one the
-# matrix writers read too: it tolerates a markdown list leader (a `- ` before the id reads
-# like the bare id) on a COPY of the line, so the terminator below still tests the raw line
-# and a following list item still ends the block; and it anchors at the line's start
-# without regex-escaping the id, so an id never matches the block of a longer id it
-# prefixes. Without the leader tolerance a list-shaped block extracted as EMPTY and every
-# consumer went silent at once.
+# matrix_fails_when_missing <plan> -> the first criterion, in the reader's order (lib/reader.sh `reader_criteria`, no
+# fold), whose fails-when is empty: the criterion question's answer, its Eval design row's Fails when cell. A criterion
+# the Eval design holds no row for is no finding: there is no row to lack the cell, and the per-tier evidence loop at
+# the Verify gate owns that gap. Nothing when every criterion names one, or the reader cannot be loaded.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-matrix_block() {
-  echo "$MATRIX" | awk -v ac="$1" "$(units_ac_head_awk)"'
-    ac_head($0, ac) {f=1; next}
-    /^[^[:space:]]/ {f=0}
-    f'
+matrix_fails_when_missing() {
+  declare -F reader_criteria >/dev/null 2>&1 || _proof_reader_load >/dev/null 2>&1 || return 0
+  { reader_criteria "$1" 2>/dev/null; printf '\034\n'; plan_read_rows "$1" 'Eval design' criterion 2>/dev/null; } | awk -F'\t' '
+    $0 == "\034" { part++; next }
+    !part { if ($0 != "") ord[++n] = $0; next }
+    { c = ""; f = ""; for (i = 1; i <= NF; i++) { if (index($i, "criterion=") == 1) c = substr($i, 11); if (index($i, "fails-when=") == 1) f = substr($i, 12) }
+      gsub(/^[ \t]+|[ \t]+$/, "", f); if (f == "—" || f == "-") f = ""; if (c != "") { ed[c] = 1; fw[c] = f } }
+    END { for (i = 1; i <= n; i++) { c = ord[i]; if ((c in ed) && fw[c] == "") { print c; exit } } }'
 }
 
 # The `user-confirmed:` value out of an AC block (empty when absent). The one parser of the
@@ -1727,29 +1487,27 @@ user_confirmed_pending() {  # <key> <value> -> 0 when the key is user-confirmed 
   [ "$(tr '[:upper:]' '[:lower:]' <<< "$2")" = pending ]
 }
 
-# Is a row WAIVED on the record? A `waiver:` token in its evidence cell or a `waiver:` line in
-# its AC block. Not the status cell alone: a row that says `waived` while recording no waiver
-# has not been through the Waiver Protocol.
-matrix_row_waiver() {  # <evidence cell> <AC block> -> 0 when a waiver is recorded
-  grep -qE 'waiver:' <<< "$1" || grep -qE '^[[:space:]]*waiver[[:space:]]*:' <<< "$2"
-}
-
-# The `task:` value out of an AC block (empty when absent): the plan row, or rows, whose work
-# proves the criterion, or the literal `9`, the close's step (`matrix_owing_step` reads it).
-matrix_block_task() {  # <AC block> -> the value
-  echo "$1" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//'
+# The task that proves <AC> (empty when it names none): the plan row, or rows, whose work proves the criterion, or the
+# literal `9`, the close's step, as the plan's one reader answers it (lib/plan-read.sh `plan_read_criterion_task`: the
+# criteria table's Task cell at 15, the block's `task:` line before). Asked of what matrix_load holds when it loaded
+# this plan, else of the plan itself.
+matrix_criterion_task() {  # <plan> <AC> -> the value
+  if [ "${MATRIX_TASKS_OF:-}" = "$1" ]; then
+    awk -F'\t' -v ac="$2" '$1 == ac { print substr($0, length(ac) + 2); exit }' <<< "${MATRIX_TASKS:-}"
+  else
+    plan_read_criterion_task "$1" "$2" 2>/dev/null | cut -f2-
+  fi
 }
 
 # A CRITERION IS OWED AT THE STEP WHOSE TASK PROVES IT. The tier says how a criterion is proved;
 # the step of the row that proves it says when. `matrix_owing_step` reads that step out of the
-# block's `task:` value: a row id resolves to its row's `step` cell through the one `## Tasks`
+# criterion's task (`matrix_criterion_task`): a row id resolves to its row's `step` cell through the one `## Tasks`
 # reader (lib/units.sh `units_rows`, `units_field_v`), a comma list to the latest step among its
 # rows, and the literal `9` stays the close's step. Any other value, or an id the table lacks,
 # owes at no particular step, so the row is judged as every row is.
-matrix_owing_step() {  # <plan> <AC block> -> the step number, or nothing
+matrix_owing_step() {  # <plan> <AC> -> the step number, or nothing
   local val id rec s best="" rows
-  val="$(matrix_block_task "$2")"
+  val="$(matrix_criterion_task "$1" "$2")"
   [ -n "$val" ] || return 0
   if [ "$val" = 9 ]; then printf '9\n'; return 0; fi
   rows="$(units_rows "$1" 2>/dev/null)" || return 0
@@ -1764,13 +1522,13 @@ matrix_owing_step() {  # <plan> <AC block> -> the step number, or nothing
   [ -z "$best" ] || printf '%s\n' "$best"
 }
 
-# matrix_owing_open <plan> <AC block> -> `yes` when any row the block's `task:` names is neither
-# landed nor dropped: the work that proves the criterion is still under way. A `task:` naming no
+# matrix_owing_open <plan> <AC> -> `yes` when any row the criterion's task names is neither
+# landed nor dropped: the work that proves the criterion is still under way. A task naming no
 # row prints nothing. The status is read through the same `units_rows` the owing step is.
 matrix_owing_open() {
   local id rec s rows
   rows="$(units_rows "$1" 2>/dev/null)" || return 0
-  for id in $(matrix_block_task "$2" | tr ',' ' '); do
+  for id in $(matrix_criterion_task "$1" "$2" | tr ',' ' '); do
     rec="$(awk -F'\t' -v i="$id" '$1 == i { print; exit }' <<< "$rows")"
     [ -n "$rec" ] || continue
     units_field_v s "$rec" status
@@ -1800,46 +1558,86 @@ matrix_row_deferred() {
 
 # THE LIVE ROW'S EXITS. A pending or blocked row the owing-step rule no longer defers meets the evidence
 # refusals below for the key it lacks, and those refusals say which of three acts settles it: a row the walk
-# proved is written discharged with its record, a row whose eval cannot fire its fails-when is retiered up
-# with a new eval, and any other row is the user's to waive. The first two are verbs an agent runs; the third
-# is a person's word, said as such, so the refusal never leaves its reader to guess whose move it is.
+# proved is discharged by registering the walk's record, a row whose eval cannot fire its fails-when has its
+# Eval design row changed by the person, and any other row is the user's to waive. The first is a verb an agent
+# runs; the other two are a person's, said as such, so the refusal never leaves its reader to guess whose move it is.
 # [WALL: tests/shell-lint.test.sh]
 matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence refusal
-  printf '%s' "the row is live past the step that owes it: if the walk proved it, run session-poker.sh matrix-set $1 status=discharged evidence=<its record>; if its eval cannot fire, run session-poker.sh matrix-retier $1 tier=<higher> eval='<the new eval>'; otherwise needs: the user — a waiver, in their words: session-poker.sh waive-row $1 '<their words>' '<why>'."
+  printf '%s' "the row is live past the step that owes it: if the walk proved it, register its record: session-poker.sh proof-add walk <its record>; if its eval cannot fire, needs: the user — its ## Eval design row changed; otherwise needs: the user — a waiver, in their words: session-poker.sh waive $1 '<their words>' '<why>'."
 }
 
-# matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>` per five-cell row of
-# `$MATRIX`, trimmed, table order: the header, the separator and a row of another width skipped.
+# matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>\037<confirmed>\037<waiver 1|0>` per
+# criterion of MATRIX_CELLS, the reader's order. The status is discharged, waived (discharged by a waiver) or pending.
+# THE WAIVER IS RECORDED or it is not one: the waiver event naming the criterion is the record.
 matrix_table_rows() {
-  awk -F'|' '/^[[:space:]]*\|/ && NF == 7 {
-    for (i = 2; i <= 6; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
-    if ($2 == "" || $2 == "AC" || $2 ~ /^[-:]+$/) next
-    printf "%s\037%s\037%s\037%s\037%s\n", $2, $3, $4, $5, $6
-  }' <<< "$MATRIX"
+  local ac st by tier ev aud conf sv w
+  while IFS=$'\037' read -r ac st by tier ev aud conf sv; do
+    [ -n "$ac" ] || continue
+    w=0
+    [ "$by" != waiver ] || { st=waived; w=1; }
+    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$st" "$ev" "$aud" "$conf" "$w"
+  done <<< "$MATRIX_CELLS"
 }
 
 # matrix_close_eval <eval text> -> 0 when the eval names `landing-report --hand-holds`, the measure
 # close-out reads last. The one test of which criterion the close proves: matrix_close_rows and the
-# task: cell matrix-render writes both ask it, so no eval reads as the close's to one and not the other.
+# proof close-out writes both ask it, so no eval reads as the close's to one and not the other.
 matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
 
-# matrix_close_rows <plan> -> the AC id of each pending or blocked row the close settles, table
-# order: owed at Step 9, and its block's `eval:` is the close's measure (matrix_close_eval).
-# close-out writes each such row's cells from that reading.
+# matrix_close_rows <plan> -> the AC id of each pending criterion the close settles, the reader's
+# order: owed at Step 9, and its Eval design row's eval is the close's measure (matrix_close_eval).
+# close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
-  local PLAN="$1" MATRIX ac tier status ev aud block
-  MATRIX="$(matrix_section)"
-  while IFS=$'\037' read -r ac tier status ev aud; do
-    [ -n "$ac" ] || continue
-    case "$status" in pending|blocked) ;; *) continue ;; esac
-    block="$(matrix_block "$ac")"
-    [ "$(matrix_owing_step "$PLAN" "$block")" = 9 ] || continue
-    matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" || continue
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF ac tier status ev aud conf w
+  matrix_load "$PLAN" || return 2
+  while IFS=$'\037' read -r ac tier status ev aud conf w; do
+    [ -n "$ac" ] && [ "$status" = pending ] || continue
+    [ "$(matrix_owing_step "$PLAN" "$ac")" = 9 ] || continue
+    matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
 MATRIX_ROWS
   return 0
+}
+
+# Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
+# then require whole-value EQUALITY against the known token set. A token that
+# merely appears as a substring of a longer value ("resolved TODOs",
+# "*.example placeholders", "status pending → done") is legal evidence.
+# "in progress" and its whitespace-free "inprogress" are both listed so
+# either spelling of the value matches. At file scope, outside the gate's body, so a
+# source of this file defines it: close-out asks the gate's own ban of a value it is given.
+# IN BUILTINS: each line trimmed
+# on its own and trailing blank lines dropped, so a value is a placeholder exactly when its FIRST
+# line is one and nothing but whitespace follows; the word compared without regard to case.
+is_placeholder_value() {
+  local v="$1" rest="" rc=1 restore=0
+  case "$v" in *$'\n'*) rest="${v#*$'\n'}"; v="${v%%$'\n'*}" ;; esac
+  case "$rest" in *[![:space:]]*) return 1 ;; esac
+  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+  shopt -q nocasematch || { shopt -s nocasematch; restore=1; }
+  case "$v" in
+    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) rc=0 ;;
+  esac
+  [ "$restore" = 0 ] || shopt -u nocasematch
+  return "$rc"
+}
+
+# Does frontmatter name a LIVE surface this run operates? The default answer
+# is no. `deploy_target` is n/a by default and is never inferred from deploy
+# signals — a target exists only when the user names one — so an absent line,
+# `none`, and `n/a` (with or without a trailing reason) all read as "no live
+# surface". Case-insensitive, matching every other value comparison in this
+# hook. Step 9 owes the three of a deploy exactly when one is named; a run that
+# names none and gives them anyway records more than it owes, and is not refused.
+# At file scope for the same reason as is_placeholder_value: close-out asks it of the
+# value it reads by the header's grammar, with DEPLOY_TARGET set in its own subshell.
+deploy_target_named() {
+  case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in
+    ""|none|n/a|n/a:*) return 1 ;;
+    *)                 return 0 ;;
+  esac
 }
 
 # matrix_row_has_verdict <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0>
@@ -1858,11 +1656,14 @@ matrix_row_has_verdict() {
 #   CONFIRMED, or it is a T4 row whose `user-confirmed:` is attributed and whose auditor cell
 #   is empty-like. A user's confirmation replaces the WAIVER a T4 row used to need, never the
 #   auditor: a standing REFUTED or UNVERIFIABLE on a confirmed T4 row is a verdict, not a
-#   ruling, and the person rules on it.
+#   ruling, and the person rules on it. A T4 row holding no confirmation at all is never ruled
+#   short of its waiver, whatever its auditor cell: at 15 that cell is the run's evidence review,
+#   which no person gave, so the person is asked at the merge advance and on the card.
 matrix_row_ruled() {
   local aud
   aud="$(placeholder_cell "$3")"
   [ "$2" = waived ] && [ "$5" = 1 ] && return 0
+  [ "$1" = T4 ] && [ -z "$4" ] && return 1
   [ "$aud" = CONFIRMED ] && return 0
   [ "$1" = T4 ] && [ -z "$aud" ] && user_confirmed_attributed "$4"
 }
@@ -1887,28 +1688,38 @@ matrix_row_owes() {
   return 0
 }
 
-# matrix_unruled <plan> <step> -> the AC id of each matrix row that owes a ruling or a verdict
-# at <step>, one per line, table order; nothing at `single` rigor. The judge's read of the
+# matrix_unruled <plan> <step> [head] [awaiting] -> the AC id of each criterion that owes a ruling or a verdict
+# at <step>, one per line, the reader's order; nothing at `single` rigor. The judge's read of the
 # matrix at the advance to 8: the same readers and the same `matrix_row_owes` the arm walks,
-# so the advance and the commit after it cannot disagree on a row. A row that is not five
-# cells is the arm's to refuse on a commit, and is skipped here. Needs lib/run.sh and
-# lib/units.sh loaded, as every caller of this file has them.
+# so the advance and the commit after it cannot disagree on a row. <head> is the one the evidence
+# review is read at. Needs lib/run.sh, lib/units.sh and
+# lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read. A fourth argument,
+# any word, prints only those that also await their person (`matrix_row_awaits`, fed as the commit gate feeds it).
 matrix_unruled() {
-  local PLAN="$1" MATRIX RIGOR ac tier status ev aud block waiver defer
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF RIGOR ac tier status ev aud conf waiver defer
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
-  MATRIX="$(matrix_section)"
-  while IFS=$'\037' read -r ac tier status ev aud; do
+  matrix_load "$PLAN" "${3:-}" || return 2
+  while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
     [ -n "$ac" ] || continue
-    block="$(matrix_block "$ac")"
-    waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
-    defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block")" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" && defer=1
-    matrix_row_owes "$2" "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" "$defer" >/dev/null \
-      && printf '%s\n' "$ac"
+    defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$ac")" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" && defer=1
+    matrix_row_owes "$2" "$tier" "$status" "$aud" "$conf" "$waiver" "$defer" >/dev/null || continue
+    [ -z "${4:-}" ] || matrix_row_awaits "$tier" "$status" "$aud" "$conf" "$waiver" || continue
+    printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
 MATRIX_ROWS
   return 0
+}
+
+# matrix_row_awaits <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0> -> 0 when the criterion awaits its
+#   person: a T4 row holding no attributed confirmation, which one in that shape would rule (`matrix_row_ruled`), so the
+#   person's word is all it waits on; 1 otherwise, a row whose auditor's finding stands among them. One reading for the
+#   gate's refusal and for any caller that names who a criterion waits on.
+matrix_row_awaits() {
+  [ "$1" = T4 ] || return 1
+  ! user_confirmed_attributed "$4" || return 1
+  matrix_row_ruled "$1" "$2" "$3" "you 1970-01-01 confirmed" "$5"
 }
 
 # THE LOADED SET, NAMED ONCE (wave-31 T30; REQ-14 AC-14.1, D13). The doctrine a session or a
@@ -2025,7 +1836,7 @@ fi
 # `bionic_context` is a pure function of both — so the duplicate costs one root walk on
 # commit commands and nothing else. Consolidating it belongs with the verbatim-carry
 # guarantee it would break, not beside it. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
-# `loader_fail_closed` needed the command text before any library existed.
+# the repair commands needed the command text before any library existed.
 #
 # THE CWD LADDER IS THE LIBRARY'S, and is named nowhere else in this file but the
 # fail-closed pre-check above — which restates it by hand for the one reason that
@@ -2409,20 +2220,6 @@ if [ ! -f "$PLAN" ]; then
   exit 0
 fi
 
-# The newest plan has no ## SDLC State section → not a canonical-sdlc run.
-# Fence-aware (matches the SECTION extraction below): a `## SDLC State` heading
-# that appears ONLY inside a ``` fenced example is documentation, not state, so
-# the file passes through as non-canonical rather than being parsed and then
-# false-blocked on the empty extraction. Line endings normalized (CRLF and
-# CR-only) to real newlines first — see normalize_newlines.
-if [ -z "$(normalize_newlines "$PLAN" | awk '
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^## SDLC State/ { print "yes"; exit }
-')" ]; then
-  exit 0
-fi
-
 # Extract YAML frontmatter (between first two `---` lines at column 0)
 # if the plan has any. Used to read the version marker, the triple, and the
 # discriminator flags the checks below key off.
@@ -2447,18 +2244,101 @@ INTENT=$(frontmatter_get intent)
 RIGOR=$(frontmatter_get rigor)
 MULTI_AGENT=$(frontmatter_get multi_agent)
 
-# ONE supported version. Anything else — an older number, a typo, an empty
-# value, garbage — blocks. Symmetric with the governing-skill hook. There is
-# no version dispatch anywhere below this line, so there is also no path that
-# reaches `exit 0` by matching no arm.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-SUPPORTED_SDLC_VERSION=14
+_EG_V15=0
+case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
+_EG_MARKED=0; grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:' <<< "$FRONTMATTER" && _EG_MARKED=1
 
-if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
+_eg_plan_named() {  # -> the path the plan takes when named for its directory: an incident's for it, any other for its stem
+  local d="${PLAN%/*}"
+  case "$d" in */incidents/*) printf '%s/%s.plan.md' "$d" "${d##*/}" ;; *) printf '%s.plan.md' "${PLAN%.md}" ;; esac
+}
+# A PAGE AT 15 IS A PLAN ONLY BY ITS NAME: a run at 15 is found by the walk and joined to its record by a name ending
+# .plan.md, so a page at 15 a session is bound to under any other name has no run this gate can read, and admitting
+# it would admit every commit against it unjudged. It is refused, named for its directory. A page at 15 under another
+# name that no session is bound to is no run, and its commit goes through.
+# [WALL: tests/plan-page.test.sh]
+_eg_refuse_misnamed15() {
+  refuse exit2 commit "this plan at 15 is not named as a plan" "name it for its directory" \
+"canonical-sdlc plan declares canonical_sdlc_version: 15, and a run at 15 is found and joined to its record by a name ending .plan.md, so nothing of this one is judged under its name.
+Plan: $PLAN
+Fix: name the plan for its directory, then commit again:
+  mv $(refuse_shell_word "$PLAN") $(refuse_shell_word "$(_eg_plan_named)")"
+}
+# A PAGE IS A RUN'S PLAN BY ITS LOG FIRST, AND BY ITS VERSION MARKER ONLY WHERE NO LOG SAYS SO. A page that does not
+# declare 15 and whose run's log holds a step is a run's plan whose version line a write or a shell edit that meets no
+# write hook lowered, deleted, commented out, misspelt or moved off the first line: judged by its marker, every commit
+# of that run would be admitted unjudged, so it is refused, naming what stood where 15 was and the line to put back.
+# Where that log is and whether it holds a step are the reader's answers, asked once here. Only then is a page whose
+# leading frontmatter declares no `canonical_sdlc_version` none of this lifecycle's, and a plan at 14 an older run's
+# document and never a run, under any name: nothing of either is judged, so its commit goes through.
+# [WALL: tests/plan-page.test.sh]
+_eg_v15_unreadable() {
+  refuse exit2 commit "the run's facts could not be read" "run the commit again" \
+"canonical-sdlc plan at version ${SDLC_VERSION}: the run's facts could not be read, so nothing this commit owes can be judged.
+Plan: $PLAN
+Fix: run the commit again; the fold's own line above names why it failed."
+}
+_eg_refuse_lowered() {
+  local s found="declares canonical_sdlc_version: $SDLC_VERSION"
+  s="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+  case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
+  [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
+  [ -n "$FRONTMATTER" ] || found="has no header on its first line"
+  refuse exit2 commit "this run's plan is lowered below 15" "put its version back to 15" \
+"canonical-sdlc plan: this plan $found, and the run's log beside it holds a step, so it is a run's plan at 15 with its version line lowered or lost, and nothing of it is judged without it.
+Plan: $PLAN
+Fix: put the line back to 'canonical_sdlc_version: 15', then commit again."
+}
+[ "$SDLC_VERSION" = 15 ] || _eg_refuse_lowered
+[ "$_EG_MARKED" = 1 ] || exit 0
+case "${PLAN##*/}:$SDLC_VERSION" in
+  *.plan.md:15) ;;
+  *:15) case "$EG_VERDICT" in bound-open|bound-closed) _eg_refuse_misnamed15 ;; *) exit 0 ;; esac ;;
+  *:14) exit 0 ;;
+esac
+
+# A plan at 15; a plan at 14 left above, under any name, with nothing judged. Anything else — an older number, a typo,
+# an empty value, garbage — blocks. So below this line every page is a plan at 15 named
+# *.plan.md, and no arm under it asks the version again: each takes its facts from the run's log where they are held,
+# and names each one the log does not hold yet (`_eg_v15_owe`), so no path reaches `exit 0` without the whole contract.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+if [ "$_EG_V15" -eq 0 ]; then
   _eg_detail="canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'.
 Plan: $PLAN
-Fix: set 'canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}' — the only supported version."
+Fix: set 'canonical_sdlc_version: 15' — a plan is written at 15."
   refuse exit2 commit "this plan declares an unsupported sdlc version" "set the supported version" "$_eg_detail"
+fi
+
+# A PLAN AT 15 IS JUDGED ON ITS LOG. A fact the log does not hold yet is named once, with every other,
+# where the checks this step reaches end: a check that found nothing to read never admits a plan at 15.
+# The words of each are what the row that moves that fact into the log turns into an admission.
+# [WALL: tests/plan-page.test.sh]
+# A fact a step owes that its event, its header or another event holds is asked there, and named as owed when it is
+# missing (`_eg_v15_ask`): the fix is to record it. One the log has no home for yet is named apart (`_eg_v15_owe`).
+_EG_UNREAD=""; _EG_OWED=""
+_eg_v15_owe() { _EG_UNREAD="${_EG_UNREAD}
+- could not be read at 15: $1"; }
+_eg_v15_ask() { _EG_OWED="${_EG_OWED}
+- owed at ${SDLC_VERSION}: $1"; }
+_eg_v15_refuse() {
+  [ -n "$_EG_UNREAD$_EG_OWED" ] || return 0
+  if [ -z "$_EG_UNREAD" ]; then
+    refuse exit2 commit "a fact this step owes is missing" "record each fact named" \
+"canonical-sdlc plan at version ${SDLC_VERSION}, current: ${CURRENT}: what this step is judged on is missing:${_EG_OWED}
+Plan: $PLAN
+Fix: record each fact named, in the run's log or the plan's header as it says, then commit again."
+  fi
+  refuse exit2 commit "a fact this step owes is not in the log" "none until the log holds it" \
+"canonical-sdlc plan at version 15, current: ${CURRENT}: the run's log does not hold what this step is judged on:${_EG_UNREAD}${_EG_OWED}
+Plan: $PLAN
+Fix: none at 15 yet for each fact the log cannot hold: it reaches the run's log in the row that moves it, and the commit is judged on it then."
+}
+if _eg_f="$(plan_read_faults "$PLAN")"; then
+  refuse exit2 commit "this plan holds what version 15 does not" "remove each part named" \
+"canonical-sdlc plan declares canonical_sdlc_version: 15, and version 15 has no place for:
+${_eg_f}
+Plan: $PLAN
+Fix: remove each part named; a version-15 run's state is read from its log, not from its plan."
 fi
 
 # THE PLAN'S RIGOR IS A LEVEL OR ABSENT (wave-30 T11; REQ-1 AC-1.4, D1). A `rigor:` that names no
@@ -2472,29 +2352,6 @@ Plan: $PLAN
 Fix: set 'rigor:' to single or double."
   refuse exit2 commit "this plan's rigor is not single or double" "use single or double" "$_eg_detail"
 fi
-
-# Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
-# then require whole-value EQUALITY against the known token set. A token that
-# merely appears as a substring of a longer value ("resolved TODOs",
-# "*.example placeholders", "status pending → done") is legal evidence.
-# "in progress" and its whitespace-free "inprogress" are both listed so
-# either spelling of the value matches. Defined here (ahead of the Step-line
-# checks) so the task-ledger validator, which runs before them, can reuse it.
-# IN BUILTINS (wave-34 T11, D19), reading what the `sed | tr` it replaces read: each line trimmed
-# on its own and trailing blank lines dropped, so a value is a placeholder exactly when its FIRST
-# line is one and nothing but whitespace follows; the word compared without regard to case.
-is_placeholder_value() {
-  local v="$1" rest="" rc=1 restore=0
-  case "$v" in *$'\n'*) rest="${v#*$'\n'}"; v="${v%%$'\n'*}" ;; esac
-  case "$rest" in *[![:space:]]*) return 1 ;; esac
-  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
-  shopt -q nocasematch || { shopt -s nocasematch; restore=1; }
-  case "$v" in
-    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) rc=0 ;;
-  esac
-  [ "$restore" = 0 ] || shopt -u nocasematch
-  return "$rc"
-}
 
 # Audit dir follows the PLAN's own project, not necessarily the invoking one:
 # findings live with the project that owns the artifact, and every worktree of one
@@ -2534,15 +2391,15 @@ BIONIC_FINDING_CHANNEL="evidence-gate"
 BIONIC_FINDING_SUBJECT="$PLAN"
 bionic_finding_root() { audit_root; }
 
-# THE READINGS A RUN OWES, JUDGED ON THE SECTION IN HAND (wave-27 T14; REQ-2 AC-2.2, D3, D19).
+# THE READINGS A RUN OWES, JUDGED ON THE RUN'S FACTS.
 # From `current: 6` a commit is admitted only when, for each question `facts_owed` (lib/proof.sh)
-# deals at <rigor>, the section holds a reading of it (`proved: kind=review … question=<q>`) whose
-# newest is not `result=fail`, or a `waived: question=<q>` line newer than that reading. Newer is
-# later in the section, the order `proof_add_line` writes in, and a waiver's fields are those before
-# ` by `: the judge's own reading (`facts_state`), so the wall and the judge never answer one
-# section text two ways on a question both can see (bash-walls §EG-6).
+# deals at <rigor>, the run holds a reading of it (a review proof of question <q>) whose newest is
+# not `result=fail`, or a waiver of <q> with a head, set after that reading. The facts are the
+# reader's `reviews` answer, which the judge's chains read too (lib/proof.sh `facts_state`), so the
+# wall and the judge never answer one run two ways on a question both can see (bash-walls §EG-6),
+# and a reading the run's log alone holds is a reading here.
 #
-# A PREDICATE OVER TEXT, AND NOTHING ELSE (the freeze, .claude/rules/hook-authoring.md). It reads
+# A PREDICATE OVER FACTS, AND NOTHING ELSE (the freeze, .claude/rules/hook-authoring.md). It reads
 # no git and no roster: whether a reading's head is still the working head, its range and its
 # scope are `facts_state`'s, asked at `current 8`, at close-out and by the tick. Below
 # `current: 6` it never runs (D19), so an open run is untouched until its Step 6.
@@ -2557,12 +2414,12 @@ bionic_finding_root() { audit_root; }
 # AND ONE LINE PER OPEN DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121),
 # `debt<TAB><suite><TAB><token>`: a debt `land` wrote to the landing record, HANDED to this wall by
 # its collector (hooks/bash-walls.sh: `BIONIC_DEBTS_OPEN`, read for `BIONIC_DEBTS_PLAN`), with no
-# `proved: kind=floor` or `kind=task` line in the section dated after its threshold (lib/proof.sh
-# `proof_debts_open`, the text half of the judge's own rule). A `landed red:` line in the plan is not
+# regression or task proof of the run dated after its threshold (lib/proof.sh `proof_debts_open`, the
+# judge's own rule over the proofs and the section's approvals). A `landed red:` line in the plan is not
 # read. Debts handed for another plan than the one judged here are not this plan's, and are not read.
 _eg_reading_gaps() {
   local qs
-  if ! declare -F facts_owed >/dev/null 2>&1 || ! declare -F proof_awk >/dev/null 2>&1; then
+  if ! declare -F facts_owed >/dev/null 2>&1 || ! declare -F _proof_ask >/dev/null 2>&1; then
     printf 'unreadable\n'
     return 0
   fi
@@ -2577,20 +2434,23 @@ _eg_reading_gaps() {
   # T72): lines the collector read for another plan than the one judged are not this plan's.
   [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || handed=1
   [ "$handed" = 0 ] || der="${BIONIC_READINGS:-}"
-  printf '%s\n' "$SECTION" | BIONIC_DERIVED="$der" awk -v qs="$qs" "$(proof_awk)"'
+  # The readings and waivers are the run's facts, in the order they were last set: the plan's section for a run
+  # with no log, the log alone for a run with one, through lib/proof.sh's kept fold of them.
+  # A fold that failed is no reading: the gaps are then unreadable, never every question absent.
+  local f
+  # A dry commit judges a copy, which names no record: its reviews and waivers are its plan's run's.
+  local rp; rp="$(proof_run_plan "$PLAN")"
+  f="$(_proof_ask "$rp" reader_q_reviews "$rp")" || { printf 'unreadable\n'; return 0; }
+  printf '%s\n' "$f" | BIONIC_DERIVED="$der" awk -F'|' -v qs="$qs" "$(proof_fact_awk)"'
     BEGIN { n = split(ENVIRON["BIONIC_DERIVED"], L, "\n")
             for (i = 1; i <= n; i++) { m = split(L[i], F, "\t"); if (m >= 3) D[F[1] SUBSEP F[2]] = F[3] } }
-    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
-      ev = PROOF_EVIDENCE
-      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT; e[PROOF_QUESTION] = ev
+    proof_fact() && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      pe = PROOF_EVIDENCE
+      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = ((pe SUBSEP PROOF_RESULT) in D) ? D[pe SUBSEP PROOF_RESULT] : PROOF_RESULT; e[PROOF_QUESTION] = pe
       next
     }
-    /^waived:[ \t]/ {
-      m = split($0, w, /[ \t]+/); q = ""; h = ""
-      for (i = 2; i <= m && w[i] != "by"; i++) {
-        if (w[i] ~ /^question=/) q = substr(w[i], 10)
-        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
-      }
+    ev() == "waiver" {
+      q = line_kv("question"); h = line_kv("head")
       if (q == "" || h !~ /^[0-9a-f]+$/ || length(h) < 7 || length(h) > 40) next
       t[q] = "waiver"
     }
@@ -2602,9 +2462,11 @@ _eg_reading_gaps() {
         else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
       }
     }'
-  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] \
-     && declare -F proof_debts_open >/dev/null 2>&1; then
-    printf '%s\n' "$SECTION" | proof_debts_open "$BIONIC_DEBTS_OPEN"
+  # The proofs that clear a debt are the run's, read through the kept fold from the plan whose record is read (a dry
+  # copy names none), and so are the approvals, each as an `approved: <name> by <who> <at>` line.
+  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] && declare -F proof_debts_open >/dev/null 2>&1; then
+    f="$(proof_approval_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}" && proof_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}")" || { printf 'unreadable\n'; return 0; }
+    printf '%s\n' "$f" | proof_debts_open "$BIONIC_DEBTS_OPEN"
   fi
 }
 
@@ -2644,15 +2506,15 @@ Fix: register each review with 'session-poker.sh proof-add review <record> --que
   refuse exit2 commit "$(eg_review_unanswered_fact)" "record or waive each review" "$_eg_detail"
 }
 
-# THE FLOOR IS OWED A PROOF LINE FROM STEP 7 (wave-35 T31; D20, A-orch-50). Step 5 owes no floor key
-# (validate_tests_block); the floor's whole run is Step 6's last act, and from `current: 7` a plan whose
+# THE FLOOR IS OWED A PROOF LINE FROM STEP 7. Step 5 owes no floor key;
+# the floor's whole run is Step 6's last act, and from `current: 7` a plan whose
 # regression is `yes` (lib/run.sh `plan_regression`: any value but `no`) is refused while its section holds
 # no `proved: kind=floor` line at all: the judge's `absent` (lib/proof.sh `facts_state`; `proof_state`
 # says "no regression proof on this plan yet"). THE JUDGE'S OWN READER decides it (wave-35 T38; critic-structure-3,
 # debt `unpinned-pair floor-absent`): lib/proof.sh `proof_floor_absent`, which proof_state and facts_state ask before
 # the floor judge, so the wall and the judge read one plan's floor line one way (FL-5 drives both). THE PLAN'S LINES
-# ARE lib/run.sh `plan_lines`'s, the one plan line reader, CR translated, which that reader reads through (wave-36
-# T12; D13, AC-7.5; C34): a CR-only plan's floor line is a line to this arm and the judge alike (FL-5-cr), where a
+# ARE lib/run.sh `plan_lines`'s, the one plan line reader, a lone CR made a newline, which that reader reads through:
+# a CR-only plan's floor line is a line to this arm and the judge alike, where a
 # raw read had refused it here as absent while the gate's own parse read the plan's steps. `plan_regression`
 # reads the frontmatter through the same translation.
 # A PREDICATE OVER TEXT, as `_eg_reading_gaps` is: whether
@@ -2668,8 +2530,8 @@ _eg_refuse_floor_absent() {
   ! declare -F units_order >/dev/null 2>&1 || ! units_order "$PLAN" >/dev/null 2>&1 || from=6
   [ "${CURRENT%[ab]}" -ge "$from" ] 2>/dev/null || return 0
   if declare -F proof_floor_absent >/dev/null 2>&1; then
-    why="$(proof_floor_absent "$PLAN")" || return 0
-    why="its section holds no 'proved: kind=regression' line: ${why} (the judge's regression absent)"
+    why="$(proof_floor_absent "$(proof_run_plan "$PLAN")")" || return 0
+    why="the run holds no regression proof: ${why} (the judge's regression absent)"
   else
     why="the regression's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
   fi
@@ -2677,46 +2539,6 @@ _eg_refuse_floor_absent() {
 Plan: $PLAN
 Fix: run the whole run with 'session-poker.sh regression-run' and record its log with 'session-poker.sh proof-add regression <log>'. Whether that regression is covered, owed or uncovered at the working head is the judge's, asked by 'current 7' and 'current 8'."
   refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add regression" "$_eg_detail"
-}
-
-# ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
-#
-# ONE LINE PER `## Tasks` ROW, and the refusal says so. The arm used to name ONE id and ask
-# for "a '- <id>:' evidence line"; an author owing eighteen of them learned of the second only
-# after landing the first (wave-16's A-orch-10 is that specimen). So the COUNT and the IDS come
-# from the whole table in one pass.
-#
-# THE LOOKUP IS THE READER'S (wave-21 T5; D4, ADR-037 decision 3). It lived here as
-# `missing_evidence_ids`, a grep over `$SECTION` asked once per row; it is `units_findings` in
-# lib/units.sh now, one program, so the gate and the Patrol tick cannot disagree about whether a
-# row carries its line. What the arm passes below is the reader's answer: the `evidence`
-# findings (a row owes its line at `landed`).
-
-# Refuse for EVERY id named, or return 0 if none is. The id list is printed as the lines the
-# author has to write, so the repair is a copy out of the refusal; it sits LAST so refuse.sh's
-# twelve-line fold (BIONIC_REFUSE_DETAIL_LINES, a ratified bound this does not move) bites the
-# list rather than the instruction above it.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-refuse_missing_evidence_lines() {  # $1 = the T-ids owing a line, one per line (the reader's)
-  local ids count subject verdict
-  ids="$(printf '%s\n' "$1" | awk 'NF')"
-  [ -n "$ids" ] || return 0
-  count=$(printf '%s\n' "$ids" | wc -l | tr -d ' ')
-  if [ "$count" -eq 1 ]; then
-    verdict="1 task has no evidence line"
-    subject="1 '## Tasks' row has"
-  else
-    verdict="${count} tasks have no evidence line"
-    subject="${count} '## Tasks' rows have"
-  fi
-  _eg_detail="canonical-sdlc: ${subject} no '- T<id>:' evidence line in '## SDLC State'.
-Plan: $PLAN
-Fix: add one line per row named below, each recording what proves that row, before committing.
-$(printf '%s\n' "$ids" | sed -E 's/^/- /; s/$/:/')"
-  # THE FIX FIELD IS SIX WORDS AND FORTY COLUMNS (refuse.sh's own self-check, ratified
-  # constants this does not move), so the `## Tasks` half of the rule rides the detail
-  # above rather than the one line: "per row" is the part a committer acts on.
-  refuse exit2 commit "$verdict" "add one '- T<id>:' per row" "$_eg_detail"
 }
 
 # THE RUN'S ROSTERS, as the gate reads them (wave-36 T29; REQ-4 AC-4.1; D10; was this session's
@@ -2760,29 +2582,6 @@ $(printf '%s\n' "$rows" | sed -E 's/^/- /')"
   refuse exit2 commit "$verdict" "write the roster name as agent" "$_eg_detail"
 }
 
-# Extract the ## SDLC State section (from its header up to the next ##
-# header or EOF). Line endings normalized here too (normalize_newlines), for
-# the same reason as FRONTMATTER above. Fence-aware (same idiom as matrix_section): lines inside
-# ``` fenced code blocks are skipped, so a plan documenting the schema in a fenced
-# example — a `## SDLC State` heading with its own `current:` — does not shadow the
-# REAL section (which would mis-parse `current:` and false-
-# block). Fence state is tracked across the whole file so section detection
-# stays fence-aware.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-SECTION=$(normalize_newlines "$PLAN" | awk '
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^## SDLC State/ { flag=1; next }
-  /^## / { flag=0 }
-  flag')
-
-if [ -z "$SECTION" ]; then
-  _eg_detail="canonical-sdlc plan file has an empty '## SDLC State' section.
-Plan: $PLAN
-Fix: populate the section with 'current: N' and per-step evidence lines."
-  refuse exit2 commit "'## SDLC State' is empty" "add current: and the step lines" "$_eg_detail"
-fi
-
 # ================================================== THE TWO STEP-4 ARMS (epic-22 K2)
 #
 # Defined here, directly before `CURRENT` is parsed; the matrix readers they call are at file
@@ -2805,13 +2604,10 @@ k2_step_num() {
 # WHAT `approved` BINDS. Step 3 ends at one approval checkpoint, and until this arm
 # existed the user's word left no trace: a run could be building at Step 4 with nobody
 # able to say whether the plan had ever been ratified, and the only backstop was the
-# Patrol's below-Step-4 fill refusal, which asks a different question. Decision 2 settled
-# the recording — on the user's LITERAL `approved` the orchestrator writes
-#
-#     approved-by: <user> <ISO-UTC> "<verbatim reply>"
-#
-# into `## SDLC State` — and this is the wall that makes its absence cost something.
-# Silence, a question, or a partial reply is never transcribed as approval, so PRESENCE
+# Patrol's below-Step-4 fill refusal, which asks a different question. On the user's
+# LITERAL `approved` the approve verb appends an approval of step3, with the git user and
+# the reply as given, to the run's log, and this is the wall that makes its absence cost
+# something. Silence, a question, or a partial reply is never transcribed as approval, so PRESENCE
 # is the whole check: nothing here grades the quote, and nothing here can tell a
 # transcription from an invention. What it can tell is that nobody wrote one down.
 #
@@ -2819,23 +2615,21 @@ k2_step_num() {
 # is authored, and the approval is asked for at the END of Step 3 — a wall there would
 # refuse the very commit that writes the plan the user is about to approve.
 #
-# DURABLE FROM 4 ONWARD, the same shape the matrix prefix check has: deleting the line at
-# Step 6 loses the same fact it would have lost at Step 4.
+# DURABLE FROM 4 ONWARD, the same shape the matrix prefix check has: a run at Step 6 owes
+# the same approval it owed at Step 4.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_approved_by() {
-  local step approved
+  local step
+  local rc=0
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
-
-  approved=$(echo "$SECTION" | grep -E '^[[:space:]]*approved-by[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*approved-by[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-  [ -n "$approved" ] && return 0
-
-  _eg_detail="canonical-sdlc step ${CURRENT} — '## SDLC State' carries no 'approved-by:' line; the Step-3 approval is what admits Step 4.
+  _proof_ask "$PLAN" reader_q_approved "$PLAN" step3 >/dev/null || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  [ "$rc" -eq 1 ] || _eg_v15_unreadable
+  refuse exit2 commit "the log holds no Step-3 approval" "record the literal approval" "canonical-sdlc step ${CURRENT} — the run's log holds no approval of step3; the Step-3 approval is what admits Step 4.
 Plan: $PLAN
-Fix: on the user's literal 'approved', record 'approved-by: <user> <ISO-UTC> \"<verbatim reply>\"' under '## SDLC State' — never on silence, a question, or a partial reply."
-  refuse exit2 commit "'## SDLC State' has no 'approved-by:' line" "record the literal approval" "$_eg_detail"
+Fix: on the user's literal 'approved', record that approval of step3 — never on silence, a question, or a partial reply."
 }
 
 # ---------- the fails-when arm (AC-K2.3, AC-K2.5) ----------
@@ -2847,62 +2641,22 @@ Fix: on the user's literal 'approved', record 'approved-by: <user> <ISO-UTC> \"<
 # into the plan's matrix at Step 3. By Step 4 every AC block has one, or a step was
 # skipped; so this arm is the receipt for that authoring order rather than a new demand.
 #
-# IT JUDGES BLOCKS, NOT ROWS. A matrix row with no AC block underneath it is not a
-# fails-when finding: there is no block to lack the key, and the per-tier evidence loop
-# at the Verify gate is what owns that gap. Nor does a plan with no `## Verification
-# Matrix` at all become one — a Step-4 plan may not have written the section yet, and
+# IT JUDGES EVAL DESIGN ROWS. A criterion with no `## Eval design` row is not a
+# fails-when finding: there is no row to lack the cell, and the per-tier evidence loop
+# at the Verify gate is what owns that gap. Nor does a plan with no `## Eval design`
+# at all become one — a Step-4 plan may not have written the section yet, and
 # demanding it here would be the Verify gate's demand moved four steps early.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_fails_when() {
-  local step rows ac
+  local step ac
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
-
-  MATRIX=$(matrix_section)
-  [ -n "$MATRIX" ] || return 0
-  rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
-  [ -n "$rows" ] || return 0
-
-  # ONE PASS, NOT SIX PROCESSES A ROW (wave-24 T15; REQ-9 AC-9.7). The walk used to fork an
-  # awk for the row's AC, `matrix_block` for its block, and grep|head|sed|sed for the key — 240
-  # processes and half a second on a 40-row matrix, paid by every commit from Step 4 on and by
-  # every plan-row verb's dry commit. The awk below is the same walk, rule for rule: the table
-  # rows in order, the separator and the `AC` header skipped, the AC as the cell between the
-  # first two pipes; its block as `matrix_block` reads it (every header line whose bullet-
-  # stripped text begins `<AC>:`, then the lines under it until a line that is not indented);
-  # a block with no non-empty line is no block; and the FIRST `fails-when:` line of the block
-  # is the one judged, empty after its key or not. It prints the first AC that fails.
-  ac=$(printf '%s\n' "$MATRIX" | awk '
-    { L[++n] = $0 }
-    END {
-      for (i = 1; i <= n; i++) {
-        line = L[i]
-        if (line !~ /^[[:space:]]*\|/) continue
-        if (line ~ /^[[:space:]]*\|[-|:[:space:]]*$/) continue
-        split(line, c, "|"); ac = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", ac)
-        if (ac == "AC" || ac == "") continue
-        if (ac in ok) continue
-        key = ac ":"; f = 0; body = 0; seen = 0; fw = ""
-        for (j = 1; j <= n; j++) {
-          hdr = L[j]; sub(/^[-*+][[:space:]]+/, "", hdr)
-          if (index(hdr, key) == 1) { f = 1; continue }
-          if (L[j] ~ /^[^[:space:]]/) f = 0
-          if (!f) continue
-          if (L[j] != "") body = 1
-          if (!seen && L[j] ~ /^[[:space:]]*fails-when[[:space:]]*:/) {
-            seen = 1; fw = L[j]
-            sub(/^[[:space:]]*fails-when[[:space:]]*:[[:space:]]*/, "", fw); sub(/[[:space:]]+$/, "", fw)
-          }
-        }
-        if (!body || fw != "") { ok[ac] = 1; continue }
-        print ac; exit
-      }
-    }')
+  ac="$(matrix_fails_when_missing "$PLAN")"
   [ -n "$ac" ] || return 0
-  _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
+  _eg_detail="canonical-sdlc step ${CURRENT} — criterion '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
 Plan: $PLAN
-Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${ac}:' block — it is authored in the spec's '## Eval design' and rendered here."
+Fix: write the planted defect this eval must go red on in the criterion's '## Eval design' Fails when cell."
   refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
   return 0
 }
@@ -2927,9 +2681,11 @@ Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${a
 #
 # INERT BELOW STEP 4, same reasoning as the two arms above: the Tasks table and the
 # Verification Matrix are both Step-3 artifacts, not necessarily complete before then.
+# Each criterion's task is asked of the plan's one reader (lib/plan-read.sh `plan_read_criterion_task`): the task its
+# criteria table names in its Task column.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_prototype_no_matrix_row() {
-  local step task_rows proto_ids line id rows ac block_txt ac_task n
+  local step task_rows proto_ids line id ac ac_task n fix
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
@@ -2948,30 +2704,19 @@ validate_prototype_no_matrix_row() {
   done <<< "$task_rows"
   [ -n "$proto_ids" ] || return 0
 
-  MATRIX=$(matrix_section)
-  [ -n "$MATRIX" ] || return 0
-  rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
-  [ -n "$rows" ] || return 0
-
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
-    ac=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    [ "$ac" = "AC" ] && continue
-    [ -n "$ac" ] || continue
-    block_txt=$(matrix_block "$ac")
-    [ -n "$block_txt" ] || continue
-    ac_task=$(echo "$block_txt" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    [ -n "$ac_task" ] || continue
+  while IFS=$'\t' read -r ac ac_task; do
+    [ -n "$ac" ] && [ -n "$ac_task" ] || continue
     for n in $proto_ids; do
       [ "$ac_task" = "$n" ] || continue
+      fix="repoint the Task cell of '${ac}' in '## Eval design'"
       _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names 'task: ${ac_task}', a 'kind: prototype' row in '## Tasks'; a prototype ships nothing and never discharges a matrix row.
 Plan: $PLAN
-Fix: remove the '${ac}:' block, or repoint its 'task:' to the build task that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
+Fix: ${fix} to the build task that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
       refuse exit2 commit "that row's task ships nothing" "point it at a shipping task" "$_eg_detail"
     done
-  done <<< "$rows"
+  done <<PROTO_TASKS
+$(plan_read_criterion_task "$PLAN" 2>/dev/null)
+PROTO_TASKS
   return 0
 }
 
@@ -2990,9 +2735,11 @@ _eg_commit_repo() {
 # about to run. After ≤ before passes without a word, whichever files moved, so growth paid for
 # elsewhere in the set is no growth. After > before is refused, naming the bytes added and each
 # file that grew, unless all three hold: the committing tree's `## Tasks` row (`_EG_RID`, set by the
-# worktree fork above) is open, its reads cell holds `approval:doctrine-growth`, and `## SDLC State`
-# carries the `approved: doctrine-growth …` line `session-poker.sh approve` writes. A commit no row
+# worktree fork above) is open, it waits on `approval:doctrine-growth`, and the run holds the
+# approval of doctrine-growth `session-poker.sh approve` gives, as the reader answers it. A commit no row
 # owns (the main checkout) has no row to read, so its growth is always refused.
+# WHAT A ROW WAITS ON IS THE PLAN'S ONE READER'S (lib/plan-read.sh `plan_read_waits`): its deps cell, the cell
+# the refusal names for the person to edit.
 #
 # NO STEP GUARD, AND THAT IS THE POINT. The rule holds at every numeric `current:`, so the arm sits
 # with the three that run before the pointer-step exit; a writer's commit reaches it through the
@@ -3009,8 +2756,8 @@ _eg_commit_repo() {
 # Refusing those spellings is a different wall's job.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_net_zero() {
-  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a reads="" tok row_reads=0 lacks="" fix_id fix_cell base=HEAD
-  local -a dirs=() toks=()
+  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a written="" row_waits=0 lacks="" fix_id fix_cell base=HEAD
+  local -a dirs=()
   _eg_commit_repo; dir="$_EG_REPO"
   # A MERGE IN A ROW'S TREE IS MEASURED AGAINST THE PARENT THAT IS NOT THE ROW'S OWN (wave-33 T15, D10). A row's tree
   # that merges the working branch in commits that branch's content on top of its own, and growth already landed there
@@ -3049,57 +2796,55 @@ validate_net_zero() {
   ${path}: ${b} B → ${a} B (+$((a - b)) B)"
   done < <(printf '%s\n' "$sums" | awk -F'\t' '$1 == "1"')
 
-  # THE APPROVAL: the row, its read, and the line. Each missing part is named.
+  # THE APPROVAL: the row, its wait, and the approval. Each missing part is named.
   if [ -n "${_EG_RID:-}" ]; then
     while IFS= read -r line; do
       [ "${line%%$'\t'*}" = "$_EG_RID" ] || continue
-      reads="$(units_field "$line" reads)"; break
+      written="$(units_field "$line" deps)"; break
     done < <(units_rows "$PLAN" 2>/dev/null)
-    if [ -n "$reads" ]; then
-      IFS=',' read -ra toks <<< "$reads"
-      for tok in "${toks[@]}"; do
-        tok="${tok#"${tok%%[![:space:]]*}"}"; tok="${tok%"${tok##*[![:space:]]}"}"; tok="${tok#live:}"
-        [ "$tok" = "approval:doctrine-growth" ] && row_reads=1
-      done
-    fi
+    case $'\n'"$(plan_read_waits "$PLAN" "$_EG_RID" 2>/dev/null)"$'\n' in
+      *$'\n'"${_EG_RID}"$'\t'wait$'\t'approval:doctrine-growth$'\n'*) row_waits=1 ;;
+    esac
     case "${_EG_RSTATUS:-}" in
-      pending|active) [ "$row_reads" = 1 ] || lacks="row ${_EG_RID} does not read approval:doctrine-growth" ;;
+      pending|active) [ "$row_waits" = 1 ] || lacks="row ${_EG_RID} does not wait on approval:doctrine-growth" ;;
       *) lacks="row ${_EG_RID} is ${_EG_RSTATUS:-without a status}, not open" ;;
     esac
   else
-    lacks="no '## Tasks' row owns the tree this commit is made in, so no row can read the approval"
+    lacks="no '## Tasks' row owns the tree this commit is made in, so no row can wait on the approval"
   fi
-  if ! printf '%s\n' "$SECTION" | awk '{ l = $0; sub(/^[ \t]*-?[ \t]*/, "", l) }
-      l ~ /^approved[ \t]*:/ { v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
-                               if (aw[1] == "doctrine-growth") f = 1 }
-      END { exit !f }'; then
-    lacks="${lacks:+$lacks; }'## SDLC State' carries no 'approved: doctrine-growth' line"
-  fi
+  _proof_ask "$PLAN" reader_q_approved "$PLAN" doctrine-growth >/dev/null
+  case $? in
+    0) ;;
+    1) lacks="${lacks:+$lacks; }the run holds no approval of doctrine-growth" ;;
+    *) lacks="${lacks:+$lacks; }the run's facts could not be read, so no approval of doctrine-growth is known" ;;
+  esac
   [ -n "$lacks" ] || return 0
 
-  fix_id="${_EG_RID:-<id>}"; fix_cell="<cell>"
-  [ -n "${_EG_RID:-}" ] && [ -n "$reads" ] && [ "$reads" != "—" ] && fix_cell="$reads"
+  # What a row's kind implies is never written, so an empty deps cell takes the approval alone.
+  fix_id="${_EG_RID:-<id>}"; fix_cell="<cell>, "
+  [ -n "${_EG_RID:-}" ] && fix_cell=""
+  [ -n "${_EG_RID:-}" ] && [ -n "$written" ] && [ "$written" != "—" ] && fix_cell="$written, "
   # THE ONE LINE HOLDS 100 COLUMNS (lib/refuse.sh): the delta and each grown file's last two path
   # segments when they fit, else the delta and the count; the detail names every path in full.
   fact="loaded set grows +${delta} B: ${short}"
   [ "${#fact}" -le 39 ] || fact="loaded set grows +${delta} B, ${n} files"
   _eg_detail="canonical-sdlc — the staged change grows the loaded set by +${delta} B (${before} B at HEAD, ${after} B staged) in ${files}; the doctrine is net zero.
 Not admitted: ${lacks}.
-Fix: pay for it with a removal in the set, or, on the user's word, commit it from a row's tree whose row reads the approval:
-  session-poker.sh task-set ${fix_id} reads=${fix_cell}, approval:doctrine-growth
+Fix: pay for it with a removal in the set, or, on the user's word, commit it from a row's tree whose row waits on the approval:
+  edit the deps cell of ${fix_id} in the plan to: ${fix_cell}approval:doctrine-growth
   session-poker.sh approve doctrine-growth '<reply>'
 Plan: $PLAN
 Grew:${grown}"
   refuse exit2 commit "$fact" "approve doctrine-growth or shrink" "$_eg_detail"
 }
 
-# Parse current step. Accepts integers (1-13) and the 8b adversarial
-# critic step.
-CURRENT=$(echo "$SECTION" \
-          | grep -E '^[[:space:]]*current[[:space:]]*:' \
-          | head -1 \
-          | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-          | tr -d '[:space:]')
+# The step is the run's newest step event: an integer, or 8b, the adversarial critic's step.
+_eg_step="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+CURRENT="$(sed -n 's/^n=//p' <<< "$_eg_step")"
+[ -n "$CURRENT" ] || refuse exit2 commit "the run's log holds no step" "record the run's step" \
+"canonical-sdlc plan at version 15: the run's log holds no step event, so the step this commit is judged at is not known.
+Plan: $PLAN
+Fix: record the run's step in its log before committing."
 
 # THE VALUE THE PLAN DECLARED, kept before anything substitutes a subject (wave-18
 # REQ-1, D1). One arm below replaces `CURRENT` for the length of one commit, with a row's
@@ -3108,24 +2853,20 @@ CURRENT=$(echo "$SECTION" \
 _EG_DECLARED_CURRENT="$CURRENT"
 
 if [ -z "$CURRENT" ] || ! grep -qE '^[0-9]+[ab]?$' <<< "$CURRENT"; then
-  # ONE LEDGER SHAPE (wave-31 D2): `current:` is a step number at every scale. A value that is not
-  # one, `T<n>` from the retired task-scale shape among them, is named and refused, never judged
-  # by a second set of arms; the words are the readers' (session-poker.sh launch-sync).
-  _eg_why=""
-  [ -z "$CURRENT" ] || _eg_why=": current: ${CURRENT} is not numeric; a plan in the retired task-scale shape is refused, not skipped"
-  _eg_detail="canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line${_eg_why}.
+  # A step is a number at every scale, and the current verb writes no other. A step event that holds anything else was
+  # written by hand; it is named and refused, never judged by a second set of arms.
+  _eg_detail="canonical-sdlc plan at version 15: the run's newest step event reads '${CURRENT}', which is not a step number.
 Plan: $PLAN
-Fix: add a line like 'current: 5' (or 'current: 8b') before committing."
-  refuse exit2 commit "'## SDLC State' has no valid 'current:' line" "add a 'current: N' line" "$_eg_detail"
+Fix: record the run's step with session-poker.sh current <N> (a number, or 8b) before committing."
+  refuse exit2 commit "the run's newest step is not a number" "session-poker.sh current <N>" "$_eg_detail"
 fi
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8): no open run, nothing to gate ----------
 #
-# The plan is now known to be well-formed — it carries an unfenced `## SDLC State`
-# and a `current:` this gate recognises. Whether there is a RUN is a different
-# question, and it is the one every always-on hook asks before doing its own work:
-# `active_run` is true while `current:` is below 9, or 9 with no `delivered:` Step-9
-# line, and the plan carries no `abandoned:` frontmatter line.
+# The run is now known to stand at a step this gate recognises. Whether there is a
+# RUN is a different question, and it is the one every always-on hook asks before
+# doing its own work: `active_run` is true while the run's log holds a step of 9 or
+# below that is open: not delivered and not abandoned.
 #
 # IT SITS HERE AND NOT EARLIER, and the order is the whole point. Everything above
 # is the gate's judgment about the PLAN — a misplaced plan, a malformed `current:`,
@@ -3325,14 +3066,13 @@ _eg_git_wt_name() {
 }
 
 # _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step><TAB><status><TAB><kind>" for
-# the ONE `## Tasks` row
-# whose `worktree` cell names that tree, and _EG_ROW_DUP to the ids when more than one does.
-# Returns 1 for "this plan has no register", 3 for "the register is ambiguous", 0 otherwise.
+# the ONE row whose latest tree event in the run's log names that tree, and _EG_ROW_DUP to the
+# ids when more than one does. Returns 3 for "the register is ambiguous", 0 otherwise.
 #
-# THE CELL IS COMPARED BY BASENAME on the row's side, so a plan that spells the tree as a
-# path (`.worktrees/14-T3`) or as its branch (`wt/14-T3`) still resolves to the tree git
-# named `14-T3`. The comparison is never loosened on the DERIVED side: that value is git's
-# own, and matching it loosely is how a commit reaches another task's step.
+# THE TREE IS COMPARED BY BASENAME on the row's side, so a tree event spelling the tree as a
+# path (`.worktrees/14-T3`) still resolves to the tree git named `14-T3`. The comparison is
+# never loosened on the DERIVED side: that value is git's own, and matching it loosely is how
+# a commit reaches another task's step.
 #
 # AND THAT LOOSENING IS EXACTLY WHY A COLLISION IS POSSIBLE (correctness F4, wave-14 T24).
 # `wt/14-T6` and `.worktrees/14-T6` are different cells with one basename, the spec's domain
@@ -3347,61 +3087,35 @@ _eg_git_wt_name() {
 # IT ASSIGNS RATHER THAN PRINTS for the reason `_eg_commit_cwd` does: the collision is a
 # second answer, and a command substitution would strand it in a subshell.
 _eg_row_for_worktree() {
-  local _want="${1:-}" _rows _line _cell _id _step _status _kind _nocase _same
+  local _want="${1:-}"
   _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
   [ -n "$_want" ] || return 0
-  _rows="$(units_rows "$PLAN")" || return 1
-  [ -n "$_rows" ] || return 0
-  # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14; both sides
-  # T50, T47's regression RED): that function folds both sides and this one now does too, for
-  # the reason case-folding always needs both sides folded — `$_want` is the literal
-  # basename git gave the tree, and that basename carries the tree's REAL case (a real
-  # dispatch tree is always `<NN>-T<n>`, capital T), while the cell is authored text that
-  # can drift in case either direction. Folding only the cell does not make the compare
-  # case-insensitive; it makes it fail on every mixed-case tree, including an EXACT match,
-  # because a lowercased cell can never equal an unlowercased `$_want`. Both walls must
-  # fold the same way to keep one plan from giving two answers for which row owns a tree.
-  # FOLDED BY THE SHELL, NOT BY `tr` (wave-34 T11, D19): `nocasematch` around the one compare
-  # is the same both-sides fold with no process per row, and it is restored at once.
-  shopt -q nocasematch && _nocase=1 || _nocase=0
-  while IFS= read -r _line; do
-    [ -n "$_line" ] || continue
-    units_field_v _cell "$_line" worktree
-    [ -n "$_cell" ] || continue
-    _cell="${_cell%/}"
-    shopt -s nocasematch
-    [[ "${_cell##*/}" == "$_want" ]]; _same=$?
-    [ "$_nocase" = 1 ] || shopt -u nocasematch
-    [ "$_same" = 0 ] || continue
-    units_field_v _id "$_line" id
-    if [ -z "$_EG_ROW" ]; then
-      # THREE CELLS, TAB-SEPARATED: id, step, status (wave-17 REQ-1, D1, ADR-031). The
-      # status cell has been validated since wave-11 and read by nothing; it is what says
-      # whether a commit out of this tree discharges the obligations of the TASK or of the
-      # RUN, and the fork below cannot ask that question of a value it was never handed.
-      # One more cell of a table this function already parses — no new fact is fetched
-      # (the D11 freeze, .claude/rules/hook-authoring.md).
-      # AND A FOURTH, THE KIND (wave-20 REQ-5, Δ6). A row ahead of the run is judged by its
-      # task arms when a writer is at work in it — unless it is a gate act (`integrate`,
-      # `close`), whose commit must wait for the run to reach its step — so the fork needs
-      # the row's kind as well as its status.
-      units_field_v _step "$_line" step; units_field_v _status "$_line" status
-      units_field_v _kind "$_line" kind
-      _EG_ROW="$_id	$_step	$_status	$_kind"
-      _EG_ROW_DUP="$_id"
-    else
-      _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
-      _EG_ROW_COLLIDED=1
-    fi
-  done <<< "$_rows"
-  if [ "${_EG_ROW_COLLIDED:-0}" = 1 ]; then
-    _EG_ROW=""
-    return 3
-  fi
-  _EG_ROW_DUP=""
-  return 0
+  # A tree is the row's latest tree event in the run's log.
+  _eg_v15_row_for_tree "$_want"
 }
 
+# At 15 a tree is the row's latest tree event; a row in flight (any state between its dispatch and its
+# landing) is what the table's `active` was. Two rows naming one tree collide as they do in the table.
+_eg_v15_tree_rows() {  # <plan> <tree name> -> the rows whose latest tree it is, comma-joined; asked through _proof_ask
+  local f
+  f="$(reader_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' -v w="$2" "$_READER_AWK"'
+    ev() == "tree" { p = line_kv("path"); sub(/\/$/, "", p); n = split(p, q, "/"); r = line_kv("row")
+      if (tolower(q[n]) == tolower(w)) { if (!(r in s)) o[++k] = r; s[r] = 1 } else if (r in s) delete s[r] }
+    END { for (i = 1; i <= k; i++) if (o[i] in s) printf "%s%s", (c++ ? ", " : ""), o[i] }'
+}
+_eg_v15_row_for_tree() {  # <tree name> -> _EG_ROW / _EG_ROW_DUP as _eg_row_for_worktree sets them
+  local ids id st cells  # a tree whose row the plan lacks names no row, as in the table
+  ids="$(_proof_ask "$PLAN" _eg_v15_tree_rows "$PLAN" "$1")" || _eg_v15_unreadable
+  [ -n "$ids" ] || return 0
+  case "$ids" in *,*) _EG_ROW_DUP="$ids"; _EG_ROW_COLLIDED=1; return 3 ;; esac
+  id="$ids"
+  st="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$id")" || { [ $? -eq 1 ] && return 0; _eg_v15_unreadable; }
+  st="$(sed -n 's/^state=//p' <<< "$st")"
+  case "$st" in dispatched|candidate|ready|returned|stalled) st=active ;; esac
+  cells="$(plan_read_row "$PLAN" Tasks id "$id")" || return 0
+  _EG_ROW="$id	$(sed -n 's/^step=//p' <<< "$cells")	$st	$(sed -n 's/^kind=//p' <<< "$cells")"
+}
 _EG_WT=""
 _EG_SUBSTITUTED=0    # set by BOTH substitution forks below (step-below, active-status); read at the pointer-step exit (D7)
 # _EG_CWD and _EG_CWD_SRC were set by `_eg_commit_cwd` at the jurisdiction arm, above the plan read
@@ -3471,17 +3185,6 @@ if [ -n "$_EG_WT" ]; then
   if [ "$_EG_REG" -eq 3 ]; then
     printf 'evidence-gate: worktree %s is named by more than one ## Tasks row (%s) — judging at current: %s\n' \
       "$_EG_WT" "$_EG_ROW_DUP" "$CURRENT" >&2
-  elif [ "$_EG_REG" -eq 0 ] && [ -z "$_EG_ROW" ]; then
-    # AC-3.2: "no row names this tree" and "this table has no `worktree` column" are two
-    # different facts and the lead-in used to print the first for both. `units_field <row>
-    # worktree` reads slot 11, which a header without the column leaves EMPTY on every row,
-    # so the loop above skipped every row and landed here — on a table that never claimed
-    # to track trees (research R2 row 6a). `units_has_column` is the discriminator, and the
-    # shape fault prints instead, from plan_bring_forward or from units_validate's own arm.
-    if units_has_column "$PLAN" worktree; then
-      printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
-        "$_EG_WT" "$CURRENT" >&2
-    fi
   elif [ -n "$_EG_ROW" ]; then
     _EG_RID="${_EG_ROW%%	*}"
     _EG_RSTEP="${_EG_ROW#*	}"
@@ -3555,8 +3258,7 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # the arms it owes are the task arms.
           #
           # WHY THAT IS SPELLED `CURRENT=4` AND NOT A SECOND ARM TABLE. The task arms
-          # already have a home: `dispatch`'s `4)` case is `shape_block worktree base-sha
-          # branch`, and the matrix `fails-when:` presence arm runs for every commit at
+          # already have a home: Step 4's ask of the branch and base, and the matrix `fails-when:` presence arm runs for every commit at
           # step ≥ 4 regardless. Step 4 IS the arm set a task owes, so naming it is the
           # whole implementation — a parallel dispatcher would be a second place to keep in
           # step with the first. The run's arms (the regression block, the walk artifact, the
@@ -3591,7 +3293,7 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # Step 4 is on POINTER_STEPS, so without this flag the pointer exit a few hundred
           # lines below took `exit 0` on the step this line just substituted — unless the
           # frontmatter happened to say `use_worktree: true`. The one arm the substitution
-          # exists to reach, `shape_block worktree base-sha branch`, was therefore skipped on
+          # exists to reach, Step 4's branch and base, was therefore skipped on
           # every `use_worktree: false` plan and the note above promised arms that never ran.
           # The fork owns the arms it announces. THIS IS THE SAME RULE THE step-below ARM
           # ABOVE NOW CARRIES (critic C1): D7 is about "a substituted step", not about which
@@ -3604,190 +3306,83 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
   fi
 fi
 
-# Find the evidence line for the current step: a "Step N:" line, with or
-# without a leading list marker.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-LINE=$(echo "$SECTION" \
-       | grep -E "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${CURRENT}[[:space:]]*:" \
-       | head -1)
+# A STEP'S EVIDENCE AT 15 IS WHAT HAPPENED, asked where it is held. A pointer step owes the approval of the step before it;
+# Step 4 its branch and base, which the header holds; Step 5 the regression's proof (its criteria, walk and auditor are
+# the matrix's and the walk's arms); Step 7 its document, the header's adrs: line naming records that stand or none with
+# a reason; Step 8 the integrate row's landing when the plan holds one and the run is not parked, every tree the log
+# names gone, and what the close cleaned, on its step event; Step 9 its delivery and, when a target is named, the three
+# of a deploy on its step event, which the close writes.
 
-# STEP 6 OWES READINGS, NOT A POINTER (wave-27 T14; D3). A `Step 6:` line naming a review used to
-# be what this step's commits were admitted on; from wave-27 the readings themselves are, judged
-# in `dispatch` (`_eg_refuse_readings`), so at `current: 6` the line is neither demanded nor read
-# here. Every other step keeps its line.
-_EG_STEP_LINE_OWED=1
-[ "$CURRENT" = 6 ] && _EG_STEP_LINE_OWED=0
-
-if [ -z "$LINE" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
-  _eg_detail="canonical-sdlc plan file has no 'Step ${CURRENT}:' line in '## SDLC State'.
-Plan: $PLAN
-Fix: add the evidence artifact for step ${CURRENT} before committing."
-  refuse exit2 commit "the plan has no line for the current step" "add the step's evidence line" "$_eg_detail"
-fi
-
-RAW_VALUE=$(echo "$LINE" | sed -E "s/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${CURRENT}[[:space:]]*:[[:space:]]*//")
-
-# Multi-line form: when the Step line has no inline content, evidence lives on
-# indented continuation lines below. Collect them so the rest of the hook treats
-# `Step N:\n  field: value\n  ...` as non-empty evidence.
-extract_continuation() {
-  local section="$1" step="$2"
-  local sline
-  sline=$(echo "$section" | grep -nE "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${step}[[:space:]]*:" | head -1 | cut -d: -f1)
-  [ -z "$sline" ] && return
-  echo "$section" | awk -v start="$sline" '
-    NR > start {
-      if ($0 ~ /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[ab]?[[:space:]]*:/) exit
-      if ($0 ~ /^[^[:space:]]/) exit
-      if ($0 ~ /^[[:space:]]*$/) next
-      print $0
-    }
-  '
+_eg_v15_approved() {  # <key> -> 0 an approval of <key> stands, 1 none; a fold that fails is refused
+  _proof_ask "$PLAN" reader_q_approved "$PLAN" "$1" >/dev/null
+  case $? in 0) return 0 ;; 1) return 1 ;; *) _eg_v15_unreadable ;; esac
 }
-
-CONTINUATION=$(extract_continuation "$SECTION" "$CURRENT")
-
-# Combined block used for empty/placeholder/shape checks.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-BLOCK=$RAW_VALUE
-if [ -n "$CONTINUATION" ]; then
-  BLOCK="${BLOCK}
-${CONTINUATION}"
-fi
-BLOCK_STRIPPED=$(echo "$BLOCK" | tr -d '[:space:]')
-
-if [ -z "$BLOCK_STRIPPED" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
-  _eg_detail="canonical-sdlc step ${CURRENT} evidence line is empty in '## SDLC State'.
-Plan: $PLAN
-Fix: record the evidence artifact (commit SHA, path, link) for step ${CURRENT} before committing."
-  refuse exit2 commit "this step's evidence line is empty" "record the step's evidence" "$_eg_detail"
-fi
-
-# R7 intent-scoped Step-5 keys (D14 log-only — see validate_intent_evidence
-# below). A whole-value match against this exact key name exempts the line from
-# the universal placeholder ban; the R7 contract is enforced instead by
-# validate_intent_evidence, which logs a finding but never blocks.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-is_r7_key() {
-  case "$1" in
-    behavior-preservation|compat-matrix|revert-plan|baseline|target|re-measure) return 0 ;;
-    *) return 1 ;;
+_eg_v15_step_asks() {
+  local n="${CURRENT%[ab]}" st v p r miss=""
+  case "$n" in
+    1|2|3) _eg_v15_approved "step$((n - 1))" || _eg_v15_ask "Step $((n - 1))'s approval (the log holds none)" ;;
+    4) [ -n "$(frontmatter_get working-branch)" ] && [ -n "$(frontmatter_get base-sha)" ] \
+         || _eg_v15_ask "Step 4's branch and base: the header's working-branch: and base-sha:" ;;
+    5) [ "$(plan_regression "$PLAN")" = no ] || [ -n "$(_proof_last_read "$(proof_run_plan "$PLAN")" regression head)" ] \
+         || _eg_v15_ask "Step 5's regression: a proof of the whole run (proof-add regression)" ;;
+    7) v="$(frontmatter_get adrs)"
+       case "$v" in
+         none|'none '|'') miss=1 ;;
+         none*) : ;;
+         *) for p in $(printf '%s' "$v" | tr ',' ' '); do [ -f "$DOCS_ROOT/$p" ] || [ -f "$BIONIC_ROOT/$p" ] || miss=1; done ;;
+       esac
+       [ -z "$miss" ] || _eg_v15_ask "Step 7's document: the header's adrs: naming records that stand, or none with its reason" ;;
+    8) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+       for r in $(plan_read_rows "$PLAN" Tasks 2>/dev/null | awk -F'\t' '{ id = ""; k = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^id=/) id = substr($i, 4); if ($i ~ /^kind=/) k = substr($i, 6) } if (k == "integrate") print id }'); do
+         miss="${miss:-1}"; v="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$r")"; [ "${v#*state=landed}" = "$v" ] || miss=0
+       done
+       ! plan_parked_why "$PLAN" >/dev/null 2>&1 || miss=0
+       [ "${miss:-0}" = 0 ] || _eg_v15_ask "Step 8's merge: the integrate row's landing"
+       v="$(_proof_ask "$PLAN" _eg_v15_trees "$PLAN")" || _eg_v15_unreadable
+       for p in $v; do [ ! -e "$BIONIC_ROOT/$p" ] || _eg_v15_ask "Step 8's trees: $p still stands"; done
+       case "$st" in *$'\ncleanup=n/a'*) : ;;
+         *$'\ncleanup='*$'\ntmp-wiped='*$'\ntasks-completed='*) : ;;
+         *) _eg_v15_ask "Step 8's cleanup, tmp-wiped and tasks-completed, given to its step by close-out" ;; esac ;;
+    9) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+       case "$st" in *state=delivered*) : ;; *) _eg_v15_ask "Step 9's delivery, given to its step by close-out" ;; esac
+       if deploy_target_named; then
+         for v in deployed verified monitored; do case "$st" in *$'\n'"$v="*) : ;; *) miss="${miss:+$miss, }$v" ;; esac; done
+         [ -z "$miss" ] || _eg_v15_ask "Step 9's $miss, given to its step by close-out (deploy_target is named)"
+       fi ;;
   esac
 }
+_eg_v15_trees() {  # <plan> -> each path the run's latest tree events name, one per line; asked through _proof_ask
+  local f; f="$(reader_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "tree" { t[line_kv("row")] = line_kv("path") } END { for (r in t) if (t[r] != "") print t[r] }'
+}
 
-# Placeholder detection. Each line of the block is checked as a whole value:
-# the text after the first ':' on a "key: value" continuation line, or the
-# whole line when it has no colon (the single-line "Step N: <value>" case,
-# which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
-# on colon lines and the unchanged line otherwise.
-[ "$_EG_STEP_LINE_OWED" = 1 ] && while IFS= read -r _bline; do
-  _bkey="${_bline#"${_bline%%[![:space:]]*}"}"
-  case "$_bkey" in *:*) _bkey="${_bkey%%:*}"; _bkey="${_bkey%"${_bkey##*[![:space:]]}"}" ;; esac
-  if is_r7_key "$_bkey"; then
-    continue
-  fi
-  if is_placeholder_value "${_bline#*:}"; then
-    _eg_detail="canonical-sdlc step ${CURRENT} evidence line is a placeholder (\"${BLOCK}\").
-Plan: $PLAN
-Fix: replace with the actual evidence artifact before committing."
-    refuse exit2 commit "this step's evidence line is a placeholder" "replace it with real evidence" "$_eg_detail"
-  fi
-done <<< "$BLOCK"
+_eg_v15_step_asks
 
-# ---------- K5 / AC-K5.2: Step-1 'requirements:' pointer (durable, current: 2+) ----------
+# ---------- the requirements a run is held to, from Step 2 ----------
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
-# K5 fixes three artifacts to three steps (design ledger K5; ADR-001): Step 1 authors
-# the wave's `*.requirements.md`, and the Step-1 evidence line is where that artifact's
-# path is recorded — once, at Step 1, and never revisited. This arm reads THAT line (not
-# the current step's own line) at every commit from current: 2 onward, so a plan cannot
-# progress past Step 1 without a resolving pointer and cannot lose it later — the same
-# durable-prefix shape validate_walk_artifact uses for the Step-5 walk narration (A5).
-# Inert at current: 1 — Step 1 is still being written, and POINTER_STEPS below is what
-# governs Step 1's own commit.
-#
-# SCOPE: rigor:double + multi_agent:true + scale wave|epic — the same guard
-# validate_dispatch_ledger uses (D7) to keep wave-lane machinery that predates a new
-# requirement out of the way of fixtures that are not about it. This suite's shared FM
-# (rigor: single) and frontmatter() (no multi_agent: line, so MULTI_AGENT reads empty)
-# are both guaranteed no-ops under this guard by the same construction the D7 comment
-# documents; only a fixture that opts in — this wave's own plan among them (rigor:
-# double, multi_agent: true) — exercises it. Judgment call recorded because AC-K5.2's
-# text names no such guard; the alternative (firing on every wave/epic plan regardless of
-# rigor) blocked 170/316 of this suite's pre-existing cases on first RED and is not what
-# "touch only your own span" can mean here.
-step1_evidence_block() {
-  local line raw cont
-  line=$(echo "$SECTION" | grep -E '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:' | head -1)
-  [ -n "$line" ] || return 0
-  raw=$(echo "$line" | sed -E 's/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:[[:space:]]*//')
-  cont=$(extract_continuation "$SECTION" "1")
-  printf '%s\n%s\n' "$raw" "$cont"
-}
-
-# Resolution mirrors resolve_walk_path: absolute stands, a `specs/` leader is
-# docs-root-relative (the form K5's layout names — requirements live beside the spec
-# under specs/epic-NN-<slug>/), anything else is project-relative.
-resolve_requirements_path() {  # $1 = raw requirements: value
-  case "$1" in
-    /*)      printf '%s\n' "$1" ;;
-    specs/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
-    *)       printf '%s/%s\n' "$BIONIC_ROOT" "$1" ;;
-  esac
-}
-
+# Step 1 authors the wave's `*.requirements.md` under specs/<epic>/, and the header's epic:
+# and wave: name it. An epic has no wave and no requirements file: its Steps 1 and 2 write
+# specs/<epic>/epic.spec.md, which the header's epic: names. From current: 2 a plan whose named
+# file is not on disk owes it, so a run cannot pass Step 1 without the file and cannot lose it
+# later. SCOPE: rigor double, multi_agent true and scale wave or epic, the guard
+# validate_dispatch_ledger uses.
 validate_requirements_pointer() {
-  local current_num b1 raw abs
+  local current_num raw
   case "$SCALE" in wave|epic) : ;; *) return 0 ;; esac
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
   current_num=$(echo "$CURRENT" | sed -E 's/[ab]$//')
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
-
-  b1=$(step1_evidence_block)
-  # ANYWHERE ON THE LINE (AC-3.3, seed B B11). The Step-1 evidence is a semicolon-separated
-  # record and the pointer is rarely its first field; see evidence_line_field's docblock for why the
-  # old line-start anchor refused a plan that named its requirements perfectly well.
-  raw=$(evidence_line_field "$b1" requirements)
-  if [ -z "$raw" ]; then
-    _eg_detail="canonical-sdlc step ${CURRENT} — the Step 1 evidence has no 'requirements:' field.
-Plan: $PLAN
-Fix: add 'requirements: specs/<epic>/<wave>.requirements.md' to the Step 1 line, naming the Step-1 artifact (K5)."
-    refuse exit2 commit "Step 1's evidence names no requirements file" "add a 'requirements:' field" "$_eg_detail"
+  if [ "$SCALE" = epic ]; then
+    raw="specs/$(frontmatter_get epic)/epic.spec.md"
+    case "$raw" in specs//*) raw="the header's epic:, which names its spec" ;; esac
+  else
+    raw="specs/$(frontmatter_get epic)/$(frontmatter_get wave).requirements.md"
+    case "$raw" in specs//*|*/.requirements.md) raw="the header's epic: and wave:, which name them" ;; esac
   fi
-
-  if grep -qE '(^|/)\.\.(/|$)' <<< "$raw"; then
-    _eg_detail="canonical-sdlc step ${CURRENT} — Step 1 'requirements: ${raw}' climbs out with a '..' component.
-Plan: $PLAN
-Fix: name the requirements file relative to the docs root, e.g. 'requirements: specs/<epic>/<wave>.requirements.md'."
-    refuse exit2 commit "the requirements path climbs out with '..'" "name it under the docs root" "$_eg_detail"
-  fi
-  abs=$(resolve_requirements_path "$raw")
-  if [ ! -f "$abs" ]; then
-    _eg_detail="canonical-sdlc step ${CURRENT} — Step 1 'requirements: ${raw}' does not resolve to a real file (resolved to ${abs}).
-Plan: $PLAN
-Fix: write the requirements document at that path (K5 Step-1 artifact) before committing at step ${CURRENT}."
-    refuse exit2 commit "the named requirements file does not exist" "write the requirements file" "$_eg_detail"
-  fi
+  [ -f "$DOCS_ROOT/$raw" ] || _eg_v15_ask "Step 1's requirements: $raw"
   return 0
-}
-
-# ---------- REQ-3 / AC-3.1: the bring-forward arm, ahead of the arms it folds ----------
-#
-# HERE, AND NOT LOWER, because the first arm it summarises is the one on the next line. Every
-# arm below refuses by calling `refuse`, which exits, so a summary written after any of them
-# would only ever be reached by a plan that did not need it.
-#
-# IT SPEAKS ONLY FOR A BODY THAT IS PRE-14 — a `## Tasks` table missing required columns AND
-# at least one version-14 key absent (plan_bring_forward's own trigger). Every other plan
-# falls straight through to the arms below, byte for byte as it does today.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-_eg_bf="$(plan_bring_forward "$PLAN")" || {
-  _eg_detail="canonical-sdlc this plan declares canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION} and its body does not match it:
-${_eg_bf}
-Plan: $PLAN
-Fix: repair every line above in one pass — each is a separate arm that would otherwise refuse the next commit in turn."
-  refuse exit2 commit "this plan's body is not at contract version ${SUPPORTED_SDLC_VERSION}" "bring the plan forward" "$_eg_detail"
 }
 
 validate_requirements_pointer
@@ -3806,162 +3401,10 @@ POINTER_STEPS="1 2 3 4"  # Step 6 must reach dispatch for the matrix prefix chec
 # `current: 4` is a pointer step. Everything between here and the new position is
 # function definitions and nothing else, so no other behaviour moved with it.
 
-# Extract a value for a key from the BLOCK ("key: value" lines or
-# "key: value" appearing on the Step line directly). Returns empty if
-# not found.
-block_get() {
-  local key="$1"
-  echo "$BLOCK" \
-    | grep -E "^[[:space:]]*${key}[[:space:]]*:" \
-    | head -1 \
-    | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" \
-    | sed -E 's/[[:space:]]+$//'
-}
-
-block_has() {
-  grep -qE "^[[:space:]]*$1[[:space:]]*:" <<< "$BLOCK"
-}
-
-block_has_na() {
-  block_has "n/a"
-}
-
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-shape_block() {
-  local missing=()
-  for f in "$@"; do
-    if ! block_has "$f"; then
-      missing+=("$f")
-    fi
-  done
-  if [ "${#missing[@]}" -gt 0 ]; then
-    _eg_detail="canonical-sdlc step ${CURRENT} evidence missing required field(s): ${missing[*]}
-Plan: $PLAN
-Required for step ${CURRENT}: $*
-Fix: rewrite the Step ${CURRENT} block as multi-line YAML-style fields. See canonical-sdlc/SKILL.md \"Evidence (two tiers)\" → verification shape table."
-    refuse exit2 commit "this step's evidence is missing fields" "add the fields the step owes" "$_eg_detail"
-  fi
-}
-
-# ---------- shared per-step validators ----------
-
-# Compose the "canonical-sdlc step <N>" message prefix.
-step_prefix() {
-  echo "canonical-sdlc step $1"
-}
-
-# THE STEP-5 BLOCK OWES NO FLOOR KEYS (wave-35 T31; D20, A-orch-32). Until 1.18.0 this function demanded
-# cmd/pass/total/output/head at `current: 5`, refused unless pass equalled total, and held head: against
-# the release head. The doctrine moved the floor to Step 6's last act and its candidate may be a red
-# whole run (ADR-054), so a run following it could not take Step 5 honestly. The floor is judged by
-# lib/proof.sh `facts_state` at `current 7` and from Step 7 on; the keys may still be written
-# (`floor-run`, `proof-add floor`, `step-field`) and no gate reads them. The walk, the matrix and the
-# auditor are judged by the caller as they always were.
-# AT `regression: no` THE BLOCK STILL OWES THE STEP-0 LINE (wave-31 T27; REQ-12 AC-12.2; D4): the
-# regression is a Step-0 setting (`session-poker.sh regression`), and a plan whose frontmatter reads
-# exactly `regression: no` records who chose it and where the regression runs instead:
-#     regression: no (Step 0, <user>) — <where it runs>
-# with the user and the place each non-empty. Any other value, or none, owes no line here.
-# `regression-override:` is never read.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_tests_block() {
-  local step="$1" rline
-  [ "$step" = 5 ] && [ "$(plan_regression "$PLAN")" = no ] || return 0
-  rline=$(block_get regression)
-  if ! grep -qE '^no \(Step 0, [^)]*[^)[:space:]][^)]*\) — .*[^[:space:]]' <<< "$rline"; then
-    _eg_detail="$(step_prefix "$step") evidence has no Step-0 regression line; the plan reads 'regression: no', so the line records who chose it and where the regression runs (got '${rline:-(none)}').
-Plan: $PLAN
-Fix: add to the Step 5 block the line 'regression: no (Step 0, <user>) — <where it runs>', naming who chose it at Step 0 and where the regression runs instead."
-    refuse exit2 commit "the Step-5 regression: no line is missing" "add the Step-0 regression line" "$_eg_detail"
-  fi
-}
-
-# Document step: adr OR rca OR n/a.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_document_step() {
-  local step="$1" prefix
-  if ! block_has adr && ! block_has rca && ! block_has_na; then
-    prefix=$(step_prefix "$step")
-    _eg_detail="${prefix} evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'.
-Plan: $PLAN"
-    refuse exit2 commit "this step names no adr, rca or n/a" "add adr:, rca: or n/a:" "$_eg_detail"
-  fi
-}
-
-# Integrate & close: merge/worktree-removed always; then the cleanup triple,
-# OR an explicit `cleanup: n/a` marker (cleanup_on_finish=false).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_integrate_step() {
-  local cleanup_val
-  shape_block merge worktree-removed
-  cleanup_val=$(block_get cleanup)
-  case "$cleanup_val" in
-    n/a|n/a:*)
-      : # cleanup_on_finish=false / already-cleaned case (reason optional)
-      ;;
-    *)
-      shape_block cleanup tmp-wiped tasks-completed
-      ;;
-  esac
-}
-
-# Does frontmatter name a LIVE surface this run operates? The default answer
-# is no. `deploy_target` is n/a by default and is never inferred from deploy
-# signals — a target exists only when the user names one — so an absent line,
-# `none`, and `n/a` (with or without a trailing reason) all read as "no live
-# surface". Case-insensitive, matching every other value comparison in this
-# hook.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-deploy_target_named() {
-  case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in
-    ""|none|n/a|n/a:*) return 1 ;;
-    *)                 return 0 ;;
-  esac
-}
-
-# Close-out step (v14 contract, ratified 2026-08-19):
-#
-#   `delivered:` ALWAYS — the terminal state of the work. Step 9's default
-#   endpoint is a PR open and ready for a human to review, or commits landed
-#   locally and ready to push; everything past that boundary is the human's
-#   process, not the run's to claim.
-#
-#   `deployed:` / `verified:` / `monitored:` owed EXACTLY when a deploy_target
-#   is named — the run that operates its own live surface (bionic's own
-#   dogfood is the example).
-#
-# Supersedes v13, where the trio was owed whenever any target existed and
-# `n/a:` discharged the step at `deploy_target: none`. That rule encoded
-# wave==release, which is the exception and not the rule, and it let a run
-# with no live surface close without ever naming what it delivered.
-#
-# An UNOWED trio is tolerated, not refused: a run that deployed something
-# without having declared a target and says so is recording more than it owes,
-# and refusing that commit would punish honesty. The wall is on the absent
-# claim, never on the extra one.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_ship_step() {
-  local step="$1" prefix f
-  local missing=()
-  shape_block delivered
-  deploy_target_named || return 0
-  for f in deployed verified monitored; do
-    block_has "$f" || missing+=("$f")
-  done
-  [ "${#missing[@]}" -eq 0 ] && return 0
-  prefix=$(step_prefix "$step")
-  _eg_detail="${prefix} frontmatter names deploy_target=${DEPLOY_TARGET}, so the close-out owes the deploy trio; missing: ${missing[*]}
-Plan: $PLAN
-Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block — or, if this run operates no live surface, set 'deploy_target: n/a' in frontmatter (the trio is owed exactly when a target is named)."
-  refuse exit2 commit "the close-out owes the deploy trio" "add deployed:, verified:, monitored:" "$_eg_detail"
-}
-
 # ---------- pre-registered Verification Matrix ----------
-# The Verify gate discharges a Verification Matrix stored in a top-level
-# `## Verification Matrix` section of the plan (separate from ## SDLC State).
-# validate_matrix parses that section — a per-session stack-health line, a
-# tier table (one row per AC), and one indented per-AC evidence block per
-# non-waived row — and fires at current: 5 (via the Step-5 validator) and as a
+# The Verify gate discharges the run's criteria, each criterion's cells being `matrix_load`'s (the Eval design's rows
+# and the run's events); a plan holds no matrix section.
+# validate_matrix walks them, and fires at current: 5 (via the Step-5 validator) and as a
 # prefix check for current: 6..9 (via the dispatcher).
 #
 # Mid-discharge commits: at current: 5, rows with status
@@ -3976,16 +3419,15 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # load-bearing.
 #
 # A criterion is owed at the step whose task proves it: a pending or blocked
-# row whose AC block's `task:` names a later step than the current one keeps
+# row whose task (its block's `task:`, at 15 its Task cell) names a later step than the current one keeps
 # that same relaxation until its step, both the per-tier keys and the
 # auditor arm, at any tier. The literal `task: 9` is the close's step, and a
 # row owed there is settled by close-out after `delivered:`. See
 # `matrix_row_deferred` at file scope.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
-# Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body` since
-# wave-30 T14, so `session-poker.sh matrix-render` reads the same list the loop below walks.
-# It names `evidence` for every tier and `user-confirmed` for T4 and nothing else (wave-31 T6).
+# Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body`.
+# It names `evidence` for every tier and `user-confirmed` for T4 and nothing else.
 
 # THE THREE STEP-4 ARMS: `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
 # `validate_prototype_no_matrix_row` are defined just before `CURRENT` is parsed, above.
@@ -4012,6 +3454,7 @@ for _ps in $POINTER_STEPS; do
   if [ "$_ps" = "4" ] && { [ "$USE_WORKTREE" = "true" ] || [ "${_EG_SUBSTITUTED:-0}" = "1" ]; }; then
     break  # fall through to the Step-4 worktree shape check below
   fi
+  _eg_v15_refuse
   exit 0
 done
 
@@ -4031,130 +3474,41 @@ Plan: $PLAN
 Fix: $4"
 }
 
-# Placeholder-token test on a single field value. The matrix section lives
-# outside ## SDLC State, so the upstream ban does not cover it; this reuses
-# the same whole-value equality test (is_placeholder_value, defined above).
+# Placeholder-token test on a single field value: the whole-value equality
+# test (is_placeholder_value, defined above).
 matrix_is_placeholder() {
   is_placeholder_value "$1"
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed live_exit
+  local rows ac tier status ev aud block_txt key val val_lc deferred row_is_waived ev_abs ucv owed live_exit head
 
-  # Set while any row is still pending/blocked at current: 5. The
-  # Step-5 validator reads it to keep the `auditor:` pointer optional
-  # mid-walk (the auditor is the exit gate — it has not run yet).
-  UNDISCHARGED=0
-  MATRIX=$(matrix_section)
-  if [ -z "$MATRIX" ]; then
+  # The evidence review is read at the working branch's head.
+  head="$(proof_branch_head "$PLAN" "$BIONIC_ROOT" 2>/dev/null)" || head=""
+  if ! matrix_load "$PLAN" "$head"; then
+    block_matrix "the run's facts could not be read" "run the commit again" \
+      "the run's facts could not be read, so no criterion's state can be judged." \
+      "run the commit again; if it is refused the same way, the run's log or its record cannot be read: bash payload/scripts/reader.sh <plan> step names why."
+  fi
+  if [ -z "$MATRIX_CELLS" ]; then
     block_matrix "this plan has no verification matrix yet" "add one row per criterion" \
-      "the Verify gate requires a '## Verification Matrix' section." \
-      "add the '## Verification Matrix' section: a stack-health line, the AC tier table, and one per-AC evidence block. See canonical-sdlc/SKILL.md Step 5."
+      "the Verify gate requires the plan's criteria: an '## Eval design' row, or a '## Verification Matrix' row, per criterion." \
+      "add the '## Eval design' table, one row per criterion. See canonical-sdlc/SKILL.md Step 5."
   fi
 
-  # stack-health: non-empty proof, or `n/a: <reason>` with a reason. A placeholder value (the
-  # `pending` stub Step 3 renders) is judged after the row loop, where UNDISCHARGED is known.
-  # A HERE-STRING, NOT A PIPE — see the header. $MATRIX is a whole plan section and
-  # routinely exceeds the pipe buffer; `echo "$MATRIX" | grep -q` turned a present
-  # stack-health line into a refusal of every commit (T37).
-  if ! grep -qE '^[[:space:]]*stack-health[[:space:]]*:' <<< "$MATRIX"; then
-    block_matrix "the matrix says nothing about stack health" "add a before/after snapshot" \
-      "'## Verification Matrix' is missing the 'stack-health:' line." \
-      "add 'stack-health: <before/after snapshot>' or 'stack-health: n/a: <reason>' above the table."
-  fi
-  sh=$(echo "$MATRIX" | grep -E '^[[:space:]]*stack-health[[:space:]]*:' | head -1 \
-       | sed -E 's/^[[:space:]]*stack-health[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-  case "$sh" in
-    ""|n/a|n/a:)
-      block_matrix "the health snapshot is empty or a bare n/a" "paste it, or say why not" \
-        "'stack-health:' needs a non-empty snapshot, or 'n/a: <reason>' with a non-empty reason." \
-        "paste the before/after snapshot showing no delta, or give the reason stack-health does not apply." ;;
-  esac
-
-  # false-green two-part rule: any `false-green:` entry must have a paired
-  # `rewritten:` entry, or the gate blocks (Assumption 12a).
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if grep -qE '^[[:space:]]*false-green[[:space:]]*:' <<< "$MATRIX"; then
-    if ! grep -qE '^[[:space:]]*rewritten[[:space:]]*:' <<< "$MATRIX"; then
-      block_matrix "a false green is logged but never rewritten" "rewrite it, then say where" \
-        "a 'false-green:' entry in the matrix has no paired 'rewritten:' entry." \
-        "add 'rewritten: <commit/test ref>' for the false-green test — a logged-but-unfixed false green is a blocking defect."
-    fi
-  fi
-
-  rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
-  if [ -z "$rows" ]; then
-    block_matrix "the verification matrix has no rows" "add one row per criterion" \
-      "'## Verification Matrix' has no tier table rows." \
-      "add the '| AC | tier | status | evidence | auditor |' table with one row per AC."
-  fi
-
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    # separator row (only pipes/dashes/colons/spaces) → skip
-    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
-    ncols=$(echo "$line" | awk -F'|' '{print NF}')
-    ac=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    tier=$(echo "$line"   | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$3); print $3}')
-    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
-    ev=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$5); print $5}')
-    aud=$(placeholder_cell "$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')")
-    # header row → skip
-    [ "$ac" = "AC" ] && continue
-    # malformed: a well-formed 5-cell row splits into exactly 7 fields on '|'.
-    if [ "$ncols" -ne 7 ]; then
-      block_matrix "row ${ac} does not have five cells" "give it five cells" \
-        "matrix row for '${ac}' is malformed (wrong cell count — no literal '|' inside cells)." \
-        "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
-    fi
-    # tier enum
+  rows="$(matrix_table_rows)"
+  while IFS=$'\037' read -r ac tier status ev aud ucv row_is_waived; do
+    [ -n "$ac" ] || continue
+    aud="$(placeholder_cell "$aud")"
+    # tier enum: the Eval design's type through the scale profile
     if ! grep -qE '^T[0-4]$' <<< "$tier"; then
       block_matrix "${ac}'s tier is unknown" "use T0 through T4" \
-        "matrix row for '${ac}' has an invalid tier '${tier}' (want T0..T4)." \
-        "set the tier cell to one of T0, T1, T2, T3, T4."
+        "criterion '${ac}' has an invalid tier '${tier}' (want T0..T4: an Eval design type of static, unit, hermetic, live or human)." \
+        "set the criterion's Eval design type to one of static, unit, hermetic, live, human."
     fi
-    # status enum — the status cell is load-bearing (pending/blocked
-    # relax the Verify gate; waived relaxes everything), so a typo must
-    # block, not silently read as discharged-like.
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    case "$status" in
-      pending|blocked|discharged|waived) : ;;
-      *)
-        block_matrix "${ac}'s status is unknown" "use pending, blocked, discharged, waived" \
-          "matrix row '${ac}' has an invalid status '${status:-empty}' (want pending|blocked|discharged|waived)." \
-          "set the status cell to one of: pending, blocked, discharged, waived." ;;
-    esac
-    block_txt=$(matrix_block "$ac")
-    # Is this row WAIVED? A `waiver:` token in the evidence cell or a
-    # `waiver:` line in the AC block — the loop's long-standing test, hoisted
-    # into one flag (review-a C-2) so every per-row demand below reads the same
-    # fact. Deliberately NOT the status cell alone: a row that says `waived`
-    # while recording no waiver has not been through the Waiver Protocol, and
-    # the per-tier key loop has always demanded its evidence anyway.
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    row_is_waived=0
-    matrix_row_waiver "$ev" "$block_txt" && row_is_waived=1
-    ucv=$(user_confirmed_value "$block_txt")
-    # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
-    # implementation` in an AC block is circular — it names the change as the
-    # source of its own requirement, which is unfalsifiable by construction.
-    # Whole-value match after whitespace-trimming; a citation that merely
-    # CONTAINS the word ("implementation-first rewrite of spec §3") is a real
-    # citation and passes. A missing `provenance:` line does not block (plan
-    # assumption A4 — presence is a W+1 candidate, not this wave's). Fires for
-    # every row regardless of tier/status, since the spec (AC-5) says "any AC
-    # block" — unlike the tier-key checks below, it does not sit behind the
-    # waived/undischarged branches. Compared case-insensitively, matching the
-    # placeholder and live-tier n/a checks a few lines below in this same loop.
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    prov_val=$(echo "$block_txt" | grep -E '^[[:space:]]*provenance[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*provenance[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    prov_val_lc=$(echo "$prov_val" | tr '[:upper:]' '[:lower:]')
-    if [ "$prov_val_lc" = "implementation" ]; then
-      block_matrix "row ${ac} cites the code as its own source" "cite what asked for it" \
-        "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
-        "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
-    fi
+    # A CRITERION HAS NO BLOCK: its evidence is the discharging proof's and its confirmation the approval naming it, so
+    # the per-tier keys below are asked of those two facts, written as the keys they stand for.
+    block_txt="$( [ -z "$ev" ] || printf '  evidence: %s\n' "$ev"; [ -z "$ucv" ] || printf '  user-confirmed: %s\n' "$ucv")"
     # A CRITERION IS OWED AT THE STEP WHOSE TASK PROVES IT (`matrix_owing_step`,
     # `matrix_row_deferred`, at file scope above). Before that step a pending or blocked row
     # owes nothing: not the per-tier keys below, and not the auditor's verdict or ruling
@@ -4165,8 +3519,8 @@ validate_matrix() {
     # `delivered:`, so no commit against an open plan demands it.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     deferred=0
-    matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block_txt")" "$CURRENT" "$status" "$(matrix_owing_open "$PLAN" "$block_txt")" && deferred=1
-    # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
+    matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$ac")" "$CURRENT" "$status" "$(matrix_owing_open "$PLAN" "$ac")" && deferred=1
+    # waived rows (the run holds a waiver of the criterion) are
     # exempt from the per-tier evidence requirement.
     if [ "$row_is_waived" = "1" ]; then
       :
@@ -4187,6 +3541,18 @@ validate_matrix() {
       live_exit=""
       case "$status" in pending|blocked) live_exit="$(matrix_live_row_exit "$ac")" ;; esac
       for key in $(keys_for_tier "$tier"); do
+        # AT 15 A CRITERION THE PERSON CONFIRMS, WITH NO APPROVAL NAMING IT, AWAITS ITS PERSON: the confirmation is the
+        # release approval card's to collect, so it is owed from the merge advance and not before, or a run holding one
+        # could not leave the verify step until the person answered.
+        if [ "$_EG_V15" = 1 ] && [ "$key" = user-confirmed ] && [ -z "$ucv" ] && [ "${CURRENT%[ab]}" -lt 8 ] 2>/dev/null; then
+          continue
+        fi
+        if [ "$key" = user-confirmed ] && [ -z "$ucv" ] \
+           && matrix_row_awaits "$tier" "$status" "$aud" "$ucv" "$row_is_waived"; then
+          block_matrix "${ac} awaits its person's confirmation" "its person confirms it at release" \
+            "criterion '${ac}' (${tier}) is proved and no approval names it, at step ${CURRENT}: from the merge it waits on its person's confirmation, which no agent gives." \
+            "needs: the user — their confirmation at the release card: reply <n> confirm, <n> being the decision the card gives ${ac}."
+        fi
         if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
           block_matrix "row ${ac} has no ${key} evidence" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) is missing evidence key '${key}' in its AC block." \
@@ -4199,7 +3565,7 @@ validate_matrix() {
             "matrix row '${ac}' (${tier}) evidence key '${key}' is empty." \
             "${live_exit:-record the evidence for '${key}' in the '${ac}:' block, or waive the row.}"
         fi
-        if matrix_is_placeholder "$val" && ! user_confirmed_pending "$key" "$val"; then
+        if matrix_is_placeholder "$val"; then
           block_matrix "${ac} has placeholder ${key} evidence" "record what actually ran" \
             "matrix row '${ac}' (${tier}) evidence key '${key}' is a placeholder (\"${val}\")." \
             "${live_exit:-replace '${key}' with the real evidence before committing.}"
@@ -4215,7 +3581,7 @@ validate_matrix() {
           T3|T4)
             case "$val_lc" in
               n/a|n/a:*)
-                _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — ${ac} calls its ${key} evidence n/a, a live tier; waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
+                _eg_owe "waive:${ac}" "waiver: row ${ac}" "commit refused — ${ac} calls its ${key} evidence n/a, a live tier; waive the row with: session-poker.sh waive ${ac} '<your words>' '<why>'"
                 block_matrix "${ac} calls its ${key} evidence n/a" "record it, or waive the row" \
                   "matrix row '${ac}' (${tier}) key '${key}' is a self-written 'n/a' on a live tier." \
                   "a live-tier field cannot be n/a — downgrade the row via the Waiver Protocol (record 'waiver: <user> <date> <reason>'), a user decision." ;;
@@ -4246,9 +3612,7 @@ validate_matrix() {
           # path half — see the split above — is tested here, so `a.md; b.md` was
           # handed to the resolver entire, missed, and refused as "names no real file",
           # which sent the author to write a file at a path nobody meant to name. The
-          # sibling reader of the walk artifact has truncated at the first `;` since
-          # epic-14 (evidence_line_field); this cell is the outlier, and the repair is to
-          # say the rule rather than to start splitting. FIRST in the branch, ahead of the
+          # repair says the rule rather than splitting. FIRST in the branch, ahead of the
           # climb-out and file tests: a cell holding two paths has no single path for
           # either of them to be asked about.
           # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -4296,21 +3660,9 @@ validate_matrix() {
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     if matrix_auditor_required \
        && owed=$(matrix_row_owes "$CURRENT" "$tier" "$status" "$aud" "$ucv" "$row_is_waived" "$deferred"); then
-      # THE CELL IS AN EQUALITY, AND THE VERDICT SAYS WHICH FAULT IT IS. An annotated cell
-      # (`CONFIRMED (audit-b3b87dc.md)`) refuses, because a reader scanning the column has to be
-      # able to compare it and the audit's own path has a key of its own; but it refuses as a
-      # shape fault, not as "no audit happened" to the one person who knows one did.
-      # AHEAD OF THE T4 BRANCHES ON PURPOSE: the shape fault is the same whatever the tier.
-      # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-      case "$aud" in
-        CONFIRMED*)
-          block_matrix "the auditor cell is not the bare token" "write CONFIRMED; cite in evidence:" \
-            "matrix row '${ac}' auditor cell is '${aud}' — it starts with CONFIRMED but is not the bare token, at step ${CURRENT}." \
-            "write exactly 'CONFIRMED' in the auditor cell and cite the audit's own path in the row's 'evidence:' key — the column is compared, not read." ;;
-      esac
       if [ "$tier" = "T4" ]; then
         if user_confirmed_attributed "$ucv"; then
-          _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
+          _eg_owe "waive:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive ${ac} '<your words>' '<why>'"
           block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
             "matrix row '${ac}' (T4) carries a well-formed 'user-confirmed:', but the independent auditor's standing verdict on it is '${aud}', at step ${CURRENT}." \
             "a user's confirmation does not overturn an auditor's finding — it replaces the WAIVER a T4 row used to need, not the audit. Resolve the '${aud}' verdict (re-run the audit and record CONFIRMED, or clear the cell if the finding was withdrawn), or waive the row."
@@ -4330,34 +3682,6 @@ validate_matrix() {
     fi
   done <<< "$rows"
 
-  # THE MATRIX HEAD'S STUBS ARE PLACEHOLDERS TOO (wave-30 T14; REQ-6 AC-6.1, D9, Δ12a). Step 3
-  # renders `stack-health: pending` (and `walk-artifact: pending` on a walked plan) above the
-  # table, beside the per-AC key stubs (`session-poker.sh matrix-render`). `stack-health:` was
-  # exempt from the placeholder ban — any value but an empty one or a bare `n/a` passed, so the
-  # stub sailed through the Verify gate unfilled — and a matrix-level `walk-artifact:` line was
-  # read by nothing. Both are now judged as a tier key is: unread before Step 5, unread at
-  # current: 5 while any row is still pending or blocked (the same mid-walk relaxation the key
-  # loop above takes, so entering Step 5 never needs an "after" snapshot that cannot exist
-  # yet), and refused once the walk is done and at every step after it. AFTER the row loop on
-  # purpose: UNDISCHARGED is what the loop found. A filled value is not judged here — the
-  # stack-health arm above and the walk gate own those; an absent walk-artifact: line is legal.
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if [ "$UNDISCHARGED" = "0" ]; then
-    for hk in stack-health walk-artifact; do
-      hv=$(grep -E "^[[:space:]]*${hk}[[:space:]]*:" <<< "$MATRIX" | head -1 \
-           | sed -E "s/^[[:space:]]*${hk}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-      [ -n "$hv" ] || continue
-      if is_placeholder_value "$hv"; then
-        case "$hk" in
-          stack-health) hf="fill it, or n/a: <reason>" ;;
-          *)            hf="name its record, or drop it" ;;
-        esac
-        block_matrix "the ${hk}: line is still a stub" "$hf" \
-          "'${hk}:' is still a placeholder ('${hv}') with no row pending or blocked." \
-          "replace the '${hk}:' stub above the table with the real value before the Verify gate closes — the stub Step 3 rendered is a reminder, not evidence."
-      fi
-    done
-  fi
 }
 
 # ---------- walk-first artifact arm (epic-14 W1) ----------
@@ -4381,21 +3705,6 @@ walk_mode() {
   esac
 }
 
-# The Step-5 evidence block, read at ANY current step. The module-level BLOCK
-# holds the CURRENT step's evidence, so at current: 6..9 it is the Step-6..9
-# block and cannot answer for the walk; this extractor re-reads Step 5 out of
-# SECTION with the same line + continuation grammar the top of the hook uses.
-# Empty when the plan carries no Step-5 line at all — which, post-Verify, is
-# itself a missing walk artifact.
-step5_evidence_block() {
-  local line raw cont
-  line=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:" | head -1)
-  [ -n "$line" ] || return 0
-  raw=$(echo "$line" | sed -E "s/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:[[:space:]]*//")
-  cont=$(extract_continuation "$SECTION" "5")
-  printf '%s\n%s\n' "$raw" "$cont"
-}
-
 # Resolve a `walk-artifact:` value to an absolute path. Absolute passes through;
 # a `record/...` value is docs-root-relative (the form the Step-5 contract
 # names); anything else is project-relative, so the fully-spelled
@@ -4409,19 +3718,6 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
   esac
 }
 
-# walk_registered <raw walk-artifact value> <its resolved path> -> 0 when the section holds a flush-left
-# `proved: kind=walk` line whose evidence= names that artifact, compared as written and as resolved, so a
-# `record/<f>` spelling and an absolute one meet. proof-add walk writes that line only after it parsed the
-# record's verdict table, so the line is what makes the artifact a registered walk rather than narration.
-walk_registered() {
-  local ev
-  while IFS= read -r ev; do
-    [ -n "$ev" ] || continue
-    if [ "$ev" = "$1" ] || [ "$(resolve_walk_path "$ev")" = "$2" ]; then return 0; fi
-  done <<< "$(printf '%s\n' "$SECTION" | sed -nE 's/^proved: kind=walk .*[[:space:]]evidence=([^[:space:]]+).*$/\1/p')"
-  return 1
-}
-
 # The arm itself. Fires at current: 5..9 (the Verify gate and, as a durable
 # prefix condition — plan assumption A5 — every step after it, so the artifact
 # cannot be deleted once Verify is behind you). Trigger: at least one matrix row
@@ -4431,36 +3727,25 @@ walk_registered() {
 # has verified nothing to narrate.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_walk_artifact() {
-  local discharged b5 raw abs
+  local discharged raw abs
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
-  # Reuses the $MATRIX cache validate_matrix() fills. It runs immediately before
-  # this arm at both call sites (validate_verify_step, dispatch's 6..9 case) and
-  # hard-blocks on an empty matrix, so the cache is populated by the time we get
-  # here. The `:-` fallback keeps that an optimization rather than a trap: a
-  # third call site that forgot the ordering would re-read the section instead
-  # of crashing under `set -u` or, worse, reading an empty matrix as "nothing
-  # discharged" and letting the walk gate fall open.
-  discharged=$(echo "${MATRIX:-$(matrix_section)}" | grep -E '^[[:space:]]*\|' \
-    | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}' \
-    | grep -cx 'discharged')
+  # Reuses the reader's answer validate_matrix() loads (MATRIX_CELLS). It runs immediately before
+  # this arm at its call sites in dispatch, so the answer is
+  # loaded by the time we get here; a third call site that forgot the ordering loads it again, and
+  # a run whose facts could not be read arms the walk gate rather than reading as "nothing
+  # discharged" and letting it fall open.
+  [ -n "${MATRIX_CELLS:-}" ] || matrix_load "$PLAN" || discharged=1
+  [ -n "${discharged:-}" ] || discharged=$(awk -F'\037' '$2 == "discharged" && $3 != "waiver" { n++ } END { print n + 0 }' <<< "${MATRIX_CELLS:-}")
   [ "$discharged" -gt 0 ] || return 0
 
-  # Truncated at the first ';' below: sibling extractors in this hook already
-  # tolerate a Step-5 line with more fields packed after the value
-  # (`walk-artifact: record/x.md; cmd: ...`); this one was the outlier,
-  # greedy to end-of-line, and swallowed the packed remainder as part of the
-  # "path" (plan assumption A17). The dedicated continuation-line shape has
-  # no ';' in it, so the truncation is a no-op there.
-  b5=$(step5_evidence_block)
-  # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `evidence_line_field`
-  # keeps the first-`;` truncation this read already had and drops only the line-start
-  # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
-  raw=$(evidence_line_field "$b5" walk-artifact)
+  # THE WALK IS THE RUN'S NEWEST WALK PROOF (proof-add walk), read through the reader, a dry copy as its plan. The
+  # verb registers it only once it parsed the record's verdict table, so the record's AC identifiers are its verdicts.
+  raw="$(_proof_last_read "$(proof_run_plan "$PLAN")" walk evidence)" || raw=""
   if [ -z "$raw" ]; then
-    block_matrix "rows are discharged with no walk recorded" "walk it, then name the file" \
-      "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
-      "run the walk first and record 'walk-artifact: record/<file>.md' in the Step 5 block. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."
+    block_matrix "rows are discharged with no walk recorded" "walk it, then register it" \
+      "the walk gate: matrix rows are discharged but the run holds no walk proof, and the Step 5 evidence has no 'walk-artifact:' line." \
+      "run the walk first and register its record: session-poker.sh proof-add walk record/<file>.md. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."
   fi
 
   # Containment. A `..` component is refused outright rather than normalized:
@@ -4488,19 +3773,6 @@ validate_walk_artifact() {
       "the walk gate: walk-artifact '${raw}' is named in the Step 5 evidence but the file is empty at ${abs}." \
       "write real narration into the walk artifact before discharging any matrix row — an empty file is not a walk."
   fi
-
-  # The walk narrates a running surface without the criteria in hand, so an AC
-  # identifier in narration is the tell that it checklists them. The one
-  # exception is a registered walk: a verdict table proof-add walk parsed and
-  # recorded as `proved: kind=walk` naming this artifact, whose identifiers are
-  # its verdicts. Invariant: the artifact carries no AC identifier unless such a
-  # line names it; a line naming another record registers nothing here.
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if grep -qE 'AC-[0-9]' "$abs" 2>/dev/null && ! walk_registered "$raw" "$abs"; then
-    block_matrix "the walk narration names acceptance criteria" "drop the criteria names" \
-      "the walk gate: walk artifact ${abs} names acceptance criteria (matched 'AC-<n>')." \
-      "rewrite the walk as narration of what was driven and what came back, with no AC identifiers — the walk is written without reading the criteria, or register the record with session-poker.sh proof-add walk <record> when it is the walk's verdict table."
-  fi
   return 0
 }
 
@@ -4513,12 +3785,11 @@ validate_walk_artifact() {
 # exception, not the rule), so the no-op is recorded to the durable audit
 # file only (log_finding_quiet, below) and never echoed to stderr — an
 # ordinary commit stays exactly as silent as it is today. Declared, it
-# requires the Step-5 evidence to carry an `environments-covered:` line
-# naming every non-fog environment, and blocks a fog entry that names no
-# cure — both are real refusals, spoken the normal BLOCKED way.
+# requires the newest walk proof's `environments=` field to name every
+# non-fog environment, and blocks a fog entry that names no cure.
 #
-# AC-23: this arm reads only the DECLARATION and the Step-5
-# `environments-covered:` line — never a derived suite set. It is
+# This arm reads only the DECLARATION and the walk proof's covered
+# set — never a derived suite set. It is
 # independent of the floor, which lib/proof.sh `facts_state` judges from
 # Step 7 (wave-35 T31; D20); nothing here substitutes for that.
 #
@@ -4560,9 +3831,13 @@ log_finding_quiet() {  # $1=check-id  $2=detail
   return 0
 }
 
+_eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field; asked through _proof_ask
+  local f; f="$(reader_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "proof" && line_kv("kind") == "walk" { e = line_kv("environments") } END { print e }'
+}
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
-  local b5 covered_line covered_norm missing claimed_fog claimed_undeclared
+  local covered_line covered_norm missing claimed_fog claimed_undeclared
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   raw=$(frontmatter_get environments)
   if [ -z "$raw" ]; then
@@ -4598,15 +3873,9 @@ validate_environments() {
   fi
 
   if [ -n "$covered_names" ]; then
-    b5=$(step5_evidence_block)
-    covered_line=$(echo "$b5" | grep -E '^[[:space:]]*environments-covered[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*environments-covered[[:space:]]*:[[:space:]]*//' \
-      | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
-    if [ -z "$covered_line" ]; then
-      block_matrix "the plan never says which environments ran" "list what you covered" \
-        "environments: declared covered set (${covered_names}) but the Step 5 evidence has no 'environments-covered:' line." \
-        "record 'environments-covered: <name>[, <name>...]' in the Step 5 block naming every declared non-fog environment."
-    fi
+    # The walk covers them: the newest walk proof's environments= field is the covered set.
+    covered_line="$(_proof_ask "$(proof_run_plan "$PLAN")" _eg_v15_walk_envs "$PLAN")" || _eg_v15_unreadable
+    [ -n "$covered_line" ] || { _eg_v15_ask "Step 5's environments covered: the walk's proof names none (proof-add walk <record> --environments <names>)"; return 0; }
     covered_norm=$(printf '%s' "$covered_line" | tr ',' ' ' | tr -s '[:space:]' ' ')
     missing=""
     for name in $covered_names; do
@@ -4652,103 +3921,6 @@ validate_environments() {
   return 0
 }
 
-# Verify gate: the Verification Matrix, the walk artifact, the Step-0 line at
-# `regression: no`, and — at double rigor, once no row is still pending — a
-# non-empty `auditor:` pointer. No floor key: the floor is Step 7's (D20).
-# At `single` that pointer is not demanded (matrix_auditor_required).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_verify_step() {
-  local aud
-  validate_tests_block 5
-  validate_environments
-  validate_matrix
-  # Walk-first: the narration must already exist once anything has discharged.
-  validate_walk_artifact
-  # The auditor is the Step-5 exit gate — it cannot have run while
-  # rows are still pending/blocked, so the pointer is required only once
-  # every row is discharged or waived, and only where an auditor exists at
-  # all (matrix_auditor_required: never at `single`).
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if [ "$UNDISCHARGED" -eq 0 ] && matrix_auditor_required; then
-    if ! block_has auditor; then
-      block_matrix "this plan has no auditor verdict yet" "record what the auditor said" \
-        "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
-        "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
-    fi
-    # THE SECOND READER OF AN AUDITOR CELL, folding the same way (D15). `auditor: —` in the
-    # Step-5 block is the absence `block_has` cannot see, and reading it as a verdict let a
-    # plan past the Verify gate with no audit recorded at all.
-    aud=$(placeholder_cell "$(block_get auditor)")
-    if [ -z "$aud" ]; then
-      block_matrix "the auditor verdict is blank" "record what the auditor said" \
-        "the Step 5 'auditor:' pointer is empty." \
-        "record the auditor's verdict summary and report pointer."
-    fi
-  fi
-}
-
-# Epic merge-target consistency (LOG-ONLY; D14, check-id `merge-target`).
-# On a wave-scale plan naming an `epic:`, when the epic plan exists and
-# declares an `integration-branch:` in its ## SDLC State, a mismatch with this
-# plan's integration-branch logs a finding. Never blocks. First cross-file read
-# in this hook — read-only, fail-open (missing epic plan / missing key → no
-# finding). Fires at the integrate step.
-# [INSTRUMENT]
-validate_merge_target() {
-  local epic epic_plan epic_branch this_branch
-  epic=$(frontmatter_get epic)
-  [ -n "$epic" ] || return 0
-  epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
-  [ -r "$epic_plan" ] || return 0
-  # Both branches are lib/plan.sh `plan_integration_branch`'s answer, the one reader close-out, the card and the
-  # handoff ask: ## SDLC State, fenced lines unread, then the frontmatter.
-  # [INSTRUMENT]
-  wall_libs evidence-gate plan.sh || return 0
-  epic_branch=$(plan_integration_branch "$epic_plan")
-  [ -n "$epic_branch" ] || return 0
-  this_branch=$(plan_integration_branch "$PLAN")
-  if [ -n "$this_branch" ] && [ "$this_branch" != "$epic_branch" ]; then
-    log_finding merge-target "plan integration-branch '$this_branch' != epic '$epic' integration-branch '$epic_branch'"
-  fi
-  return 0
-}
-
-# Intent-scoped Step-5 evidence keys (R7) — LOG-ONLY (D14; check-ids
-# `refactor-evidence`, `tune-evidence`). Fires on plans whose
-# declared intent carries a conditional key set; never blocks. Reuses the
-# Step-5 BLOCK/block_has/block_get accessors already populated for the
-# current step's evidence (same accessors validate_verify_step uses),
-# so this validator is only meaningful when called at current: 5.
-# [INSTRUMENT]
-validate_intent_evidence() {
-  local key val
-  case "$INTENT" in
-    refactor)
-      if ! block_has behavior-preservation || [ -z "$(block_get behavior-preservation)" ] \
-         || is_placeholder_value "$(block_get behavior-preservation)"; then
-        log_finding refactor-evidence "refactor plan Step 5 missing 'behavior-preservation:' evidence"
-      fi
-      for key in compat-matrix revert-plan; do
-        if block_has "$key"; then
-          val=$(block_get "$key")
-          if [ -z "$val" ] || is_placeholder_value "$val"; then
-            log_finding refactor-evidence "refactor plan Step 5 '${key}:' present but empty"
-          fi
-        fi
-      done
-      ;;
-    tune)
-      for key in baseline target re-measure; do
-        val=$(block_get "$key")
-        if ! block_has "$key" || [ -z "$val" ] || is_placeholder_value "$val"; then
-          log_finding tune-evidence "tune plan Step 5 missing '${key}:' evidence"
-        fi
-      done
-      ;;
-  esac
-  return 0
-}
-
 # D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to scale wave or task +
 # frontmatter rigor:double + multi_agent:true plans; for every other plan it is a no-op
 # (return 0). ONE LEDGER SHAPE (wave-31 T24; REQ-1, D2): a task-scale plan carries the same
@@ -4769,20 +3941,18 @@ validate_intent_evidence() {
 #   2. NO TABLE, OR A TABLE WITH ZERO DATA ROWS -> SATISFIED (a human
 #      `none dispatched` prose line is documentation, not required by the
 #      parser — the shape this refusal's own Fix text advertises). return 0.
-#   3. Each data row: the Task invariants, delegated to `units_validate` (REQ-1e)
-#      — status in {pending,active,landed,dropped} among them — else exit 2; then
-#      the reader's ledger findings (`units_findings`, wave-21 T5, D4): a `landed`
-#      row with no `- T<n>:` line in ## SDLC State, or an `active` row whose agent
-#      cell names no row on this session's roster, on another roster of this plan,
-#      or in its `## Dispatch ledger` (wave-36 T29), else exit 2; a line that is
-#      there must not be a placeholder, else exit 2.
+#   3. Each data row: the Task invariants, delegated to `units_validate`, else
+#      exit 2; then the reader's ledger findings (`units_findings`): a row whose
+#      landing or launch the run's log does not hold as the row reads is owed, and
+#      an `active` row whose agent cell names no row on this session's roster, on
+#      another roster of this plan, or in its `## Dispatch ledger` is refused.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
   case "$SCALE" in wave|task) : ;; *) return 0 ;; esac
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local tasks rows id ev violations findings _eg_ph _eg_origin
+  local rows id violations findings _eg_origin
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -4798,22 +3968,15 @@ validate_dispatch_ledger() {
   #
   # WHAT STAYS HERE is the pair of facts units.sh cannot know: that this plan owes a
   # ledger at all (the D7 PRESENCE rule, guarded to the triple above), and that every
-  # row's evidence has actually been written on a `- T<n>:` line in ## SDLC State.
+  # landed or launched row is one the run's log holds (below).
   #
-  # PRESENCE IS A QUESTION ABOUT THE SECTION, NOT ABOUT THE TABLE, and the base's
-  # own fence-aware extractor is what answers it (correctness F-1, A-68.1). Asking
-  # `units_rows` instead moved the basis: that reader exits 1 for a section carrying
+  # PRESENCE IS A QUESTION ABOUT THE SECTION, NOT ABOUT THE TABLE, and the plan-read library's heading answer is what
+  # answers it. Asking `units_rows` instead moved the basis: that reader exits 1 for a section carrying
   # PROSE and no header row, a shape the docblock above calls SATISFIED and this
   # refusal's own Fix text advertises ("a header plus a 'none dispatched' line is
   # fine"). The next double multi_agent wave that wrote it would have been unable
-  # to commit. It is the extractor the pre-wave hook carried at 84da6b5.
-  tasks=$(normalize_newlines "$PLAN" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## Tasks/ { f=1; next }
-    /^## / { f=0 }
-    f')
-  if [ -z "$tasks" ]; then
+  # to commit.
+  if ! plan_read_heading "$PLAN" Tasks >/dev/null; then
     _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan has no '## Tasks' dispatched-task ledger section.
 Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
@@ -4835,113 +3998,65 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
     _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header."
+Fix: repair each row named above; the columns are $(units_columns 1)"
     refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
   fi
-  # PRESENCE IS ASKED OF THE WHOLE TABLE AT ONCE (AC-5.1). This loop used to refuse at the
-  # first id it found short, so a wave owing three lines paid three refused commits; the
-  # shared arm below counts every row and prints the lines the author owes. It runs ahead
-  # of the placeholder walk: "you wrote nothing" and "you wrote a placeholder" are two
-  # findings, and the first is the one a whole-table answer can give.
-  #
-  # AND WHAT A ROW OWES IS THE READER'S ANSWER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4,
-  # ADR-037 decision 3). Through 1.8.7 every row owed a line, so an `active` row the dispatch
-  # hook had just written to the roster was refused for a hand copy of that record at its
-  # writer's first commit. A `landed` row owes its line; an `active` row whose agent cell is
-  # a roster name owes nothing; a self-owned row owes neither; and an agent cell naming no
-  # roster row is its own refusal, after the lines. The status enum stays `units_validate`'s,
-  # above, whose ids the reader's `status` findings equal.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  # A ROW HAS NO LINE: a row's landing and its launch are the reader's, and a row the reader does not answer as the
+  # table reads it is owed until the log holds the fact.
   findings="$(units_findings "$PLAN" "$(_eg_roster_path)")"
-  refuse_missing_evidence_lines "$(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }')"
+  for id in $(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }'); do
+    _eg_v15_ask "${id}'s landing or launch, which the run's log does not hold as its row reads"
+  done
   refuse_unlaunched_rows "$(printf '%s\n' "$findings" \
     | awk '$1 == "launch" { v = $0; sub(/^launch [^ ]+ /, "", v); print $2 ": " v }')"
-  # Evidence line in ## SDLC State (anchored), judged for a
-  # placeholder. ONE PASS (wave-24 T15; REQ-9 AC-9.7): this walk forked grep|head|sed|sed for
-  # the line and sed|tr for the test, six processes a row; the awk is the same lookup — the
-  # first section line matching `^[[:space:]]*-?[[:space:]]*<id>[[:space:]]*:`, its text after
-  # that prefix with trailing space trimmed — and `is_placeholder_value`'s whole-value test
-  # (trimmed, lower-cased, one of its seven tokens). It prints the first `<id><TAB><ev>` that is
-  # a placeholder, rows in table order.
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  _eg_ph=$(printf '%s\n' "$SECTION" | EG_IDS="$(printf '%s\n' "$rows" | awk -F'\t' '$1 ~ /^T[0-9]/ { print $1 }')" awk '
-    { L[++n] = $0 }
-    END {
-      m = split(ENVIRON["EG_IDS"], ids, "\n")
-      for (k = 1; k <= m; k++) {
-        id = ids[k]; if (id == "") continue
-        pat = "^[[:space:]]*-?[[:space:]]*" id "[[:space:]]*:"
-        for (i = 1; i <= n; i++) {
-          if (L[i] !~ pat) continue
-          ev = L[i]; sub(pat "[[:space:]]*", "", ev); sub(/[[:space:]]+$/, "", ev)
-          v = ev; sub(/^[[:space:]]+/, "", v); v = tolower(v)
-          if (v == "todo" || v == "pending" || v == "in progress" || v == "inprogress" || v == "xxx" || v == "tbd" || v == "placeholder") {
-            printf "%s\t%s\n", id, ev; exit
-          }
-          break
-        }
-      }
-    }')
-  if [ -n "$_eg_ph" ]; then
-    id="${_eg_ph%%$'\t'*}"; ev="${_eg_ph#*$'\t'}"
-    _eg_detail="canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}').
-Plan: $PLAN
-Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing."
-    refuse exit2 commit "the dispatched task's evidence is a placeholder" "replace it with evidence" "$_eg_detail"
+  return 0
+}
+
+# Epic merge-target consistency (LOG-ONLY, check-id `merge-target`).
+# On a wave-scale plan naming an `epic:`, when the epic plan exists and
+# declares an `integration-branch:` in its header, a mismatch with this
+# plan's integration-branch logs a finding. Never blocks. First cross-file read
+# in this hook — read-only, fail-open (missing epic plan / missing key → no
+# finding). Fires at the integrate step.
+# [INSTRUMENT]
+validate_merge_target() {
+  local epic epic_plan epic_branch this_branch
+  epic=$(frontmatter_get epic)
+  [ -n "$epic" ] || return 0
+  epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
+  [ -r "$epic_plan" ] || return 0
+  # Both branches are lib/plan.sh `plan_integration_branch`'s answer, the one reader close-out, the card and the
+  # handoff ask: the plan's header key.
+  # [INSTRUMENT]
+  wall_libs evidence-gate plan.sh || return 0
+  epic_branch=$(plan_integration_branch "$epic_plan")
+  [ -n "$epic_branch" ] || return 0
+  this_branch=$(plan_integration_branch "$PLAN")
+  if [ -n "$this_branch" ] && [ "$this_branch" != "$epic_branch" ]; then
+    log_finding merge-target "plan integration-branch '$this_branch' != epic '$epic' integration-branch '$epic_branch'"
   fi
   return 0
 }
 
-# Step numbering: 4 worktree · 5 Verify gate · 7 Document · 8 Integrate &
-# close · 9 Close-out. Steps 1/2/3/6 are pointer steps handled upstream, except
-# that Step 6 reaches here so the matrix prefix check can fire.
+# The integrate step, where the merge target is asked.
 INTEGRATE_STEP=8
-SHIP_STEP=9
 
 dispatch() {
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
   # that reaches this dispatcher (guarded internally; no-op otherwise).
   validate_dispatch_ledger
-  # The Verification Matrix is a prefix contract for every step from the Verify
-  # gate on — current: 5 validates it inside validate_verify_step; current: 6..9
-  # validate it here, so a REFUTED auditor blocks post-Verify commits too.
-  # The walk artifact is a durable prefix condition alongside it (A5): deleting
-  # the narration after the Verify gate blocks every later commit. The
-  # environments claim (S3, AC-4) is the same shape: covered ⊆ declared and
-  # every fog entry's cure stay true across the whole post-Verify span. A lettered step is its step
-  # here, in the walk and environments arms and in the matrix's own step tests (wave-27 T67; review
-  # pass 46 N10): `6a` binds as 6.
-  case "${CURRENT%[ab]}" in
-    6|7|8|9) validate_matrix; validate_walk_artifact; validate_environments ;;
+  # The walk and the environments are read, then the reviews and the floor, before the refusal of what the log does not
+  # hold, so a run lacking what the log does hold is refused for it. The criteria are judged last, once nothing else is owed.
+  case "${CURRENT%[ab]}" in 5|6|7|8|9)
+    [ "$(walk_mode)" = exempt ] || validate_walk_artifact
+    validate_environments ;;
   esac
-  # Log-only epic merge-target check at the integrate step.
   [ "$CURRENT" = "$INTEGRATE_STEP" ] && validate_merge_target
-  case "$CURRENT" in
-    4) shape_block worktree base-sha branch ;;
-    5)
-      validate_verify_step
-      validate_intent_evidence
-      ;;
-    7) validate_document_step 7 ;;
-    *)
-      if [ "$CURRENT" = "$INTEGRATE_STEP" ]; then
-        validate_integrate_step
-      elif [ "$CURRENT" = "$SHIP_STEP" ]; then
-        validate_ship_step "$SHIP_STEP"
-      fi
-      ;;
-  esac
-  # THE READINGS THE RUN OWES are a prefix condition from Step 6 (wave-27 T14; D3, D19), asked
-  # last, after each step's own evidence: the Step-6 pointer line no longer answers for them. A
-  # lettered step is its step (T31; review pass 25 F1): `6a` binds as 6, `5b` as 5.
-  case "${CURRENT%[ab]}" in
-    6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
-  esac
-  # THE FLOOR'S PROOF LINE is a prefix condition from Step 7, or from Step 6 in the order
-  # (`_eg_refuse_floor_absent`), asked last.
-  case "${CURRENT%[ab]}" in
-    6|7|8|9) _eg_refuse_floor_absent "the run" ;;
-  esac
+  case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
+  _eg_v15_refuse
+  case "${CURRENT%[ab]}" in 5|6|7|8|9) validate_matrix ;; esac
+  return 0
 }
 
 dispatch
@@ -5032,7 +4147,7 @@ if [ -f "$BIONIC_ROOT/.bionic/config.yaml" ]; then
 fi
 [ "$MODE" = "off" ] && return 0
 
-# Normalized single-line form for matching + the scrubbed deny reason (CR translate).
+# Normalized single-line form for matching + the scrubbed deny reason (a CR made a newline).
 # THREE FORKS AND A SUBSHELL BECOME ONE BUILTIN LOOP (REQ-10, T11) — see
 # `_wall_flatten` at the top of this file for why the CR pass was redundant once
 # the whitespace squeeze ran.
@@ -5210,9 +4325,10 @@ classify_tier1() {  # $1=command text → sets CLASS ROLE, rc 0 on match
   local c
   if [ "$1" = "${CMD-}" ]; then _wall_class_read "$1"; c="$_WALL_CLASS"
   else c=$(cmd_class "$1"); fi
-  # A BROWSER OR COMPILE RUN IS BOOKED, NOT FARMED OUT: the suite guard wraps it, and this wall's
-  # redirect stays what it was for a command that read `none`.
-  case "$c" in none|browser|compile) return 1 ;; esac
+  # A HEAVY RUN LEAVES THE THREAD AS A SUITE DOES: only a command that read `none` is passed here.
+  # The refusal books nothing, because the fold discards a staged wrap when a wall blocks; the same
+  # command from a dispatched agent never reaches this wall and is wrapped by the suite guard.
+  case "$c" in none) return 1 ;; esac
   CLASS="$c"; ROLE=$(role_for_class "$c")
   return 0
 }
@@ -5374,22 +4490,18 @@ return 0
 
 # ─── _wall_poker_contract_verb — is this a call of a contract-changing poker verb ─
 #
-# 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
-# `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
-# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
-# `approve` and `waive`, each written on the user's word; `budget`, the user's cap, from
-# T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
-# gate reads; `matrix-render` and `discharge` — wave-30 T14, D9, the matrix's stubs and its auditor cell; `handoff` —
-# wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children;
-# `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting; and, wave-33 T15 (D10),
-# `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
-# `rule` (a ruling pushed to a writer), `matrix-set`, `matrix-retier` (a criterion's tier raised, which rewrites its
-# eval and evidence cells), `waive-row`, `confirm-row` (the user's confirmation of a
-# T4 row, the user's act and never an agent's), `tasks-prose`, `epic-row` and
-# `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
-# replay into approve, waive, waive-row and finding-move), `decisions` (a decision put or ruled writes the run's
-# design ledger and its register, and the read goes with the verb; a writer reads neither) — `ruling-ack` and `rulings`
-# are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs one of these `session-poker.sh`
+# verbs: `amend`, `extend`, `task-add` and `hold` (a roster row, or a row's birth); `current` (the
+# run's step); `proof-add` (a proof the gates judge by); `approve` and `waive` (each written on the
+# user's word); `release-check` (the check's fact); `finding-move` (a finding across the line);
+# `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
+# writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
+# user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
+# row's own writer); and `decisions` (a decision put or ruled writes the run's design ledger and
+# its register, and the read goes with the verb; a writer reads neither). `ruling-ack` and
+# `rulings` are the writer's own reads and are NOT on the list. 1 otherwise. Every name on the
+# list is a verb the poker dispatches: a verb it no longer has fails there on its own, so its name
+# leaves the list with it.
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5460,7 +4572,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|matrix-retier|waive-row|confirm-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
@@ -5706,8 +4818,8 @@ _BSG_CLASS_ARGS=()
 # _bsg_booked_class <class> — rc 0 when a command of this class is wrapped in the shim and so
 # met by the backgrounded refusal: a suite, and the browser and compile runs the gate must cost.
 _bsg_booked_class() {
-  case "$1" in suite|browser|compile) return 0 ;; esac
-  return 1
+  [ "$1" != suite ] || return 0
+  cmd_class_heavy "$1"
 }
 # _bsg_agent — sets _BSG_AGENT to the name the gate's request records for this call (T12): the
 # roster row's `name=`, which the budget arm read into _BUDGET_ROW_NAME when it ran, else the
@@ -5756,16 +4868,15 @@ _bsg_wrap_text() {
   # command's measurements reach every tree it runs in and a tree's path is never part of a key.
   # The reader prints a place, not the text after it, so the prefix is cut here by pattern.
   _BSG_CLASS_ARGS=()
-  case "$_WALL_CLASS" in
-    browser|compile)
-      [ "$_WALL_CLASS_TEXT" = "$COMMAND" ] || return 1
-      _w="$_c"
-      _kre='^cd[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|"'"'"']+)[[:space:]]*(\|\|[^;&|]*;|&&|;)[[:space:]]*(.+)$'
-      if [[ "$_w" =~ $_kre ]]; then _w="${BASH_REMATCH[3]}"; fi
-      _w="${_w//[$'\n\r\t|']/ }"; _w="${_w:0:60}"
-      case "$_w" in *'$'*|*'`'*) _BSG_SUITES='?' ;; *) _BSG_SUITES="${_w//[!A-Za-z0-9._+-]/_}" ;; esac
-      _BSG_CLASS_ARGS=(--class "$_WALL_CLASS") ;;
-  esac
+  if cmd_class_heavy "$_WALL_CLASS"; then
+    [ "$_WALL_CLASS_TEXT" = "$COMMAND" ] || return 1
+    _w="$_c"
+    _kre='^cd[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|"'"'"']+)[[:space:]]*(\|\|[^;&|]*;|&&|;)[[:space:]]*(.+)$'
+    if [[ "$_w" =~ $_kre ]]; then _w="${BASH_REMATCH[3]}"; fi
+    _w="${_w//[$'\n\r\t|']/ }"; _w="${_w:0:60}"
+    case "$_w" in *'$'*|*'`'*) _BSG_SUITES='?' ;; *) _BSG_SUITES="${_w//[!A-Za-z0-9._+-]/_}" ;; esac
+    _BSG_CLASS_ARGS=(--class "$_WALL_CLASS")
+  fi
   set --
   _bsg_agent
   [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"
@@ -5806,15 +4917,14 @@ _bsg_wrap_only() {
   return 0
 }
 
-# _bsg_own_deliver — is the matched `session-poker.sh deliver` (`_WALL_POKER_ARGS`) the writer's OWN row, alone in one
-# call (wave-33 T15, D10; T6's concern A-T6-10). `deliver` lands a record row at the working head, which a writer
-# does for the row its dispatch bound and for no other: one that could land another's row would close work nobody did.
-# The row it may deliver is the roster row's own `row=` (the brief's `Row:`, which the dispatch wall wrote). Sets
-# `_BSG_DL_OWN` (that row, empty when its roster row names none) and `_BSG_DL_TARGET` (the operand) for the refusal's
-# detail. ALONE IN ONE CALL because the arm reads only the first matching segment: `deliver T6; deliver T9` would
-# otherwise be admitted for its first half. Returns 0 only when the call is exactly `deliver <own row>`.
+# _bsg_own_row — is the matched poker verb's one operand (`_WALL_POKER_ARGS`) the writer's OWN row, alone in one call?
+# A writer acts for the row its dispatch bound and for no other. Its row is the roster row's own `row=` (the brief's
+# `Row:`, which the dispatch wall wrote). Sets `_BSG_DL_OWN` (that row, empty when its roster row names none) and
+# `_BSG_DL_TARGET` (the operand) for the refusal's detail. ALONE IN ONE CALL because the arm reads only the first
+# matching segment, so a second verb after it would otherwise be admitted for the first. Returns 0 only when the call
+# is exactly `<verb> <own row>`.
 _BSG_DL_OWN=""; _BSG_DL_TARGET=""
-_bsg_own_deliver() {
+_bsg_own_row() {
   local _pick _seg _segs _l _n=0 _oldifs _hadf
   _BSG_DL_OWN=""; _BSG_DL_TARGET=""
   wall_libs background-suite-guard roster.sh || return 1
@@ -5841,14 +4951,14 @@ _bsg_own_deliver() {
 # _bsg_own_reviews_part — is the matched `session-poker.sh reviews-part` (`_WALL_POKER_ARGS`) the INTEGRATE row's own
 # writer's, on that row, alone in one call? `reviews-part` commits the release entry's reviews on the working branch
 # before the pull request, which only the integrate row's writer does and only for its own row. The own-row reading is
-# `_bsg_own_deliver`'s, so the two cannot drift; what this adds is the row's kind, read from the session's bound plan
+# `_bsg_own_row`'s, so it cannot drift; what this adds is the row's kind, read from the session's bound plan
 # through the one reader (`units_rows`), so a build row's writer is refused its own row too. Sets `_BSG_RP_KIND` (that
 # row's kind, empty when no plan names it) for the refusal's detail. A session with no bound plan names no kind.
 _BSG_RP_KIND=""
 _bsg_own_reviews_part() {
   local _alone=1
   _BSG_RP_KIND=""
-  _bsg_own_deliver && _alone=0
+  _bsg_own_row && _alone=0
   [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_OWN" = "$_BSG_DL_TARGET" ] && _bsg_rp_kind
   [ "$_alone" -eq 0 ] && [ "$_BSG_RP_KIND" = integrate ]
 }
@@ -6076,7 +5186,7 @@ _bsg_own_amend() {
 
 # _bsg_budget_read — THE AGENT'S BUDGET, OFF ITS ROSTER ROW (moved out of the budget arm by wave-33
 # T36; D7, AC-6.2). The budget arm's read: sets the caller's BUDGET_STATED, SUITES_ALLOWED,
-# RE_EXECUTES (decoded and normalised), _BUDGET_ROW and _BUDGET_ROW_NAME; rc 1 when roster.sh will not
+# RE_EXECUTES (decoded), _BUDGET_ROW and _BUDGET_ROW_NAME; rc 1 when roster.sh will not
 # load, which the caller answers by allowing, as the arm always did. Defined ahead of the wall: a
 # function written inside the wall's body is defined only when the wall's run reaches it.
 _bsg_budget_read() {
@@ -6156,15 +5266,8 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   # while decoding in both places would turn a literal `%7C` in a command into a pipe.
   RE_EXECUTES="${RE_EXECUTES//\%7C/|}"
   RE_EXECUTES="${RE_EXECUTES//\%25/%}"
-  # AND NORMALISED, AT THE SAME ONE DECODE (wave-20 T4; REQ-7, D7). The claim side builds
-  # its run with `cmdnorm_run` (payload/scripts/lib/cmd-class.sh, loaded above ARM 1), which
-  # takes trailing redirections, `| tee` and `|| true` off; the declared side goes through
-  # the same rule here, once per hook call, so `_run_is_declared` compares two readings of
-  # one rule and never a raw declaration against a normalised claim. For a row the lift
-  # wrote this is the identity — the lift refuses a redirection in a declaration and runs
-  # the same rule before it stores one — and `cmd_runs_norm` skips its fork when the field
-  # holds nothing the rule could act on.
-  RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
+  # LEFT RAW HERE ON PURPOSE: the refusal prints the declaration as the author wrote it, and
+  # the compare set is built from it where the typed claims are read (`_declared_runs`).
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
 }
@@ -6184,14 +5287,14 @@ fi
 # declares it optional on the Bash tool input), so the test is `== true` and never
 # `!= false`.
 #
-# THE PARTITION IS A GATE HERE NOW (T23 ruling R2). This wall was registered BEHIND
-# hooks/agent-context-guard.sh, which ran it only inside an agent context of an armed
-# session — and that wrapper was the only thing keeping arm 1 off the main thread:
+# THE PARTITION IS A GATE HERE NOW. This wall was registered BEHIND a wrapper, which
+# ran it only inside an agent context of an armed session — and that wrapper was the
+# only thing keeping arm 1 off the main thread:
 # driven straight, this wall refuses a main-thread backgrounded suite; driven through
 # the guard it did not (measured 2026-09-12, T23 report §2). A wrapper around the
 # COMPOUND would silence protect-main, protect-database, the evidence gate and
 # farm-out-reminder on every main-thread call, so the predicate is asked here, of
-# this one function, and the guard file stays registered on SubagentStop untouched.
+# this one function.
 # [WALL: tests/background-suite-guard.test.sh]
 # [WALL: tests/cmd-class.test.sh]
 wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
@@ -6213,8 +5316,8 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   IS_BACKGROUND=no
   [ "$(bionic_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
   # THE ACTOR (design D1, task 4/1 probe): an agent-context payload carries a top-level
-  # `agent_id`, a main-thread one does not. hooks/stop-guard.sh reads the same field the
-  # same way.
+  # `agent_id`, a main-thread one does not. payload/scripts/lib/stop.sh reads the same
+  # field the same way.
   ACTOR=$(bionic_jq .agent_id)
   # NO PRE-FILTER ANY MORE (wave-26 T7, D8). A main-thread foreground call used to return
   # here unread; now every allowed suite call is wrapped in the booking shim, so a call no
@@ -6222,7 +5325,7 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # non-suite main-thread command pays one `cmd_class`, the same reading farm-out-reminder
   # gives it on that thread.
 
-  # ── THE PARTITION, verbatim from hooks/agent-context-guard.sh's predicate ──
+  # ── THE PARTITION ──
   #
   # 1. an agent context at all — main-thread payloads carry no top-level `agent_id`
   #    (t1 §3, `ctx = .agent_id // "MAIN"`).
@@ -6322,9 +5425,11 @@ A commit placed outside the project root and outside every tree of its repositor
 
   # ---------- ARM A (wave-20 T9; REQ-4, AC-4.2; spec D4): a subagent changes no contract ----
   #
-  # `session-poker.sh amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a
-  # MET row, and `task-add` writes the bound plan. All three are the orchestrator's: a writer
-  # that could run them would grant itself a wider budget or schedule its own work. The
+  # Every verb on `_wall_poker_contract_verb`'s list changes a roster contract or the run's record:
+  # `amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a MET row, `task-add`
+  # records a row's birth, and `proof-add` registers the evidence the gates judge by. Each is the
+  # orchestrator's: a writer that could run one would widen its own budget, schedule its own work
+  # or register the evidence it is judged by. The
   # script cannot see who called it — in-process teammates share the session's environment —
   # so the refusal is here, below the partition every arm of this function shares: a payload
   # carrying a top-level `agent_id`, in an armed session. Main-thread calls never reach it.
@@ -6342,11 +5447,6 @@ A commit placed outside the project root and outside every tree of its repositor
         if [ "$_WALL_POKER_VERB" = amend ] && _bsg_own_amend; then
           fold_update_input "$_BSG_AM_UPD"
           return 1
-        fi
-        # A WRITER DELIVERS ITS OWN ROW (wave-33 T15, D10): `deliver <the row its roster row names>`, alone in one
-        # call, goes through unchanged. Anything else the verb takes is refused below, naming the row.
-        if [ "$_WALL_POKER_VERB" = deliver ] && _bsg_own_deliver; then
-          return 0
         fi
         # THE INTEGRATE ROW'S WRITER RENDERS ITS OWN REVIEWS PART: the same own-row admission, and only for a row the
         # bound plan makes the integrate row. Anything else the verb takes is refused below, naming the row.
@@ -6369,18 +5469,6 @@ A commit placed outside the project root and outside every tree of its repositor
 The integrate row's writer renders its own part, alone in one call, before its push and pull request:
     bash <plugin>/hooks/session-poker.sh reviews-part <your row>"
         fi
-        if [ "$_WALL_POKER_VERB" = deliver ]; then
-          if [ -n "$_BSG_DL_OWN" ]; then
-            _bsg_am_more="
-\`deliver ${_BSG_DL_TARGET:-<none>}\`: ${_BSG_DL_TARGET:-no row} is not your row (yours is $_BSG_DL_OWN)."
-          else
-            _bsg_am_more="
-\`deliver\`: no roster row of yours names a plan row, so there is no row of yours to deliver."
-          fi
-          _bsg_am_more="${_bsg_am_more}
-A writer delivers its own row, alone in one call:
-    bash <plugin>/hooks/session-poker.sh deliver <your row>"
-        fi
         if [ "$_WALL_POKER_VERB" = amend ] && [ -n "$_BSG_AM_OWN" ]; then
           if [ -n "$_BSG_AM_TARGET" ] && [ "$_BSG_AM_TARGET" != "$_BSG_AM_OWN" ]; then
             _bsg_am_more="
@@ -6391,10 +5479,10 @@ The one amend a writer runs itself adds Files to its own row, alone in one call:
     bash <plugin>/hooks/session-poker.sh amend $_BSG_AM_OWN --files+ <path> --reason '<why>'"
         fi
         fold_block exit2 "$_WALL_POKER_VERB" \
-          "a subagent may not change a contract or the plan" "ask main" \
-          "\`$_WALL_POKER_SHOWN\` changes a roster contract or the bound plan, and
-only the orchestrator does that: a dispatched agent that could would widen its own budget or
-schedule its own work. Send the orchestrator what you need — the files, suites or runs to
+          "a subagent may not change a contract or the run's record" "ask main" \
+          "\`$_WALL_POKER_SHOWN\` changes a roster contract or the run's record (its plan or its log), and
+only the orchestrator does that: a dispatched agent that could would widen its own budget,
+schedule its own work, or register the evidence it is judged by. Send the orchestrator what you need — the files, suites or runs to
 add and why, or the row to add — and it runs the verb.${_bsg_am_more}"
         return 2
       fi
@@ -6714,6 +5802,36 @@ _budget_wire_fact() {
   printf '%s%s' "$label" "$(_budget_wire_list "$allowed" "$room")"
 }
 
+# THE DECLARED SIDE IS READ BY THE CLAIMS READER, the reader that built the typed side. A
+# declaration may lead with `cd <dir> &&` or a `VAR=value`, and the typed command has those taken
+# off before it is compared; trailing-normalising alone left the two sides spelled
+# differently. Each marked token becomes the run(s) the reader claims from it, marks kept and
+# space-joined. A token the reader claims nothing from is kept as its trailing-normalised
+# text, which is how it compared before. A field with nothing the reader could strip (no
+# `cd`, `=`, `;`, redirection or run of blanks) is returned as it stands and costs no fork.
+_declared_runs() {  # <re_executes field, decoded> -> the compare set
+  local _rest="${1-}" _bt='`' _tok _out="" _cl _k _t _r _any
+  case "$_rest" in
+    *'>'*|*'|'*|*'&'*|*';'*|*'='*|*'cd '*|*'  '*|*$'\t'*|*$'\n'*|*$'\r'*) : ;;
+    *) printf '%s' "$_rest"; return 0 ;;
+  esac
+  while :; do
+    case "$_rest" in *"$_bt"*) : ;; *) break ;; esac
+    _rest="${_rest#*"$_bt"}"
+    case "$_rest" in *"$_bt"*) : ;; *) break ;; esac
+    _tok="${_rest%%"$_bt"*}"
+    _rest="${_rest#*"$_bt"}"
+    _any=""
+    _cl=$(cmd_suite_claims "$_tok" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")
+    while IFS=$'\t' read -r _k _t _r; do
+      [ -n "$_r" ] || continue
+      _any=1; _out="${_out:+$_out }$_bt$_r$_bt"
+    done <<< "$_cl"
+    [ -n "$_any" ] || _out="${_out:+$_out }$_bt$(cmd_run_norm "$_tok")$_bt"
+  done
+  printf '%s' "$_out"
+}
+
 # _run_is_declared <run> <the row's re_executes= field, DECODED> -> 0 when the row declared
 # EXACTLY this run (REQ-1 AC-1.5).
 #
@@ -6859,8 +5977,8 @@ $_how"
 # `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
 # THE WHOLE RUN IS NO WIDENING (wave-35 T10; D10, REQ-1 AC-1.8). A refused run that is the project's whole tree,
 # `run.sh` or `tests/run.sh` with no `--only`, is never sent to `--reexec+ '<cmd>'`: an amend would hand a row the
-# whole tree outside the full-run rules. Its one path is `session-poker.sh floor-run`, which holds those rules
-# itself (hooks/session-poker.sh, the floor-run arm) and which this wall admits as typed, so the line printed,
+# whole tree outside the full-run rules. Its one path is `session-poker.sh regression-run`, which holds those rules
+# itself (hooks/poker/proof.sh, its verb) and which this wall admits as typed, so the line printed,
 # run as printed, is not refused again. `_budget_whole_run_cmd` is the command, built once, for this line and for
 # the full-tree arm's detail.
 _budget_whole_run_cmd() {
@@ -6918,6 +6036,7 @@ _BSG_SET_CMP="$SUITES_ALLOWED"
 case "$_BSG_SET_CMP" in
   *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*) ! cmd_case_blind "$BIONIC_ROOT" || _BSG_SET_CMP="$(printf '%s' "$_BSG_SET_CMP" | tr 'A-Z' 'a-z')" ;;
 esac
+local _RUNS_CMP; _RUNS_CMP=$(_declared_runs "$RE_EXECUTES")
 _BSG_RUNS=0
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
@@ -7017,7 +6136,7 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   # spellings of one statement (AC-1.2) and an arm honouring only one of them would refuse
   # at run time what the dispatch wall let through. It does NOT admit the full tree: that
   # arm ran above it, for the reason written there.
-  if _run_is_declared "$_run" "$RE_EXECUTES"; then continue; fi
+  if _run_is_declared "$_run" "$_RUNS_CMP"; then continue; fi
 
   # A WRAPPER'S INNER RUN, DECLARED, IS ADMITTED (wave-39 T21; D19, REQ-15 AC-15.1). A `run` claim read
   # inside a script carries the run the script holds as its target, beside the command as typed. When
@@ -7025,7 +6144,7 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   # and the wrapper that launches it is no different from the run typed bare. Nothing else changes: an
   # undeclared inner run falls through to the refusal below, which names the script and the run, and
   # the full tree was judged above.
-  if [ "$_kind" = "run" ] && _run_is_declared "$_target" "$RE_EXECUTES"; then continue; fi
+  if [ "$_kind" = "run" ] && _run_is_declared "$_target" "$_RUNS_CMP"; then continue; fi
 
   # A RUN READ INSIDE A SCRIPT names the script and the run (wave-31 T11): the claim's run is the
   # command as typed, its target the run the script holds.

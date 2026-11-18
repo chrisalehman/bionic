@@ -1,6 +1,5 @@
 #!/bin/bash
 # Tests for payload/scripts/lib/fold.sh — THE ONE COMPOSITION RULE
-# (epic-23 wave-11-lean-spine, REQ-1f (iv), ADR-004, T12 ruling R3).
 #
 # THE MECHANISM UNDER TEST, AND NOTHING ELSE. `bionic_fold <event> <fn>...` runs
 # every named function, in order, in the CURRENT SHELL, with no short-circuit,

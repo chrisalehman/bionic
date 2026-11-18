@@ -17,7 +17,7 @@
 # refused a correct stop with "no observation exists in this repo" because nobody had run
 # the verb: the wall asserted a condition it had not observed. ADR-028 rules that a wall
 # asserts only what it can observe at the moment of the act, so the look became a function
-# two callers share — `hooks/stop-check.sh` prints it, `hooks/stop-guard.sh` decides on it —
+# two callers share — `hooks/stop-check.sh` prints it, the stop gate decides on it —
 # and the record, its writer arm and the D-1/D-2/D-3/D-6 accounting over it left the tree.
 #
 # NOT A SUBPROCESS SEAM. The gate calls these functions IN PROCESS rather than running the
@@ -40,7 +40,7 @@
 #   OBSERVE_PROGRESS_ARG  an explicit progress path, overriding the roster's
 #   OBSERVE_CLAIMS_ARG    an explicit subprocess claim pattern, overriding the roster's
 #
-# [WALL: tests/stop-check.test.sh, tests/stop-guard.test.sh]
+# [WALL: tests/stop-check.test.sh, tests/stop.test.sh]
 
 # The roster schema this library reads. A row it cannot read is a row it does not guess at.
 OBSERVE_ROSTER_VERSION="v1"
@@ -73,7 +73,7 @@ OBSERVE_CADENCE_DEFAULT_S=900
 
 # ---------- portable file facts ----------
 #
-# ONE DEFINITION NOW. `hooks/stop-check.sh` and `hooks/stop-guard.sh` each carried a copy of
+# ONE DEFINITION NOW. `hooks/stop-check.sh` and the stop gate each carried a copy of
 # these two, byte for byte, held together by the resolver agreement battery in
 # tests/cross-gate-agreement.test.sh §C. The copies were the price of the no-library rule
 # (TDD §9: a sourced file the installer misses is a silently inert wall) and the loader's
@@ -241,8 +241,7 @@ observe_roster_walk() {  # <key>
   # reading each row's three fields through `$(line_field …)` cost 3 s over 262 rows, and the stop
   # guard, which walks twice through here, ran past its own 7 s deadline. `_roster_kv` gives the
   # FIRST value of a key, as `line_field` did. The three rows come back one per line (a row
-  # holds no newline): by id, by name, by name with an id. hooks/stop-guard.sh's `roster_walk`
-  # is the same pass over the same rule, kept in the hook so a copied hook carries it.
+  # holds no newline): by id, by name, by name with an id.
   rows="$(OBS_WK="$key" OBS_WV="roster-state/${OBSERVE_ROSTER_VERSION}|" awk "$_ROSTER_OPEN_AWK"'
     index($0, ENVIRON["OBS_WV"]) != 1 { next }
     {

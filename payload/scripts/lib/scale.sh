@@ -85,18 +85,6 @@ scale_patrol() {  # <plan>
   return 0
 }
 
-# scale_branch_number <scale> <branch> -> what the branch pattern's `<NN>` matched on <branch>,
-# exit 0; nothing and exit 0 when the cell is `any`; nothing and exit 1 when <branch> does not
-# have the cell's shape or <scale> is no scale. The pattern is the cell itself: `<NN>` reads
-# digits, `<slug>` one or more characters, every other character itself.
-scale_branch_number() {
-  local pat ere
-  pat="$(scale_cell "${1:-}" branch 2>/dev/null)" || return 1
-  [ "$pat" != any ] || return 0
-  ere="$(printf '%s' "$pat" | sed -e 's/[][\.*^$(){}+?|/]/\\&/g' -e 's/<NN>/([0-9]+)/' -e 's/<slug>/.+/')"
-  printf '%s\n' "${2:-}" | sed -nE "s/^${ere}\$/\\1/p" | /usr/bin/grep . || return 1
-}
-
 # THE EVAL TYPE'S TIER. The Eval design names each criterion's eval type in words; the matrix table names its
 # tier, and the tier decides the keys its block owes (walls.sh `keys_for_tier`). This is the one map between the
 # two, so the render that writes a missing table row and any reader that asks agree on the tier a type owes.

@@ -1,6 +1,5 @@
 #!/bin/bash
 # tests/farm-out-reminder.test.sh — the wall's own suite, written at last
-# (epic-23 wave-11-lean-spine, T23/R1).
 #
 # WHY IT EXISTS, AND WHY IT EXISTS *FIRST*. hooks/farm-out-reminder.sh is the only one
 # of the five PreToolUse|Bash walls that answers on STDOUT as JSON rather than by exit 2

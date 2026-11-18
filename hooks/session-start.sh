@@ -65,100 +65,14 @@
 set -u
 
 BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh roster.sh binding.sh"
-# --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
-# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
-# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
-# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
-# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
-# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
-# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
-# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
-# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
-# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
-# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
-BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
-_bl_try() {
-  [ -n "${1:-}" ] || return 1
-  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
-  [ -d "$1" ] || return 1
-  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
-  BIONIC_LIB="$1"
-}
-if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
-  if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
-    _bl_mk="${_bl_keys%%
-*}"
-    _bl_mk="${_bl_mk#bionic@}"
-  fi
-  if [ -n "$_bl_mk" ]; then
-    _bl_src=""
-    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
-      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
-    fi
-    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
-    if [ -z "$BIONIC_LIB" ]; then
-      _bl_best=""; _bl_bestk=""
-      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
-        [ -d "$_bl_v" ] || continue
-        _bl_n="${_bl_v##*/}"
-        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
-        _bl_x1=""; _bl_x2=""; _bl_x3=""
-        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
-$_bl_n
-BIONIC_LOADER_VER
-        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
-        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
-      done
-      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
-    fi
-  fi
+# Find the library through lib/loader.sh beside this hook; payload/scripts/lib/loader.sh says how.
+_bl_dir="$(dirname "$0")"; _bl_l="$_bl_dir/../scripts/lib/loader.sh"; [ -r "$_bl_l" ] || _bl_l="$_bl_dir/../payload/scripts/lib/loader.sh"
+# shellcheck source=/dev/null
+if [ -r "$_bl_l" ]; then . "$_bl_l"; bionic_load; else
+  BIONIC_LIB=""; BIONIC_LIB_MISSING="${BIONIC_LIB_WANT%% *}"; BIONIC_LIB_CANDS="$_bl_dir/../scripts/lib, $_bl_dir/../payload/scripts/lib"
+  loader_fail_open() { echo "$1: library $BIONIC_LIB_MISSING not found at $BIONIC_LIB_CANDS — hook stepping aside; run /bionic:doctor" >&2; exit 0; }
+  loader_fail_closed() { set -- "$1"; [ "${#1}" -le 25 ] || set -- "${1:0:24}…"; echo "bionic: load refused — $1 cannot load the bionic library (run /bionic:doctor)" >&2; exit 2; }
 fi
-if [ -z "$BIONIC_LIB" ]; then
-  BIONIC_LIB_MISSING="${_bl_want%% *}"
-  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
-fi
-loader_fail_open() {
-  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
-  exit 0
-}
-loader_fail_closed() {
-  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
-  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
-  case "${2:-}" in
-    "claude plugin update bionic@bionic"|\
-    "claude plugin install bionic@bionic"|\
-    "bash $_bl_root/scripts/doctor.sh"|\
-    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
-  esac
-  _bl_who="${1:-a bionic hook}"
-  if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
-  printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
-    cat >&2 <<BIONIC_LOADER_REFUSE
-A wall that cannot read a command refuses it rather than waving it through.
-
-Wanted: ${BIONIC_LIB_MISSING:-the bionic library}
-Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
-
-Until the plugin is whole again this wall permits exactly four commands, each matched
-as a whole string:
-
-    claude plugin update bionic@bionic
-    claude plugin install bionic@bionic
-    bash $_bl_root/scripts/doctor.sh
-    bash $_bl_root/scripts/setup.sh
-
-Anything else is refused, including one of those four with another command chained
-after it. Run one of them, or act from your own terminal.
-BIONIC_LOADER_REFUSE
-  fi
-  exit 2
-}
-# --- bionic-loader/v2 END
 
 # The library, or nothing. `loader_fail_open` prints one stderr line and exits 0 —
 # a detector that cannot read the disk reports nothing rather than guessing.
@@ -343,8 +257,9 @@ N=$(printf '%s\n' "$RUNS" | grep -c '.')
 # scripts/lib/run.sh — so the header above still names the true OPEN count (`$N`,
 # unchanged) while the listing itself shows only the LIVE subset; the quiet remainder is
 # reported as one count, not a second listing, because a bystander acts on a live plan by
-# name and on a quiet one only by knowing it exists at all.
-LIVE="$(live_runs "$BIONIC_ROOT")" || LIVE=""
+# name and on a quiet one only by knowing it exists at all. The filter is handed the open set
+# read above, so every candidate is asked once per start, not once for each listing.
+LIVE="$(live_runs "$BIONIC_ROOT" "$RUNS")" || LIVE=""
 LIVE_N=$(printf '%s\n' "$LIVE" | grep -c '.')
 QUIET=$((N - LIVE_N))
 
@@ -400,17 +315,37 @@ print_quiet_line() {
   printf 'bionic: %s quiet open run(s) — bind names any of them\n' "$QUIET"
 }
 
+# THE RUN'S FACTS, ONE FOLD PER START. The bound line's step and the resume door's pointer are
+# the reader's `step` and `handoff` answers (lib/reader.sh) over lib/proof.sh's kept fold, so a
+# step or a handoff only the run's log holds is the one printed, and a start after another pays
+# no fold while the run's files are unchanged. At most one plan is asked: the bound run, or on a
+# resume the newest open run. proof.sh is sourced here rather than wanted by the loader, so a
+# library without it prints no step and no door and the rest of the report stands. A fold that failed is held as
+# nothing and answers 2, and the line says the facts could not be read where the step or the door would stand.
+SS_FACTS_PLAN=""; SS_FACTS=""; SS_ANSWER=""; SS_UNREAD="not read — the run's facts could not be read"
+ss_ask() {  # <plan> <reader question function> -> SS_ANSWER, its answer over the plan's facts; 2 when they cannot be read
+  SS_ANSWER=""
+  if [ "$SS_FACTS_PLAN" != "$1" ]; then
+    { declare -F _proof_facts >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
+    declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load || return 1
+    SS_FACTS="$(_proof_facts "$1")" || { SS_FACTS=""; return 2; }
+    SS_FACTS_PLAN="$1"
+  fi
+  SS_ANSWER="$( reader_facts() { printf '%s' "$SS_FACTS"; }; "$2" "$1" 2>/dev/null )"
+}
+
 # THE BOUND-RUN LINE (AC-21). `session_run` already resolved "this session's binding
 # is to an open plan"; this only formats it. The plan path comes off the marker
 # `session_run` read, not off `$RUNS`/`$LIVE`, because a bound plan is named by the
-# ONE binding fact regardless of how many other runs are open. `current:` is read the
-# same way the poker's own step display does — first match, digits and `T` only, so a
-# multi-digit or ISO-stamped value still comes through whole.
+# ONE binding fact regardless of how many other runs are open. The step is the run's
+# (`ss_ask` above), digits and `T` only, as the poker's own step display prints it.
 print_bound_line() {  # <verdict "bound-open <plan>">
   local verdict="$1" bplan step relplan
   bplan="${verdict#bound-open }"
-  step="$(grep -m1 '^current:' "$bplan" 2>/dev/null | tr -dc '0-9T')"
   if [ -n "$DOCS" ]; then relplan="${bplan#"$DOCS"/}"; else relplan="$bplan"; fi
+  ss_ask "$bplan" reader_q_step
+  [ $? -ne 2 ] || { printf 'bionic: bound to %s — current: %s\n' "$relplan" "$SS_UNREAD"; return 0; }
+  step="$(printf '%s\n' "$SS_ANSWER" | sed -n 's/^n=//p' | tr -dc '0-9T')"
   printf 'bionic: bound to %s — current: %s\n' "$relplan" "$step"
   # THE STEP FILE, NAMED RATHER THAN INJECTED (wave-11 row 1b, design D1). The governing
   # skill is a core plus one file per step, and the core's own rule is to read `steps/N.md`
@@ -434,19 +369,17 @@ print_bound_line() {  # <verdict "bound-open <plan>">
 # adopts and recaps (`session-poker.sh resume`). After a clear, resume or compact, the bound plan's pointer, or
 # unbound the newest open plan's, to a file whose first line is the kind line is printed where the engage or bind
 # advice stood (and after the bound line). A startup has nothing to resume; a pointer to no file, or to a file
-# without the kind line, is no door. The pointer is read the way the poker's `handoff_file_of` reads it (the section
-# by its heading, fences skipped); this hook sources no poker code, so the awk is a second copy of that one reader.
+# without the kind line, is no door. The pointer is the run's latest handoff, the reader's `handoff` answer (`ss_ask`
+# above): the plan's ## Handoff line, or a handoff the run's log holds.
 SS_DOOR=""
 case "${SOURCE:-}" in
   clear|resume|compact)
     if [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ]; then SS_DOOR_PLAN="$BIONIC_RUN_PLAN"
     else SS_DOOR_PLAN="$(printf '%s\n' "$RUNS" | head -n 1)"; fi
     if [ -n "$SS_DOOR_PLAN" ] && [ -f "$SS_DOOR_PLAN" ]; then
-      SS_DOOR_REL="$(awk '
-        /^[ \t]*```/ { f = !f; next }
-        f { next }
-        /^##[ \t]/ { h = ($0 ~ /^##[ \t]+Handoff[ \t]*$/); next }
-        h && index($0, "handoff: ") == 1 && / written / { s = substr($0, 10); sub(/ written .*$/, "", s); print s; exit }' "$SS_DOOR_PLAN" 2>/dev/null)"
+      ss_ask "$SS_DOOR_PLAN" reader_q_handoff
+      [ $? -ne 2 ] || SS_DOOR="bionic: the resume door is $SS_UNREAD; start again to be offered it"
+      SS_DOOR_REL="$(printf '%s\n' "$SS_ANSWER" | sed -n 's/^path=//p')"
       case "$SS_DOOR_REL" in
         '') SS_DOOR_FILE="" ;;
         /*) SS_DOOR_FILE="$SS_DOOR_REL" ;;
@@ -638,7 +571,7 @@ fi
 #
 # THE INTERVAL COMES FROM THE POKER BESIDE THIS HOOK, by the same two-step
 # lib/patrol.sh's `patrol_interval` takes — the project's configured value, then
-# the script's built-in default, then the last resort. It is asked HERE rather than
+# the library's PATROL_INTERVAL_DEFAULT. It is asked HERE rather than
 # through `patrol_interval` because that function resolves the poker through
 # `plugin_root` (lib/roots.sh), i.e. the plugin installed on the machine, while a
 # SessionStart hook must measure against the tree it was actually launched from.
@@ -647,12 +580,8 @@ ss_interval() {
   if [ -f "$poker" ]; then
     s="$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" interval 2>/dev/null )"
     case "$s" in ''|*[!0-9]*) s="" ;; esac
-    if [ -z "$s" ]; then
-      s="$( bash "$poker" interval-default 2>/dev/null )"
-      case "$s" in ''|*[!0-9]*) s="" ;; esac
-    fi
   fi
-  if [ -z "$s" ] || [ "$s" -le 0 ]; then s="$PATROL_INTERVAL_LAST_RESORT"; fi
+  if [ -z "$s" ] || [ "$s" -le 0 ]; then s="$PATROL_INTERVAL_DEFAULT"; fi
   printf '%s' "$s"
 }
 

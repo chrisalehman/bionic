@@ -19,7 +19,7 @@ set +x +v
 #      found by the walk every reader of a project's runs uses (lib/run.sh `_run_candidates` under
 #      `docs_root` of the project: BIONIC_CHECK_PROJECT when set, else this checkout's top). Every OPEN deferral of that plan (lib/proof.sh
 #      `proof_findings_owed` rating it `defer`, the reader close-out's continuation carries by) that
-#      states its sentence (the ` stated="…"` field `finding-stated` writes, unescaped) must stand
+#      states its sentence (lib/proof.sh `proof_finding_stated`, the move's `stated=` field, unescaped) must stand
 #      under the entry's `### Known limits`, both sides folded by lib/said.sh `said_fold`, the one
 #      fold the sentence was written through. A missing one is ONE line naming the finding and the
 #      sentence, and exit 1. An open deferral rated `defer` that states none, or a `-` for one (the form a
@@ -28,8 +28,7 @@ set +x +v
 #      passed over, its known-limits line unchanged. The plan is read from the working files: `.bionic/` is ignored, so the
 #      head's tree holds no plan to read. No plan naming the release (a closed run is archived), and
 #      a plan with no stated deferral, each pass with one `known-limits:` line saying so; a pass with
-#      sentences held says how many, in one such line. Generalised from the §CORR rule of
-#      tests/release-check.test.sh, which held one release to one plan by hand.
+#      sentences held says how many, in one such line.
 #   4. the landing numbers: the entry's `### The landing numbers` part names the head and the instant it
 #      was rendered for (``landing-report --rows` at <40-hex> on <ISO-UTC>:`, the line `release-note`
 #      prints), and its fenced block must equal, field for field, what `hooks/session-poker.sh release-note
@@ -127,7 +126,7 @@ rel_load() {
   local lib f
   lib="$HERE/../../payload/scripts/lib"
   command -v jq >/dev/null 2>&1 || { echo "release-check: refused — $1 needs jq, to fold as the sentences were written"; return 2; }
-  for f in run.sh proof.sh said.sh worktree.sh; do
+  for f in run.sh proof.sh said.sh worktree.sh line.sh; do
     # shellcheck source=/dev/null
     [ -f "$lib/$f" ] && . "$lib/$f" >/dev/null 2>&1 || { echo "release-check: refused — $1 cannot load $lib/$f"; return 2; }
   done
@@ -145,16 +144,6 @@ rel_plans() {  # <version> -> each run plan under DROOT whose frontmatter says `
     [ "$(plan_frontmatter_get "$f" release 2>/dev/null)" = "$1" ] && printf '%s\n' "$f"
   done < <([ -z "$DROOT" ] || _run_candidates "$DROOT" 2>/dev/null)
 }
-# lim_sentence <plan> <record>#<n> -> the stated sentence of the first `deferred:` line of `## SDLC State`
-# naming it, unescaped; nothing when the line states none.
-lim_sentence() {
-  awk -v id="$2" '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { print; exit } }' "$1" \
-    | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p' | sed -e 's/\\\(.\)/\1/g'
-}
 lim_check() {  # <version> <changelog text> -> one line per omission, or one known-limits: line; exit 1 on an omission
   local ver="$1" cl="$2" plans plan kl id s r p t st n=0 un=0 bad=0
   rel_load "the Known limits check" || return 2
@@ -169,7 +158,7 @@ lim_check() {  # <version> <changelog text> -> one line per omission, or one kno
     n=0 un=0
     while read -r id s r p t; do
       [ "$p" = defer ] || continue
-      st="$(said_fold "$(lim_sentence "$plan" "$id")")"
+      st="$(said_fold "$(proof_finding_stated "$plan" "$id")")"
       # Before the floor an unstated deferral, or a dash for one, is passed over as the older rule passed it.
       if ! lim_version_at_least "$ver" "$LIM_RULE_FROM"; then
         { [ -z "$st" ] || [ "$st" = - ]; } && continue
@@ -248,9 +237,10 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
     if nums_holds "$c" "$hl" && ! nums_holds "$c^1" "$hl"; then continue; fi
     echo "release-check: the landing numbers of $ver are at $h12, and $row landed after them at ${c:0:12}; render them again with release-note"
     bad=1
-  done < <(awk -F'|' '$1 == "line/v1" && $2 == "ev=published" { r = c = ""
+  done < <(rec="$(_wt_proofs_path "$TOP" "$plan")" && line_lines "$rec" 2>/dev/null \
+    | awk -F'|' '($1 == "line/v1" || $1 == "run/v1") && $2 == "ev=published" { r = c = ""
       for (k = 3; k <= NF; k++) { if (index($k, "row=") == 1) r = substr($k, 5); if (index($k, "commit=") == 1) c = substr($k, 8) }
-      if (r != "" && c != "") print r "|" c }' "$(_wt_proofs_path "$TOP" "$plan")" 2>/dev/null)
+      if (r != "" && c != "") print r "|" c }')
   [ "$bad" -ne 0 ] || echo "landing-numbers: $ver agrees with the landing report at $h12"
   return "$bad"
 }

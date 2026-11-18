@@ -3,9 +3,7 @@
 # count forks over 8 and 400 predecessors and §17.13 counts the bound's polls, where they once
 # read seconds and ratios of seconds; see THE COUNT in §16.
 #
-# Tests for hooks/session-start.sh — THE POST-`/clear` DETECTOR (bionic 1.4.0,
-# spec AC-1, AC-4's "the block runs the report", AC-11's symlink listing; plan
-# task SSTART).
+# Tests for hooks/session-start.sh — THE POST-`/clear` DETECTOR.
 #
 # THE CONTRACT UNDER TEST. `/clear` re-keys the session id in place (probe
 # A-probe-1/2/3: env, payload and `sessions/<pid>.json` all move together, same
@@ -137,40 +135,22 @@ write_stamp() {  # <project> <sid>
     > "$1/.bionic/tmp/patrol-$2.state"
 }
 
-# An OPEN RUN, in the shape lib/run.sh's active_plan/active_run read: a
-# flush-left `## SDLC State` heading under `.bionic/docs/plans/`, and a
-# `current:` step below 9. This is the T4 gate's own precondition (AC-11/
-# AC-12) — no earlier section in this suite plants one, so the engagement
-# gate is a complete no-op for every fixture above.
-write_open_plan() {  # <project> [name] -> plan path on stdout
-  local dir="$1/.bionic/docs/plans/fixture" f name="${2:-fixture}"
-  mkdir -p "$dir"
-  f="$dir/$name.plan.md"
-  {
-    printf -- '---\n'
-    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: bugfix\nrigor: single\nscale: task\n'
-    printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\ncurrent: 3\n'
-  } > "$f"
+# An OPEN RUN, in the shape lib/run.sh's active_plan/active_run read: a plan page at 15
+# under `.bionic/docs/plans/`, its run's log (`<docs>/record/<name>/run.log`) at a step
+# below 9. This is the engagement gate's own precondition — no earlier section in this
+# suite plants one, so that gate is a complete no-op for every fixture above.
+write_open_plan() {  # <project> [name] [step] -> plan path on stdout
+  local f="$1/.bionic/docs/plans/fixture/${2:-fixture}.plan.md" l="$1/.bionic/docs/record/${2:-fixture}/run.log"
+  mkdir -p "${f%/*}" "${l%/*}"
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: bugfix\nrigor: single\nscale: task\n---\n' > "$f"
+  printf 'run/v1|ev=step|n=%s|at=2026-11-01T00:00:00Z\n' "${3:-4}" > "$l"
   printf '%s' "$f"
 }
 
-# A CLOSED run (delivered) — same shape, `current: 9` and a Step-9 evidence line
-# carrying `delivered:` (lib/run.sh `run_open`'s own close condition). This is the
-# negative fixture for §12: a member of `active_plan`'s candidate walk that
-# `open_runs` must never include.
-write_delivered_plan() {  # <project> [name] -> plan path on stdout
-  local dir="$1/.bionic/docs/plans/fixture" f name="${2:-delivered}"
-  mkdir -p "$dir"
-  f="$dir/$name.plan.md"
-  {
-    printf -- '---\n'
-    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: bugfix\nrigor: single\nscale: task\n'
-    printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: delivered: 2026-09-02\n'
-  } > "$f"
-  printf '%s' "$f"
-}
+# A CLOSED run (delivered) — same shape, its log at step 9, delivered (lib/run.sh `run_open`'s
+# own close condition). This is the negative fixture for §12: a member of `active_plan`'s
+# candidate walk that `open_runs` must never include.
+write_delivered_plan() { write_open_plan "$1" "${2:-delivered}" 9; }  # <project> [name] -> plan path on stdout
 
 # A BOUND marker (lib/binding.sh's shape, S1/S2 contract): `plan=<path>` naming a
 # member of the open-run set, plus `engaged_at=`. Distinct from `plant_engaged`,
@@ -220,12 +200,10 @@ WRAP_EOF
 # the initial 0 against itself: forty green rows over an unread status. The status
 # and the stderr therefore cross the subshell boundary the only way they can, on
 # disk, and `rc` / `errtext` read them back afterwards.
-OUTF=""; ERRF=""; RCF=""
 STANDING_MARK='goes through the bionic:decision skill'
 drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdout
   local proj="$1" src="$2" esid="$3" psid="$4" fsid="$5" home
   home="$WORK/home.$RANDOM.$RANDOM"; mkdir -p "$home"
-  OUTF="$WORK/last.out"; ERRF="$WORK/last.err"; RCF="$WORK/last.rc"
   # DRIVE_PLUGIN_ROOT=<dir>: the CLAUDE_PLUGIN_ROOT the CLI hands the hook (§21, wave-36 T1). Empty by
   # default, and set empty rather than inherited, so no section reads the root of whatever ran the suite.
   # DRIVE_HOOK_BASH=<path>: the bash that runs the hook (§22); `bash` on the PATH by default.
@@ -690,7 +668,7 @@ S14_BEFORE=$(snap "$P14")
 OUT=$(drive "$P14" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq  "14a.1 exit 0" "0" "$(rc)"
 has "14a.2 the bound line names the docs-root-relative plan and its current step" \
-  "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 3" "$OUT"
+  "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 4" "$OUT"
 # TWO LINES SINCE WAVE-11 ROW 1b, and the second one is the point of the split. The bound
 # line names the run and its step; the line under it names the step FILE the governing skill
 # tells the model to read at that step. The count is still pinned exactly, not loosened to
@@ -703,7 +681,7 @@ eq  "14a.3 exactly two lines — the bound line and its step-file pointer; no ar
   "2" "$(printf '%s\n' "$OUT" | grep -c .)"
 hasnt "14a.3c …and no arm line: a task-scale run has no Patrol to re-arm" "re-arm: CronList" "$OUT"
 has "14a.3b the second line points at the step file for the plan's own current step" \
-  "skills/canonical-sdlc/steps/3.md" "$OUT"
+  "skills/canonical-sdlc/steps/4.md" "$OUT"
 eq  "14a.4 wrote nothing" "$S14_BEFORE" "$(snap "$P14")"
 
 # THE PAIR, so the absence above is the scale's and not the fixture's: the same bound run at `scale: wave` still
@@ -737,7 +715,7 @@ echo "--- 14b: the same fixture on resume and on compact: the bound line fires o
 for BSRC in resume compact; do
   OUT=$(drive "$P14" "$BSRC" "$CUR_SID" "$CUR_SID" "$CUR_SID")
   has "14b.$BSRC the bound line fires on source=$BSRC" \
-    "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 3" "$OUT"
+    "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 4" "$OUT"
 done
 
 echo ""
@@ -750,10 +728,18 @@ plant_bound "$P14c" "$CUR_SID" "$PLAN14cA"
 OUT=$(drive "$P14c" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq    "14c.1 exit 0" "0" "$(rc)"
 has   "14c.2 the bound line names the bound plan" \
-  "bionic: bound to ${PLAN14cA#$P14c/.bionic/docs/} — current: 3" "$OUT"
+  "bionic: bound to ${PLAN14cA#$P14c/.bionic/docs/} — current: 4" "$OUT"
 hasnt "14c.3 the sibling (unbound) plan is not named" "$(basename "$PLAN14cB")" "$OUT"
 hasnt "14c.4 no count-style listing" "open runs exist here" "$OUT"
 has   "14c.5 the predecessor roster still prints alongside it" "roster-$OLD_SID.state" "$OUT"
+
+echo ""
+echo "--- 14d: the run's log moves on a step: the bound line prints the log's newest ---"
+printf 'run/v1|ev=step|n=5|at=2026-11-02T00:00:00Z\n' >> "$P14/.bionic/docs/record/fixture/run.log"
+OUT=$(drive "$P14" resume "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "14d.1 the bound line names the log's step" "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 5" "$OUT"
+has   "14d.2 …and that step's file" "skills/canonical-sdlc/steps/5.md" "$OUT"
+hasnt "14d.3 …and not the step before it" "current: 4" "$OUT"
 
 section "15 — engaged, one live run, unbound: the bind line, and otherwise unchanged (S3 scope (c); wave-23 T13, critic C-4)"
 # 3600s: see §1's comment — engaged, N==1, unbound also reaches the sweep below.

@@ -1,11 +1,9 @@
 #!/bin/bash
-# tests/close-out-2.test.sh — payload/scripts/close-out.sh, part 2 of 4: sections 4f through LANDINGS, and
-# WAIVED-REGRESSION (wave-39 T25), which drives a waived regression through every reader to close.
+# tests/close-out-2.test.sh — payload/scripts/close-out.sh, part 2 of 6: sections 4f, §5, LANDINGS and CLOSED.
 #
-# THE SUITE IS FOUR PARTS (wave-39 T6; D1, D13, REQ-3 AC-3.1). One close-out.test.sh promised more than the
-# suite bar, ten minutes of the gate's promise, so it runs as four suites cut at section boundaries. Its
-# governing design, its sandbox, and the fixture builders and helpers every part shares are in
-# tests/close-out.prelude.sh, sourced below after the framework.
+# THE SUITE IS SIX PARTS: one close-out.test.sh outran the suite bar, so it runs as parts cut at section boundaries,
+# and the two longest were cut again by the seconds of one run: CARRY left this part for close-out-5.
+# Its design, sandbox, fixture builders and helpers are in tests/close-out.prelude.sh, sourced below after the framework.
 #
 # Usage: bash tests/close-out-2.test.sh
 
@@ -14,35 +12,31 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
-. "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
+. "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder
 . "$(dirname "$0")/close-out.prelude.sh"
 
 # ============================================================
-section "4f — REQ-1 (AC-1.1–1.4): the shipped table is found once; the ADR cell is read, not marked"
+section "4f — REQ-1 (AC-1.1–1.4): the close prints the epic's row and writes no epic plan; the ADR cell is read, not marked"
 # ============================================================
-# D17 (wave-24 T1). `epic_has_row`, `act_epic` and `presence_missing` each used their own idea
-# of "the wave table": a file-wide grep, the FIRST `| wave |` header, any `| wave |` header. A
-# planned table (`| wave | … | status |`) above or beside the shipped one made all three disagree.
-# One locator now picks the table whose header's first cell is `wave` AND which has a `shipped`
-# cell. The helpers below read the fixture with their OWN awk, not the script's.
+# The close prints the wave's row for the orchestrator's edit and writes no plan: each fixture epic plan's checksum is the
+# same after a close as before it, and the row is read from the output. A planned table (`| wave | … | status |`) above or
+# beside the shipped one is the fixture's trap; the helpers read the fixture with their OWN awk, not the script's.
 
 # table_rows: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # rows_with_wave: hoisted to tests/close-out.prelude.sh (a later part reads it)
+# printed_row -> the row the last close printed for the epic plan; printed_adr_cell -> its ADRs cell, trimmed.
+printed_row() { printf '%s\n' "$CO_OUT" | sed -n 's/^shipped-row: //p'; }
+printed_adr_cell() { printed_row | awk -F'|' '{ c = $6; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }'; }
 
-# epic_planned_first -> an epic with a planned table ABOVE the shipped one. The planned table
-# carries a `| 01 |` row (this fixture's own wave number), and a headerless `## Ladder`
-# table carries another; neither is the shipped table.
+# epic_planned_first -> an epic with a planned table ABOVE the shipped one; the planned table carries a `| 01 |` row (this
+# fixture's own wave number), which is no row of the shipped table.
 epic_planned_first() {
   cat <<'EPIC78'
 ---
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 ---
 
 # epic-fx
-
-## SDLC State
-
-current: 4
 
 ## Waves — planned
 
@@ -51,75 +45,62 @@ current: 4
 | 01 | 0.0.2 | fixture | a planned wave | planned |
 | 09 | 0.0.9 | other | another | planned |
 
-## Ladder
-
-| 01 | step | one |
-|---|---|---|
-| 01 | step | two |
-
 ## Waves — shipped
 
 | wave | version | plan | spec / requirements | ADRs | shipped |
 |---|---|---|---|---|---|
 | 00 | 0.0.1 | `wave-00-seed.plan.md` | — | — | 2026-01-01 |
-
-## Notes
-
-Nothing here.
 EPIC78
 }
 
-# §78.1 — a `| 01 |` row that is not in the shipped table is not "already listed".
+# row_whole <project> -> yes when the last close printed the row whole: the cells of a wave with no release and no ADR,
+# then a shipped cell of the close's own date and the integration head (the date is read apart: it is the close's second)
+row_whole() {
+  case "$(printed_row)" in '| 01 | — | `wave-01-fixture.plan.md` | `wave-01-fixture.spec.md`, `.requirements.md` | — | '*", main @ $(fixture_git "$1" rev-parse --short main) |") echo yes ;; *) echo no ;; esac
+}
+
+# §78.1 — a `| 01 |` row in the planned table only is no reason to print nothing; neither table is written, and a second close prints no second row.
 T78="$(mk_fixture t78a)"; advance_to "$T78" 8
 epic_planned_first > "$T78/$EPIC_REL"
-expect_eq "78.0: the extractor reads the shipped table (wave 00 is one row there)" "1" \
-  "$(rows_with_wave "$T78/$EPIC_REL" shipped 00)"
-expect_eq "78.0b: …and the planned table (wave 01 is one row there; wave 00 none)" "1/0" \
-  "$(rows_with_wave "$T78/$EPIC_REL" planned 01)/$(rows_with_wave "$T78/$EPIC_REL" planned 00)"
-expect_eq "78.0c: …and wave 01 is in the shipped table zero times before the run" "0" \
-  "$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
+EPIC_SUM78="$(sha_of "$T78/$EPIC_REL")"
+expect_eq "78.0: the extractor reads both tables: wave 00 is one shipped row and no planned one, wave 01 one planned row and no shipped one" "1/0/1/0" \
+  "$(rows_with_wave "$T78/$EPIC_REL" shipped 00)/$(rows_with_wave "$T78/$EPIC_REL" planned 00)/$(rows_with_wave "$T78/$EPIC_REL" planned 01)/$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
 run_close "$T78" check
-expect_eq "78.1a: check names an epic-row line" "yes" "$(contains "$CO_OUT" "epic-row: ")"
-expect_eq "78.1b: …and does not call wave 01 already listed" "no" "$(contains "$CO_OUT" "already listed")"
+expect_eq "78.1a: check prints the row, and does not call wave 01 already listed" "yes/no" \
+  "$(contains "$CO_OUT" "shipped-row: | 01 | ")/$(contains "$CO_OUT" "already listed")"
 run_close "$T78" run
-expect_eq "78.1c: run exits 0" "0" "$CO_RC"
-expect_eq "78.1d: …the shipped table holds the wave-01 row" "1" "$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
-expect_eq "78.1e: …the epic-row line says appended, not already listed" "yes" \
-  "$(contains "$CO_OUT" "epic-row: wave 01 appended to epic.plan.md")"
+expect_eq "78.1d: run exits 0, the epic plan's checksum is what it was, and the shipped table holds no wave-01 row" "0/$EPIC_SUM78/0" \
+  "$CO_RC/$(sha_of "$T78/$EPIC_REL")/$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
+expect_eq "78.1e: …the output holds the row whole, once, and one line saying the edit is the orchestrator's" "yes/1/1" \
+  "$(row_whole "$T78")/$(printed_row | wc -l | tr -d ' ')/$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^epic-edit: .*writes no plan')"
+run_close "$T78" run
+expect_eq "78.2e: a second run prints no second row and leaves the epic plan as it was" "0/$EPIC_SUM78" "$(printed_row | wc -l | tr -d ' ')/$(sha_of "$T78/$EPIC_REL")"
 
-# §78.2 — the planned table sits first; the row still lands in the shipped one.
-T78B="$(mk_fixture t78b)"; advance_to "$T78B" 8
-epic_planned_first > "$T78B/$EPIC_REL"
-PLANNED_BEFORE="$(table_rows "$T78B/$EPIC_REL" planned)"
-SHIPPED_BEFORE="$(table_rows "$T78B/$EPIC_REL" shipped | wc -l | tr -d ' ')"
-run_close "$T78B" run
-expect_eq "78.2a: run exits 0" "0" "$CO_RC"
-expect_eq "78.2b: the shipped table's row count rose by exactly one" "$((SHIPPED_BEFORE + 1))" \
-  "$(table_rows "$T78B/$EPIC_REL" shipped | wc -l | tr -d ' ')"
-expect_eq "78.2c: …the planned table is unchanged" "$PLANNED_BEFORE" "$(table_rows "$T78B/$EPIC_REL" planned)"
-expect_eq "78.2d: …and the row sits after the existing shipped row (appended, not inserted above it)" "00 01" \
-  "$(table_rows "$T78B/$EPIC_REL" shipped | sed -E 's/^\|[[:space:]]*([0-9]+)[[:space:]]*\|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
-run_close "$T78B" run
-expect_eq "78.2e: a second run adds no second row (reader and writer agree on the table)" "1" \
-  "$(rows_with_wave "$T78B/$EPIC_REL" shipped 01)"
-
-# §78.3 — an epic whose only `| wave |` table is the planned one has nowhere to put the row.
+# §78.3 — an epic whose only `| wave |` table is the planned one: the close prints the table's header beside the row.
 T78C="$(mk_fixture t78c)"; advance_to "$T78C" 8
-epic_planned_first | awk '
-  /^## Waves — shipped/ { skip = 1 }
-  /^## Notes/ { skip = 0 }
-  !skip { print }
-' > "$T78C/epic.tmp" && mv "$T78C/epic.tmp" "$T78C/$EPIC_REL"
-PRE_C="$(presence_state "$T78C")"; PLAN_C_SHA="$(sha_of "$T78C/$PLAN_REL")"; EPIC_C_SHA="$(sha_of "$T78C/$EPIC_REL")"
-# wave-38 T15 (AC-4.4): the shipped table is added beside the planned one, never refused, and the planned one keeps its rows.
-run_close "$T78C" check
+epic_planned_first | awk '/^## Waves — shipped/ { exit } { print }' > "$T78C/$EPIC_REL"
+EPIC_C_SHA="$(sha_of "$T78C/$EPIC_REL")"
 run_close "$T78C" run
-expect_eq "78.3b: run closes rc 0" "0" "$CO_RC"
-expect_eq "78.3e: …the plan reads closed" "1" "$(run_open_rc "$T78C/$PLAN_REL")"
+expect_eq "78.3b: run closes rc 0, the plan reads closed, and the epic plan is what it was" "0|1|$EPIC_C_SHA" \
+  "$CO_RC|$(run_open_rc "$T78C/$PLAN_REL")|$(sha_of "$T78C/$EPIC_REL")"
+expect_eq "78.3e: …the output holds the row, and the header of the table to add it to" "yes/yes" \
+  "$(row_whole "$T78C")/$(contains "$CO_OUT" "| wave | version | plan | spec / requirements | ADRs | shipped |")"
+
+# §78.4 — a wave closes under an epic at 15: its page holds no state section, and its log the step it stands at.
+T78D="$(mk_fixture t78d)"; advance_to "$T78D" 8
+awk '$0 == "canonical_sdlc_version: 14" { $0 = "canonical_sdlc_version: 15" } /^## / { s = ($0 == "## SDLC State") } !s' \
+  "$T78D/$EPIC_REL" > "$T78D/epic.15" && mv "$T78D/epic.15" "$T78D/$EPIC_REL"
+mkdir -p "$T78D/.bionic/docs/record/epic-fx"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:04:00Z\n' > "$T78D/.bionic/docs/record/epic-fx/run.log"
+EPIC_SUM78D="$(sha_of "$T78D/$EPIC_REL")"
+run_close "$T78D" run
+expect_eq "78.4a: the close under an epic at 15 exits 0, prints the wave's row once, leaves the epic plan as it was, and the epic's page reads 15" "0|1|$EPIC_SUM78D|15" \
+  "$CO_RC|$(printed_row | wc -l | tr -d ' ')|$(sha_of "$T78D/$EPIC_REL")|$(sed -n 's/^canonical_sdlc_version: //p' "$T78D/$EPIC_REL")"
+EPIC_STEP="$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$T78D/$EPIC_REL" step 2>&1)"
+expect_eq "78.4b: …and the reader reads the epic open at the step it held" "yes|yes" "$(contains "$EPIC_STEP" "n=4")|$(contains "$EPIC_STEP" "state=open")"
 
 # ---------- §86: the ADR cell reads the spec's `adrs:` line ----------
 
-# adr_cell: hoisted to tests/close-out.prelude.sh (a later part reads it)
+# adr_cell: hoisted to tests/close-out.prelude.sh (a later part reads it); this part reads the cell from the printed row
 # set_plan_keys: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # mk_spec <project> <adrs-line|-> -> writes the spec the plan names, with or without `adrs:`.
 mk_spec() {
@@ -137,7 +118,7 @@ set_plan_keys "$T86" "$SPEC_KEY" "-"
 mk_spec "$T86" "adrs: adrs/epic-fx/adr-040-first-thing.md · adrs/epic-fx/adr-041-second-thing.md"
 run_close "$T86" run
 expect_eq "86.0: run exits 0" "0" "$CO_RC"
-expect_eq "86.1: the ADRs cell reads the spec's two ADRs, numbers joined by a comma" "040, 041" "$(adr_cell "$T86")"
+expect_eq "86.1: the ADRs cell reads the spec's two ADRs, numbers joined by a comma" "040, 041" "$(printed_adr_cell)"
 
 T86B="$(mk_fixture t86b)"; advance_to "$T86B" 8
 set_plan_keys "$T86B" "$SPEC_KEY" "-"
@@ -150,18 +131,18 @@ run_close "$T86B" run
 expect_eq "86.2a: a wave with no adrs: in spec or plan is refused (rc 2), naming the field" "2/yes" \
   "$CO_RC/$(contains "$CO_OUT" "adrs:")"
 expect_eq "86.2b: …no placeholder was written: the epic table carries no wave 01 row, and nothing else changed" "0/yes" \
-  "$(adr_cell "$T86B" | wc -l | tr -d ' ')/$([ "$PRE_86B" = "$(presence_state "$T86B")/$(sha_of "$T86B/$PLAN_REL")/$(sha_of "$T86B/$EPIC_REL")" ] && echo yes || echo no)"
+  "$(printed_row | wc -l | tr -d ' ')/$([ "$PRE_86B" = "$(presence_state "$T86B")/$(sha_of "$T86B/$PLAN_REL")/$(sha_of "$T86B/$EPIC_REL")" ] && echo yes || echo no)"
 
 T86C="$(mk_fixture t86c)"; advance_to "$T86C" 8
 set_plan_keys "$T86C" "$SPEC_KEY" "adrs: adrs/epic-fx/adr-039-from-the-plan.md"
 mk_spec "$T86C" "-"
 run_close "$T86C" run
-expect_eq "86.3: a spec without adrs: falls back to the plan's adrs:" "039" "$(adr_cell "$T86C")"
+expect_eq "86.3: a spec without adrs: falls back to the plan's adrs:" "039" "$(printed_adr_cell)"
 
 T86D="$(mk_fixture t86d)"; advance_to "$T86D" 8
 set_plan_keys "$T86D" "-" "adrs: adrs/epic-fx/adr-038-from-the-plan.md"
 run_close "$T86D" run
-expect_eq "86.4: a plan whose spec file is not on disk falls back to the plan's adrs:" "038" "$(adr_cell "$T86D")"
+expect_eq "86.4: a plan whose spec file is not on disk falls back to the plan's adrs:" "038" "$(printed_adr_cell)"
 
 # ============================================================
 section "5 — REQ-1 (AC-1.1–1.3): a close-out spares a live neighbour's session state"
@@ -254,284 +235,6 @@ for c in workspaces gate; do
 done
 expect_eq "5.14: only B's 2 spared files remain under .bionic/tmp/" "2" "$(tmp_entries "$P7")"
 
-section "CARRY — wave-28 T17 (AC-8.7, D21): close-out writes every open deferral, with its sentence, under ## Deferrals of the continuation"
-# ============================================================
-# A deferral is held to its debts: the plan carries one `deferred:` line per finding the table
-# defers (`session-poker.sh proof-add` writes it; `finding-stated` adds ` stated="<sentence>"`), and
-# close-out carries each into the continuation, in the one form the next wave's Step 1 card reads:
-#
-#   deferred: <record>#<n> <S> <reach> "<title>" stated="<sentence|->" from=<wave name>
-#
-# in the plan's order, `-` for a deferral with no sentence, a `"` or a `\` in a sentence written
-# `\"` and `\\` as the plan holds it. A `check:` line is a check owed, not a deferral, and is not
-# carried. The heading is written whether or not there is anything under it, so a continuation
-# that reports no deferral differs from one written before the heading existed.
-# CARRY_REC: hoisted to tests/close-out.prelude.sh (a later part reads it)
-# carry_plant: hoisted to tests/close-out.prelude.sh (a later part reads it)
-# carry_section: hoisted to tests/close-out.prelude.sh (a later part reads it)
-# CARRY_W: hoisted to tests/close-out.prelude.sh (a later part reads it)
-CARRY_Q1='Said \"go\" \\ now | here'   # the sentence: Said "go" \ now | here, as the plan holds it
-PC="$(mk_fixture carry1)"; advance_to "$PC" 8
-carry_plant "$PC" \
-  "deferred: $CARRY_REC#2 S3 on \"second, written first\" stated=\"The second sentence.\"" \
-  "deferred: $CARRY_REC#1 S2 off \"first, unstated\"" \
-  "check: $CARRY_REC#4 S1 off \"a settled check, not a deferral\" settled=S2:off by=record/wave-01-fixture/chk.md" \
-  "deferred: $CARRY_REC#3 S2 off \"third, quoted\" stated=\"$CARRY_Q1\""
-# The check: line is SETTLED (wave-28 T14, ruling A-orch-165): since T41 an open check holds the step, so
-# the fixture settles it, in the form the retired finding-check wrote (settled= and by=; wave-31 T32 removed
-# the verb and the hold, and an old line binds nothing), at a rating the table defers (S2 off).
-expect_eq "CARRY-0 precondition: the plan carries three deferred: lines and one check: line inside its SDLC State" "3 1" \
-  "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ d++ } s && /^check: /{ c++ } END { print d + 0, c + 0 }' "$PC/$PLAN_REL")"
-run_close "$PC" run
-expect_eq "CARRY-1 run exits 0 over a plan carrying deferred: and check: lines (the gate and the parsers admit it)" "0" "$CO_RC"
-expect_nonempty "CARRY-3 precondition: the extractor finds lines under the heading" "$(carry_section "$PC/$CONT_REL")"
-expect_eq "CARRY-5 …and the heading comes after the template's Next wave section and before the Resume instruction" "yes" \
-  "$(awk '/^## Next wave/ { a = NR } /^## Deferrals$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PC/$CONT_REL")"
-expect_eq "CARRY-6 the plan close-out closed still reads closed (run_open says 1)" "1" "$(run_open_rc "$PC/$PLAN_REL")"
-
-# none: the heading and nothing under it
-PN="$(mk_fixture carry2)"; advance_to "$PN" 8
-run_close "$PN" run
-expect_eq "CARRY-7 a run with no deferral exits 0" "0" "$CO_RC"
-
-# an existing continuation is never overwritten: a missing heading is appended, a present one is left
-PE="$(mk_fixture carry3)"; advance_to "$PE" 8
-carry_plant "$PE" "deferred: $CARRY_REC#1 S2 off \"kept\" stated=\"A kept sentence.\""
-mkdir -p "$PE/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Resume instruction\n\nedited by a person\n' > "$PE/$CONT_REL"
-run_close "$PE" run
-expect_eq "CARRY-9 a continuation that exists without the heading: run exits 0" "0" "$CO_RC"
-expect_eq "CARRY-11 …and the deferral is appended under a ## Deferrals heading" \
-  "deferred: $CARRY_REC#1 S2 off \"kept\" stated=\"A kept sentence.\" from=$CARRY_W" "$(carry_section "$PE/$CONT_REL")"
-PH="$(mk_fixture carry4)"; advance_to "$PH" 8
-carry_plant "$PH" "deferred: $CARRY_REC#1 S2 off \"not carried over a written heading\" stated=\"A sentence.\""
-mkdir -p "$PH/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Deferrals\n\nnone, said the person\n' > "$PH/$CONT_REL"
-run_close "$PH" run
-expect_eq "CARRY-12 a continuation that already carries the heading: run exits 0" "0" "$CO_RC"
-# wave-28 T50 (A-orch-74) supersedes A-T17.6's "with the heading, never touched": the merge adds the run's
-# own line it lacks under the heading, after the line a person wrote there, which stays
-
-# check never writes it, and names what run would carry
-PK="$(mk_fixture carry5)"; advance_to "$PK" 8
-carry_plant "$PK" "deferred: $CARRY_REC#1 S2 off \"checked\""
-run_close "$PK" check
-expect_eq "CARRY-14 check exits 0 and writes no continuation" "0|no" \
-  "$CO_RC|$([ -e "$PK/$CONT_REL" ] && echo yes || echo no)"
-
-# the mutation arm: a doctored copy of close-out.sh with the heading dropped from the template
-CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-carry-mut.XXXXXX")"
-mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
-ln -s "$REPO_ROOT/payload/scripts/card.sh" "$CARRY_MUT/scripts/card.sh"   # close-out reads the inherited deferrals through it (T43)
-sed "s/printf '## Deferrals/printf '## Carried over/" "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
-expect_eq "CARRY-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
-  "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-PM="$(mk_fixture carry6)"; advance_to "$PM" 8
-carry_plant "$PM" "deferred: $CARRY_REC#1 S2 off \"mutant\" stated=\"A sentence.\""
-( cd "$PM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
-    bash "$CARRY_MUT/scripts/close-out.sh" "$PM/$PLAN_REL" run ) > "$SANDBOX/carry-mut.out" 2>&1
-CARRY_MRC=$?
-expect_eq "CARRY-mut1 the doctored run still closes and writes its continuation (the mutant runs)" "0|yes" \
-  "$CARRY_MRC|$([ -s "$PM/$CONT_REL" ] && echo yes || echo no)"
-rm -rf "$CARRY_MUT"
-
-
-# ============================================================
-# CARRY, continued — wave-28 T43 (AC-8.10, D21): what the run inherited and did not settle is carried
-# ============================================================
-# The run's requirements file disposes of the deferrals the newest continuation under the docs root
-# carries (never the run's own; A-orch-64), under
-# `## Inherited deferrals`: `adopted: <id> as REQ-<n>`, `again: <id>`, `closed: <id> <reason>`.
-# Close-out writes, after this run's own lines, every inherited line deferred again and every one the
-# requirements file did not dispose of, each as the old continuation wrote it, its `from=` kept. An
-# adopted or a closed one is not carried. The reading is card.sh's (`card.sh inherited <plan>`), the
-# one the Step 1 card listed them from.
-# CARRY_PREV: hoisted to tests/close-out.prelude.sh (a later part reads it)
-CARRY_PR="record/$CARRY_PREV/read-adversarial-p2.md"
-CARRY_P1="deferred: $CARRY_PR#1 S2 off \"deferred again\" stated=\"Kept \\\"as is\\\".\" from=$CARRY_PREV"
-CARRY_P2="deferred: $CARRY_PR#2 S3 on \"left undisposed\" stated=\"-\" from=$CARRY_PREV"
-CARRY_P3="deferred: $CARRY_PR#3 S3 on \"adopted\" stated=\"-\" from=$CARRY_PREV"
-CARRY_P4="deferred: $CARRY_PR#4 S2 off \"closed\" stated=\"-\" from=$CARRY_PREV"
-# carry_prev <project> -> the predecessor's continuation, carrying the four lines above under
-# ## Deferrals: the only continuation under the docs root until close-out writes this run's own
-carry_prev() {
-  local proj="$1"
-  case "$proj" in "$SANDBOX"/*) : ;; *) echo "carry_prev: refusing outside the sandbox: '$proj'" >&2; return 1 ;; esac
-  mkdir -p "$proj/.bionic/docs/record/$CARRY_PREV"
-  printf '%s\n' "# continuation — $CARRY_PREV" "" "## Deferrals" "" "$CARRY_P1" "$CARRY_P2" "$CARRY_P3" "$CARRY_P4" \
-    "" "## Resume instruction" "" "nothing" > "$proj/.bionic/docs/record/$CARRY_PREV/continuation.md"
-}
-# carry_req <project> <line>... -> the plan names a requirements file whose ## Inherited deferrals holds the lines
-carry_req() {
-  local proj="$1" plan="$1/$PLAN_REL" rel="specs/epic-fx/wave-01-fixture.requirements.md"; shift
-  case "$proj" in "$SANDBOX"/*) : ;; *) echo "carry_req: refusing outside the sandbox: '$proj'" >&2; return 1 ;; esac
-  mkdir -p "$proj/.bionic/docs/specs/epic-fx"
-  { printf '# fixture requirements\n\n## Goal\n\nThe fixture.\n\n## Inherited deferrals\n\n'; printf '%s\n' "$@"; } \
-    > "$proj/.bionic/docs/$rel"
-  sed "s#^walk: exempt\$#&\\
-requirements: $rel#" "$plan" > "$plan.req" && mv "$plan.req" "$plan"
-}
-PI="$(mk_fixture carry7)"; advance_to "$PI" 8
-carry_prev "$PI"
-carry_req "$PI" "again: $CARRY_PR#1" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
-carry_plant "$PI" "deferred: $CARRY_REC#1 S2 off \"this run's own\""
-run_close "$PI" run
-expect_eq "CARRY-16 run exits 0 over a run that inherited four deferrals" "0" "$CO_RC"
-expect_nonempty "CARRY-17 precondition: the extractor finds lines under the heading" "$(carry_section "$PI/$CONT_REL")"
-expect_eq "CARRY-18 this run's own line first, then the one deferred again and the undisposed one, as written, from= kept" \
-"deferred: $CARRY_REC#1 S2 off \"this run's own\" stated=\"-\" from=$CARRY_W
-$CARRY_P1
-$CARRY_P2" "$(carry_section "$PI/$CONT_REL")"
-expect_absent "CARRY-19 …the adopted one is not carried" "\"adopted\"" "$(carry_section "$PI/$CONT_REL")"
-expect_absent "CARRY-19a …nor the closed one" "\"closed\"" "$(carry_section "$PI/$CONT_REL")"
-
-# a run whose plan names no requirements file disposed of nothing: every inherited line is carried
-PJ="$(mk_fixture carry8)"; advance_to "$PJ" 8
-carry_prev "$PJ"
-run_close "$PJ" run
-expect_eq "CARRY-20 no requirements file: run exits 0 and carries all four inherited lines, in their order" \
-  "0|$CARRY_P1
-$CARRY_P2
-$CARRY_P3
-$CARRY_P4" "$CO_RC|$(carry_section "$PJ/$CONT_REL")"
-
-# an existing continuation without the heading gets the carried lines in the appended section too; it
-# is the newest continuation under the docs root, and it is this run's own, so it is not the predecessor
-PL="$(mk_fixture carry9)"; advance_to "$PL" 8
-carry_prev "$PL"
-carry_req "$PL" "again: $CARRY_PR#1" "adopted: $CARRY_PR#2 as REQ-1" "closed: $CARRY_PR#3 done" "closed: $CARRY_PR#4 done"
-mkdir -p "$PL/${CONT_REL%/*}"
-printf '# continuation — hand written\n' > "$PL/$CONT_REL"
-run_close "$PL" run
-expect_eq "CARRY-21 an existing continuation without the heading: the again line is appended under it" \
-  "0|$CARRY_P1" "$CO_RC|$(carry_section "$PL/$CONT_REL")"
-
-# check says what run will do (read-structure-p15 #2): over an existing continuation with no heading,
-# check names the append, and run then performs it; over one with the heading, both leave it
-PV="$(mk_fixture carry11)"; advance_to "$PV" 8
-carry_plant "$PV" "deferred: $CARRY_REC#1 S2 off \"appended\""
-mkdir -p "$PV/${CONT_REL%/*}"
-printf '# continuation — hand written\n' > "$PV/$CONT_REL"
-run_close "$PV" check
-run_close "$PV" run
-PW="$(mk_fixture carry12)"; advance_to "$PW" 8
-mkdir -p "$PW/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Deferrals\n' > "$PW/$CONT_REL"
-run_close "$PW" check
-expect_absent "CARRY-22d …and names no append" "appends the ## Deferrals" "$CO_OUT"
-
-# a ## Deferrals inside a code fence of an existing continuation is an example, not the section: the
-# section is still appended (read-adversarial-p15 #4)
-PF="$(mk_fixture carry13)"; advance_to "$PF" 8
-carry_plant "$PF" "deferred: $CARRY_REC#1 S2 off \"behind a fence\""
-mkdir -p "$PF/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n```\n## Deferrals\n\ndeferred: an example of the form\n```\n' > "$PF/$CONT_REL"
-run_close "$PF" run
-carry_section_unfenced() { awk '/^```/ { f = !f; next } f { next } /^## / { s = ($0 == "## Deferrals"); next } s && NF { print }' "$1"; }
-expect_eq "CARRY-23 an existing continuation whose only ## Deferrals is fenced: run appends the section, its deferral under it" \
-  "0|deferred: $CARRY_REC#1 S2 off \"behind a fence\" stated=\"-\" from=$CARRY_W" "$CO_RC|$(carry_section_unfenced "$PF/$CONT_REL")"
-
-# a continuation written by hand BEFORE Step 9 with the heading and this run's own line under it (the
-# shape steps/9.md invites) still gets what the run inherited and did not settle (wave-28 T50, AC-8.10;
-# read-adversarial-p16 #1): close-out merges, each line written once, the missing ones at the end of the
-# section; check names what run will add, and says "left as it stands" only when nothing would be added
-CARRY_OWN="deferred: $CARRY_REC#1 S2 off \"this run's own\" stated=\"-\" from=$CARRY_W"
-PX="$(mk_fixture carry14)"; advance_to "$PX" 8
-carry_prev "$PX"
-carry_req "$PX" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
-carry_plant "$PX" "deferred: $CARRY_REC#1 S2 off \"this run's own\""
-mkdir -p "$PX/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Chris decides\n\n1. none\n\n## Deferrals\n\n%s\n\n## Resume instruction\n\nNothing to resume.\n' \
-  "$CARRY_OWN" > "$PX/$CONT_REL"
-expect_eq "CARRY-24 precondition: the hand-written continuation holds the heading and this run's own line, and nothing carried" \
-  "$CARRY_OWN" "$(carry_section "$PX/$CONT_REL")"
-CARRY_CK0="$(cksum < "$PX/$CONT_REL")"
-run_close "$PX" check
-expect_eq "CARRY-25a …and check writes nothing" "$CARRY_CK0" "$(cksum < "$PX/$CONT_REL")"
-run_close "$PX" run
-expect_eq "CARRY-26 run exits 0, and the section holds this run's own line first, then the two the run inherited and did not dispose of" \
-  "0|$CARRY_OWN
-$CARRY_P1
-$CARRY_P2" "$CO_RC|$(carry_section "$PX/$CONT_REL")"
-expect_eq "CARRY-26b …the hand-written text around the section is kept, byte for byte" \
-  "# continuation — hand written||## Chris decides||1. none||" "$(sed -n '1p;2p;3p;4p;5p;6p' "$PX/$CONT_REL" | tr '\n' '|')"
-expect_eq "CARRY-26c …and the section is followed by a blank line and the next heading as it was" \
-  "|## Resume instruction||Nothing to resume." "$(tail -4 "$PX/$CONT_REL" | tr '\n' '|' | sed 's/|$//')"
-# a second close-out over what the first left adds nothing: the continuation the first run wrote is
-# planted in a fresh fixture at the same step (a closed plan refuses a second run outright)
-PX2="$(mk_fixture carry17)"; advance_to "$PX2" 8
-carry_prev "$PX2"
-carry_req "$PX2" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
-carry_plant "$PX2" "deferred: $CARRY_REC#1 S2 off \"this run's own\""
-mkdir -p "$PX2/${CONT_REL%/*}"; cp "$PX/$CONT_REL" "$PX2/$CONT_REL"
-CARRY_CK1="$(cksum < "$PX2/$CONT_REL")"
-run_close "$PX2" check
-expect_absent "CARRY-27b …and names no add" "run adds" "$CO_OUT"
-run_close "$PX2" run
-expect_eq "CARRY-27c run exits 0 and the continuation is byte for byte what the first run left" "0|$CARRY_CK1" \
-  "$CO_RC|$(cksum < "$PX2/$CONT_REL")"
-expect_absent "CARRY-27d …with no line reported added" "deferred line" "$CO_OUT"
-
-# a line already under the heading, byte for byte, is not written twice; the one missing is added alone
-PY="$(mk_fixture carry15)"; advance_to "$PY" 8
-carry_prev "$PY"
-carry_req "$PY" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
-mkdir -p "$PY/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Deferrals\n\n%s\n' "$CARRY_P2" > "$PY/$CONT_REL"
-run_close "$PY" check
-run_close "$PY" run
-expect_eq "CARRY-28a run adds the missing one after the one that was there, and the one that was there once" \
-  "0|$CARRY_P2
-$CARRY_P1" "$CO_RC|$(carry_section "$PY/$CONT_REL")"
-
-# a heading with nothing under it, then the next heading: the lines go under it, a blank line between
-PZ="$(mk_fixture carry16)"; advance_to "$PZ" 8
-carry_prev "$PZ"
-carry_req "$PZ" "again: $CARRY_PR#1" "adopted: $CARRY_PR#2 as REQ-1" "closed: $CARRY_PR#3 done" "closed: $CARRY_PR#4 done"
-mkdir -p "$PZ/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction\n\nNothing.\n' > "$PZ/$CONT_REL"
-run_close "$PZ" run
-CARRY_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
-expect_eq "CARRY-29 an empty section followed by a heading: the carried line goes under it, the layout kept (T33: and the Hand-holds section the close now merges in, after it, a blank line either side; wave-36 T2: then the Governed by section, its installed line with no load record)" \
-  "0|# continuation — hand written||## Deferrals||$CARRY_P1||## Hand-holds||"'```'"|hand-holds: …|"'```'"||## Governed by||"'```'"|governed-by: installed $CARRY_VER|"'```'"||## Resume instruction||Nothing.|" \
-  "$CO_RC|$(sc_strip "$PZ/$CONT_REL" | sed 's/^hand-holds: .*/hand-holds: …/' | tr '\n' '|')"
-
-# the mutation arm: a doctored copy of close-out.sh that carries nothing it inherited
-CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-inherit-mut.XXXXXX")"
-mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
-ln -s "$REPO_ROOT/payload/scripts/card.sh" "$CARRY_MUT/scripts/card.sh"
-sed 's/\$1 == "again" || \$1 == "open"/$1 == "none"/' "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
-expect_eq "CARRY-mut3 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
-  "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-PQ="$(mk_fixture carry10)"; advance_to "$PQ" 8
-carry_prev "$PQ"
-carry_req "$PQ" "again: $CARRY_PR#1"
-( cd "$PQ" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
-    bash "$CARRY_MUT/scripts/close-out.sh" "$PQ/$PLAN_REL" run ) > "$SANDBOX/carry-mut.out" 2>&1
-CARRY_MRC=$?
-rm -rf "$CARRY_MUT"
-
-# the merge's mutation arm (T50): a doctored copy of close-out.sh whose merge writes nothing
-CARRY_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-merge-mut.XXXXXX")"
-mkdir -p "$CARRY_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$CARRY_MUT/scripts/lib"
-ln -s "$REPO_ROOT/payload/scripts/card.sh" "$CARRY_MUT/scripts/card.sh"
-sed 's/^      co_cont_write "## Deferrals" "\$missing" lines$/      :/' "$SCRIPT" > "$CARRY_MUT/scripts/close-out.sh"
-expect_eq "CARRY-mut6 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
-  "$(diff "$SCRIPT" "$CARRY_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-PR="$(mk_fixture carry18)"; advance_to "$PR" 8
-carry_prev "$PR"
-carry_req "$PR" "adopted: $CARRY_PR#3 as REQ-1" "closed: $CARRY_PR#4 fixed in passing"
-carry_plant "$PR" "deferred: $CARRY_REC#1 S2 off \"this run's own\""
-mkdir -p "$PR/${CONT_REL%/*}"
-printf '# continuation — hand written\n\n## Deferrals\n\n%s\n' "$CARRY_OWN" > "$PR/$CONT_REL"
-( cd "$PR" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
-    bash "$CARRY_MUT/scripts/close-out.sh" "$PR/$PLAN_REL" run ) > "$SANDBOX/carry-mut.out" 2>&1
-CARRY_MRC=$?
-expect_eq "CARRY-mut7 the doctored run still closes, and the hand-written continuation keeps its own line (the mutant runs)" "0|$CARRY_OWN" \
-  "$CARRY_MRC|$(carry_section "$PR/$CONT_REL")"
-rm -rf "$CARRY_MUT"
-
-
 # ============================================================
 section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints the run's numbers with each landed row"
 # ============================================================
@@ -539,7 +242,7 @@ section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints
 # line per landed row (`session-poker.sh landing-report --rows <plan>`), read from the run's landing
 # record and the gate's requests and only printed. The plan is NAMED to the report, never resolved
 # through the session: act 3 has wiped the session's binding before the continuation is written.
-# FIXTURE FIDELITY: the events are PLANTED in the Interfaces table's `line/v1` shape, which
+# FIXTURE FIDELITY: the events are PLANTED in the run's log in the `run/v1` shape
 # lib/line.sh writes; the gate store is the sandbox's own, empty. Each row line carries the admission split, wait,
 # prove and rework, and the width (wave-38 T7, AC-6.4; wave-37 T9, AC-11.3): the report reads them from this record
 # alone, the verdict's `admitted=` (lib/line.sh, 1.21.0) the start of its admitted run, and the block fences the rows whole.
@@ -549,14 +252,14 @@ section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints
 # lines dropped; nothing when there is no such heading.
 land_section() { awk '/^## / { s = ($0 == "## Landings"); next } s && NF && !/^```/ { print }' "$1"; }
 land_plant() {  # <project> -> a ready and a queue landing for T1, a git landing for T2
-  local rec="$1/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+  local rec="$1/$LOG_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "land_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   mkdir -p "${rec%/*}"
-  printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$1" >> "$rec"
-  printf 'line/v1|ev=candidate|row=T1|base=%s|commit=%s|tree=%s/.bionic/tmp/landing/1|at=2026-10-06T10:02:00Z\n' "$LAND_C" "$LAND_C" "$1" >> "$rec"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|admitted=1791281100|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
-  printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
-  printf 'line/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
+  printf 'run/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$1" >> "$rec"
+  printf 'run/v1|ev=candidate|row=T1|base=%s|commit=%s|tree=%s/.bionic/tmp/landing/1|at=2026-10-06T10:02:00Z\n' "$LAND_C" "$LAND_C" "$1" >> "$rec"
+  printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|admitted=1791281100|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
+  printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
+  printf 'run/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
 }
 PLD="$(mk_fixture landings1)"; advance_to "$PLD" 8
 land_plant "$PLD"
@@ -565,11 +268,11 @@ expect_eq "LAND-1 run exits 0 over a run whose landing record holds two landings
 expect_nonempty "LAND-3 precondition: the extractor finds lines under the heading" "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-5 …and the heading sits after ## Deferrals and before the Resume instruction" "yes" \
   "$(awk '/^## Deferrals$/ { a = NR } /^## Landings$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PLD/$CONT_REL")"
-# no record: the line with zeros
+# no record, and the plan lands T1 and T2: landings stand that no line measured, so the unmeasured line
 PLZ="$(mk_fixture landings2)"; advance_to "$PLZ" 8
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLZ" run
-expect_eq "LAND-7 a run with no landing record exits 0 and its continuation carries the line with zeros, and no row" \
-  "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=0s · killed=0" \
+expect_eq "LAND-7 a run whose plan lands rows and holds no landing record exits 0, its continuation the unmeasured line and no row" \
+  "0|landings: unmeasured — the landing record holds no line/v1 events" \
   "$CO_RC|$(land_section "$PLZ/$CONT_REL")"
 # an existing continuation is never overwritten: no section is added to it
 PLE="$(mk_fixture landings3)"; advance_to "$PLE" 8
@@ -588,31 +291,8 @@ PLM="$(mk_fixture landings4)"; advance_to "$PLM" 8
 land_plant "$PLM"
 ( cd "$PLM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     BIONIC_GATE_DIR="$LAND_GATE" bash "$LAND_MUT/scripts/close-out.sh" "$PLM/$PLAN_REL" run ) > "$SANDBOX/land-mut.out" 2>&1
-LAND_MRC=$?
 rm -rf "$LAND_MUT"
 
-# ---- wave-28 T62 (AC-4.6, D18): a run open across the upgrade holds `landed:` lines and no line/v1 event ----
-# The report says so (`landings: unmeasured`) where it once printed zeros; the continuation's section is
-# that one line, with no fence and no row.
-PLU="$(mk_fixture landings5)"; advance_to "$PLU" 8
-LAND_UREC="$PLU/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
-mkdir -p "${LAND_UREC%/*}"
-printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-06T10:09:00Z|suites=a.test.sh\n' \
-  "$LAND_C" "$LAND_C" "$LAND_C" > "$LAND_UREC"
-BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLU" run
-# the mutation arm: the unfenced branch never taken, so the section is fenced again
-LAND_UMUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-unm-mut.XXXXXX")"
-mkdir -p "$LAND_UMUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$LAND_UMUT/scripts/lib"
-ln -s "$REPO_ROOT/payload/scripts/card.sh" "$LAND_UMUT/scripts/card.sh"
-sed 's/^      "landings: unmeasured "\*)/      "landings: never "*)/' "$SCRIPT" > "$LAND_UMUT/scripts/close-out.sh"
-expect_eq "LAND-mut3 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
-  "$(diff "$SCRIPT" "$LAND_UMUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-PLV="$(mk_fixture landings6)"; advance_to "$PLV" 8
-mkdir -p "$PLV/.bionic/docs/record/wave-01-fixture"; cp "$LAND_UREC" "$PLV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
-( cd "$PLV" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
-    BIONIC_GATE_DIR="$LAND_GATE" bash "$LAND_UMUT/scripts/close-out.sh" "$PLV/$PLAN_REL" run ) > "$SANDBOX/land-umut.out" 2>&1
-LAND_UMRC=$?
-rm -rf "$LAND_UMUT"
 
 # ============================================================
 section "CLOSED — the closed form says merged into after a merge, and to be pulled into only while a pull request is owed"

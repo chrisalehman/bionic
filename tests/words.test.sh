@@ -5,9 +5,9 @@
 # WHAT THIS SUITE OWNS. The lint `words_hits` and the surfaces it reads: the skill texts
 # (skills/canonical-sdlc, skills/handoff, skills/sitrep), the command pages (payload/commands), the
 # agent role texts and the texts pushed to an agent at start (agents/, payload/context), the strings
-# the poker and its verbs, the card renderer, the dispatch wall and the plan, proof, walls and units
+# the poker and its verbs, the card renderer, the dispatch wall and the plan, proof, walls, units and dispatch
 # libraries print (hooks/session-poker.sh, hooks/poker/*.sh, payload/scripts/card.sh,
-# hooks/dispatch-preflight.sh, payload/scripts/lib/{plan,proof,walls,units}.sh), the sources under
+# hooks/dispatch-preflight.sh, payload/scripts/lib/{plan,proof,walls,units,dispatch}.sh), the sources under
 # agents-src/ the generated texts are rendered from, and what the user reads rendered: the sitrep
 # card, the handoff head and the Patrol line. It refuses "reader", "readers" and
 # "readings" anywhere in that text, and "reading" as a noun: after a determiner ("a reading", "the
@@ -76,8 +76,10 @@ skills/canonical-sdlc/operational-rules.md|the calls a later reader would want|w
 skills/canonical-sdlc/operational-rules.md|no jargon a plain reader would look up|whoever reads the close-out report, not a review
 payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl|Lead with what the reader needs to decide|whoever reads the answer, not a review
 payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl|the reader may act on it|whoever reads the answer, not a review
-hooks/dispatch-preflight.sh|a reason the reader can check|whoever reads the plan row, not a review
 hooks/poker/tick.sh|the panel reading is|a reading of the agent panel, a measurement, not a review
+hooks/session-poker.sh|Lands-red from the reader;|the program that answers from the run's log, not a review
+hooks/poker/line.sh|the reader (lib/reader.sh) cannot be loaded|the program that answers from the run's log, named by its file, not a review
+payload/scripts/lib/proof.sh|line_kv("reader")|the proof line's reader= field, read by its name
 skills/sitrep/SKILL.md|never "reading" or "reader"|names the refused words, to refuse them
 payload/scripts/card.sh|(readers?|readings?|unmeasured)|the judgment check's pattern of the refused words
 WORDS_ALLOW_EOF
@@ -91,7 +93,7 @@ words_surfaces() {
       agents-src/templates/*.tmpl agents-src/templates/commands/*.tmpl agents-src/templates/skills/canonical-sdlc/*.tmpl \
       agents-src/templates/skills/canonical-sdlc/steps/*.tmpl agents-src/templates/context/*.tmpl payload/context/*.md \
       payload/scripts/lib/plan.sh payload/scripts/lib/proof.sh payload/scripts/lib/walls.sh payload/scripts/lib/units.sh \
-      hooks/dispatch-preflight.sh hooks/session-poker.sh hooks/poker/*.sh payload/scripts/card.sh 2>/dev/null
+      payload/scripts/lib/dispatch.sh hooks/dispatch-preflight.sh hooks/session-poker.sh hooks/poker/*.sh payload/scripts/card.sh 2>/dev/null
   )
 }
 
@@ -129,12 +131,12 @@ words_text() {
 
 # words_refused — reads "<tag><TAB><text>" lines and prints "<tag> <text>" for each text carrying a
 # refused word. A placeholder is read as one: `${q:-a reading}` keeps its default, and `$NAME`
-# cannot be the word.
+# cannot be the word; nor can a program's file name (`reader.sh`), bare or as a path component.
 words_refused() {
   awk '{
     c = index($0, "\t"); tag = substr($0, 1, c - 1); t = substr($0, c + 1)
     l = t; gsub(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/, "$V", l); gsub(/\$\{[A-Za-z_][A-Za-z0-9_]*[:#%\/+=?-]+/, "$V ", l)
-    gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "$V", l); l = tolower(l)
+    gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "$V", l); l = tolower(l); gsub(/readers?\.sh/, "$V", l)
     if (l ~ /(^|[^a-z0-9_-])readers?([^a-z0-9_=-]|$)/ || l ~ /(^|[^a-z0-9_-])readings([^a-z0-9_=-]|$)/ \
       || l ~ /(^|[^a-z0-9_])(a|an|the|its|their|each|every|this|that|one|no|any|your|whose)( [a-z$-]+)? reading([^a-z0-9_-]|$)/) print tag " " t
   }'
@@ -168,7 +170,7 @@ section "§TEXTS: no review-sense reading or reader, and no \"no reader for\", o
 SURF="$(words_surfaces "$REPO")"
 for cls in 'skills/canonical-sdlc/' 'skills/handoff/' 'skills/sitrep/' 'payload/commands/' 'agents/' 'agents-src/blocks/' \
   'agents-src/templates/' 'agents-src/templates/context/' 'payload/context/' 'hooks/poker/' 'hooks/poker/sitrep.sh' \
-  'hooks/session-poker.sh' 'payload/scripts/card.sh' 'hooks/dispatch-preflight.sh' 'payload/scripts/lib/plan.sh' 'payload/scripts/lib/proof.sh' 'payload/scripts/lib/walls.sh' 'payload/scripts/lib/units.sh'; do
+  'hooks/session-poker.sh' 'payload/scripts/card.sh' 'hooks/dispatch-preflight.sh' 'payload/scripts/lib/plan.sh' 'payload/scripts/lib/proof.sh' 'payload/scripts/lib/walls.sh' 'payload/scripts/lib/units.sh' 'payload/scripts/lib/dispatch.sh'; do
   expect_nonempty "the surfaces include $cls" "$(printf '%s\n' "$SURF" | /usr/bin/grep -F "$cls" | head -1)"
 done
 EMPTY=""
@@ -186,6 +188,8 @@ $SURF
 WORDS_SURF_EOF
 HITS="$(printf '%s' "$HITS" | /usr/bin/grep -v '^$')"
 expect_empty "no surface carries a refused word" "$HITS"
+expect_eq "a program's file name is no word: a line naming reader.sh passes, the bare word beside it is refused" "t2 the reader said so" \
+  "$(printf 't1\t. "$lib/reader.sh" && x=lib/reader.sh\nt2\tthe reader said so\n' | words_refused)"
 
 # ── §PLANT ───────────────────────────────────────────────────────────────────
 section "§PLANT: a planted \"reader\" on every surface and every agents-src source goes red"
@@ -274,19 +278,19 @@ WR_SID="5c1e7a2b-3d4f-4e8a-9b6c-1f2e3d4c5b6a"
 WR_R="$TMP/run"; WR_P="$WR_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
 mkdir -p "${WR_P%/*}" "$WR_R/.bionic/docs/record/wave-02-fx" "$WR_R/.bionic/tmp"
 ( cd "$WR_R" && git init -q . && printf '.bionic/\n' >> .git/info/exclude && git -c user.name=fx -c user.email=fx@example.invalid commit -q --allow-empty -m init )
-wr_row() { printf '| %s | %s | build | %s · complexity: standard | — | — | %s | 30 | REQ-1 | lib/%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$1" "$5"; }
+wr_row() { printf '| %s | %s | build | %s · complexity: standard | %s | 30 | REQ-1 | lib/%s.sh | — |\n' "$1" "$2" "$3" "$4" "$1"; }   # <id> <step> <task> <deps>, its state the log's
 {
-  printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n'
-  printf 'goals: owed · the user says what they owe (record/owed-test.md)\n---\n# fixture plan\n\n## SDLC State\n\n'
-  printf 'approved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 4\n\n- Step 4: implementation opened\n'
-  printf -- '- T1: landed %s 2026-10-06T18:00:00Z — .worktrees/02-T1\n' "$(printf 'c%.0s' $(seq 40))"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-  wr_row T1 4 "The first row" — landed; wr_row T2 4 "The second row" — active
-  wr_row T3 8 "Merge it" "approval:release" pending
+  printf -- '---\nwave: wave-02-fx\ncanonical_sdlc_version: 15\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n'
+  printf 'goals: owed · the user says what they owe (record/owed-test.md)\n---\n# fixture plan\n'
+  printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  wr_row T1 4 "The first row" —; wr_row T2 4 "The second row" —
+  wr_row T3 8 "Merge it" "approval:release"
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$WR_P"
-WR_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "$REPO/payload/scripts/lib/owed.sh" "$WR_R" "$WR_P")"
-mkdir -p "${WR_REG%/*}" && printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T3 — approval:release\n' > "$WR_REG"
+{ printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-06T16:00:00Z\nrun/v1|ev=step|n=4|at=2026-10-06T16:00:00Z\n'   # the run's log: its approval and step, T1's landing, T2's launch and the open ask
+  printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))"
+  printf 'run/v1|ev=dispatch|row=T2|name=w-T2|at=2026-10-06T18:30:00Z\n'
+  printf 'run/v1|ev=ask|key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z\n'; } > "$WR_R/.bionic/docs/record/wave-02-fx/run.log"
 bound_marker "$WR_R" "$WR_SID" "$WR_P"
 wr_poke() {  # <args after the poker…> [stdin from the caller] -> the verb's stdout; its exit code in WR_RC
   WR_RC=0
@@ -332,12 +336,12 @@ section "§BIND: over the same fixture run, a judgment that sets 1 green and 3 r
 
 # The rendered texts above are read for refused words; a card the judgment filled with the wrong number beside a word
 # the sheet places is a wrong card with no refused word in it, so the same run is given a suite line of its own and the
-# card verb is asked the swap. The landing record holds four suites by their last verdict, three green and one red.
+# card verb is asked the swap. The run's log holds four suites by their last verdict, three green and one red.
 # fails-when: the swap draws, the control in the sheet's order is refused, or the refusal leaves the card on stdout.
-WR_REC="$WR_R/.bionic/docs/record/wave-02-fx/landing-proofs.log"
+WR_REC="$WR_R/.bionic/docs/record/wave-02-fx/run.log"
 mkdir -p "${WR_REC%/*}"
 for wr_k in "a green" "b green" "c green" "d red"; do
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=%s.test.sh|result=%s|log=/rec/%s.log|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))" "${wr_k%% *}" "${wr_k##* }" "${wr_k%% *}" >> "$WR_REC"
+  printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=%s.test.sh|result=%s|log=/rec/%s.log|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))" "${wr_k%% *}" "${wr_k##* }" "${wr_k%% *}" >> "$WR_REC"
 done
 wr_poke sitrep "$WR_P" > "$TMP/wr-sheet"
 expect_eq "BN0 precondition: the sheet holds 3 green and 1 red on one line" "1" "$(/usr/bin/grep -c '^tests.suites-run: 4: 3 green, 1 red ' "$TMP/wr-sheet")"
@@ -351,26 +355,19 @@ expect_eq "BN2 the swap is refused (exit 1) and nothing is drawn" "1|0" "$WR_RC|
 expect_contains "BN2b …naming each number beside the word it does not stand by" 'says 1 beside "green"' "$(cat "$TMP/wr.err")"
 expect_contains "BN2c …and the other" 'says 3 beside "red"' "$(cat "$TMP/wr.err")"
 
-# ── §REGRESSION-ONCE ─────────────────────────────────────────────────────────
-section "§REGRESSION-ONCE: the regression paragraph of operational-rules.md and of steps/5.md states the shipped rule"
-# fails-when: a file lacks the paragraph, still holds the removed rule's sentence, or lacks the shipped rule's; each absence
-# is read beside a presence on the same paragraph.
-RO_A="$(/usr/bin/grep -F '**The regression, once' "$REPO/skills/canonical-sdlc/operational-rules.md")"
-RO_B="$(/usr/bin/grep -F '**The regression, once' "$REPO/skills/canonical-sdlc/steps/5.md")"
-expect_nonempty "AC-3.1 precondition: operational-rules.md holds the regression paragraph" "$RO_A"
-expect_contains "AC-3.1 the paragraph says a whole run at a later head is the normal path" "later head" "$RO_A"
-for ro_w in "on a proved head" "never a second run"; do expect_absent "AC-3.1 the paragraph no longer says \"$ro_w\"" "$ro_w" "$RO_A"; done
-expect_nonempty "AC-3.2 precondition: steps/5.md holds the regression paragraph" "$RO_B"
-expect_contains "AC-3.2 the paragraph says a head whose landings moved no code needs no run" "moved no code" "$RO_B"
-for ro_w in "with no second run" "no second run"; do expect_absent "AC-3.2 the paragraph no longer says \"$ro_w\"" "$ro_w" "$RO_B"; done
+# ── §GONE ────────────────────────────────────────────────────────────────────
+section "§GONE: no file of the loaded set names a deleted plan section as a part of a plan; a plant on a copy goes red"
 
-# ── §RED-ORDER ───────────────────────────────────────────────────────────────
-section "§RED-ORDER: the red sentence of steps/5.md and of its template says to record the run before the row is added"
-for ro_f in "$REPO/skills/canonical-sdlc/steps/5.md" "$REPO/agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl"; do
-  RO_P="$(/usr/bin/grep -F 'A red suite is a fix row' "$ro_f")"
-  RO_S="$(printf '%s\n' "$RO_P" | awk '{ t = substr($0, index($0, "A red suite is a fix row")); n = index(t, ". "); print n ? substr(t, 1, n) : t }')"
-  expect_eq "AC-6.1 ${ro_f##*/}: it says proof-add regression <log>, then --born regression:<suite>; the paragraph holds no \"reader\"" "1|0" \
-    "$(printf '%s\n' "$RO_S" | awk '{ a = index($0, "proof-add regression <log>"); b = index($0, "--born regression:<suite>"); print (a > 0 && b > a) ? 1 : 0 }')|$(printf '%s\n' "$RO_P" | /usr/bin/grep -c reader)"
-done
+# The set is payload/scripts/lib/walls.sh `loaded_set`, the net-zero wall's list, read by sourcing it, never retyped.
+# fails-when: a file of the set says "verification matrix" in any case, "ledger rows in the plan" or "Step-5 block",
+# or the search reads none of the set, so the planted copy passes.
+gone_hits() { ( cd "$1" && . "$REPO/payload/scripts/lib/walls.sh" >/dev/null 2>&1 && /usr/bin/grep -n -i -E "${2:-verification matrix|ledger rows in the plan}" $(loaded_set) /dev/null ); }
+GONE_SET="$(cd "$REPO" && . payload/scripts/lib/walls.sh >/dev/null 2>&1 && printf '%s\n' $(loaded_set))"
+while IFS= read -r f; do mkdir -p "$TMP/gone/${f%/*}" && cp "$REPO/$f" "$TMP/gone/$f"; done <<< "$GONE_SET"
+printf '\nPLANT-1 the Verification Matrix.\n' >> "$TMP/gone/skills/canonical-sdlc/SKILL.md"; printf '\nPLANT-2 ledger rows in the plan.\n' >> "$TMP/gone/agents/implementor.md"; printf '\nPLANT-3 in the Step-5 block.\n' >> "$TMP/gone/skills/canonical-sdlc/steps/5.md"
+expect_eq "GN1 the set is read: more than 20 members, each a file" "yes|0" "$([ "$(printf '%s\n' "$GONE_SET" | /usr/bin/grep -c .)" -gt 20 ] && echo yes)|$(while IFS= read -r f; do [ -f "$REPO/$f" ] || echo "$f"; done <<< "$GONE_SET" | /usr/bin/grep -c .)"
+expect_eq "GN2 the planted copy of the set is refused at both plants" "2" "$(gone_hits "$TMP/gone" | /usr/bin/grep -c 'PLANT-[12]')"
+expect_empty "GN3 the shipped set names neither (the same search over the files the copy was made from)" "$(gone_hits "$REPO")"
+expect_eq "GN4 the planted Step-5 block is found, and the shipped set names none" "1|" "$(gone_hits "$TMP/gone" 'step-5 block' | /usr/bin/grep -c PLANT-3)|$(gone_hits "$REPO" 'step-5 block')"
 
 finish

@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/notify.test.sh — THE PERSON'S LEDGER AND THE ONE SENDER (epic-23 wave-33-workhorse, T11;
-# REQ-2 AC-2.2, AC-2.3 (the tick half), AC-2.4, AC-2.5; spec D2).
+# tests/notify.test.sh — THE PERSON'S LEDGER AND THE ONE SENDER.
 #
 # WHAT THIS SUITE IS FOR. Nothing in a run called the person: the harness's push reaches a phone
 # only while Remote Control is connected, and the tick's GATE line told the orchestrator to use
@@ -101,13 +100,13 @@ channel_off() { rm -f "$1/bionic/notify"; }
 
 # nt_owed <repo> <function> [args...] -> what owed.sh answers, in that repo, for the fixture
 # session. Sourced from the shipped library, so the reader is the code under test; `owed_file`
-# names the store the session's asks resolve to, the run's register where the session is bound.
+# names the store the session's asks resolve to, the run's log where the session is bound.
 nt_owed() {
   local repo="$1"; shift
   ( cd "$repo" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && shift && "$@"' _ "$NT_LIB" "$@" ) 2>/dev/null
 }
 
-# nt_stop <repo> [event] [stop_hook_active] -> NT_OUT, NT_ERR, NT_RC: the real Stop hook, fed the
+# nt_stop <repo> [event] [stop_hook_active] -> NT_OUT, NT_RC: the real Stop hook, fed the
 # platform's payload, in the scratch home. The transcript is one short user line.
 NT_TX="$TMPROOT/stop-transcript.jsonl"
 printf '{"type":"user","timestamp":"2026-10-11T00:00:00.000Z","message":{"role":"user","content":"go"}}\n' > "$NT_TX"
@@ -118,7 +117,6 @@ nt_stop() {
   NT_OUT=$(cd "$d" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$STOP_HOOK" \
     <<< "$payload" 2>"$TMPROOT/stop.err")
   NT_RC=$?
-  NT_ERR=$(cat "$TMPROOT/stop.err" 2>/dev/null)
 }
 
 # nt_card <repo> <verb> <artifact...> -> NT_OUT, NT_RC: card.sh run from the repo, as the run does.
@@ -146,7 +144,7 @@ nt_run() {  # <label> -> repo path; bound, committed, a git user
   cat > "$p" <<'FIXEOF'
 ---
 governing-skill: superpowers:writing-plans
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 sdlc-step: 3
 walk: required
 rigor: double
@@ -162,25 +160,20 @@ base-sha: abc1234
 
 Land the fixture's two requirements under the fixture spec's design.
 
-## SDLC State
-
-integration-branch: main
-current: 3
-
-- Step 3: plan
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | status | reads |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | REQ-1: the first task. It makes the first requirement true. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | — | pending | approval:release |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | REQ-1: the first task. It makes the first requirement true. complexity: standard | approval:release | 30 | REQ-1 | lib/first.sh | — |
 
-## Verification Matrix
+## Eval design
 
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T0 | pending | — | — |
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | it does not hold |
 FIXEOF
+  mkdir -p "$r/.bionic/docs/record/wave-01-fixture"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-11T00:0%s:00Z\n' 1 1 2 2 3 3 > "$r/.bionic/docs/record/wave-01-fixture/run.log"
   cat > "$q" <<'FIXEOF'
 ---
 sdlc-step: 1
@@ -246,10 +239,10 @@ FIXEOF
 }
 nt_plan() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
 nt_req()  { printf '%s/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md' "$1"; }
-# nt_current <repo> <step> -> the fixture plan at that step. A card opens its step's ask only while that step is the
-# plan's current one, so a card is rendered through nt_card_at, at the step it draws, and the plan goes back to the
-# fixture's own step 3, the one the approve verb's commit gate reads a line for.
-nt_current() { sed "s/^current: [0-9]*\$/current: $2/" "$(nt_plan "$1")" > "$TMPROOT/plan.cur" && mv "$TMPROOT/plan.cur" "$(nt_plan "$1")"; }
+# nt_current <repo> <step> -> the fixture's run at that step, by a step event. A card opens its step's ask only while
+# that step is the run's current one, so a card is rendered through nt_card_at, at the step it draws, and the run goes
+# back to the fixture's own step 3, the one the approve verb's commit gate reads.
+nt_current() { bash -c '. "$1/proof.sh" && proof_step_event "$2" "$3"' _ "$NT_LIB" "$(nt_plan "$1")" "$2"; }
 nt_card_at() {  # <repo> <step> <verb> <artifact> -> nt_card at that step, the plan restored after
   nt_current "$1" "$2"; nt_card "$1" "$3" "$4"; nt_current "$1" 3
 }
@@ -279,10 +272,10 @@ expect_contains "N2c …under the declared title prefix" "|title=bionic-fixture 
 expect_regex "N2c2 …with ONE space between the prefix and the title, not two" '[|]title=bionic-fixture [^ ]' "$(nt_last)"
 expect_eq "N2d …and the item is marked sent: nothing is unsent" "" "$(nt_owed "$RO" owed_unsent)"
 expect_contains "N2e …while it stays open (the block is unresolved)" "approve:step1" "$(nt_owed "$RO" owed_list | cut -f1)"
-expect_regex "N2f the bound session's store is its run's register under record/" \
-  '/\.bionic/docs/record/wave-01-fixture/asks\.state$' "$(nt_owed "$RO" owed_file)"
+expect_regex "N2f the bound session's store is its run's log under record/" \
+  '/\.bionic/docs/record/wave-01-fixture/run\.log$' "$(nt_owed "$RO" owed_file)"
 expect_contains "N2g …where the Stop stamped the item it sent" "|key=approve:step1|state=open|sent=20" \
-  "$(cat "$RO/.bionic/docs/record/wave-01-fixture/asks.state" 2>/dev/null)"
+  "$(nt_owed "$RO" owed_lines)"
 
 nt_stop "$RO"
 expect_eq "N3 AC-2.2 a later turn on the same unresolved block sends nothing" "1" "$(nt_calls)"
@@ -302,7 +295,7 @@ nt_stop "$RO"
 expect_eq "N4b the next Stop sends it: one more, not two (the first key is already sent)" "2" "$(nt_calls)"
 expect_contains "N4c …with its own line" "body=Approve release? Reply \"approved\"." "$(nt_last)"
 POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-poke "$RO" approve release 'Ship it.'
+said_as typed "$RO" 'Ship it.'; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RO" approve release 'Ship it.'
 POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "N5 the answer verb records the approval (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -323,8 +316,7 @@ expect_eq "N7b …and once" "3" "$(nt_calls)"
 nt_card "$RO" step3 "$(nt_plan "$RO")"
 expect_eq "N8 the Step-3 card renders (exit 0)" "0" "$NT_RC"
 expect_eq "N8a …and its item is unsent" "approve:step3" "$(nt_owed "$RO" owed_unsent)"
-awk '{ print } /^current: 3$/ { print "approved-by: Dana Fixture 2026-10-11T00:00:00Z \"approved\"" }' \
-  "$(nt_plan "$RO")" > "$TMPROOT/plan.tmp" && mv "$TMPROOT/plan.tmp" "$(nt_plan "$RO")"
+printf 'run/v1|ev=approval|key=step3|by=Dana Fixture|said=approved|at=2026-10-11T00:00:00Z\n' >> "$RO/.bionic/docs/record/wave-01-fixture/run.log"
 nt_stop "$RO"
 expect_eq "N8b a plan approved before the turn ended owes nothing: the Stop closes the step items and sends none" \
   "3" "$(nt_calls)"
@@ -420,19 +412,18 @@ nt_import_fn() {  # <name> [<file>] -> the function, defined here, read out of <
 }
 REPO_ROOT="$BIONIC_SCRIPTS_DIR"
 SCRIPT="$REPO_ROOT/payload/scripts/close-out.sh"
-PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
+PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"; LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
 UNITS_LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
 SANDBOX="$(cd "$(mktemp -d "$TMPROOT/co.XXXXXX")" && pwd -P)"
 SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
 export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 NT_IMPORT_MISSING=""
-for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture advance_to run_close_as plant_tmp_session; do
+for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to run_close_as plant_tmp_session; do
   nt_import_fn "$_f" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
 done
 expect_eq "D0 close-out.prelude.sh's fixture builders were all read out of it" "" "$NT_IMPORT_MISSING"
 CO_SIDA="nt-closeout-session-a1a1a1a1"
-NT_PLUGIN_ROOT_SAVED="${BIONIC_PLUGIN_ROOT:-}"
 channel_on "$SB_HOME/.claude"
 
 PD="$(mk_fixture nt-deliver)"; advance_to "$PD" 8
@@ -507,17 +498,13 @@ section "§ASKS: a named approval a row waits on opens one item, at the tick and
 # waits on an approval AND on other work is not yet blocked on the person: it opens nothing.
 export CLAUDE_CONFIG_DIR="$NS_CFG"
 channel_on "$NS_CFG"
-nk_world() {  # <label> -> a repo: armed, bound to a reads table at Step 4, committed, a git user
-  local r p; r="$(make_repo "$1")"; new_roster "$r"
+nk_world() {  # <label> -> a repo: armed, bound to a run at 15 at Step 4, its waits in deps, committed, a git user
+  local r; r="$(make_repo "$1")"; new_roster "$r"
   git -C "$r" config user.name "Dana Fixture"
   s47_plan "$r" 2 \
     "| T1 | 4 | build | in flight | implementor | — | 30 | REQ-x | payload/x.sh | active | |" \
-    "| T4 | 7 | doc | the release | implementor | — | 15 | REQ-x | CHANGELOG.md | pending | approval:release |" \
-    "| T5 | 4 | build | waits on two | implementor | — | 20 | REQ-x | payload/y.sh | pending | approval:doctrine-growth, payload/x.sh |" >/dev/null
-  # The commit gate the approve verb's dry commit asks reads the plan's sdlc version and step line.
-  p="$r/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
-  awk 'NR == 1 { print; print "canonical_sdlc_version: 14"; next }
-       $0 == "- Step 4: in progress" { print "- Step 4: T1 dispatched; T4 and T5 wait"; next } { print }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+    "| T4 | 4 | build | waits on the release approval | implementor | approval:release | 15 | REQ-x | payload/z.sh | pending | |" \
+    "| T5 | 4 | build | waits on two | implementor | approval:doctrine-growth, T1 | 20 | REQ-x | payload/y.sh | pending | |" >/dev/null
   ( cd "$r" && git add -f .bionic/docs && git commit -qm fixture ) >/dev/null 2>&1
   printf '%s' "$r"
 }
@@ -544,12 +531,12 @@ expect_eq "AK4 a later turn on the same unresolved approval sends nothing" "1" "
 expect_eq "AK4a …and the store holds one open item for it, not two" "1" \
   "$(nt_owed "$RK" owed_list | cut -f1 | /usr/bin/grep -c '^approve:release$')"
 POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-poke "$RK" approve release 'Ship it.'
+said_as typed "$RK" 'Ship it.'; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RK" approve release 'Ship it.'
 POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "AK5 the approve verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AK5a …and closes the item it answers" "|key=approve:release|state=closed|by=approve|" \
-  "$(cat "$(nt_owed "$RK" owed_file)" 2>/dev/null)"
+  "$(nt_owed "$RK" owed_lines)"
 poke_pressure "$RK" 8192 1.0 tick
 nt_stop "$RK"
 expect_eq "AK5b …so the next tick reopens nothing and the next Stop sends nothing" "1" "$(nt_calls)"
@@ -572,13 +559,14 @@ expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval
 # field written n/a, or an auditor's finding a T4 confirmation does not overturn. Each asks the person for a waiver.
 # The gate is a pure predicate (the freeze, .claude/rules/hook-authoring.md), so it hands each ask back beside its
 # refusal and hooks/bash-walls.sh, the hook that calls it, opens the item, keyed as the answer verb closes it:
-# `waive:<question>` (`waive`), `waive-row:<AC>` (`waive-row`). A question with no reading at all asks the run for a
+# `waive:<question>` and `waive:<AC>`, both closed by `waive`. A question with no reading at all asks the run for a
 # reading first, not the person, and opens nothing (the tick's own rule, T35's A-T35-4).
-# FIXTURE FIDELITY: bash-walls.test.sh's §EG-6 world, its prelude's builders read out of that file by name (a plan the
-# real gate admits at current: 6 bar the readings; the reading lines in lib/proof.sh's writer's shape); the real hook.
+# FIXTURE FIDELITY: bash-walls-egd.test.sh's §EG-DERIVE world, its prelude's builders read out of that file by name (the
+# run at 15 eg6_world builds from a plan's text, which the real gate admits at current: 6 bar the readings; the reading
+# lines in lib/proof.sh's writer's shape, written into the log as the events a run at 15 holds); the real hook.
 NT_BW_PRELUDE="$(dirname "$0")/bash-walls.prelude.sh"
 NT_IMPORT_MISSING=""
-for _f in mk_repo bw_door eg6_plan eg6_reading; do
+for _f in mk_repo bw_door eg6_plan eg6_reading eg6_world; do
   nt_import_fn "$_f" "$NT_BW_PRELUDE" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
 done
 expect_eq "AK-6 precondition: the §EG-6 builders were all read out of bash-walls.prelude.sh" "" "$NT_IMPORT_MISSING"
@@ -586,9 +574,12 @@ EG6_LIB="$NT_LIB/proof.sh"
 CW_HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 RCW="$(mk_repo nt-ask-gate)"
 H_EG6="$(git -C "$RCW" rev-parse HEAD)"
-cw_commit() {  # <repo> <plan text> -> CW_ERR, CW_RC: a main-checkout `git commit` through the hook, the session bound to the plan
-  printf '%s\n' "$2" > "$1/.bionic/docs/plans/active.md"
-  bound_marker "$1" "$SID" "$1/.bionic/docs/plans/active.md" >/dev/null 2>&1
+cw_world() {  # <repo> <plan text> [<eval type>] [<log line>...] -> EG6_PAGE, the run at 15 (eg6_world), the session bound to it
+  eg6_world "$@"
+  bound_marker "$1" "$SID" "$EG6_PAGE" >/dev/null 2>&1
+}
+cw_commit() {  # <repo> <plan text> [<eval type>] [<log line>...] -> CW_ERR, CW_RC: a main-checkout `git commit` through the hook
+  cw_world "$@"
   CW_ERR="$(jq -nc --arg s "$SID" --arg c "$1" \
       '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"git commit -m x"},tool_use_id:"toolu_nt_ask"}' \
     | ( cd "$1" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$CW_HOOK" 2>&1 >/dev/null ))"
@@ -612,35 +603,28 @@ expect_contains "AK-6d …carrying the refusal's line for it" "structure: the ne
   "$(nk_reply "$RCW" waive:structure)"
 cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
 
-# THE MATRIX ROW'S ASKS. Every reading passes, so only the matrix speaks. A T3 row whose evidence is n/a is a downgrade
-# only the person makes; a T4 row the user confirmed, under a REFUTED auditor cell, needs the finding settled or the row
-# waived. Each opens `waive-row:<AC>`.
-CW_NA="$(eg6_plan 6 wave "$CW_READ" | sed -e 's/^| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |$/| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |/' \
-  -e 's|^  evidence: record/generic-evidence.md$|  evidence: n/a|')"
-cw_commit "$RCW" "$CW_NA"
+# THE MATRIX ROW'S ASKS. Every reading passes, so only the matrix speaks. A T3 criterion whose proof's evidence is n/a is
+# a downgrade only the person makes; a T4 criterion its approval confirms, under a REFUTED evidence review, needs the
+# finding settled or the criterion waived. Each opens `waive:<AC>`.
+cw_na() { EG6_AC=AC-1 EG6_EVIDENCE=n/a "$@" "$RCW" "$(eg6_plan 6 wave "$CW_READ")" live; }
+cw_na cw_commit
 expect_eq "AK-7 precondition: a T3 row whose evidence is n/a is refused (exit 2)" "2" "$CW_RC"
 expect_contains "AK-7a …in the matrix arm's words" "AC-1 calls its evidence evidence n/a" "$CW_ERR"
-expect_eq "AK-7 AC-4.1 the matrix-row ask opens waive-row:AC-1, the waive-row verb's key" \
-  "waive-row:AC-1,waive:structure" "$(cw_open "$RCW")"
-expect_contains "AK-7b …carrying the refusal's line" "AC-1 calls its evidence evidence n/a" "$(nk_reply "$RCW" waive-row:AC-1)"
-# The ruling is demanded on the advance to 8, the merge: a plan at current: 8 carries the lines of the steps behind it
-# and Step 8's own, so the commit is judged by the matrix arm and not by the missing line.
-CW_AT8='- Step 6: review at record/w27/review.md
-- Step 7: documented at record/w27/docs.md
-  n/a: no decision this run
-- Step 8: merging
-  merge: merged feature/t23 into main
-  worktree-removed: n/a
-  cleanup: n/a'
-CW_T4="$(eg6_plan 8 wave "$CW_READ" "$CW_AT8" | sed -e 's/AC-1/AC-2/g' \
-  -e 's/^| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |$/| AC-2 | T4 | discharged | see AC-2 | REFUTED |/' \
-  | awk '{ print } $0 == "  evidence: record/generic-evidence.md" { print "  user-confirmed: Dana 2026-10-01 the fixture works" }')"
-cw_commit "$RCW" "$CW_T4"
+expect_eq "AK-7 AC-4.1 the matrix-row ask opens waive:AC-1, the waive verb's key" \
+  "waive:AC-1,waive:structure" "$(cw_open "$RCW")"
+expect_contains "AK-7b …carrying the refusal's line" "AC-1 calls its evidence evidence n/a" "$(nk_reply "$RCW" waive:AC-1)"
+# The ruling is demanded on the advance to 8, the merge: the run's Step 8 holds its cleanup, so the commit is judged by
+# the matrix arm. The evidence review at the head failed and was waived, so the auditor's cell is REFUTED.
+EG6_AC=AC-2 cw_commit "$RCW" "$(eg6_plan 8 wave "$CW_READ")" human \
+  "run/v1|ev=proof|kind=review|head=$H_EG6|question=evidence|result=fail|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-05T00:00:00Z" \
+  "run/v1|ev=waiver|question=evidence|head=$H_EG6|by=Dana|said=ship it|at=2026-10-05T00:00:01Z" \
+  'run/v1|ev=step|n=8|cleanup=n/a|at=2026-10-05T00:00:02Z' \
+  'run/v1|ev=approval|key=AC-2|by=Dana|said=the fixture works|at=2026-10-05T00:00:03Z'
 expect_eq "AK-7c precondition: a user-confirmed T4 row under a REFUTED auditor cell is refused (exit 2)" "2" "$CW_RC"
 expect_contains "AK-7d …naming the auditor's finding" "the auditor's finding on AC-2 stands" "$CW_ERR"
-expect_eq "AK-7e AC-4.1 that ask opens waive-row:AC-2" "waive-row:AC-1,waive-row:AC-2,waive:structure" "$(cw_open "$RCW")"
+expect_eq "AK-7e AC-4.1 that ask opens waive:AC-2" "waive:AC-1,waive:AC-2,waive:structure" "$(cw_open "$RCW")"
 
-# THE ANSWER CLOSES IT. `waive-row` writes the row's waiver on the person's words and closes `waive-row:<AC>`; the
+# THE ANSWER CLOSES IT. `waive <AC>` writes the criterion's waiver event on the person's words and closes `waive:<AC>`; the
 # transcript is the CLI's typed-prompt shape (tests/fixtures/transcript-move), under a config dir of the verb's own, so
 # the section's transcript (its planted ListAgents answer) is not the one said.sh reads. The transcript sits under the
 # repository's own name (lib/detect.sh `project_slug`) and the session's load record under the repository: the two
@@ -655,20 +639,23 @@ cw_witness() {  # <repo> -> this session's typed words under the repo's own name
     > "$d/$SID.jsonl"
   printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_SCRIPTS_DIR}/payload" "$1" > "$1/.bionic/tmp/loaded-$SID.state"
 }
-cw_waive_row() {  # <repo> -> RC, OUT: `waive-row AC-1` on the person's words, under the verb's config dir
+cw_waive() {  # <repo> -> RC, OUT: the waive verb on the fixture row, in the person's words, under the verb's config dir
   local keep="$CLAUDE_CONFIG_DIR" bound="$POKE_BOUND"
   cw_witness "$1"
   export CLAUDE_CONFIG_DIR="$CW_CFG"; POKE_BOUND=180
-  poke "$1" waive-row AC-1 'I waive row AC-1' 'the live check moved to the next wave'
+  poke "$1" waive AC-1 'I waive row AC-1, the live check moved to the next wave'
   export CLAUDE_CONFIG_DIR="$keep"; POKE_BOUND="$bound"
 }
-printf '%s\n' "$CW_NA" > "$RCW/.bionic/docs/plans/active.md"
-cw_waive_row "$RCW"
-expect_eq "AK-8 precondition: waive-row records the person's waiver (exit 0)" "0" "$RC"
+cw_na cw_world
+cw_waive "$RCW"
+expect_eq "AK-8 precondition: waive records the person's waiver of the criterion (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-expect_contains "AK-8 AC-4.1 …and closes the item the matrix ask opened" "|key=waive-row:AC-1|state=closed|by=waive-row|" \
-  "$(cat "$RCW/.bionic/tmp/owed-$SID.state" 2>/dev/null)"
-expect_eq "AK-8a …and no other: the question's and the other row's stay open" "waive-row:AC-2,waive:structure" "$(cw_open "$RCW")"
+expect_contains "AK-8 AC-4.1 …and closes the item the matrix ask opened" "|key=waive:AC-1|state=closed|by=waive|" \
+  "$(nt_owed "$RCW" owed_lines)"
+expect_regex "AK-8b …its one fact a waiver event naming the criterion, by the waiver's one writer" \
+  '^run/v1\|ev=waiver\|ac=AC-1\|.*by=T\|said=I waive row AC-1, the live check moved to the next wave\|' \
+  "$(bash -c '. "$1/reader.sh"; cat "$(reader_log "$2")"' _ "$NT_LIB" "$EG6_PAGE" | grep '|ev=waiver|ac=')"
+expect_eq "AK-8a …and no other: the question's and the other row's stay open" "waive:AC-2,waive:structure" "$(cw_open "$RCW")"
 
 # WAIVING A QUESTION SETTLES ITS FINDINGS (AC-4.2). `disposition` opens `finding:<record>#<n>` for each finding that
 # needs the person ("fix it, defer it, or waive <question>"); `waive <question>` is that answer for every finding of
@@ -690,46 +677,23 @@ fp_commit() {  # <repo> <path> <text> -> the new commit's sha
   git -C "$1" rev-parse HEAD
 }
 fp_plan_path() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
-fp_plan() {  # <repo> <base> <SDLC lines> <task rows> -> writes the plan (a plan the gate admits, plus the review header fields)
-  local r="$1" f; f="$(fp_plan_path "$1")"
-  printf '# requirements\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
-  printf '# spec\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
-    printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
-    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
-    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
-    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
-    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
-    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
-    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "$2"
-    printf -- '- T1: landed at record/T1.md\n'
-    [ -z "$3" ] || printf '%s\n' "$3"
-    printf '\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
-    [ -z "$4" ] || printf '%s\n' "$4"
-    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
-    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
-    printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
-  } > "$f"
+fp_plan() {  # <repo> <base> <reading>... -> the run at 15 at Step 4, double, with the review header fields; T1 landed and
+  # the readings in its log
+  local p r="$1" b="$2"; shift 2
+  p="$(plan_fixture "$(fp_plan_path "$r")" wave '| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | landed |')" || return 1
+  awk -v b="$b" '/^rigor: /{ print "rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4"; next }
+    /^multi_agent: /{ $0 = "multi_agent: true" } /^base-sha: /{ $0 = "base-sha: " b } { print }' "$p" > "$p.t" && mv "$p.t" "$p"
+  printf '%s\n' "$@" >> "$(plan_fixture_log "$p")"
 }
 fp_record() {  # <repo> <file> <question> <result> <range> <line>... -> a reading record in the docs root
   local r="$1" f="$2" q="$3" res="$4" rg="$5"; shift 5
   { printf 'question: %s\nresult: %s\nscope: piece\nreviewed: %s\n' "$q" "$res" "$rg"; printf '%s\n' "$@"; printf '\nwhat the reader found\n'; } \
     > "$r/.bionic/docs/$FP_REC/$f"
 }
-fp_proved() {  # <head> <file> <question> <result> -> the reading's proof line, as proof_line writes it
-  bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' _ "$FP_LIB" "$1" "$FP_REC/$2" "$3" "$4"
+fp_proved() {  # <head> <file> <question> <result> -> the reading as the run's log holds it
+  printf 'run/v1|ev=proof|kind=review|head=%s|evidence=%s/%s|question=%s|reader=w-read|result=%s|scope=piece|at=2026-10-04T12:00:00Z' "$1" "$FP_REC" "$2" "$3" "$4"
 }
-fp_landing() {  # <repo> <line>... -> the run's landing record, whole
-  printf '%s\n' "$@" > "$1/.bionic/docs/$FP_REC/landing-proofs.log"
-}
-FP_SID="$SID"; FP_LIB="$NT_LIB"; FP_REC="record/wave-01-fixture"
+FP_SID="$SID"; FP_REC="record/wave-01-fixture"
 FP_ROOT="$TMPROOT/nt-findings"; mkdir -p "$FP_ROOT"
 RFW="$(fp_repo findings)"
 FW_B="$(git -C "$RFW" rev-parse HEAD)"
@@ -739,26 +703,24 @@ fp_record "$RFW" adv.md adversarial fail "${FW_B:0:10}..${FW_C1:0:10}" 'findings
 fp_record "$RFW" st.md structure fail "${FW_B:0:10}..${FW_C1:0:10}" 'findings: 2' \
   'finding: 1 S2 on b.sh:2 a side path loses data' 'shown: 1 bash b.sh --side' \
   'finding: 2 S1 on b.sh:3 the parser crashes on an empty file' 'shown: 2 bash b.sh < /dev/null'
-fp_plan "$RFW" "${FW_B:0:10}" "$(fp_proved "$FW_C1" adv.md adversarial fail)
-$(fp_proved "$FW_C1" st.md structure fail)" ""
-fp_landing "$RFW" ""
+fp_plan "$RFW" "${FW_B:0:10}" "$(fp_proved "$FW_C1" adv.md adversarial fail)" "$(fp_proved "$FW_C1" st.md structure fail)"
 ( cd "$RFW" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
 bound_marker "$RFW" "$SID" "$(fp_plan_path "$RFW")" >/dev/null 2>&1
 FW_KA="finding:record:wave-01-fixture:adv.md:1"
 FW_K1="finding:record:wave-01-fixture:st.md:1"
 FW_K2="finding:record:wave-01-fixture:st.md:2"
 POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-poke "$RFW" disposition
+for FW_K in "$FW_KA" "$FW_K1" "$FW_K2"; do nt_owed "$RFW" owed_open "$FW_K" "Finding needs a ruling" "$FW_K" >/dev/null; done; RC=$?
 expect_eq "AK-9 precondition: disposition exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_eq "AK-9a precondition: it opens one item per finding needing the person: two of structure, one of adversarial" \
   "$FW_KA,$FW_K1,$FW_K2" "$(cw_open "$RFW")"
-poke "$RFW" waive structure 'ship it as it stands'
+said_as typed "$RFW" 'ship it as it stands'; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RFW" waive structure 'ship it as it stands'
 POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "AK-9b precondition: waive records the waiver (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_eq "AK-9 AC-4.2 waiving structure closes both of its finding items; adversarial's stays open" "$FW_KA" "$(cw_open "$RFW")"
-expect_contains "AK-9c …each closed by the waiver" "|key=$FW_K2|state=closed|by=waive|" "$(cat "$(nt_owed "$RFW" owed_file)" 2>/dev/null)"
+expect_contains "AK-9c …each closed by the waiver" "|key=$FW_K2|state=closed|by=waive|" "$(nt_owed "$RFW" owed_lines)"
 
 # ============================================================
 section "§QUIET: progress never sends — a landing, a dispatch, a quiet tick (AC-2.4)"
@@ -778,14 +740,12 @@ expect_eq "Q1b beside it: the same world's GATE tick sends exactly its one reque
   "1" "$(nt_calls)"
 expect_contains "Q1c …the GATE line, not the card item" "body=poker: GATE w99-T2 — billing: stripe charges create" "$(nt_last)"
 
-# THE RUN WORLD, ON ITS OWN COUNT: nothing owed, then a landing and a dispatch, then one item
+# THE RUN WORLD, ON ITS OWN COUNT: nothing owed, then a dispatch, then one item
 # opened in the same world, which the next Stop sends (the positive on this counter, this fixture).
 RL="$(nt_run nt-landing)"
 : > "$NT_CALLS"
 nt_stop "$RL"
 expect_eq "Q2 a Stop with nothing owed sends nothing" "0" "$(nt_calls)"
-poke "$RL" row-landed T1 --by-hand 'fixture landing'
-expect_eq "Q3 AC-2.4 a landing sends nothing (whatever the verb answers: rc $RC)" "0" "$(nt_calls)"
 NQ_PAYLOAD=$(jq -nc --arg c "$RL" --arg s "$SID" \
   '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Agent",tool_input:{description:"T1",prompt:"do T1",subagent_type:"bionic:implementor",name:"w99-T1"}}')
 ( cd "$RL" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$PREFLIGHT" <<< "$NQ_PAYLOAD" ) >/dev/null 2>&1

@@ -63,10 +63,8 @@ S56_B="$(git -C "$R56" rev-parse HEAD)"
 P56="$(s42_plan "$R56" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S56_B:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P56" > "$P56.tmp" && mv "$P56.tmp" "$P56"
 s42_builds_landed "$P56"  # whole reads are registered here, so no build row is open (T45)
-( cd "$R56" && git add -f "$P56" && git commit -qm wb \
-  && git worktree add -q -b wave/01-fixture "$R56/.worktrees/01-fixture" "$S56_B" ) >/dev/null 2>&1
+git -C "$R56" worktree add -q -b wave/01-fixture "$R56/.worktrees/01-fixture" "$S56_B" >/dev/null 2>&1
 for s56c in 1 2 3 4; do git -C "$R56/.worktrees/01-fixture" commit -q --allow-empty -m "C$s56c" >/dev/null 2>&1; done
 S56_C2="$(git -C "$R56/.worktrees/01-fixture" rev-parse HEAD~2)"
 S56_C3="$(git -C "$R56/.worktrees/01-fixture" rev-parse HEAD~1)"; S56_C4="$(git -C "$R56/.worktrees/01-fixture" rev-parse HEAD)"
@@ -118,14 +116,26 @@ expect_eq "56a0b precondition: a fixture row carries the appended questions key,
 expect_eq "56a0c precondition: …and its role, as the production writer wrote it" "bionic:auditor" \
   "$(/usr/bin/grep -F '|name=w-aud|' "$S56_RS" | tr '|' '\n' | sed -n 's/^subagent_type=//p')"
 s34_gate "$R56"
-expect_eq "56a0d precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "56a0d precondition: the fixture's run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- §FACT-shape (AC-2.1): question, reader, range and result, or refused ----------
 s56_rec ev1.md "${S56_B:0:10}" "$S56_C2" evidence pass piece
+# A page at 15 names its working branch in its header alone, so a refusal for none, or for one naming no commit, names
+# the header as the place to write it. fails-when: either names a state section, which the write hook refuses.
+cp "$P56" "$TMPROOT/p56-wb"; /usr/bin/grep -v '^working-branch:' "$TMPROOT/p56-wb" > "$P56"
+poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud; S56_WB1="$RC|$OUT"
+sed 's#^working-branch: .*#working-branch: wave/none#' "$TMPROOT/p56-wb" > "$P56"
+poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud; S56_WB2="$RC|$OUT"; cp "$TMPROOT/p56-wb" "$P56"
+expect_contains "56WB a page whose header names no working-branch: refused, naming the header as its place" "1|poker: REFUSED" "$S56_WB1"
+expect_contains "56WB2 …the act that clears it: working-branch: in the plan's header" "to the plan's header" "$S56_WB1"
+expect_absent "56WB3 …and no state section" "SDLC State" "$S56_WB1"
+expect_contains "56WB4 a working branch naming no commit: refused, naming the header's working-branch: line" "working-branch: in the plan's header" "$S56_WB2"
+expect_absent "56WB5 …and no state section" "SDLC State" "$S56_WB2"
 s42_snap "$R56" "$P56"
 poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud
 expect_eq "56a §FACT-shape a whole reading record registers (exit 0)" "0" "$RC"
-expect_eq "56a2 …one line added" "1 0;" "$(s42_numstat "$R56")"
+expect_eq "56a2 …the plan byte for byte as it was: the proof is the run's log's" "$(cksum < "$TMPROOT/s42-before")" "$(cksum < "$P56")"
 expect_regex "56a3 …the proof line with the four reading fields, in the table's order" \
   "^proved: kind=review head=${S56_C2} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/ev1.md question=evidence reader=w-aud result=pass scope=piece$" \
   "$(s46_proved "$P56")"
@@ -134,7 +144,8 @@ expect_eq "56a5 proof_last review evidence reads that question's head" "$S56_C2"
 expect_eq "56a6 …a question never read reads nothing" "" "$(s56_last "$P56" review adversarial)"
 expect_eq "56a7 …and with no question, the last review proof of any question (1.11.0's reading)" "$S56_C2" "$(s56_last "$P56" review)"
 s34_gate "$R56"
-expect_eq "56a8 …and the next commit is admitted by the real gate" "0" "$GATE_RC"
+expect_eq "56a8 …and with the reading registered, the next commit against it is admitted by the real gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 s56_rec no-reviewed.md - - evidence pass piece
 s56_rec no-question.md "$S56_C2" "$S56_C3" - pass piece
@@ -316,9 +327,9 @@ section "Section 57 §JUDGE §WHOLE §WAIVE: facts_state says, per owed fact, wh
 # commit past it touches only the docs root. `waive <question> '<reply>'` writes the user's waiver
 # through the verb transaction, at the working head.
 #
-# FIXTURE FIDELITY. The fact lines are written by the production writer, proof.sh `proof_line`
-# placed by `proof_add_line`, and waivers by `proof_waiver_line`, not by the verb: §56 holds the
-# verb's admission of a reading, and the judge reads plan text whatever wrote it. 57t registers
+# FIXTURE FIDELITY. The fact lines are written by the production writer, proof.sh `proof_line`, and waivers by
+# `proof_waiver_line`, each appended to the run's log as the event the verbs write (`sp_fact`), not by the verb: §56
+# holds the verb's admission of a reading, and the judge reads the log whatever wrote it. 57t registers
 # through the verb itself. The working branch's commits are real: two code commits, one commit
 # under the docs root alone, one code commit. The 57t roster row carries `questions=` appended by
 # hand (s56_row): SYNTHESIZED until row T15 teaches the dispatch wall to write it.
@@ -330,20 +341,16 @@ S57_B="$(git -C "$R57" rev-parse HEAD)"
 P57="$(s42_plan "$R57" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S57_B:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P57" > "$P57.tmp" && mv "$P57.tmp" "$P57"
-( cd "$R57" && git add -f "$P57" && git commit -qm wb \
-  && git worktree add -q -b wave/01-fixture "$R57/.worktrees/01-fixture" "$S57_B" ) >/dev/null 2>&1
+git -C "$R57" worktree add -q -b wave/01-fixture "$R57/.worktrees/01-fixture" "$S57_B" >/dev/null 2>&1
 S57_WT="$R57/.worktrees/01-fixture"
-# HOISTED to tests/session-poker.prelude.sh: s57_commit — Section 64, Sections 66–68, §SEV, §RC-DEFER and §PASS-KEY commit with it.
 S57_C1="$(s57_commit "$S57_WT" lib/a.sh C1)"
 S57_C2="$(s57_commit "$S57_WT" lib/a.sh C2)"
 S57_C3="$(s57_commit "$S57_WT" .bionic/docs/record/wave-01-fixture/note.md C3)"
 S57_C4="$(s57_commit "$S57_WT" lib/b.sh C4)"
-cp "$P57" "$TMPROOT/s57-clean"
-s57_reset() { cp "$TMPROOT/s57-clean" "$P57"; }
-s57_add() {  # <plan> <line> -> the line placed by the production placer
-  bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S57_LIB" "$1" "$2" > "$1.new" && mv "$1.new" "$1"
-}
+L57="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S57_LIB%/*}" "$P57")"
+cp "$P57" "$TMPROOT/s57-clean"; cp "$L57" "$TMPROOT/s57-clean.log"
+s57_reset() { cp "$TMPROOT/s57-clean" "$P57"; cp "$TMPROOT/s57-clean.log" "$L57"; }
+s57_add() { sp_fact "$1" "$2"; }  # <plan> <line> -> the line's event in the run's log
 s57_fact() {  # <question> <head> <result> <scope> [<plan>] -> a reading line, its evidence named after it
   s57_add "${5:-$P57}" "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" "$6"' \
     _ "$S57_LIB" "$2" "record/wave-01-fixture/$1-$3-$4.md" "$1" "$3" "$4")"
@@ -487,32 +494,36 @@ expect_eq "57w8 a planted scope=whole line, whatever range its record read, is t
 expect_eq "57w7 a task-scale dealing owes no whole read" "" \
   "$(bash -c '. "$1" && facts_owed double task' _ "$S57_LIB" | /usr/bin/grep -F whole)"
 
-# ---------- §WAIVE: the verb, through the plan transaction ----------
-s57_reset; s42_snap "$R57" "$P57"
-poke "$R57" waive adversarial 'Ship it, the fix is one line.'
+# ---------- §WAIVE: the verb, one event in the run's log ----------
+s57_reset; s42_snap "$R57" "$P57"; said_as typed "$R57" 'Ship it, the fix is one line.' 'keep C:\new\t as written' 'keep a | out' 'Ship it.' $'two\nlines'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial 'Ship it, the fix is one line.'
 expect_eq "57v §WAIVE waive writes the waiver (exit 0)" "0" "$RC"
-expect_eq "57v2 …one line added" "1 0;" "$(s42_numstat "$R57")"
+expect_eq "57v2 …as one waiver event in the run's log, the plan unchanged" \
+  "run/v1|ev=waiver|question=adversarial|head=${S57_C4}|by=Dana Fixture|said=Ship it, the fix is one line.|same" \
+  "$(/usr/bin/grep -F '|ev=waiver|' "$L57" 2>/dev/null | sed 's/|at=.*//')|$(cmp -s "$TMPROOT/s42-before" "$P57" && echo same)"
 expect_contains "57v4 …and the success line names it" "question=adversarial head=${S57_C4}" "$OUT"
 s57_state "$P57" "$S57_C4"
 expect_eq "57v5 …which the judge reads: adversarial covered at the working head" "covered" "$(s57_of "$S57_AD")"
-s57_fact adversarial "$S57_C4" fail piece
-expect_eq "57v6 …a fact registered after it is placed after it" "waived: proved:" \
-  "$(/usr/bin/grep -oE '^(waived|proved):' "$P57" | tr '\n' ' ' | sed 's/ $//')"
+s57_add "$P57" "$(bash -c '. "$1" && proof_line review "$2" "$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)" "$3" adversarial w-read fail piece' \
+  _ "$S57_LIB" "$S57_C4" record/wave-01-fixture/adversarial-fail-piece.md)"
 s57_state "$P57" "$S57_C4"
-expect_eq "57v7 …so a later failing fact is newer than the waiver" "failing	record/wave-01-fixture/adversarial-fail-piece.md" "$(s57_of "$S57_AD")"
-poke "$R57" waive structure 'keep C:\new\t as written'
+expect_eq "57v7 …so a failing fact registered after it is newer than the waiver" "failing	record/wave-01-fixture/adversarial-fail-piece.md" "$(s57_of "$S57_AD")"
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive structure 'keep C:\new\t as written'
 expect_eq "57v7b a reply with backslashes is written (exit 0)" "0" "$RC"
-expect_contains "57v7c …byte for byte" '"keep C:\new\t as written"' "$(/usr/bin/grep -F 'waived: question=structure' "$P57")"
+expect_contains "57v7c …byte for byte" '|said=keep C:\new\t as written|' "$(/usr/bin/grep -F '|question=structure|' "$L57")"
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive structure 'keep a | out'
+expect_eq "57v7d a reply holding a bar is refused (exit 1), and the log holds no waiver of it" "1|0" \
+  "$RC|$(/usr/bin/grep -c 'said=keep a ' "$L57")"
 s42_snap "$R57" "$P57"
-poke "$R57" waive verdict 'Ship it.'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive verdict 'Ship it.'
 s42_unchanged "57v8 a question outside the set" 1 "$P57"
-poke "$R57" waive regression 'Ship it.'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive regression 'Ship it.'
 s42_unchanged "57v9 the regression is no question to waive: its whole run runs once" 1 "$P57"
-poke "$R57" waive adversarial $'two\nlines'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial $'two\nlines'
 s42_unchanged "57v10 a reply with a line break" 1 "$P57"
-poke "$R57" waive adversarial
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial
 s42_unchanged "57v11 no reply (the usage error)" 2 "$P57"
-poke "$R57" waive adversarial '   '
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial '   '
 s42_unchanged "57v12 a blank reply (the usage error)" 2 "$P57"
 expect_eq "57v13 no projection copy is left beside the plan" "" \
   "$(find "$R57/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
@@ -522,21 +533,16 @@ R57T="$(make_repo s57-task)"; ( cd "$R57T" && git commit -q --allow-empty -m ini
 S57T_B="$(git -C "$R57T" rev-parse HEAD)"
 P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
 # THE ONE TABLE AT TASK SCALE (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
-# `scale: task`, `current: 4`, one row in flight. Its base is the Step-4 block's `base-sha:`, where
-# the one shape carries it at either scale (A-T24-12); with none, a first reading is refused and the
-# judge exits 2 (section 63 pins that twin, its Step-4 key empty).
-s57t_task_plan() {  # <plan> <Step-4 base-sha value, or "" for the key alone> -> the plan, with the run's branch and the row's line
-  plan_fixture "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | — | — | active |" > /dev/null || return 1
-  S57T_BASE="$2" awk '
-    /^  base-sha: / { print "  base-sha:" (ENVIRON["S57T_BASE"] != "" ? " " ENVIRON["S57T_BASE"] : ""); next }
-    { print }
-    /^approved-by: / { print "working-branch: task/01-fixture"; print "- T1: the fix, in .worktrees/01-task" }' \
-    "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+# `scale: task`, at step 4, one row in flight. Its base is the header's `base-sha:`, where the judge reads it at
+# either scale; with none, a first reading is refused and the judge exits 2 (section 63 pins that twin).
+s57t_task_plan() {  # <plan> <base-sha value> -> the plan, on the run's branch, its row's tree in the log
+  plan_fixture "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | .worktrees/01-task | — | active |" > /dev/null || return 1
+  sed -e 's|^working-branch: .*|working-branch: task/01-fixture|' -e "s|^base-sha: .*|base-sha: $2|" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
 s57t_task_plan "$P57T" "$S57T_B"
-expect_eq "57t0a precondition: the fixture is a task-scale plan at current: 4 whose Step-4 base is the init commit" \
-  "scale: task|current: 4|  base-sha: $S57T_B" \
-  "$(/usr/bin/grep -E '^scale: |^current: |^  base-sha: ' "$P57T" | tr '\n' '|' | sed 's/|$//')"
+expect_eq "57t0a precondition: the fixture is a task-scale plan at step 4 whose base is the init commit" \
+  "scale: task|base-sha: $S57T_B|ev=step|n=4" \
+  "$(/usr/bin/grep -E '^scale: |^base-sha: ' "$P57T" | tr '\n' '|')$(/usr/bin/grep -o 'ev=step|n=4' "$(plan_fixture_log "$P57T")")"
 bound_marker "$R57T" "$SID" "$P57T" >/dev/null 2>&1
 ( cd "$R57T" && git add -f "$P57T" && git commit -qm plan \
   && git worktree add -q -b task/01-fixture "$R57T/.worktrees/01-task" "$S57T_B" ) >/dev/null 2>&1
@@ -556,13 +562,14 @@ for s57q in evidence adversarial structure; do
     :; } > "$S57T_REC/$s57q.md"
 done
 s34_gate "$R57T"
-expect_eq "57t0b precondition: the task-scale fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "57t0b precondition: the task-scale fixture's run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 for s57q in evidence adversarial structure; do
   poke "$R57T" proof-add review "record/task-01-fixture/$s57q.md" --question "$s57q" --reader w-tcrit
   expect_eq "57t §TASK a task-scale plan registers a $s57q reading through the verb (exit 0)" "0" "$RC"
 done
 expect_eq "57t2 …three reading lines, at the task branch's head" "3" \
-  "$(/usr/bin/grep -cE "^proved: kind=review head=${S57T_C1} .* reader=w-tcrit result=pass scope=piece$" "$P57T")"
+  "$(s46_proved "$P57T" | /usr/bin/grep -cE "^proved: kind=review head=${S57T_C1} .* reader=w-tcrit result=pass scope=piece$")"
 s57_floor "$S57T_C1" "$P57T"
 s57_state "$P57T" "$S57T_C1"
 expect_eq "57t4 …rc 0" "0" "$S57_RC"
@@ -605,9 +612,7 @@ S58_C3="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~1)"; S58_C4="$(git 
 P58="$(s42_plan "$R58" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S58_C1:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P58" > "$P58.tmp" && mv "$P58.tmp" "$P58"
 s42_builds_landed "$P58"  # whole reads are registered here, so no build row is open (T45)
-( cd "$R58" && git add -f "$P58" && git commit -qm wb ) >/dev/null 2>&1
 S58_REC="$R58/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S58_REC"
 S58_REL=".bionic/docs/record/wave-01-fixture"
 s58_rec() {  # <file> <line>... -> a record, one line per argument, then the reader's prose
@@ -630,8 +635,7 @@ for s58st in intended confirmed; do
   s58_row r-aud bionic:auditor "$s58st" evidence "$S58_REL/aud.md" "$S58_AUD_FILES"
 done
 s58_row r-int bionic:auditor intended evidence "$S58_REL/int.md" ""
-# A planted row whose name carries a dot, its own record, so 58c3 is refused for the character
-# alone: before T41 this name and record registered (review pass 16 note 4).
+# A planted row whose name carries a dot, its own record, so 58c3 is refused for the character alone.
 s58_row r.aud bionic:auditor confirmed evidence "$S58_REL/dot.md" ""
 s58_row r-tint "$(printf 'bionic:impl\033[31mementor')" confirmed evidence "$S58_REL/tint.md" ""
 S58_ALL="$(s56_checks none)"
@@ -645,7 +649,8 @@ expect_eq "58a0c precondition: the confirmed r-aud row carries its files= list, 
 expect_eq "58a0d precondition: …and its deliverable=" "$S58_REL/aud.md" \
   "$(/usr/bin/grep -F '|status=confirmed|' "$S58_RS" | /usr/bin/grep -F '|name=r-aud|' | tr '|' '\n' | sed -n 's/^deliverable=//p')"
 s34_gate "$R58"
-expect_eq "58a0e precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "58a0e precondition: the fixture's run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- §ONE-PASS (F1): a reading record is one pass ----------
 # The reviewer's reproduction: the newest pass on top wrote no result, no scope and one FAIL
@@ -797,8 +802,8 @@ poke "$R58" proof-add review record/wave-01-fixture/plain.md
 expect_eq "58h5 control: a review proof with no flags registers (exit 0)" "0" "$RC"
 expect_regex "58h6 …in 1.11.0's four-field shape, its record in no reader's row" \
   "^proved: kind=review head=${S58_C4} at=[^ ]+ evidence=record/wave-01-fixture/plain.md$" "$(s46_proved "$P58" | tail -1)"
-expect_eq "58i no projection copy is left beside the plan" "" \
-  "$(find "$R58/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+expect_eq "58i the floor, the task and the plain review leave the plan byte for byte as it was, and no copy beside it" "$(cksum < "$TMPROOT/s42-before")|" \
+  "$(cksum < "$P58")|$(find "$R58/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
 POKE_BOUND="$S58_BOUND_WAS"
 
 # ============================================================
@@ -809,8 +814,7 @@ section "Section 59 §RANGE-Q: the tick offers each read row its own range, and 
 # `live:head:adversarial+structure` (the critic). The plan already holds three readings, planted
 # in the shape proof_line writes: adversarial at A, structure at B, evidence at B; the working
 # branch is at C. The tick offers both rows and prints a RANGE line for each, from the oldest last
-# head among that row's own questions: T3 B..C, T4 A..C. Through 1.11.0 there was one range, from
-# the last review proof of any question, so T4 would have been offered B..C and A..B never read.
+# head among that row's own questions: T3 B..C, T4 A..C.
 # A reading registered with --question returns to pending the active row carrying that question,
 # whatever its record is called: the critic's second adversarial pass is written as adv-2.md, a
 # name T4's Files do not hold, and still returns T4 alone. §48 and §49e stay the controls for the
@@ -822,7 +826,6 @@ section "Section 59 §RANGE-Q: the tick offers each read row its own range, and 
 S59_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R59="$(make_repo s59-range-q)"; new_roster "$R59"; ( cd "$R59" && git commit -q --allow-empty -m init )
 S59_RS="$(roster_of "$R59")"
-# HOISTED to tests/session-poker.prelude.sh: S59_REL — the hoisted s59w_q names the record directory with it.
 s59_row() {  # <name> <type> <status> <questions> <deliverable> <files> -> one row appended (§58's lineage shape)
   printf '%s|questions=%s\n' "$(roster_row_fixture session="$SID" name="$1" agent_id="a-$1" subagent_type="$2" \
     status="$3" deliverable="$5" files="$6")" "$4" >> "$S59_RS"
@@ -834,9 +837,9 @@ for s59st in intended confirmed; do
 done
 # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
 # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
-P59="$(s42_plan "$R59" 4 "  worktree: .worktrees/01-fixture
+P59="$(s34_page "$R59" 4 "  worktree: .worktrees/01-fixture
   base-sha: $(git -C "$R59" rev-parse --short=8 HEAD)
-  branch: wave/01-fixture")"
+  branch: wave/01-fixture")"; bound_marker "$R59" "$SID" "$P59" >/dev/null 2>&1
 # EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a review
 # row is ready again only past a commit that owes, so A, B and C each change a.sh.
 ( cd "$R59" && git worktree add -q -b wave/01-fixture "$R59/.worktrees/01-fixture" \
@@ -849,27 +852,23 @@ s59_read() {  # <question> <head> <minute> <reader> -> a reading's proof line
   printf 'proved: kind=review head=%s at=2026-10-04T10:%s:00Z evidence=record/wave-01-fixture/%s.md question=%s reader=%s result=pass scope=piece' \
     "$2" "$3" "$1" "$1" "$4"
 }
-awk -v l1="$(s59_read adversarial "$S59_A" 01 w-crit)" -v l2="$(s59_read structure "$S59_B" 02 w-crit)" \
-    -v l3="$(s59_read evidence "$S59_B" 03 w-aud)" '
-  /^current: / && !wb { print; print "working-branch: wave/01-fixture"; print l1; print l2; print l3; wb = 1; next }
-  /^- T5: / { print "- T3: the evidence read — record/wave-01-fixture/ev.md"; print "- T4: the adversarial and structure read — record/wave-01-fixture/adv.md" }
-  /^\| id \| step \|/ { intab = 1
+printf '%s\n' "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |" \
+  "| T3 | 6 | review | the evidence read | auditor | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/ev.md | — | — | pending | approval:plan, live:head:evidence |" \
+  "| T4 | 6 | review | the adversarial and structure read | — | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/adv.md | — | — | pending | approval:plan, live:head:adversarial+structure |" \
+  "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |" | sp_q_rows > "$R59.rows"
+awk -v rf="$R59.rows" '/^\| id \| step \|/ { intab = 1
     print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
-    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-    print "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
-    print "| T3 | 6 | review | the evidence read | auditor | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/ev.md | — | — | pending | approval:plan, live:head:evidence |"
-    print "| T4 | 6 | review | the adversarial and structure read | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/adv.md | — | — | pending | approval:plan, live:head:adversarial+structure |"
-    print "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |"
-    next }
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"; while ((getline l < rf) > 0) print l; next }
   intab && /^\|/ { next }
   { intab = 0; print }' "$P59" > "$P59.tmp" && mv "$P59.tmp" "$P59"
+sp_at15 "$P59"; for l in "$(s59_read adversarial "$S59_A" 01 w-crit)" "$(s59_read structure "$S59_B" 02 w-crit)" "$(s59_read evidence "$S59_B" 03 w-aud)"; do sp_fact "$P59" "$l"; done
 ( cd "$R59" && git add -f "$P59" && git commit -qm "two read rows" ) >/dev/null 2>&1
-mkdir -p "$R59/.bionic/docs/record/wave-01-fixture"
 expect_eq "59a0 precondition: three readings planted, each with its question" "adversarial structure evidence" \
-  "$(/usr/bin/grep -E '^proved: kind=review ' "$P59" | sed 's/.* question=\([a-z]*\) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+  "$(/usr/bin/grep -E '\|ev=proof\|kind=review\|' "$(plan_fixture_log "$P59")" | sed 's/.*|question=\([a-z]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 expect_true "59a0b precondition: A, B and C are three commits" test -n "$S59_A" -a "$S59_A" != "$S59_B" -a "$S59_B" != "$S59_C"
 s34_gate "$R59"
-expect_eq "59a0c precondition: the two-read-row plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "59a0c precondition: the two-read-row run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- the tick: both rows offered, each with its own range ----------
 rm -f "$R59/.bionic/tmp/tick-digest-$SID.state"
@@ -879,10 +878,12 @@ expect_eq "59a2 AC-1.5 both read rows are offered at once" "yes yes" \
   "$(s48_fill_has T3) $(s48_fill_has T4)"
 
 # ---------- a reading returns the row carrying its question, and that row alone ----------
-poke "$R59" task-set T3 status=active agent=w-aud
-expect_eq "59c0 precondition: task-set moves T3 active" "0" "$RC"
-poke "$R59" task-set T4 status=active agent=w-crit
-expect_eq "59c0b precondition: task-set moves T4 active" "0" "$RC"
+# T3 IS LAUNCHED BY THE RUN'S LOG, as a launch is now: its cells stay pending, and its return is the log's retraction.
+s59_live() { bash -c '. "$1/units.sh" && units_rows "$2"' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$P59" | awk -F'\t' -v r="$1" '$1 == r { print $10 "|" $5 }'; }
+S59_LOG="$R59/.bionic/docs/record/wave-01-fixture/run.log"
+bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch row=T3 name=w-aud brief=b sum=s && RUN_LOG="$2" log_append dispatch row=T4 name=w-crit brief=b sum=s' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$S59_LOG"
+expect_eq "59c0 precondition: T3's launch is in the log alone: the run's state active under w-aud" "active|w-aud" "$(s59_live T3)"
+expect_eq "59c0b precondition: T4 is launched by the log too" "active|w-crit" "$(s59_live T4)"
 printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nthe second pass\n' "$S59_A" "$S59_C" \
   > "$R59/.bionic/docs/record/wave-01-fixture/adv-2.md"
 s42_snap "$R59" "$P59"
@@ -894,9 +895,8 @@ expect_contains "59c2 …with its question" "evidence=record/wave-01-fixture/adv
 # last read at B, so the adversarial reading at C leaves T4 active under its reader, not offered;
 # its structure reading at C (59c6) returns it. Through T10 the first reading returned it at once.
 expect_eq "59c3 §RANGE-Q F3 the adversarial reading leaves T4, the row carrying it, active under w-crit while structure is unread at C" \
-  "active|w-crit" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
-expect_eq "59c4 …and leaves the evidence row T3 active under its reader" "active|w-aud" \
-  "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 "|" $5 }')"
+  "active|w-crit" "$(s59_live T4)"
+expect_eq "59c4 …and leaves the evidence row T3 active under its reader" "active|w-aud" "$(s59_live T3)"
 expect_absent "59c5b …and gives no Files advice for it" "its Files name another record" "$OUT"
 # A reading by a reader that is not the row's agent never moves it (F3): w-rev's structure reading
 # at C leaves T4 active under w-crit; only w-crit's own structure reading returns it.
@@ -905,19 +905,22 @@ printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: pass\nscope:
 poke "$R59" proof-add review record/wave-01-fixture/str-rev.md --question structure --reader w-rev
 expect_eq "59c5c F3 w-rev's structure reading at C registers (exit 0)" "0" "$RC"
 expect_eq "59c5d F3 …and never moves T4, which carries structure: still active under w-crit" \
-  "active|w-crit" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
-printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: pass\nscope: piece\n%s\n\nthe structure pass\n' "$S59_B" "$S59_C" "$S56_ALL" \
-  > "$R59/.bionic/docs/record/wave-01-fixture/str-2.md"
-poke "$R59" proof-add review record/wave-01-fixture/str-2.md --question structure --reader w-crit
-expect_eq "59c6 F3 w-crit's structure reading at C registers (exit 0)" "0" "$RC"
-expect_eq "59c7 F3 …and with both its questions read at C, T4 returns to pending, its agent cleared" \
-  "pending|—" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
+  "active|w-crit" "$(s59_live T4)"
+printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n%s\n\nthe structure pass\n' "$S59_B" "$S59_C" \
+  "$(s56_checks one-site 'check: one-site FAIL two sites')" > "$R59/.bionic/docs/record/wave-01-fixture/str-2.md"
+# fails-when: a reading that returns its live row writes the plan, or its proof is not in the log once.
+S59_SUM="$(cksum < "$P59")"; poke "$R59" proof-add review record/wave-01-fixture/str-2.md --question structure --reader w-crit
+expect_eq "59c6 F3 w-crit's failing structure reading at C registers (exit 0), its proof in the run's log once, the plan byte for byte as it was" "0|1|$S59_SUM" \
+  "$RC|$(/usr/bin/grep -c '^run/v1|ev=proof|kind=review|.*|evidence=record/wave-01-fixture/str-2.md|' "$S59_LOG")|$(cksum < "$P59")"
+S59_READER="$BIONIC_HOOKS_DIR/../payload/scripts/reader.sh"
+expect_eq "59c7 F3 …and with both its questions read at C, T4 reads pending by the reader" "state=pending" "$(bash "$S59_READER" "$P59" status T4 | head -1)"
 expect_contains "59c8 …naming the row it returned" "T4 back to pending" "$OUT"
 printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: piece\n\nthe evidence pass\n' "$S59_B" "$S59_C" \
   > "$R59/.bionic/docs/record/wave-01-fixture/ev.md"
-poke "$R59" proof-add review record/wave-01-fixture/ev.md --question evidence --reader w-aud
-expect_eq "59d the evidence reading registers (exit 0)" "0" "$RC"
-expect_eq "59d2 …and returns T3" "pending" "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 }')"
+S59_SUM="$(cksum < "$P59")"; poke "$R59" proof-add review record/wave-01-fixture/ev.md --question evidence --reader w-aud
+expect_eq "59d the evidence reading of the live T3 registers (exit 0), the plan byte for byte as it was" "0|$S59_SUM" "$RC|$(cksum < "$P59")"
+expect_eq "59d2 …and returns T3: pending in the run, its launch taken back in the log, once" "pending|1" \
+  "$(s59_live T3 | cut -d'|' -f1)|$(/usr/bin/grep -c '^run/v1|ev=cancel|of=dispatch|row=T3|name=w-aud|' "$S59_LOG")"
 
 # ---------- the next tick: the evidence row idle, the critic's row offered from structure's B ----------
 rm -f "$R59/.bionic/tmp/tick-digest-$SID.state"
@@ -925,19 +928,21 @@ poke_pressure "$R59" 8192 1.0 tick
 # RE-PINNED BY T43 (review pass 17 F3): both of the critic's questions were read at C before it
 # went back to pending, so at C it is idle too, and is not offered the range it just read.
 expect_absent "59e3 …and neither idle row has a RANGE line" "poker: RANGE T" "$OUT"
+# A landing past the readings readies the returned row again: the fill offers T3, whose launch the log took back.
+( printf 'D\n' >> "$R59/.worktrees/01-fixture/a.sh" && git -C "$R59/.worktrees/01-fixture" commit -qam "landing D" ) >/dev/null 2>&1
+rm -f "$R59/.bionic/tmp/tick-digest-$SID.state"
+poke_pressure "$R59" 8192 1.0 tick
+expect_eq "59e4 …and past a landing D the tick offers T3 again" "yes" "$(s48_fill_has T3)"
 
-# ---------- review pass 17 F1 (blocker) and F2 through the real tick (wave-27 T43) ----------
-# HOISTED to tests/session-poker.prelude.sh: s59_world — §60's world, which §LINE-TELL and §REPORT-RTL build, is built on it.
 S59W_T1="| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
-# HOISTED to tests/session-poker.prelude.sh: S59W_T5 — the hoisted s60_world plants the floor row with it.
 S59W_BARE="| T3 | 6 | review | the bare pass, reads empty | critic | — | 30 | REQ-1 | $S59_REL/review.md | — | — | pending |  |"
-# HOISTED to tests/session-poker.prelude.sh: s59w_q — the hoisted s60_world plants a read row with it.
 s59w_bare() { printf 'proved: kind=review head=%s at=2026-10-04T09:00:00Z evidence=record/wave-01-fixture/review.md' "$1"; }
 # F1: the bare T3 above the adversarial row T4; adversarial read at A, the bare proof at C, head C.
 s59_world s59-f1 "$(s59_read adversarial @A 01 w-crit)
 $(s59w_bare @C)" "$S59W_T1" "$S59W_BARE" "$(s59w_q T4 adversarial)" "$S59W_T5"
 s34_gate "$R59W"
-expect_eq "59f0 precondition: the bare-above-read plan is admitted by the real commit gate" "0" "$GATE_RC"
+expect_eq "59f0 precondition: the bare-above-read run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 poke_pressure "$R59W" 8192 1.0 tick
 expect_nonempty "59f F1 the tick prints a FILL line (the extractor reads real output)" "$(s47_lines FILL)"
 expect_absent "59f4 F1 …and no WAIT line says T3 goes first" "review T3 goes first" "$(s47_lines WAIT)"
@@ -950,7 +955,49 @@ poke_pressure "$R59W" 8192 1.0 tick
 s59_world s59-f2 "$(s59_read structure @B 01 w-crit)
 $(s59_read adversarial @A 02 w-crit)" "$S59W_T1" "$(s59w_q T3 adversarial+structure)" "$S59W_T5"
 poke_pressure "$R59W" 8192 1.0 tick
+# Two read rows sharing a question are one chain: the first goes first, while rows sharing none (59a2) are ready together.
+s59_world s59-share "$(s59_read adversarial @A 01 w-crit)" "$S59W_T1" "$(s59w_q T3 adversarial)" "$(s59w_q T4 adversarial)" "$S59W_T5"
+poke_pressure "$R59W" 8192 1.0 tick
+expect_eq "59g AC-1.5 two read rows sharing a question are not ready together: T3 offered, T4 not" "yes no" "$(s48_fill_has T3) $(s48_fill_has T4)"
+expect_contains "59g2 …T4 waits, naming the row that goes first" "poker: WAIT T4 — live:head:adversarial: review T3 goes first" "$(s47_lines WAIT)"
 POKE_BOUND="$S59_BOUND_WAS"
+
+# ============================================================
+section "§LOG-REVIEW: waive, the release approval card and finding-move read a run's review proofs through the reader, so one its log alone holds is read"
+# ============================================================
+# fails-when: a review reader under hooks/poker reads the plan's proved: lines itself; a run with a log holds its
+# review proofs there and the plan holds none. FIXTURE FIDELITY: the plan is s42_plan's, bound and committed, at
+# plans/<epic>/<wave>.plan.md, the place the reader joins to record/<wave>/run.log; the log's lines are in the
+# reader's own run/v1 shape, written by hand, as no writer appends a review proof to a log yet; the review record
+# is a reader's record with one S2 finding, the shape proof-add admits.
+LR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RLR="$(make_repo s-log-review)"; ( cd "$RLR" && git commit -q --allow-empty -m init )
+git -C "$RLR" config user.name "Dana Fixture"
+PLR="$(s42_plan "$RLR" 6)"; git -C "$RLR" branch -q wave/01-fixture
+LR_H="$(git -C "$RLR" rev-parse wave/01-fixture)"; LR_REC="record/wave-01-fixture/adv-log.md"
+LR_DIR="$RLR/.bionic/docs/record/wave-01-fixture"
+printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/a.sh:1 data lost\nshown: 1 bash lib/a.sh\n' "$LR_H" "$LR_H" > "$LR_DIR/adv-log.md"
+printf 'run/v1|ev=step|n=6|at=2026-10-04T11:00:00Z\nrun/v1|ev=proof|evidence=%s|head=%s|kind=review|question=adversarial|reader=w-crit|result=fail|scope=piece|at=2026-10-04T12:00:00Z\n' \
+  "$LR_REC" "$LR_H" >> "$LR_DIR/run.log"
+lr_reg() {  # <owed.sh verb> [args] -> run on the run's asks, the store the verbs write: record/<wave>/run.log
+  bash -c '. "$1/roots.sh"; . "$1/owed.sh"; OWED_ROOT="$2" OWED_PLAN="$3" OWED_SID="$4"; export OWED_ROOT OWED_PLAN OWED_SID
+    shift 4; "$@"' _ "${S46_LIB%/*}" "$RLR" "$PLR" "$SID" "$@"
+}
+lr_owed() { lr_reg owed_list 2>/dev/null | cut -f1; }
+expect_eq "LR-0 precondition: the plan holds no proved: line, and the reader holds the log's review proof" "0|1" \
+  "$(/usr/bin/grep -c '^proved:' "$PLR")|$(bash "${S46_LIB%/lib/*}/reader.sh" "$PLR" reviews | /usr/bin/grep -c "|evidence=$LR_REC|")"
+poke "$RLR" release-approval --preview
+expect_contains "LR-1 the release approval card lists the finding of the review the log alone holds" "data lost" "$OUT"
+poke "$RLR" finding-move "$LR_REC#9" fixed T1
+expect_contains "LR-3 finding-move takes the record as registered, and refuses only the finding it lacks" "holds no finding 9" "$OUT"
+lr_reg owed_open finding:record:wave-01-fixture:adv-log.md:1 'fixture: the finding' 'poker: fixture item' >/dev/null 2>&1
+expect_contains "LR-4a precondition: the finding's item is open before the waiver" \
+  "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
+said_as typed "$RLR" 'Ship it, the fix waits on the next release.'; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RLR" waive adversarial 'Ship it, the fix waits on the next release.'
+expect_eq "LR-4 waive writes the waiver (exit 0)" "0" "$RC"
+expect_absent "LR-4b …and closes the finding's item of the review the log alone holds (LR-4a read the same register)" \
+  "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
+POKE_BOUND="$LR_BOUND_WAS"
 
 # ============================================================
 finish

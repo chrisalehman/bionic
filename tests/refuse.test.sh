@@ -1,7 +1,6 @@
 #!/bin/bash
 # tests/refuse.test.sh — payload/scripts/lib/refuse.sh: the refusal object, its one
-# renderer, and the channel table it renders by (epic-22 wave-01 task 11, REQ-E1;
-# AC-E1.3 and AC-E1.5; ADR-002).
+# renderer, and the channel table it renders by.
 #
 # WHAT IT OWNS. Questions no static pin can answer, each driven through a REAL call site: a
 # scratch hook that sources the shipped library and calls `refuse`.
@@ -870,13 +869,15 @@ needs_root() {  # <name> <marker body>: a git root holding a plan, and a marker 
   echo "# plan" > "$r/.bionic/docs/plans/e/w.plan.md"; printf '%s\n' "${2//@/$r}" > "$r/.bionic/tmp/engaged-s.state"
 }
 needs_root NB "plan=@/.bionic/docs/plans/e/w.plan.md"; needs_root NZ "plan=none"
-NREC="$NB/.bionic/docs/record/w/landing-proofs.log"
+NREC="$NB/.bionic/docs/record/w/run.log"
 needs_drive() { export BIONIC_ROOT="$1" BIONIC_SID="$2"; shift 2; drive "$LIB" exit2 "$FX_VERB" "$@"; unset BIONIC_ROOT BIONIC_SID; }
 needs_n() { if [ -f "$NREC" ]; then wc -l < "$NREC" | tr -d ' '; else echo 0; fi; }
 needs_drive "$NB" s "$FX_FACT" "$NEEDS_FIX" ""
 expect_eq "NEEDS-1 a needs fix under a bound plan appends one line" "1" "$(needs_n)"
-expect_regex "NEEDS-2 …in the event's shape, carrying the verb" \
-  "^line/v1\|ev=refusal\|needs=person\|wall=$FX_VERB\|at=[0-9]{4}-[0-9-]{5}T[0-9:]{8}Z$" "$(cat "$NREC")"
+expect_regex "NEEDS-2 …a hand act of kind refusal in the run's log, carrying the verb" \
+  "^run/v1\|ev=hand\|what=refusal\|needs=person\|wall=$FX_VERB\|why=[^|]+\|at=[0-9]{4}-[0-9-]{5}T[0-9:]{8}Z$" "$(cat "$NREC")"
+expect_eq "NEEDS-2b …its reason what was refused and what it needs, as the user line says them" "$FX_FACT ($NEEDS_FIX)" \
+  "$(sed -n 's/.*|why=\([^|]*\)|.*/\1/p' "$NREC")"
 expect_status "NEEDS-3 …and the refusal still exits 2" "2" "$DRV_RC"
 expect_eq "NEEDS-4 …with the one user line, the fix as given" "bionic: $FX_VERB refused — $FX_FACT ($NEEDS_FIX)" "$DRV_ERR"
 needs_drive "$NB" s "$FX_FACT" "$FX_FIX" "$FX_DETAIL"

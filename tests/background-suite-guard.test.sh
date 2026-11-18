@@ -1,12 +1,7 @@
 #!/bin/bash
 # Tests for hooks/background-suite-guard.sh — THE BUDGET ARM
-# (wave-01 verification-cannot-lie, S13; spec AC-21; seed suite-allowance-wall.md item 3.)
 #
-# THE INCIDENT. Two dispatched writers finished their own work green at ~45 minutes and
-# then spent 40 more re-running the whole tree, one suite at a time, in parallel, on an
-# 8 GB machine at load 10. Their briefs said "run impacted suites only; never
-# tests/run.sh; run X, Y, Z as consumers", and "consumers" was read as "everything". The
-# Patrol notified both as overdue and they were killed by hand. Prose in a brief is a
+# Prose in a brief is a
 # wish. This file tests the wall.
 #
 # WHAT IT COVERS. `hooks/dispatch-preflight.sh` records the budget on the roster row at
@@ -22,7 +17,7 @@
 #
 # THE B-9 ARM IS NOT RE-TESTED HERE. The backgrounded-suite refusal this hook has carried
 # since bionic 1.3.2 belongs to tests/cmd-class.test.sh §C4, which drives it through
-# hooks/agent-context-guard.sh exactly as hooks.json registers it. What IS asserted here
+# hooks/bash-walls.sh exactly as hooks.json registers it. What IS asserted here
 # is the one interaction between them: which arm speaks when both apply.
 #
 # HERMETIC. Every payload is crafted and piped into the hook; repos are throwaway git
@@ -57,12 +52,11 @@ PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
 unset BIONIC_SLOT_HELD BIONIC_SLOT_PLACE BIONIC_SLOT_QUIET
 # THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23), and there is no
 # longer a WRAPPER to drive through. This wall is `wall_background_suite_guard` in
-# payload/scripts/lib/walls.sh, and the partition hooks/agent-context-guard.sh used to
+# payload/scripts/lib/walls.sh, and the partition a wrapper hook used to
 # apply in front of it — an agent context, an armed session — is the first thing that
 # function asks. A wrapper around the compound would have silenced protect-main,
 # protect-database, the evidence gate and farm-out-reminder on every main-thread call,
-# so the predicate moved inside and the wrapper's Bash-side registration is gone. The
-# guard file itself stays, registered on SubagentStop, untouched.
+# so the predicate moved inside and the wrapper is gone.
 GUARD="$PAYLOAD_HOOKS/bash-walls.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/bg-suite-guard-test.XXXXXX")" && pwd -P)"
@@ -431,6 +425,28 @@ expect_eq "B5c after the successor row, the declared run is admitted" "0" "$ST"
 guarded "$R5C" 'npx jest'
 expect_eq "B5c …and an undeclared run is still refused" "2" "$ST"
 
+section "B5d — a declared run is read as the typed one is: a leading cd or VAR= still matches"
+# Each declaration sits on its own row so a pass cannot come from the bare spelling beside it.
+R5D=$(mk_repo b5d)
+dispatched "$R5D" "$ACTOR" name=w-b5d suites_allowed=none suites_source=declared files= \
+  're_executes=`cd /abs/tree && yarn test a.test.js`'
+guarded "$R5D" 'cd /abs/tree && yarn test a.test.js'
+expect_eq "B5d a declared leading cd is matched when typed" "0" "$ST"
+guarded "$R5D" 'yarn test b.test.js'
+expect_eq "B5d …and a run no brief declared is still refused" "2" "$ST"
+R5E=$(mk_repo b5e)
+dispatched "$R5E" "$ACTOR" name=w-b5e suites_allowed=none suites_source=declared files= \
+  're_executes=`CI=true yarn test a.test.js`'
+guarded "$R5E" 'CI=true yarn test a.test.js'
+expect_eq "B5d a declared VAR= prefix is matched when typed" "0" "$ST"
+R5F=$(mk_repo b5f)
+dispatched "$R5F" "$ACTOR" name=w-b5f suites_allowed=none suites_source=declared files= \
+  're_executes=`yarn test a.test.js`'
+guarded "$R5F" 'cd /treeB && yarn test a.test.js'
+expect_eq "B5d a bare declaration admits the run typed after a cd" "0" "$ST"
+guarded "$R5F" 'CI=true yarn test a.test.js 2>&1 | tee log'
+expect_eq "B5d …and typed with a VAR= prefix and a tee" "0" "$ST"
+
 section "B6 — scope: the arm is the AGENT's, and the session must be engaged"
 # A main-thread payload has no top-level agent_id (t1-probe-report.md §3). The
 # orchestrator's own thread is hooks/farm-out-reminder.sh's, which answers the same
@@ -648,7 +664,33 @@ guarded "$R1" 'cd /tmp/x || exit 1; npx playwright test e2e/a.spec.ts'
 expect_contains "BC3 a leading cd is not part of the key" "--suites npx_playwright_test_e2e_a.spec.ts -- " "$WRAP"
 guarded "$R1" 'cd /tmp/y && npx playwright test e2e/a.spec.ts'
 expect_contains "BC3 …and another tree running the one command keys the same word" "--suites npx_playwright_test_e2e_a.spec.ts -- " "$WRAP"
+guarded "$R1" 'cd /tmp/y && npx next build'
+expect_contains "BC3 …and a different heavy command from one tree keys its own word" "--suites npx_next_build -- " "$WRAP"
 guarded "$R1" 'npx playwright test e2e/x.spec.ts &'
 expect_eq "BC2 a backgrounded browser run is REFUSED" "2" "$ST"
+
+section "B-THREAD — a heavy run on the orchestrator's thread leaves it, as a suite does"
+# The farm-out wall refuses a browser or compile run wherever it refuses a suite, and books nothing:
+# the gate's store stays empty because no wrap is staged beside a refusal.
+BT_GATE="$SANDBOX/bt-gate"
+EXTRA_ENV="BIONIC_GATE_DIR=$BT_GATE"
+for BT_CMD in 'npx playwright test e2e/x.spec.ts' 'npx next build'; do
+  guarded "$R1" "$BT_CMD" ""
+  expect_contains "BT1 on the main thread '$BT_CMD' is DENIED" '"permissionDecision":"deny"' "$OUT"
+  expect_contains "BT1 …with the farm-out words" "belongs in a subagent" "$ERR"
+  expect_empty "BT1 …booked into no shim" "$WRAP"
+  expect_eq "BT1 …and the gate's store holds no request" "0" "$(ls "$BT_GATE/requests" 2>/dev/null | wc -l | tr -d ' ')"
+done
+guarded "$R1" 'bash tests/run.sh' ""
+expect_contains "BT1 control: a suite on the main thread is denied the same way" '"permissionDecision":"deny"' "$OUT"
+BT_SHORT="$(mk_payload "$R1" 'npx playwright test e2e/x.spec.ts' "" | jq -c '.tool_input.timeout = 60000')"
+run_hook "$BT_SHORT" "$GUARD"
+expect_empty "BT2 a SHORT browser run is not denied, as a short suite is not" "$OUT$ERR"
+rm -f "$R1/.bionic/tmp/engaged-$SID.state"
+guarded "$R1" 'npx playwright test e2e/x.spec.ts' ""
+expect_eq "BT3 with no run engaged the same command passes" "0" "$ST"
+expect_empty "BT3 …untouched" "$OUT$ERR$WRAP"
+: > "$R1/.bionic/tmp/engaged-$SID.state"
+EXTRA_ENV=""
 
 finish

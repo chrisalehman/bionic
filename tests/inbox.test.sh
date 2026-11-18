@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/inbox.test.sh — a ruling reaches the writer it is for (epic-23 wave-33 T10; REQ-1, AC-1.1 to
-# AC-1.4; spec D1, the Eval design rows §PUSH, §STATE, §SCOPE, §GUARD).
+# tests/inbox.test.sh — a ruling reaches the writer it is for.
 #
 # A ruling is the orchestrator's binding instruction to one live writer, recorded with
 # `session-poker.sh rule <writer> '<text>'` as `ruling/v1` lines on the session's roster. It is
@@ -32,8 +31,9 @@
 #
 # ANTI-VACUITY. Every empty readback sits beside a positive on the same extractor in the same world:
 # (p2)/(p4) beside (p3), (c1)'s absences beside wx-T1's carry, (c2)'s absent line beside the live
-# writer's, (g5) beside (g3). The commit control (g0) proves the world admits a commit at all, so
-# (g3)'s refusal is the ruling's and (g5)'s pass is the shown mark's.
+# writer's, (g5) beside (g3), (w2) beside (w1), (w3)/(w8) beside (w4), each on one fold of one call.
+# The commit control (g0) proves the world admits a commit at all, so (g3)'s refusal is the
+# ruling's and (g5)'s pass is the shown mark's.
 #
 # Usage: bash tests/inbox.test.sh
 
@@ -69,7 +69,7 @@ world_cost a.test.sh 5 0.5 5; world_cost b.test.sh 5 0.5 5
 # ---------------------------------------------------------------------------- helpers
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# A world whose plan the commit gate admits (the shape tests/landing-line.prelude.sh's `ll_world` plants),
+# A world whose plan the commit gate admits (tests/lib/world.sh's, as `ll_world` of tests/landing-line.prelude.sh takes it),
 # its two rows' launch lines on the roster with ids and the suite they land on, and a third writer,
 # wx-T3, whose row is closed: acked in the sweeper ledger after its launch.
 in_world() {  # -> the world root
@@ -77,10 +77,8 @@ in_world() {  # -> the world root
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
   p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  awk '{ print }
-    /^working-branch: / { print "canonical_sdlc_version: 14" }
-    /^current: 4$/ { print "approved-by: fixture 2026-10-04T00:00Z \"approved\""; print "- Step 4: started"; print "- T1: active"; print "- T2: active" }' \
-    "$p" > "$p.n" && mv "$p.n" "$p"
+  # The base Step 4 owes joins the header of the world's page at 15.
+  awk -v b="$(git -C "$r" rev-parse main)" '{ print } /^working-branch: / { print "base-sha: " b }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
   for t in T1 T2; do
     printf '%s|row=%s|lands_on=a.test.sh\n' \
       "$(roster_row_fixture status=intended session="$WORLD_SID" name="wx-$t" agent_id="b00$t" plan="$p")" "$t" \
@@ -270,6 +268,7 @@ section "§GUARD: no commit and no ready against an unread ruling (AC-1.4)"
 # The control: a writer with nothing unread commits in this world.
 in_walls "$W" b00T2 'git commit -m "T2: work"'
 expect_eq "(g0) control: wx-T2, nothing unread, commits (exit 0)" "0" "$IN_RC"
+[ "$IN_RC" = 0 ] || printf '      the walls said: %s\n' "$IN_OUT" | head -6
 
 in_poker "$W" rule wx-T1 'rename the flag before you commit'
 G_ID="$(in_rid "$IN_OUT")"
@@ -289,17 +288,49 @@ expect_eq "(g5) the same commit once shown passes (exit 0)" "0" "$IN_RC"
 in_poker "$W" rule wx-T1 'land only after the rename'
 R_ID="$(in_rid "$IN_OUT")"
 expect_nonempty "(g6) a ruling for wx-T1 is recorded" "$R_ID"
-REC="$W/.bionic/docs/record/wave-x/landing-proofs.log"
+REC="$W/.bionic/docs/record/wave-x/run.log"
 in_ready "$W" T1
 G_OUT6="$IN_OUT"
 expect_eq "(g6) wx-T1's ready with the ruling unread is refused (exit 2)" "2" "$IN_RC"
 expect_contains "(g6) …saying why" "REFUSED reason=ruling-unread" "$IN_OUT"
 expect_contains "(g6) …carrying the ruling" "land only after the rename" "$IN_OUT"
-expect_false "(g6) …and nothing entered the line" test -e "$REC"
+expect_eq "(g6) …and nothing entered the line: the log holds no ready of T1" "0" "$(/usr/bin/grep -c '^run/v1|ev=ready|row=T1|' "$REC")"
 expect_regex "(g7) the refusal marked it shown" "shown=[0-9]+" "$(in_state "$W" wx-T1 "$R_ID")"
 in_ready "$W" T1
 expect_eq "(g8) the same ready once shown lands (exit 0)" "0" "$IN_RC"
 expect_contains "(g8) …LANDED" "LANDED T1 " "$IN_OUT"
+expect_contains "(g8) …and its ready entered the line, read by the extractor (g6) reads" "1" "$(/usr/bin/grep -c '^run/v1|ev=ready|row=T1|' "$REC")"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "§WORDS: the ruling walls' refusals, said by the library the wall calls"
+
+# Each refusal's words and the decision that reaches them, called with the facts the wall gathers and folded as the
+# wall folds them, in a shell that loaded only the fold and the roster library -> IN_OUT (both streams), IN_RC.
+in_say() {  # <function> [args...]
+  IN_OUT="$(bash -c 'L="$1"; shift; . "$L/fold.sh" && . "$L/roster.sh" || exit 9; A=("$@"); _w() { "${A[@]}"; }
+    bionic_fold PreToolUse _w' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$@" 2>&1)"; IN_RC=$?
+}
+in_say ruling_unread_refusal wx-T1 "$(ruling_render r-w1 'rename the flag')"
+expect_eq "(w1) a writer's commit with a ruling unread is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(w1) …saying so, and carrying the ruling to the writer" "an orchestrator ruling for you is unread" "$IN_OUT"
+expect_contains "(w1) …and the ruling itself" "wx-T1, shown now:"$'\n'"bionic ruling r-w1 " "$IN_OUT"
+in_say ruling_unread_refusal wx-T1 ""
+expect_eq "(w2) with nothing unread it is admitted, silent" "0 " "$IN_RC $IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 wx-T1 b00T1 1
+expect_eq "(w3) an acknowledgement alone from its writer is admitted, silent" "0 " "$IN_RC $IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 wx-T1 b00T1 0
+expect_eq "(w4) one from its writer not alone in its call is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(w4) …saying it goes alone" "an acknowledgement goes alone in its call" "$IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 "" "" 1
+expect_eq "(w5) one from the main thread is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(w5) …naming the writer it needs" "ruling r-w3 is addressed to wx-T1, not to the main thread." "$IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 wx-T2 b00T2 1
+expect_contains "(w6) one from another writer is refused, naming both" "2 bionic: ruling-ack refused — this ruling is wx-T1's to ack" "$IN_RC $IN_OUT"
+expect_contains "(w6) …the other by its roster name" "addressed to wx-T1, not to wx-T2." "$IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 "" a-nested-delegate 1
+expect_contains "(w7) one from an agent no row names is refused as that" "not to an agent no roster row names." "$IN_OUT"
+in_say ruling_ack_refusal r-no-such-ruling "" "" "" 1
+expect_eq "(w8) an id no ruling carries has no writer, and the verb refuses it, not the wall" "0 " "$IN_RC $IN_OUT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "§ROOT: one plugin root in every ruling's acknowledgement call (wave-34 T4; debt ruling-plugin-root)"

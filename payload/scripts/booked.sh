@@ -163,8 +163,8 @@
 #
 # --no-wait: THE CALLER WHO IS NOT THE RUN'S WATCHER. A caller that only starts the run (the tick starting the
 # whole run, which must answer within its own call) passes --no-wait beside --detach: it prints the same one
-# line, `started` or `attached`, and exits 0 at once, leaving the run to `session-poker.sh wait <name>`, the
-# roster's RUNNING line and the run's own log. Without --detach it is usage (exit 2).
+# line, `started` or `attached`, and exits 0 at once, leaving the run to the roster's RUNNING line and the run's
+# own log. Without --detach it is usage (exit 2).
 #
 # THE WAIT polls the log every BIONIC_RUN_POLL seconds (1 unless set; a fraction is allowed), copies
 # each new WHOLE line of it to stdout, and exits with the run's code once `<log>.rc` holds it (the
@@ -176,7 +176,7 @@
 # nothing. A run whose pid is alive is "live" only while that pid is still this run's detached shim
 # (`ps` names booked.sh and its --run-log), so a recycled pid is never waited on. LOST is never a
 # timeout: a dead pid with no `<log>.rc` is reported with the time the log was last written, and the
-# caller exits 70. `session-poker.sh wait <name>` is the same wait, by name, after the caller is gone.
+# caller exits 70.
 #
 # THE LOG is `<runs>/<id>.log`, `<runs>` being the project's
 # `.bionic/tmp/runs` (the project is the checkout git's common dir belongs to, so a row tree's run
@@ -211,7 +211,7 @@
 # when nothing smaller bounds it, so a run the gate has not admitted by then ends through the
 # not-admitted path below: exit 75, one line naming the wait and the command to run again in the log,
 # `rc=75` there, `75` in `<log>.rc`, `run_rc=75` on the roster row; the caller copies the line and
-# exits 75, and `session-poker.sh wait` prints it. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
+# exits 75. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
 # macOS ships no `setsid`, and perl is the one tool a stock machine has for it. No perl, or a
 # detached side that is neither alive nor ended once its pid file is read, exits 71 with one line.
 #
@@ -272,7 +272,7 @@ BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class browser|compile] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class <heavy class>] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
   exit 2
 }
 
@@ -306,7 +306,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$sep" -eq 1 ] && [ "$#" -ge 1 ] || booked_usage
-case "$cls" in ''|browser|compile) ;; *) booked_usage ;; esac
+[ -z "$cls" ] || _gate_class_heavy "$cls" || booked_usage
 [ "$no_wait" -eq 0 ] || [ "$detach" -eq 1 ] || booked_usage
 if [ "$#" -gt 1 ]; then
   printf 'booked: %s words after --, and each would be parsed again as shell — pass the command as one word: booked.sh -- '\''<the whole command line>'\''\n' "$#" >&2
@@ -794,10 +794,10 @@ booked_run_open() {  # at the start of the tail, in the detached side
 }
 
 # booked_run_line <rc> — THE RUN, RECORDED WHERE A FLOOR PROOF LOOKS (wave-37 T4; D7, REQ-6 AC-6.1; ADR-057): after the
-# log's rc line and before `<log>.rc`, one line in the landing record of the plan this session is bound to (lib/run.sh
-# `session_plan`, the engaged marker's `plan=`, as every verb reads the binding; lib/line.sh `line_event`, through
-# `_wt_proofs_put`):
-#   line/v1|ev=run|log=<the log from the project root>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|starter=<who>|at=<ISO>
+# log's rc line and before `<log>.rc`, one line in the run's log of the plan this session is bound to (lib/run.sh
+# `session_plan`, the engaged marker's `plan=`, as every verb reads the binding; lib/line.sh `line_run_event`, through
+# the log's appender):
+#   run/v1|ev=run|log=<the log from the project root>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|starter=<who>|at=<ISO>
 # the head and dirty count the stamp read before anything ran, the hash through lib/detect.sh `_detect_sha256`.
 # WHO STARTED IT is the command's own `--starter <tick|orchestrator|person>` when it names one of the three
 # (regression-run's flag, which the tick's whole run carries), else `orchestrator`: a run the shim books is the
@@ -826,7 +826,7 @@ booked_run_line() {
   plan="$(session_plan "$r" "$sid" 2>/dev/null)" || return 0
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   sha="$(_detect_sha256 "$run_log")" || return 0
-  line_event "$plan" run "log=${run_log#"$r"/}" "head=$stamp_head" "dirty=${stamp_dirty:-0}" "rc=$1" "sha256=$sha" \
+  line_run_event "$(line_log "$plan")" "log=${run_log#"$r"/}" "head=$stamp_head" "dirty=${stamp_dirty:-0}" "rc=$1" "sha256=$sha" \
     "starter=$(booked_starter)" 2>/dev/null
   return 0
 }

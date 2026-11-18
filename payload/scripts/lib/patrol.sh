@@ -49,11 +49,11 @@ PATROL_STAMP_SCHEMA_OUT="patrol-stamp/v1"
 PATROL_ROSTER_SCHEMA="patrol-roster/v1"
 PATROL_WALL_SCHEMA="patrol-wall/v1"
 
-# The poker's own default, quoted here ONLY as the last resort when the poker
-# itself cannot be reached to be asked. Where the script exists it is asked —
-# `interval` for the project's configured value and `interval-default` for its
-# built-in — because two copies of a constant drift the first time either moves.
-PATROL_INTERVAL_LAST_RESORT=1200
+# THE DEFAULT PATROL INTERVAL, in seconds: its one copy. hooks/session-poker.sh takes its own default from it, and
+# every reader of the interval (this file's `patrol_interval`, the arming wall, the stop library, session start) asks
+# the poker's `interval` for the project's configured value and falls back to this when that refuses or cannot be
+# asked, so a broken config line cannot disarm a wall and no second copy can drift from the poker's.
+PATROL_INTERVAL_DEFAULT=1200
 
 # HOW STALE IS STALE IS NOT A MULTIPLE OF THE INTERVAL ANY MORE (epic-23 wave-16
 # REQ-11, retiring L-DETECT/4.5's constant below). It held one judgment call —
@@ -88,6 +88,13 @@ fi
 if ! declare -F roster_open_names >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roster.sh"
+fi
+# alive.sh, THE SAME SOFT SOURCE, for `alive_sessions`: whether a session is alive has one rule, and
+# the live set below is that rule's enumeration. Without it the live set is empty and the dead set
+# names nothing: a rule this process cannot read never sends a session's state to the sweep.
+if ! declare -F alive_sessions >/dev/null 2>&1 && [ -r "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/alive.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/alive.sh"
 fi
 # time.sh, THE SAME SOFT SOURCE, for `_TIME_ISO_AWK` (wave-39 T17; D18): an instant has one reader, and this file's
 # date arithmetic below is that reader's.
@@ -135,26 +142,13 @@ EOF
 # nested `.bionic/tmp` while this resolver answered with the git toplevel — the session read
 # as blind (FIX-PATROL-ROOT).
 
-# Every live CLI process, from the session files it keeps. `kind`/`status` are
-# deliberately not read: a session file describes a process, and whether that
-# process still exists is a question only the kernel answers — `kill -0` is a
-# builtin, so this survives a machine with no `ps` on PATH.
+# Every live session, by lib/alive.sh's one rule: a process running with the start its record
+# names, the conversation each one holds now and each recorded predecessor of a cleared one.
+# `kind`/`status` are deliberately not read: a session file describes a process, and whether that
+# process still exists is the kernel's answer, not the file's.
 patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
-  local dir f pid sid cwd
-  dir="$(claude_home)/sessions"
-  [ -d "$dir" ] || return 0
-  command -v jq >/dev/null 2>&1 || return 0
-  for f in "$dir"/*.json; do
-    [ -f "$f" ] || continue
-    pid="$(jq -r '.pid // empty' "$f" 2>/dev/null)"
-    sid="$(jq -r '.sessionId // empty' "$f" 2>/dev/null)"
-    cwd="$(jq -r '.cwd // empty' "$f" 2>/dev/null)"
-    [ -n "$pid" ] && [ -n "$sid" ] || continue
-    case "$pid" in ''|*[!0-9]*) continue ;; esac
-    kill -0 "$pid" 2>/dev/null || continue
-    printf 'session=%s|pid=%s|cwd=%s\n' \
-      "$(_patrol_clean "$sid" 80)" "$pid" "$(_patrol_clean "$cwd" 300)"
-  done
+  declare -F alive_sessions >/dev/null 2>&1 || return 0
+  alive_sessions
 }
 
 # ─── SESSION-KEYED STATE UNDER .bionic/tmp ───────────────────────────────────
@@ -321,6 +315,7 @@ patrol_live_session_ids() {  # -> one live session id per line
 # session sweep its own state out from under itself.
 patrol_dead_sessions() {  # <root> [<also-live id>...] -> one session id per line
   local root="${1:-}" live sid; shift 2>/dev/null || :
+  declare -F alive_sessions >/dev/null 2>&1 || return 0
   live="$(patrol_live_session_ids)"
   for sid in "$@"; do
     [ -n "$sid" ] && live="${live}${live:+
@@ -435,7 +430,7 @@ _patrol_scan_jq='
 #
 # THE WINDOW APPLIES HERE TOO. `agents` and `refused` used to be counted over the
 # transcript's WHOLE LIFE, while hooks/session-poker.sh's own counters scope to the
-# roster's own window (`roster_window()`, exposed as its `window` verb) — and since a
+# roster's own window (`patrol_window()` below) — and since a
 # `.bionic/tmp` wipe re-opens the roster at zero, a session running a second wave read its
 # first wave's dispatches against a roster that only began at the wipe, and doctor printed
 # `N launches unrostered` for a wall that had rostered everything asked of it since. The
@@ -494,50 +489,41 @@ _patrol_scan() {  # <transcript> [<since ISO>] -> JOB/AGENTS/REFUSED records
 }
 
 # The interval, from its owner. `interval` is the project's configured value and
-# REFUSES on a malformed one; `interval-default` is the poker's own built-in and
-# is what a refusal falls back to — the same two-step
+# REFUSES on a malformed one; PATROL_INTERVAL_DEFAULT is what a refusal, or a poker
+# that cannot be reached, falls back to — the same two-step
 # hooks/dispatch-preflight.sh's arming wall takes, so doctor measures staleness
 # against the number the wall would refuse against.
-patrol_interval() {  # <repo-root> -> "<seconds> <configured|default|last-resort>"
-  local repo="${1:-}" poker secs
+patrol_interval() {  # <repo-root> -> "<seconds> <configured|default>"
+  local repo="${1:-}" poker secs=""
   poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
   if [ -f "$poker" ]; then
     secs=$( cd "$repo" 2>/dev/null && bash "$poker" interval 2>/dev/null )
     case "$secs" in ''|*[!0-9]*) secs="" ;; esac
-    if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s configured' "$secs"; return 0; fi
-    secs=$( bash "$poker" interval-default 2>/dev/null )
-    case "$secs" in ''|*[!0-9]*) secs="" ;; esac
-    if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s default' "$secs"; return 0; fi
   fi
-  printf '%s last-resort' "$PATROL_INTERVAL_LAST_RESORT"
+  if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s configured' "$secs"; return 0; fi
+  printf '%s default' "$PATROL_INTERVAL_DEFAULT"
 }
 
-# THE WINDOW, from its owner. "Since when does THIS roster's own record of this session
-# begin" is hooks/session-poker.sh's own question — its `window` verb answers it with the
-# roster file's own creation time, or the Patrol stamp beside it when the roster itself
-# cannot be dated (`roster_window()`). This shells out to that verb rather than
-# re-deriving `file_birth`/`epoch_iso`/`roster_window` here, the same call
-# `patrol_interval()` above already makes for the interval and for the identical reason: a
-# copy grown in a lib/ file that cannot source hooks/ would be a second, silently
-# driftable answer to one question. tests/cross-gate-agreement.test.sh §Q.3 compares the
-# two COUNTING functions this window feeds (hooks/session-poker.sh's
-# count_main_thread_dispatches/count_refused_dispatches against this file's own
-# _patrol_scan) on one shared fixture, the same way §Q already does for the refusal-join
-# rule.
+# THE WINDOW: since when does THIS roster's own record of this session begin. The answer is the roster file's
+# creation instant, or the Patrol stamp's beside it when the roster cannot be dated: arming precedes the first
+# dispatch, so the stamp still dates the stretch the session answers for. The creation instant is the filesystem's
+# own (`stat %B`, `%W` on GNU, where 0 means none is kept), never the mtime: the roster is append-only, so its mtime
+# is the last dispatch and a window from it would hide every gap but the newest. tests/cross-gate-agreement.test.sh
+# §Q.3 compares the two COUNTING functions this window feeds on one shared fixture.
 #
-# EVERY FAILURE IS AN EMPTY STRING, never a refusal: an unreachable poker, an unresolvable
-# root or a filesystem that keeps no creation time all mean "no window", and the counters
-# fall back to the whole transcript — the answer doctor gave before this existed.
+# EVERY FAILURE IS AN EMPTY STRING, never a refusal: no session, no root or a filesystem that keeps no creation time
+# all mean "no window", and the counters read the whole transcript.
 patrol_window() {  # <repo-root> <sid> -> ISO instant on stdout, empty for "the whole transcript"
-  local repo="${1:-}" sid="${2:-}" poker w
-  [ -n "$repo" ] && [ -n "$sid" ] || { printf ''; return 0; }
-  poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
-  [ -f "$poker" ] || { printf ''; return 0; }
-  w=$( cd "$repo" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$sid" bash "$poker" window 2>/dev/null )
-  case "$w" in
-    ''|*[!0-9TZ:.-]*) printf '' ;;
-    *) printf '%s' "$w" ;;
-  esac
+  local repo="${1:-}" sid="${2:-}" t f b=""
+  [ -n "$repo" ] && [ -n "$sid" ] || return 0
+  t="$(tmp_root "$repo" 2>/dev/null)" || return 0
+  for f in "$t/roster-${sid}.state" "$t/patrol-${sid}.state"; do
+    b="$(stat -f %B "$f" 2>/dev/null || stat -c %W "$f" 2>/dev/null)" || b=""
+    case "$b" in ''|*[!0-9]*|0) b="" ;; *) break ;; esac
+  done
+  [ -n "$b" ] || return 0
+  date -u -r "$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+  return 0
 }
 
 _patrol_mtime() {  # <file>
@@ -689,7 +675,7 @@ _patrol_verdict_jq='
 # never blocks — and the advisory names it, so the degradation is visible rather than
 # silent.
 _PATROL_ISO_AWK="${_TIME_ISO_AWK:-}"
-# THE VERDICT'S OWN PROGRAM, after the date functions it shares with `fill_ledger_report`.
+# THE VERDICT'S OWN PROGRAM, after the date functions of lib/time.sh.
 # THE TRANSCRIPT'S INSTANTS CARRY MILLISECONDS (`…:33.724Z`, as Claude Code writes them), which is the
 # transcript's grammar and not an instant's (wave-39 T17; D18). They are cut to the whole second at this edge, the
 # second the patrol always read off them, and anything else goes to `iso2epoch` as it stands.
@@ -961,93 +947,4 @@ tick_digest_path() {  # <project root> <session-id> -> absolute path, or nothing
 tick_digest_field() {  # <digest file> <key>
   [ -f "$1" ] && [ ! -L "$1" ] || return 0
   sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
-}
-
-# ─── THE FILL LEDGER'S PATH AND ITS REPORT (epic-23 wave-20 REQ-5, AC-5.5/AC-5.6; Δ2; ADR-036) ──
-#
-# TWO PROCESSES READ ONE FILE, so its path and its fold are written once, here: the stop
-# library's recorder (`stop_fill_ledger`, payload/scripts/lib/stop.sh) appends a line per Stop,
-# and `session-poker.sh fill-report` folds them. This file is already sourced by both — the
-# poker's loader wants it and the stop library sources it for the death notice — and the fold
-# shares the verdict's date arithmetic (`_PATROL_ISO_AWK`, above) rather than growing a second
-# copy of it. The ledger is the Patrol's measure: did the scheduler keep every slot busy.
-#
-# THE PATH IS DERIVED, NOT CONFIGURED: `<docs-root>/record/<plan slug>/fill-ledger.log`, the
-# slug being the plan's basename less `.plan.md` — lib/proof.sh `proof_plan_slug`, the one reader
-# close-out.sh and every other record path asks (wave-37 T2; AC-9.2), so no new plan key exists to
-# drift. `.bionic/` is machine-local, so the ledger is too, like every record. proof.sh is loaded
-# on first use, not at source time: most of this file's callers never name a ledger.
-_patrol_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
-  declare -F proof_plan_slug >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/proof.sh" 2>/dev/null
-  declare -F proof_plan_slug >/dev/null 2>&1
-}
-fill_ledger_path() {  # <project root> <plan path> -> the ledger's absolute path
-  local root="${1:-}" plan="${2:-}" slug
-  [ -n "$root" ] && [ -n "$plan" ] || return 1
-  _patrol_proof_load && slug="$(proof_plan_slug "$plan")" || return 1
-  printf '%s/record/%s/fill-ledger.log\n' "$(docs_root "$root")" "$slug"
-}
-
-# THE REPORT (AC-5.6). Lines are folded by `turn=` — the last line of a turn wins, because a
-# refused Stop and the re-entered Stop that ends the same turn are one turn, and the later
-# line is the one that saw the launches. A line with no turn key stands alone. The folded
-# lines are ordered by `at` and each owns the interval up to the next; the last one owns the
-# interval to <now> only while the run is open, and nothing once it has closed. Each interval
-# is charged to exactly one bucket, in this order:
-#   declined  the line carries a decline — listed per reason, with its idle cost
-#   hold      state=hold|emergency and a row was ready — a machine fact the plan cannot hold
-#   missed    state=ok and missed>0 — a free slot, a ready row, nothing launched: the measure,
-#             target zero
-# Minutes are rounded to the nearest whole minute; the seconds are printed beside them. A line
-# whose `at` cannot be dated is skipped rather than guessed at.
-fill_ledger_report() {  # <ledger> <plan slug> <open: yes|no> <now epoch> -> report lines
-  local f="${1:-}" slug="${2:-}" open="${3:-no}" now="${4:-}"
-  case "$now" in ''|*[!0-9]*) now="$(date -u +%s)" ;; esac
-  [ -f "$f" ] && [ ! -L "$f" ] || f=/dev/null
-  awk -v slug="$slug" -v open="$open" -v now="$now" "$_PATROL_ISO_AWK"'
-    function field(line, key,   i, n, parts, kv) {
-      n = split(line, parts, "|")
-      for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    function mins(s) { return int((s + 30) / 60) }
-    index($0, "fill-ledger/v1|") == 1 {
-      e = iso2epoch(field($0, "at"))
-      if (e < 0) next
-      k = field($0, "turn")
-      if (k != "" && (k in slot)) { i = slot[k] } else { i = ++n; if (k != "") slot[k] = i }
-      ep[i] = e; st[i] = field($0, "state"); rd[i] = field($0, "ready")
-      ms[i] = field($0, "missed") + 0; dc[i] = field($0, "declined")
-    }
-    END {
-      # ORDER BY at — an insertion sort over an index, stable, so equal instants keep file order.
-      for (i = 1; i <= n; i++) ord[i] = i
-      for (i = 2; i <= n; i++) {
-        v = ord[i]; j = i - 1
-        while (j >= 1 && ep[ord[j]] > ep[v]) { ord[j + 1] = ord[j]; j-- }
-        ord[j + 1] = v
-      }
-      missed = 0; hold = 0; declined = 0; nr = 0
-      for (x = 1; x <= n; x++) {
-        i = ord[x]
-        if (x < n) end = ep[ord[x + 1]]
-        else end = (open == "yes" ? now : ep[i])
-        dur = end - ep[i]; if (dur < 0) dur = 0
-        if (dc[i] != "") {
-          declined += dur
-          if (!(dc[i] in why)) { rs[++nr] = dc[i]; why[dc[i]] = 0 }
-          why[dc[i]] += dur
-        } else if ((st[i] == "hold" || st[i] == "emergency") && rd[i] != "") {
-          hold += dur
-        } else if (st[i] == "ok" && ms[i] > 0) {
-          missed += dur
-        }
-      }
-      printf "fill-report/v1|plan=%s|turns=%d|missed=%d|hold=%d|declined=%d|missed_s=%d|hold_s=%d|declined_s=%d|open=%s\n", \
-        slug, n, mins(missed), mins(hold), mins(declined), missed, hold, declined, open
-      for (r = 1; r <= nr; r++)
-        printf "fill-report-decline/v1|minutes=%d|seconds=%d|reason=%s\n", mins(why[rs[r]]), why[rs[r]], rs[r]
-    }' "$f"
 }

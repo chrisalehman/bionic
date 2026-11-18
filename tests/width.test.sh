@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/width.test.sh — payload/scripts/lib/width.sh, the one column budget
-# (bionic 1.4.0, wave-bionic-1.4.0-update task DOCTOR handoff 4.6, spec AC-23:
-# "the arrow glyph measures one column").
 #
 # WHAT THIS SUITE IS FOR. width.sh's own header states the property everything
 # else in it rests on: the glyph set is CLOSED, and "a glyph added to a report
@@ -253,10 +251,6 @@ section "Section 5: bionic_wrap folds a string inside a column budget"
 # `LC_ALL=C` are already this file's rulings (Section 3, 7n). A fold that measured
 # its own way would disagree with the truncator on the same string.
 
-wrap_lines() {  # <string> <budget> -> how many lines the fold produced
-  bionic_wrap "${1:-}" "${2:-0}" | wc -l | tr -d ' '
-}
-
 if ! type bionic_wrap >/dev/null 2>&1; then
   no "10: width.sh defines bionic_wrap" "no such function in $WIDTH_SH"
   no "10a: every row in this section needs it" "skipped: bionic_wrap is not defined"
@@ -299,12 +293,6 @@ else
   # one function up ("a caller whose prefix already ate the whole line still gets
   # its content"). The two say the same thing about the same input.
 
-  # THE GLYPH SET, AT THE FOLD. An em dash is one column and three bytes: a fold
-  # that measured bytes would break the line two words early. Asserted against the
-  # ASCII twin of the same sentence, so the number is not hand-computed.
-  EM_S='an em — dash inside a cell that must fold at its own column boundary'
-  ASCII_S='an em x dash inside a cell that must fold at its own column boundary'
-
   # A GLYPH OUTSIDE THE CLOSED SET is measured conservatively and IDENTICALLY in
   # both locales — 7n's ruling, one function down. Short of the budget, never over.
   wrap_c() {  # <string> <budget> -> the fold, made under the C locale
@@ -323,18 +311,6 @@ else
   # words in a TSV cell must not become a two-space gap at a fold boundary.
   expect_eq "19: a run of whitespace inside the cell collapses to one space" "a b c" \
     "$(bionic_wrap "  a   b		c  " 44)"
-
-  # T10 / REQ-9 (AC-9.1, AC-9.2): § and the curly quotes are measured at one
-  # column by the fold too — the same differential the em dash gets at 17,
-  # against the ASCII twin of the same sentence so the number is not hand-computed.
-  SEC_S='a § mark inside a cell that must fold at its own column boundary here'
-  ASCII_SEC_S='a x mark inside a cell that must fold at its own column boundary here'
-
-  TIMES_S='a count of 5 × 12 inside a cell that must fold at its own column boundary'
-  ASCII_TIMES_S='a count of 5 x 12 inside a cell that must fold at its own column boundary'
-
-  QUOTE_S='a “quoted” word inside a cell that must fold at its own column boundary'
-  ASCII_QUOTE_S='a xquotedx word inside a cell that must fold at its own column boundary'
 fi
 
 finish

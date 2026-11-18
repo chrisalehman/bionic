@@ -1,6 +1,5 @@
 #!/bin/bash
-# WORKTREE — bionic 1.4.0 wave, task WORKTREE (spec AC-11, AC-28; design ledger
-# C1 "worktree lease", C2 ".bionic symlink retired").
+# WORKTREE.
 #
 # WHAT THIS SUITE OWNS. One payload library:
 #
@@ -95,17 +94,14 @@ new_tree() {  # <repo> <branch> [content] -> echoes the worktree path
 # A BOUND PLAN (wave-20 T8, REQ-1, D1). The engaged marker names a plan, in the shape
 # payload/scripts/lib/binding.sh writes it, and the plan's frontmatter carries
 # `working-branch:` — or does not, when <working-branch> is empty. The plan is an OPEN run
-# (`## SDLC State`, `current: 4`) under the docs root, so the same file doubles as the root's
-# newest open run for the unbound `fallback` arm.
+# (a page at 15, its run's log at step 4) under the docs root, so the same file doubles as the
+# root's newest open run for the unbound `fallback` arm.
 bind_plan() {  # <repo> <sid> <working-branch or empty> -> echoes the plan path
   local r="$1" sid="$2" wb="$3" p
   p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  mkdir -p "${p%/*}" "$r/.bionic/tmp"
-  {
-    printf -- '---\n'
-    if [ -n "$wb" ]; then printf 'working-branch: %s\n' "$wb"; fi
-    printf -- '---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n'
-  } > "$p"
+  mkdir -p "${p%/*}" "$r/.bionic/tmp" "$r/.bionic/docs/record/wave-x"
+  printf -- '---\ncanonical_sdlc_version: 15\n%s---\n# fixture plan\n' "${wb:+working-branch: $wb$'\n'}" > "$p"
+  printf 'run/v1|ev=step|n=4|at=2026-09-23T00:00:00Z\n' >> "$r/.bionic/docs/record/wave-x/run.log"
   printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$p" > "$r/.bionic/tmp/engaged-${sid}.state"
   printf '%s' "$p"
 }
@@ -113,8 +109,6 @@ bind_plan() {  # <repo> <sid> <working-branch or empty> -> echoes the plan path
 # Every ref and its object, one line each: a refused land changes NONE of them, which is
 # "no merge commit anywhere" read off git rather than off the refusal line.
 refs_of() { git -C "$1" for-each-ref --format='%(refname) %(objectname)'; }
-# Every worktree, its path and its branch, without the heads: what a land removes or keeps.
-trees_of() { git -C "$1" worktree list --porcelain | grep -v '^HEAD '; }
 
 # shellcheck source=/dev/null
 . "$LIB" 2>/dev/null || { echo "FAIL: the library does not source ($LIB)"; exit 1; }
@@ -894,54 +888,42 @@ BH="$(new_repo "$TMP/by-hand")"; git -C "$BH" config user.name "Hand Lander"
 BHSID="by-hand-session-01"
 BHT="$(new_tree "$BH" wt/bh-T1)"
 BHP="$BH/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${BHP%/*}" "$BH/.bionic/tmp"
-cat > "$BHP" <<'BHPLAN'
----
-working-branch: wave/fixture
-canonical_sdlc_version: 14
----
-# fixture plan (§BY-HAND)
-
-## SDLC State
-
-current: 4
-approved-by: fixture 2026-10-04T00:00Z "approved"
-- Step 4: started
-- T1: active
-
-## Tasks
-
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | row one | bh-T1 | — | | 10 | REQ-1 | bh-T1.txt | .worktrees/bh-T1 | | active |
-BHPLAN
+{ printf -- '---\nworking-branch: wave/fixture\ncanonical_sdlc_version: 15\n---\n# fixture plan (§BY-HAND)\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'; } > "$BHP"
+BHLOG="$BH/.bionic/docs/record/wave-x/run.log"; mkdir -p "${BHLOG%/*}"
+bh_row() {  # <n> -> row T<n> on the plan, dispatched to bh-T<n> on its tree in the run's log
+  printf '| T%s | 4 | build | row %s | — | 10 | REQ-1 | bh-T%s.txt | — |\n' "$1" "$1" "$1" >> "$BHP"
+  printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:0%sZ\n' "dispatch|row=T$1|name=bh-T$1" "$1" 1 "tree|row=T$1|path=.worktrees/bh-T$1" "$1" 2 >> "$BHLOG"
+}
+printf 'run/v1|ev=%s|at=2026-10-04T00:00:0%sZ\n' 'step|n=4' 1 'approval|key=step3|by=fixture|said=approved' 2 > "$BHLOG"; bh_row 1
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$BHP" > "$BH/.bionic/tmp/engaged-${BHSID}.state"
-BHREC="$BH/.bionic/docs/record/wave-x/landing-proofs.log"
+bh_all() { cat "$BHLOG" 2>/dev/null; }
+BH_SUM="$(cksum < "$BHP")|$(cksum < "$BHLOG")"
 BH_REFS0="$(refs_of "$BH")"
 bh_land() { ( cd "$BH" && CLAUDE_CODE_SESSION_ID="$BHSID" bash "$SPAWN" land "$@" 2>&1 ); }
 OUTBH0="$(bh_land "$BHT" --by-hand)"; RCBH0=$?
 expect_eq    "(h1) a hand landing with no --reason is refused (exit 2)" "2" "$RCBH0"
 expect_match "(h1) …naming why" "spawn-worktree: REFUSED reason=no-reason *" "$OUTBH0"
-expect_false "(h1) …and nothing is recorded" test -e "$BHREC"
+expect_eq    "(h1) …and nothing is recorded: the plan and its log are as they were" "$BH_SUM" "$(cksum < "$BHP")|$(cksum < "$BHLOG")"
 OUTBHB="$(bh_land "$BHT")"; RCBHB=$?
 expect_ne    "(h2) a bare land exits non-zero" "0" "$RCBHB"
 expect_eq    "(h2) …and no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
 OUTBH="$(bh_land "$BHT" --by-hand --reason "the person's why")"; RCBH=$?
 expect_eq    "(h3) a hand landing with a reason exits 0" "0" "$RCBH"
-expect_match "(h3) …on land's own LANDED line" "*spawn-worktree: LANDED branch=wt/bh-T1 onto=wave/fixture checkout=${BH} merge=* removed=${BHT} proofs=${BHREC}*" "$OUTBH"
-BH_PUB="$(grep '^line/v1|ev=published|' "$BHREC" 2>/dev/null)"
-expect_regex "(h4) the record's published line carries the user, the time and the reason" \
-  "^line/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
+expect_match "(h3) …on land's own LANDED line" "*spawn-worktree: LANDED branch=wt/bh-T1 onto=wave/fixture checkout=${BH} merge=* removed=${BHT} proofs=${BHLOG}*" "$OUTBH"
+BH_PUB="$(grep '^run/v1|ev=published|' "$BHLOG" 2>/dev/null)"
+expect_regex "(h4) the log's published line carries the user, the time and the reason" \
+  "^run/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|branch=wt/bh-T1\\|head=[0-9a-f]{40}\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
 BH_AT="${BH_PUB##*|at=}"
-expect_eq    "(h5) the row's - T1: line gains who, when and why" \
-  "- T1: active landed-by-hand: Hand Lander ${BH_AT} \"the person's why\"" "$(grep '^- T1:' "$BHP")"
+expect_eq    "(h5) the plan is the landing's to leave: its bytes stand as they were, the who, when and why on the event" \
+  "${BH_SUM%|*}|Hand Lander|the person's why" "$(cksum < "$BHP")|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^by=//p')|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^why=//p')"
 
 section "§HAND: a hand landing lands a row whose suite is red, writes the person's words on its line, and runs nothing"
 #
 # A second row of the same plan commits a suite that fails and logs each run of it, and its launch line names that suite
 # as the one it lands on. The hand landing merges it all the same: running a suite is no part of it, and none is wanted.
 # What the person says of the writer's run (its suites, the commit they were green at, its log) is recorded as verdicts.
-printf '| T2 | 4 | build | row two | bh-T2 | — | | 10 | REQ-1 | bh-T2.txt | .worktrees/bh-T2 | | active |\n' >> "$BHP"
-awk '{ print } /^- T1:/ { print "- T2: active" }' "$BHP" > "$BHP.n" && mv "$BHP.n" "$BHP"
+bh_row 2
 BHT2="$(new_tree "$BH" wt/bh-T2)"; mkdir -p "$BHT2/tests"
 printf '#!/bin/bash\necho run >> "%s"\necho "FAIL: planted"; echo; echo "r.test.sh: 0/1 passed, 1 failed  sections=1 setup=0"; exit 1\n' \
   "$TMP/hand-runs" > "$BHT2/tests/r.test.sh"
@@ -956,15 +938,15 @@ OUTHD0="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.t
 OUTHD="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.test.sh --green-at "$BHC2" --log /logs/T2-green.log)"; RCHD=$?
 expect_eq    "(hd1) the hand landing of a row whose suite is red exits 0, the row's commit on the working branch" "0 yes" \
   "$RCHD $(git -C "$BH" merge-base --is-ancestor "$BHC2" wave/fixture && echo yes)"
-expect_contains "(hd2) …and its - T2: line carries the person's words" '"landed on the report"' "$(grep '^- T2:' "$BHP")"
+expect_contains "(hd2) …and its landing carries the person's words" '|why=landed on the report|' \
+  "$(grep '^run/v1|ev=published|row=T2|' "$BHLOG" 2>/dev/null)"
 expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, keyed by the commit it was green at" \
-  "0|line/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
-  "$(awk 'END { print NR }' "$TMP/hand-runs")|$(grep '|ev=verdict|' "$BHREC" | sed 's/|at=[^|]*$//')"
+  "0|run/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
+  "$(awk 'END { print NR }' "$TMP/hand-runs")|$(bh_all | grep '|ev=verdict|' | sed 's/|at=[^|]*$//')"
 
 # A hand landing that names its suites leaves a ready line that names them too, so the judge and the door read one
 # row's suites; with none named, the ready line says none.
-printf '| T3 | 4 | build | row three | bh-T3 | — | | 10 | REQ-1 | bh-T3.txt | .worktrees/bh-T3 | | active |\n' >> "$BHP"
-awk '{ print } /^- T2:/ { print "- T3: active" }' "$BHP" > "$BHP.n" && mv "$BHP.n" "$BHP"
+bh_row 3
 BHT3="$(new_tree "$BH" wt/bh-T3)"; printf 'three\n' > "$BHT3/three.txt"; git -C "$BHT3" add three.txt && git -C "$BHT3" commit -qm "T3: a row"
 printf '%s|row=T3|lands_on=a.test.sh,b.test.sh\n' "$(roster_row_fixture status=intended session="$BHSID" name=bh-T3 agent_id=b00T3 plan="$BHP")" \
   >> "$BH/.bionic/tmp/roster-${BHSID}.state"
@@ -972,18 +954,18 @@ BHC3="$(git -C "$BHT3" rev-parse HEAD)"
 bh_land "$BHT3" --by-hand --reason "landed on the report" --suites a.test.sh,b.test.sh --green-at "$BHC3" --log /logs/T3-green.log >/dev/null
 expect_eq    "(hd4) …and its ready line names the suites the person named, where a landing that named none says none" \
   "a.test.sh,b.test.sh|none" \
-  "$(grep '|ev=ready|row=T3|' "$BHREC" | sed 's/.*|suites=\([^|]*\)|.*/\1/')|$(grep '|ev=ready|row=T1|' "$BHREC" | sed 's/.*|suites=\([^|]*\)|.*/\1/')"
+  "$(bh_all | grep '|ev=ready|row=T3|' | sed 's/.*|suites=\([^|]*\)|.*/\1/')|$(bh_all | grep '|ev=ready|row=T1|' | sed 's/.*|suites=\([^|]*\)|.*/\1/')"
 
 BHT4="$(new_tree "$BH" wt/bh-T4)"; mkdir -p "$BHT4/tests"; printf '# the wave-40 run said so\n' > "$BHT4/tests/cited.sh"; git -C "$BHT4" add tests && git -C "$BHT4" commit -qm "T4: a cited comment"; BH_REFS4="$(refs_of "$BH")"
 OUTHL="$(bh_land "$BHT4" --by-hand --reason "landed on the report")"; RCHL=$?
 expect_eq    "(hl1) a hand landing whose added comment cites the run exits 2 with ready's LINT line, and no ref moved" "2|LINT wt/bh-T4 tests/cited.sh:1 wave|same" "$RCHL|$(printf '%s\n' "$OUTHL" | grep '^LINT ')|$([ "$BH_REFS4" = "$(refs_of "$BH")" ] && echo same)"
 # A hand landing behind an entry still proving waits on it, and builds its candidate once for each base it is given.
 BHT5="$(new_tree "$BH" wt/bh-T5)"; BHX="$(git -C "$BH" commit-tree -p wave/fixture -m ahead "$(git -C "$BH" rev-parse 'wave/fixture^{tree}')")"; BHAT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-printf 'line/v1|ev=ready|row=T9|name=-|commit=%s|branch=-|tree=-|suites=none|debt=-|carrier=%s:|at=%s\nline/v1|ev=candidate|row=T9|base=%s|commit=%s|tree=-|at=%s\n' "$BHX" "$$" "$BHAT" "$(git -C "$BH" rev-parse wave/fixture)" "$BHX" "$BHAT" >> "$BHREC"
+printf 'run/v1|ev=ready|row=T9|name=-|commit=%s|branch=-|tree=-|suites=none|debt=-|carrier=%s:|at=%s\nrun/v1|ev=candidate|row=T9|base=%s|commit=%s|tree=-|at=%s\n' "$BHX" "$$" "$BHAT" "$(git -C "$BH" rev-parse wave/fixture)" "$BHX" "$BHAT" >> "$BHLOG"
 bh_land "$BHT5" --by-hand --reason "behind an entry" >/dev/null & BHPID=$!
-sleep 3; printf 'line/v1|ev=returned|row=T9|why=red|detail=-|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BHREC"; wait "$BHPID"; RCHW=$?
+sleep 3; printf 'run/v1|ev=returned|row=T9|why=red|detail=-|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BHLOG"; wait "$BHPID"; RCHW=$?
 expect_eq    "(hd3b) a hand landing held 3 s behind an entry lands, with one candidate on the entry's and one on the head it published onto" \
-  "0|${BHX} $(git -C "$BH" rev-parse wave/fixture^1)" "$RCHW|$(grep '|ev=candidate|row=wt/bh-T5|' "$BHREC" | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
+  "0|${BHX} $(git -C "$BH" rev-parse wave/fixture^1)" "$RCHW|$(bh_all | grep '|ev=candidate|row=wt/bh-T5|' | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
 section "§CHECK-FILES: what a range changes of the check's files is the declared list met with the range"
 CF="$(new_repo "$TMP/check-files")"; mkdir -p "$CF/chk/sub" "$CF/lib"
 : > "$CF/chk/a.sh"; : > "$CF/chk/sub/c.sh"; : > "$CF/lib/b.sh"; : > "$CF/lib/d.sh"
@@ -1021,13 +1003,15 @@ wt_import_fn() {  # <name> -> the function, defined here, read out of the landin
   eval "$body"
 }
 for f in ll_world ll_launch ll_carrier_env; do wt_import_fn "$f" || no "($f is read out of landing-line.prelude.sh)" "absent"; done
-ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
+ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }; ll_log() { printf '%s/.bionic/docs/record/wave-x/run.log' "$1"; }
 ll_carrier_env
-sc_spawn() {  # <root> <row> <sid> -> the tree `create --for wx-<row>` made under <sid>, its plan row and one commit of its own
+sc_spawn() {  # <root> <row> <sid> -> the tree `create --for wx-<row>` made under <sid>, its plan row, its dispatch and one commit of its own
   local r="$1" t="$2" s="$3" p out tree
   p="$(ll_plan "$r")"
-  printf '| %s | 4 | build | row %s | wx-%s | — | | 10 | REQ-1 | %s.txt | .worktrees/%s | | active |\n' "$t" "$t" "$t" "$t" "$t" >> "$p"
-  awk -v t="$t" '{ print } /^- T2: active$/ { print "- " t ": active" }' "$p" > "$p.n" && mv "$p.n" "$p"
+  printf '| %s | 4 | build | row %s | — | 10 | REQ-1 | %s.txt | — |\n' "$t" "$t" "$t" >> "$p"
+  printf 'run/v1|ev=dispatch|row=%s|name=wx-%s|at=2026-10-04T00:1%s:00Z\n' "$t" "$t" "${t#T}" >> "$(ll_log "$r")"
+  mkdir -p "$r/.bionic/docs/record/wave-x/briefs"
+  printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' "$t" "wx-$t" 0 > "$r/.bionic/docs/record/wave-x/briefs/wx-$t.md"
   out="$( cd "$r" && CLAUDE_CODE_SESSION_ID="$s" bash "$SPAWN" create "$(git -C "$r" rev-parse wave/x)" "wt/$t" --for "wx-$t" 2>/dev/null )" || return 1
   tree="$(printf '%s\n' "$out" | tr ' ' '\n' | sed -n 's/^path=//p')"
   [ -d "$tree" ] || return 1
@@ -1072,7 +1056,7 @@ expect_eq "(su4) ready from a rebound successor whose roster holds no row lands 
   "0 LANDED T4" "$SC_RC $(sc_head "$SC_OUT")"
 [ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
 expect_contains "(su4b) …proved on that launch row's suite" "|ev=ready|row=T4|" \
-  "$(grep '|suites=b.test.sh|' "$SC/.bionic/docs/record/wave-x/landing-proofs.log" 2>/dev/null)"
+  "$(grep '|suites=b.test.sh|' "$SC/.bionic/docs/record/wave-x/run.log" 2>/dev/null)"
 
 section "§MISMATCH: a tree whose record names another plan than the binding is refused naming both; close-out's own last landing on a closed plan is admitted"
 #
@@ -1081,7 +1065,8 @@ section "§MISMATCH: a tree whose record names another plan than the binding is 
 # lands its last rows from; any other session is refused naming the closed plan.
 # fails-when: a stale tree lands on the wrong plan silently, or close-out's last landing is refused.
 SC_Q="$SC/.bionic/docs/plans/epic-x/wave-y.plan.md"
-printf -- '---\nworking-branch: wave/x\n---\n# another run\n\n## SDLC State\n\ncurrent: 4\n' > "$SC_Q"
+printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/x\n---\n# another run\n' > "$SC_Q"
+mkdir -p "$SC/.bionic/docs/record/wave-y"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:00:00Z\n' > "$SC/.bionic/docs/record/wave-y/run.log"
 SQ="55555555-6666-4777-8888-999999999999"
 bound_marker "$SC" "$SQ" "$SC_Q" >/dev/null
 SC_T5="$(sc_spawn "$SC" T5 "$WORLD_SID")"; ll_launch "$SC" T5 a.test.sh
@@ -1099,16 +1084,16 @@ SD="$(ll_world)"; SD_P="$(ll_plan "$SD")"
 SD_T3="$(sc_spawn "$SD" T3 "$WORLD_SID")"; ll_launch "$SD" T3 a.test.sh
 # Delivered at current 9, as close-out leaves it; T3 is a fix born of a finding of the review the judge reads failing,
 # the one landing a judged run admits (lib/worktree.sh, THE RUN HAS BEEN JUDGED FOR INTEGRATION), in the shape
-# `proof-add review` and `task-add --born` write (tests/asks.test.sh's world at current 8 is the same plant).
+# `proof-add review` and `task-add --born` write.
 SD_H="$(git -C "$SD" rev-parse wave/x)"; SD_B="$(git -C "$SD" rev-parse main)"
 mkdir -p "$SD/.bionic/docs/record/wave-x"
 printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off T3.txt:1 the row is wrong\nshown: 1 cat T3.txt\n' \
   "$SD_B" "$SD_H" > "$SD/.bionic/docs/record/wave-x/rev.md"
-SD_H="$SD_H" SD_B="$SD_B" awk '
-  /^working-branch: / && !fm { fm = 1; print; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["SD_B"]; next }
-  /^current: 4$/ { print "current: 9"; print "proved: kind=review head=" ENVIRON["SD_H"] " at=2026-10-20T00:00:00Z evidence=record/wave-x/rev.md question=structure reader=w-rev result=fail scope=piece"; next }
-  /^- T3: active$/ { print "- T3: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; print "- Step 9: closed delivered: 2026-10-24T00:00:00Z"; next }
+SD_B="$SD_B" awk '/^working-branch: / && !fm { fm = 1; print; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["SD_B"]; next }
   { print }' "$SD_P" > "$SD_P.n" && mv "$SD_P.n" "$SD_P"
+printf 'run/v1|ev=%s|at=%s\n' "proof|kind=review|head=$SD_H|evidence=record/wave-x/rev.md|question=structure|reader=w-rev|result=fail|scope=piece" \
+  2026-10-20T00:00:00Z 'born|row=T3|reason=review S1 off|finding=record/wave-x/rev.md#1' 2026-10-20T00:00:00Z \
+  'step|n=9|delivered=2026-10-24T00:00:00Z' 2026-10-24T00:00:00Z >> "$(ll_log "$SD")"
 expect_eq "(mc0) the plan is closed" "closed" "$( . "$REPO/payload/scripts/lib/run.sh" && { run_open "$SD_P" && echo open || echo closed; } )"
 SD_REFS="$(git -C "$SD" for-each-ref --format='%(refname) %(objectname)')"
 sc_ready "$SD_T3" "$SUCC"
@@ -1123,8 +1108,8 @@ expect_eq "(mc2) close-out's own last landing, from the session bound to the clo
 
 section "§HAND: a hand landing writes the person's verdicts before it publishes, so the born row's landing closes the review's ask"
 #
-# `land --by-hand` with --suites records what the person says of the writer's run as green verdicts, as `row-landed
-# --by-hand` does, and writes them before the publish: the publish reads the reviews the row answers again once the row
+# `land --by-hand` with --suites records what the person says of the writer's run as green verdicts, and writes them
+# before the publish: the publish reads the reviews the row answers again once the row
 # reads landed, judging the row by those verdicts. T3 is born of the one finding of a failing adversarial review that
 # `proof-add review` registered, which opened the waiver ask.
 # fails-when: the ask stays open after the hand landing's publish, or the verdicts follow the published line.
@@ -1140,9 +1125,9 @@ printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nf
 printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$WORLD_SID" name=w-rev agent_id=a-w-rev subagent_type=bionic:critic \
   launched_at=2026-10-01T00:00:00Z deliverable="$HN_RD/rev.md")" >> "$HN/.bionic/tmp/roster-$WORLD_SID.state"
 HN_PA="$( cd "$HN" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$REPO/hooks/session-poker.sh" proof-add review record/wave-x/rev.md --question adversarial --reader w-rev 2>&1 )"; HN_PARC=$?
-awk '/^- T3: active$/ { print "- T3: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; next } { print }' \
-  "$HN_P" > "$HN_P.n" && mv "$HN_P.n" "$HN_P"
-hn_ask() { awk -F'|' '$2 == "key=waive:adversarial" { s = ""; b = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }; l = s "|" b } END { print l }' "$HN_RD/asks.state" 2>/dev/null; }
+printf 'run/v1|ev=born|row=T3|reason=review S1 off|finding=record/wave-x/rev.md#1|at=2026-10-20T00:00:00Z\n' >> "$HN_RD/run.log"
+hn_ask() { bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_lines "$2" "$3"' _ "$REPO/payload/scripts/lib" "$HN_P" "$HN" 2>/dev/null \
+  | awk -F'|' '{ k = s = b = ""; for (i = 2; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) } } k == "waive:adversarial" { l = s "|" b } END { print l }'; }
 expect_eq "(hn0) proof-add registers the failing review (exit 0) and its waiver ask is open" "0|open|" "$HN_PARC|$(hn_ask)"
 [ "$HN_PARC" = 0 ] || printf '      proof-add said: %s\n' "$HN_PA"
 HN_C="$(git -C "$HN_T3" rev-parse HEAD)"; printf 'a.test.sh: 1/1 passed\n' > "$HN_RD/T3-green.log"
@@ -1150,7 +1135,7 @@ HN_OUT="$( cd "$HN" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$
   --suites a.test.sh --green-at "$HN_C" --log "$HN_RD/T3-green.log" 2>&1 )"; HN_RC=$?
 expect_eq "(hn1) the hand landing of the born row exits 0" "0" "$HN_RC"
 [ "$HN_RC" = 0 ] || printf '      land said: %s\n' "$HN_OUT"
-HN_REC="$HN_RD/landing-proofs.log"
+HN_REC="$HN_RD/run.log"
 expect_eq "(hn2) the row's verdict is written before its published line" "verdict published" \
   "$(awk -F'|' '$3 == "row=T3" && ($2 == "ev=verdict" || $2 == "ev=published") { sub(/^ev=/, "", $2); printf "%s%s", s, $2; s = " " }' "$HN_REC" 2>/dev/null)"
 expect_eq "(hn3) …and the review's waiver ask is closed by the landing, with no regression and no waiver" "closed|landing T3" "$(hn_ask)"

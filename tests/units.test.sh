@@ -1,68 +1,63 @@
 #!/bin/bash
 # tests/units.test.sh — payload/scripts/lib/units.sh: THE ONE READER OF `## Tasks`
-# (epic-23 wave-11-lean-spine, REQ-1e; AC-1e.1/1e.2; spec Design §1 "Task", §2 D3/D7).
 #
 # WHAT IT OWNS. The contract three callers bind to after T8 — the evidence gate's ledger
 # checks and its prototype check, the tick's FILL, and the governing-skill Step-3 wall — so
 # that none of them carries a parser of its own. The questions, one per section:
 #
-#   §1 units_rows <plan>          the thirteen fields, in the FIXED order, whatever order the
-#                                 table's columns are written in; the `worktree` cell (slot 11)
-#                                 and the `base` cell (slot 12) are OPTIONAL, a table without the
-#                                 column is valid and reads it empty, and `base` is a commit id
-#                                 when it holds one
+#   §1 units_rows <plan>          the thirteen fields, in the FIXED order, whatever order the table's columns are written in;
+#                                 the `worktree` (11) and `base` (12) cells are OPTIONAL, absent reading empty, `base` a commit id
 #   §2 header names               reversed columns give identical output
 #   §3 the ## Tasks section       is read, and nothing else
 #   §4 units_ready <plan> <step>  which rows at that step may be dispatched now
 #   §6 units_validate <plan>      one line per broken invariant, naming the id and the rule
 #   §7 units_validate <plan>      a missing column is a violation of the table, not of a row
-#   §8 the differential           the old fill derivation and units_ready answer the same
 #   §9 a markdown-escaped pipe    in a cell
-#   §ORDER   build, regression, review, release: units_validate refuses any other order naming the
-#            rows; units_order reads it
-#   §POST    a review row after a landed release is admitted when it reads only approval:plan, head
-#            and the rows landed past the release
+#   §ORDER   build, regression, review, release: units_validate refuses any other order naming the rows; units_order reads it
 #   §AFTER-PUBLISH  after the release is the record's publish order: a step-4 fix row published past the release
 #            is read as a piece; the record's order reversed refuses; no record falls back to the plan's order
-#   §JUDGE   covered at the last green whole run's head; past it each commit owes its row's suites,
-#            never a second whole run
-#   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's
-#            cover reads it
-#   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one
-#            line with nothing run, and at the head the whole run read it does not refuse
-#   §STEP-FIELD  units_step_field reads the first key line of the block units_step_fields writes
+#   §JUDGE   covered at the last green whole run's head; past it each commit owes its row's suites, never a second whole run
+#   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's cover reads it
+#   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one line with nothing run,
+#            and at the head the whole run read it does not refuse
 #   §DEBT    a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts;
 #            task-add's cap refusal, its fourth-fix refusal and its count line each go red when removed
+#   §ASK     a row edited by hand reads as lib/plan-read.sh's row reads it; a floor row whose review proof stands at
+#            an older head is ready only when the judge reads the reviews covered; the fix policy is the header's
+#   §LIVE    a launch the run's log holds reads active under its name and is not ready; a dry copy reads its plan's run
+#   §BORN    a row's born event, one per row, is read by the fix-cap's count, the findings and the marks; a marker in
+#            the page's text is none
+#   §BACK    a launch taken back by one function: a cancel for a launch in the log
+#   §TREE    a row's tree and base read from the newest tree event in the log
+#   §LEDGER  a landed row with no line asked of the reader: admitted when it answers landed
+#   §DROP    a drop in the run's log reads dropped to the reader and the fill at 15, launched or not; a wait on it is met
+#   §UNTIMED a dispatch or a tree line with no instant: the reader's dispatched and tree, never the fill's launch or tree
+#   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
+#   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
+#   §DEPS-15   a row at 15 waits by its deps and kind alone: no step hold; a questions tag judged
 #
-# WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
-# readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
-# `$2`/`$4`/`$6` of a five-column table. The ten-column table this wave ships puts `agent`
-# at `$6` and `kind` at `$4`, so both readers would have read an agent name as a status and
-# refused every row — on this wave's own plan, at its own next commit. A reader keyed on
-# the header CELL TEXT cannot be broken by inserting, moving or renaming a column it does
-# not read, which is what makes the schema an ordinary edit again. §2 is that assertion:
-# the same rows with every column REVERSED must produce a byte-identical TSV.
+# WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
+# column REVERSED must produce a byte-identical TSV.
 #
 # FIXTURE PROVENANCE — NOT HAND-TYPED (fixture fidelity). The table in `tasks_table` below
 # was spliced verbatim out of this wave's own live plan,
 # `.bionic/docs/plans/epic-23-bionic-tech-debt/wave-11-lean-spine.plan.md`, at the `## Tasks`
-# heading, at commit 1f48673 — header, separator and all 22 data rows, byte for byte. The
+# heading, at commit 1f48673 — header, separator and all 22 data rows, in table order — and
+# then cut to the nine cells of a page at 15: each row's agent and status cells are gone, since
+# a row's state and its agent are events in the run's log, and its artifact cell reads `—`. The
 # plan tree is gitignored and absent from a worktree, so the specimen has to live in the
 # suite; copying it by hand is how a fixture comes to test its own typing instead of the
 # reader. Every other fixture here is built FROM that one by a name-blind transform (§2
 # reverses cell order; §3 wraps it in decoys) or is a small purpose-built table (§4).
 #
-# THE REVERSAL IS NAME-BLIND, DELIBERATELY (§2). A permuter that re-ordered columns BY NAME
-# would be a second implementation of the thing under test, and a shared misreading of a
-# header cell would cancel out and show green. Reversing the cells of every row of the table
-# — header, separator and data alike — cannot know what any column is called, so the two
-# sides of the §2 comparison have no common machinery at all.
+# THE REVERSAL IS NAME-BLIND, DELIBERATELY (§2). A permuter that re-ordered columns BY NAME would be a second
+# implementation of the thing under test, and a shared misreading of a header cell would cancel out and show green.
+# Reversing the cells of every row — header, separator and data alike — cannot know what any column is called, so
+# the two sides of the §2 comparison have no common machinery at all.
 #
-# HERMETIC. Every fixture is a file under one mktemp sandbox; nothing reads the repository's
-# own plans, no hook runs, and the library is sourced in a CHILD shell per call so no row can
-# be answered by a function an earlier row left defined in this one.
-# §WALK alone is live tier: it reads this repository's own release merges, read-only, and skips
-# by version and hash a merge the history does not hold.
+# HERMETIC. Every fixture is a file under one mktemp sandbox; nothing reads the repository's own plans, no hook runs,
+# and the library is sourced in a CHILD shell per call so no row is answered by a function an earlier row left defined.
+# §WALK alone is live tier: it reads this repository's own release merges, read-only, and skips one its history lacks.
 #
 # Usage: bash tests/units.test.sh
 
@@ -70,10 +65,9 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/roster-row.sh"
-. "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
@@ -82,10 +76,9 @@ SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/units-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
-# call <fn> <args...> — the library in a child shell. Prints the function's stdout; its exit
-# status is left in CALL_RC. A missing or unparsable library yields empty output and a
-# non-zero CALL_RC, which is what makes the RED run of this suite red for the right reason
-# rather than killing it.
+# call <fn> <args...> — the library in a child shell. Prints the function's stdout; its exit status is left in CALL_RC.
+# A missing or unparsable library yields empty output and a non-zero CALL_RC, which is what makes the RED run of this
+# suite red for the right reason rather than killing it.
 CALL_RC=0
 call() {
   local fn="$1" out; shift
@@ -101,44 +94,41 @@ call_rc() { call "$@" >/dev/null; printf '%s' "$CALL_RC"; }
 # nlines <string> — 0 for the empty string, which `wc -l` cannot say and `grep -c` will not.
 nlines() { [ -z "$1" ] && { printf '0'; return; }; printf '%s\n' "$1" | wc -l | tr -d ' '; }
 
-# ============================================================
 setup_section "0s — the fixtures"
-# ============================================================
 
-# THE SPECIMEN, verbatim from the live plan (see FIXTURE PROVENANCE above).
+# THE SPECIMEN, the live plan's rows cut to nine cells (see FIXTURE PROVENANCE above).
 cat > "$SANDBOX/tasks-table.md" <<'TASKS_TABLE_EOF'
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 3 | doc | Plan, Tasks and matrix written; Step-3 card approved | orchestrator | — | 30m | all | plan | landed |
-| T2 | 4 | build | 1d: `disable-model-invocation: true` on the five command templates; re-render; frontmatter pin | orchestrator | T1 | 15m | REQ-1d | agents-src/templates/commands/*.tmpl, payload/commands/*.md, payload/integrity/rendered.sha256, tests/docs-pins.test.sh | landed |
-| T3 | 4 | build | 1c-a: survival renders once to payload/context/survival.md; auditor mandate moved the same way; role templates ≤5 KB with a one-line pointer; §5 writer rules as defaults; PIPESTATUS fixed; six pins re-pointed | senior-implementor | T1 | 60m | REQ-1c | agents-src/blocks/survival.md, agents-src/templates/*.md.tmpl, agents-src/render.sh, agents/*.md, payload/context/survival.md, tests/docs-pins.test.sh, tests/render.test.sh, payload/integrity/rendered.sha256 | landed |
-| T4 | 4 | build | 1c-b: SubagentStart hook injects survival for bionic:* agents, self-attributed first line; stdout-equals-file pin | implementor | T3 | 45m | REQ-1c | hooks/execution-recorder.sh, tests/execution-recorder.test.sh | landed |
-| T5 | 4 | build | 1b: core + steps/0–9 + dispatch.md from the template; render.sh unit rows; 168 pins re-pointed, 4 structural ones rewritten; prune to caps; session-start pointer line | senior-implementor | T1 | 120m | REQ-1b | agents-src/templates/skills/canonical-sdlc/, agents-src/render.sh, skills/canonical-sdlc/, tests/docs-pins.test.sh, tests/render.test.sh, payload/integrity/rendered.sha256, hooks/session-start.sh | landed |
-| T6 | 4 | build | 1a: three prose surfaces re-pointed to record/ paths; evidence-gate fixtures (path-cited ≤40 KB passes; empty evidence value fails) | implementor | T3, T5 | 45m | REQ-1a | agents-src/blocks/critic-template.md, agents-src/templates/senior-implementor.md.tmpl, agents-src/templates/skills/canonical-sdlc/steps/, tests/canonical-sdlc-evidence-gate.test.sh | active |
-| T7 | 4 | build | 1e-a: lib/units.sh (units_rows, units_ready, units_validate) TDD from tests/units.test.sh; domain dictionary entry | senior-implementor | T1 | 60m | REQ-1e | payload/scripts/lib/units.sh, tests/units.test.sh, design/domain-dictionary.md | active |
-| T8 | 4 | build | 1e-b: callers onto units.sh (gate ledger checks + prototype check, tick FILL, governing-skill Step-3 wall); the retired word becomes task; fixtures migrated; differential vs old parsers on the specimen plan | senior-implementor | T7 | 120m | REQ-1e | hooks/canonical-sdlc-evidence-gate.sh, hooks/session-poker.sh, hooks/canonical-sdlc-governing-skill.sh, hooks/dispatch-preflight.sh, tests/canonical-sdlc-evidence-gate.test.sh, tests/session-poker.test.sh, tests/canonical-sdlc-governing-skill.test.sh, tests/docs-pins.test.sh, agents-src/ | pending |
-| T9 | 4 | build | 1f-a: delete hooks/stop-check.sh and every reference; remove the seven dead functions | implementor | T8 | 30m | REQ-1f | hooks/stop-check.sh, hooks/stop-guard.sh, payload/scripts/lib/, tests/ | pending |
-| T10 | 4 | build | 1f-b: lib/context.sh with bionic_context; fifteen hooks call it; no-inline-sequence pin | senior-implementor | T9 | 90m | REQ-1f | payload/scripts/lib/context.sh, hooks/*.sh, tests/cross-gate-agreement.test.sh | pending |
-| T11 | 4 | build | 1f-c: loader block ≤95 lines in loader.sh's heredoc and all 21 hooks; §N.1 pin and mutation arm green | senior-implementor | T10 | 60m | REQ-1f | payload/scripts/lib/loader.sh, hooks/*.sh, tests/cross-gate-agreement.test.sh | pending |
-| T12 | 4 | build | 1f-d: context-spend suite first (RED); lib/stop.sh four functions; hooks/stop.sh on Stop + SubagentStop with fold; differential vs the four originals; hooks.json ≤12 command objects | senior-implementor | T11 | 150m | REQ-1f | payload/scripts/lib/stop.sh, hooks/stop.sh, hooks/hooks.json, hooks/context-spend.sh, hooks/landing-gate.sh, hooks/patrol-duties-gate.sh, hooks/patrol-revive.sh, tests/stop.test.sh, tests/context-spend.test.sh, tests/ | pending |
-| T13 | 5 | verify | Walk: an agent that has not read the ACs drives the candidate by plugin-dir in a throwaway project and narrates; record/wave-11-lean-spine/walk.md | researcher | T2, T4, T5, T6, T8, T12, T22 | 30m | all | record/wave-11-lean-spine/walk.md | pending |
-| T14 | 5 | test | Tests floor: bash tests/run.sh in the wave worktree; census commands re-run; evidence/floor.md | test-runner | T2, T4, T5, T6, T8, T12, T22 | 40m | all | record/wave-11-lean-spine/evidence/floor.md | pending |
-| T15 | 5 | verify | Discharge the matrix: 22 static pins, 12 hermetic rows, 6 live drives; one evidence file per AC | orchestrator | T13, T14 | 90m | all | record/wave-11-lean-spine/evidence/ | pending |
-| T16 | 5 | verify | Auditor on the REQ-1e and REQ-1f rows (double) and the wave verdict | auditor | T15 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/auditor.md | pending |
-| T17 | 6 | review | Six-axis self-review, one reviewer per axis in parallel at exec-complex | orchestrator | T16 | 45m | all | record/wave-11-lean-spine/review/ | pending |
-| T18 | 6 | review | Critic on T7–T12 (double rows) | critic | T17 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/critic.md | pending |
-| T19 | 7 | doc | ADRs 001–004; spec adrs: pointer | orchestrator | T18 | 30m | D1, D3, D4, D5 | adrs/epic-23-bionic-tech-debt/ | pending |
-| T20 | 8 | integrate | Wake Note, then attended no-ff merge to main; writer worktrees and the wave worktree removed; tmp ephemera wiped | orchestrator | T19 | 20m | all | none | pending |
-| T22 | 4 | build | 1g: fix the doctor/setup agreement on the `motion` row so DS.2a/2c/9/11 pass on this machine; honour the 2026-08-22 ruling | senior-implementor | T1 | 60m | REQ-1g | payload/scripts/lib/deps.sh, payload/scripts/doctor.sh, payload/scripts/setup.sh, tests/cross-gate-agreement.test.sh | landed |
-| T21 | 9 | close | Close-out report with dispositions; continuation.md; archive_run; Patrol CronDelete + disarm | orchestrator | T20 | 30m | all | record/wave-11-lean-spine/closeout-report.md | pending |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 3 | doc | Plan, Tasks and matrix written; Step-3 card approved | — | 30m | all | plan | — |
+| T2 | 4 | build | 1d: `disable-model-invocation: true` on the five command templates; re-render; frontmatter pin | T1 | 15m | REQ-1d | agents-src/templates/commands/*.tmpl, payload/commands/*.md, payload/integrity/rendered.sha256, tests/docs-pins.test.sh | — |
+| T3 | 4 | build | 1c-a: survival renders once to payload/context/survival.md; auditor mandate moved the same way; role templates ≤5 KB with a one-line pointer; §5 writer rules as defaults; PIPESTATUS fixed; six pins re-pointed | T1 | 60m | REQ-1c | agents-src/blocks/survival.md, agents-src/templates/*.md.tmpl, agents-src/render.sh, agents/*.md, payload/context/survival.md, tests/docs-pins.test.sh, tests/render.test.sh, payload/integrity/rendered.sha256 | — |
+| T4 | 4 | build | 1c-b: SubagentStart hook injects survival for bionic:* agents, self-attributed first line; stdout-equals-file pin | T3 | 45m | REQ-1c | hooks/execution-recorder.sh, tests/execution-recorder.test.sh | — |
+| T5 | 4 | build | 1b: core + steps/0–9 + dispatch.md from the template; render.sh unit rows; 168 pins re-pointed, 4 structural ones rewritten; prune to caps; session-start pointer line | T1 | 120m | REQ-1b | agents-src/templates/skills/canonical-sdlc/, agents-src/render.sh, skills/canonical-sdlc/, tests/docs-pins.test.sh, tests/render.test.sh, payload/integrity/rendered.sha256, hooks/session-start.sh | — |
+| T6 | 4 | build | 1a: three prose surfaces re-pointed to record/ paths; evidence-gate fixtures (path-cited ≤40 KB passes; empty evidence value fails) | T3, T5 | 45m | REQ-1a | agents-src/blocks/critic-template.md, agents-src/templates/senior-implementor.md.tmpl, agents-src/templates/skills/canonical-sdlc/steps/, tests/canonical-sdlc-evidence-gate.test.sh | — |
+| T7 | 4 | build | 1e-a: lib/units.sh (units_rows, units_ready, units_validate) TDD from tests/units.test.sh; domain dictionary entry | T1 | 60m | REQ-1e | payload/scripts/lib/units.sh, tests/units.test.sh, design/domain-dictionary.md | — |
+| T8 | 4 | build | 1e-b: callers onto units.sh (gate ledger checks + prototype check, tick FILL, governing-skill Step-3 wall); the retired word becomes task; fixtures migrated; differential vs old parsers on the specimen plan | T7 | 120m | REQ-1e | hooks/canonical-sdlc-evidence-gate.sh, hooks/session-poker.sh, hooks/canonical-sdlc-governing-skill.sh, hooks/dispatch-preflight.sh, tests/canonical-sdlc-evidence-gate.test.sh, tests/session-poker.test.sh, tests/canonical-sdlc-governing-skill.test.sh, tests/docs-pins.test.sh, agents-src/ | — |
+| T9 | 4 | build | 1f-a: delete hooks/stop-check.sh and every reference; remove the seven dead functions | T8 | 30m | REQ-1f | hooks/stop-check.sh, payload/scripts/lib/, tests/ | — |
+| T10 | 4 | build | 1f-b: lib/context.sh with bionic_context; fifteen hooks call it; no-inline-sequence pin | T9 | 90m | REQ-1f | payload/scripts/lib/context.sh, hooks/*.sh, tests/cross-gate-agreement.test.sh | — |
+| T11 | 4 | build | 1f-c: loader block ≤95 lines in loader.sh's heredoc and all 21 hooks; §N.1 pin and mutation arm green | T10 | 60m | REQ-1f | payload/scripts/lib/loader.sh, hooks/*.sh, tests/cross-gate-agreement.test.sh | — |
+| T12 | 4 | build | 1f-d: context-spend suite first (RED); lib/stop.sh four functions; hooks/stop.sh on Stop + SubagentStop with fold; differential vs the four originals; hooks.json ≤12 command objects | T11 | 150m | REQ-1f | payload/scripts/lib/stop.sh, hooks/stop.sh, hooks/hooks.json, hooks/context-spend.sh, hooks/landing-gate.sh, hooks/patrol-duties-gate.sh, hooks/patrol-revive.sh, tests/stop.test.sh, tests/context-spend.test.sh, tests/ | — |
+| T13 | 5 | verify | Walk: an agent that has not read the ACs drives the candidate by plugin-dir in a throwaway project and narrates; record/wave-11-lean-spine/walk.md | T2, T4, T5, T6, T8, T12, T22 | 30m | all | record/wave-11-lean-spine/walk.md | — |
+| T14 | 5 | test | Tests floor: bash tests/run.sh in the wave worktree; census commands re-run; evidence/floor.md | T2, T4, T5, T6, T8, T12, T22 | 40m | all | record/wave-11-lean-spine/evidence/floor.md | — |
+| T15 | 5 | verify | Discharge the matrix: 22 static pins, 12 hermetic rows, 6 live drives; one evidence file per AC | T13, T14 | 90m | all | record/wave-11-lean-spine/evidence/ | — |
+| T16 | 5 | verify | Auditor on the REQ-1e and REQ-1f rows (double) and the wave verdict | T15 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/auditor.md | — |
+| T17 | 6 | review | Six-axis self-review, one reviewer per axis in parallel at exec-complex | T16 | 45m | all | record/wave-11-lean-spine/review/ | — |
+| T18 | 6 | review | Critic on T7–T12 (double rows) | T17 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/critic.md | — |
+| T19 | 7 | doc | ADRs 001–004; spec adrs: pointer | T18 | 30m | D1, D3, D4, D5 | adrs/epic-23-bionic-tech-debt/ | — |
+| T20 | 8 | integrate | Wake Note, then attended no-ff merge to main; writer worktrees and the wave worktree removed; tmp ephemera wiped | T19 | 20m | all | none | — |
+| T22 | 4 | build | 1g: fix the doctor/setup agreement on the `motion` row so DS.2a/2c/9/11 pass on this machine; honour the 2026-08-22 ruling | T1 | 60m | REQ-1g | payload/scripts/lib/deps.sh, payload/scripts/doctor.sh, payload/scripts/setup.sh, tests/cross-gate-agreement.test.sh | — |
+| T21 | 9 | close | Close-out report with dispositions; continuation.md; archive_run; Patrol CronDelete + disarm | T20 | 30m | all | record/wave-11-lean-spine/closeout-report.md | — |
 TASKS_TABLE_EOF
 
-# live.md — the specimen in the shape a plan actually presents it: frontmatter, the SDLC
-# state section, the table under its own heading, and a following `## Verification Matrix`
-# that the reader must stop at.
+# live.md — the specimen in the shape a page at 15 presents it: its header with the version
+# line, the table under its own heading, and a following `## Verification Matrix` that the
+# reader must stop at.
 {
-  printf -- '---\ncurrent: 4\nwave: wave-11-lean-spine\n---\n\n'
-  printf -- '## SDLC State\n\n- Step 4: in flight\n\n'
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n\n'
   printf -- '## Tasks\n\n'
   cat "$SANDBOX/tasks-table.md"
   printf -- '\nParallel width: 15 writers budgeted.\n\n'
@@ -161,7 +151,7 @@ reverse_cells() {
 }
 reverse_cells "$SANDBOX/tasks-table.md" > "$SANDBOX/tasks-table-reversed.md"
 {
-  printf -- '---\ncurrent: 4\n---\n\n## Tasks\n\n'
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n'
   cat "$SANDBOX/tasks-table-reversed.md"
   printf -- '\n## Verification Matrix\n'
 } > "$SANDBOX/reordered.md"
@@ -172,55 +162,37 @@ reverse_cells "$SANDBOX/tasks-table.md" > "$SANDBOX/tasks-table-reversed.md"
 # literal below is the retired word, kept on purpose: this fixture is what proves the
 # reader refuses it.  # retired: slice
 {
-  printf -- '---\ncurrent: 4\n---\n\n'
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n\n'
   printf -- '## Slices (machine-readable)\n\n'  # retired: slice
   printf -- '| id | deps | complexity | status |\n|---|---|---|---|\n'
   printf -- '| S1 | — | complex | landed |\n| S2 | S1 | standard | pending |\n\n'
   printf -- '## Tasks\n\n'
   cat "$SANDBOX/tasks-table.md"
   printf -- '\n## Notes\n\nThe schema, for a reader:\n\n```\n'
-  printf -- '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
-  printf -- '|---|---|---|---|---|---|---|---|---|---|\n'
-  printf -- '| T99 | 4 | build | example row | implementor | — | 1m | none | none | pending |\n'
+  printf -- '| id | step | kind | task | deps | size | serves | Files | artifact |\n'
+  printf -- '|---|---|---|---|---|---|---|---|---|\n'
+  printf -- '| T99 | 4 | build | example row | — | 1m | none | none | — |\n'
   printf -- '```\n'
 } > "$SANDBOX/decoys.md"
 
-# ready-a.md — one step, one blocked row. T2 landed; T4 depends on T3, which is pending.
-cat > "$SANDBOX/ready-a.md" <<'READY_A_EOF'
----
-current: 4
----
+# ready-a — one step, one blocked row, a page at 15 with the plan's approval in its log. T2 landed; T4 depends on T3,
+# which is pending.
+R4A="$(plan_fixture --current 4 "$SANDBOX/ready/plans/e/ready-a.plan.md" task \
+  '| T1 | 3 | doc | plan written | orchestrator | — | — | 30m | all | plan | — | — | landed |' \
+  '| T2 | 4 | build | already landed | implementor | T1 | — | 15m | REQ-x | a.sh | — | — | landed |' \
+  '| T3 | 4 | build | free to go | implementor | T1 | — | 15m | REQ-x | b.sh | — | — | pending |' \
+  '| T4 | 4 | build | blocked behind T3 | implementor | T3 | — | 15m | REQ-x | c.sh | — | — | pending |' \
+  '| T5 | 4 | build | free to go | implementor | T2 | — | 15m | REQ-x | d.sh | — | — | pending |')"
 
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 3 | doc | plan written | orchestrator | — | 30m | all | plan | landed |
-| T2 | 4 | build | already landed | implementor | T1 | 15m | REQ-x | a.sh | landed |
-| T3 | 4 | build | free to go | implementor | T1 | 15m | REQ-x | b.sh | pending |
-| T4 | 4 | build | blocked behind T3 | implementor | T3 | 15m | REQ-x | c.sh | pending |
-| T5 | 4 | build | free to go | implementor | T2 | 15m | REQ-x | d.sh | pending |
-READY_A_EOF
-
-# ready-b.md — every Step-4 row landed, three Step-5 rows, written OUT OF ID ORDER so that
-# "table order" is a different answer from "sorted by id". T6 names a dependency the table
-# does not carry.
-cat > "$SANDBOX/ready-b.md" <<'READY_B_EOF'
----
-current: 5
----
-
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 3 | doc | plan written | orchestrator | — | 30m | all | plan | landed |
-| T2 | 4 | build | landed | implementor | T1 | 15m | REQ-x | a.sh | landed |
-| T3 | 4 | build | landed | implementor | T1 | 15m | REQ-x | b.sh | landed |
-| T7 | 5 | verify | the walk | researcher | T2, T3 | 30m | all | walk.md | pending |
-| T6 | 5 | verify | names a dep nobody defines | researcher | T2, T3, T9 | 30m | all | x.md | pending |
-| T5 | 5 | test | the floor | test-runner | T2, T3 | 40m | all | floor.md | pending |
-READY_B_EOF
+# ready-b — every Step-4 row landed, three Step-5 rows, written OUT OF ID ORDER so that "table order" is a different
+# answer from "sorted by id". T6 names a dependency the table does not carry.
+R4B="$(plan_fixture --current 5 "$SANDBOX/ready/plans/e/ready-b.plan.md" task \
+  '| T1 | 3 | doc | plan written | orchestrator | — | — | 30m | all | plan | — | — | landed |' \
+  '| T2 | 4 | build | landed | implementor | T1 | — | 15m | REQ-x | a.sh | — | — | landed |' \
+  '| T3 | 4 | build | landed | implementor | T1 | — | 15m | REQ-x | b.sh | — | — | landed |' \
+  '| T7 | 5 | verify | the walk | researcher | T2, T3 | — | 30m | all | walk.md | — | — | pending |' \
+  '| T6 | 5 | verify | names a dep nobody defines | researcher | T2, T3, T9 | — | 30m | all | x.md | — | — | pending |' \
+  '| T5 | 5 | test | the floor | test-runner | T2, T3 | — | 40m | all | floor.md | — | — | pending |')"
 
 # broken.md — one row per invariant, each breaking exactly one. T7 is a Step-6 row whose
 # transitive closure is {T1}, so it reaches no other Step-4 row.
@@ -238,32 +210,29 @@ current: 4
 | X1 | 4 | build | an id of the wrong shape | implementor | — | 15m | REQ-x | c.sh | pending |
 | T3 | 2 | build | a step below the range | implementor | — | 15m | REQ-x | d.sh | pending |
 | T4 | 4 | slice | the retired word as a kind | implementor | — | 15m | REQ-x | e.sh | pending |  # retired: slice
-| T5 | 4 | build | a status nobody defines | implementor | — | 15m | REQ-x | f.sh | done |
 | T6 | 4 | build | a dep naming no row | implementor | T99 | 15m | REQ-x | g.sh | pending |
 | T7 | 6 | review | reaches only T1 | critic | T1 | 15m | REQ-x | h.sh | pending |
 BROKEN_EOF
 
-# missing-column.md — the ten-column schema with `step` deleted. AC-1e.5's third case.
+# missing-column.md — a page at 15 whose nine-cell schema has `step` deleted. AC-1e.5's third case.
 cat > "$SANDBOX/missing-column.md" <<'MISSING_EOF'
 ---
-current: 4
+canonical_sdlc_version: 15
 ---
 
 ## Tasks
 
-| id | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|
-| T1 | build | no step column anywhere | implementor | — | 15m | REQ-x | a.sh | pending |
+| id | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|
+| T1 | build | no step column anywhere | — | 15m | REQ-x | a.sh | — |
 MISSING_EOF
 
-# no-table.md — a plan with no `## Tasks` at all.
-printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\n- Step 4: in flight\n' > "$SANDBOX/no-table.md"
+# no-table.md — a page at 15 with no `## Tasks` at all.
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Notes\n\n- Step 4: in flight\n' > "$SANDBOX/no-table.md"
 
 ROWS_LIVE="$(call units_rows "$SANDBOX/live.md")"
 
-# ============================================================
 section "1 — units_rows: the live table, thirteen fields per row, in the fixed order"
-# ============================================================
 
 expect_eq "the live specimen yields one line per data row (22)" "22" "$(nlines "$ROWS_LIVE")"
 
@@ -277,15 +246,8 @@ expect_eq "every line carries exactly thirteen tab-separated fields" "22" \
 
 # THE FIRST ROW, WHOLE. Written out by hand from the plan, which is the point: a row asserted
 # against a value the reader itself produced would pass on any consistent misreading.
-
-# THE COLLISION measure §4.3 names, asserted field by field. In the shipped five-column
-# table `$6` was the status; here it is the agent, and a positional reader reads
-# `implementor` as a status and refuses the row.
 T2_LINE="$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' '$1 == "T2"')"
-expect_eq "T2 field 5 is the agent, not the status" "orchestrator" \
-  "$(printf '%s\n' "$T2_LINE" | cut -f5)"
 expect_eq "T2 field 6 is deps"   "T1"     "$(printf '%s\n' "$T2_LINE" | cut -f6)"
-expect_eq "T2 field 10 is status" "landed" "$(printf '%s\n' "$T2_LINE" | cut -f10)"
 expect_eq "T2 field 2 is the step" "4"     "$(printf '%s\n' "$T2_LINE" | cut -f2)"
 expect_eq "T2 field 3 is the kind" "build" "$(printf '%s\n' "$T2_LINE" | cut -f3)"
 
@@ -298,9 +260,6 @@ expect_contains "T2 field 9 is the Files cell, matched case-insensitively on the
 expect_eq "T13's deps cell comes through unsplit" "T2, T4, T5, T6, T8, T12, T22" \
   "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' '$1 == "T13"' | cut -f6)"
 
-expect_eq "T7's status is read from the last column" "active" \
-  "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' '$1 == "T7"' | cut -f10)"
-
 # TABLE ORDER, NOT ID ORDER. The live plan carries T22 before T21; a reader that sorted
 # would answer the dispatch question in an order the orchestrator did not choose.
 expect_eq "rows come out in TABLE order — T22 is 21st and T21 is 22nd" "T22 T21" \
@@ -310,9 +269,7 @@ expect_eq "rows come out in TABLE order — T22 is 21st and T21 is 22nd" "T22 T2
 expect_eq "no separator or prose line is emitted as a row" "" \
   "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' '$1 ~ /^[-: ]*$/ || $1 ~ /Parallel/')"
 
-# ============================================================
 section "2 — units_rows is keyed on header NAMES: reversed columns, identical output (AC-1e.2)"
-# ============================================================
 
 # THE FIXTURE REALLY IS REORDERED — the positive control, without which the equality below
 # would pass just as loudly on two copies of the same file.
@@ -328,52 +285,41 @@ expect_eq "reversing every column changes not one byte of the TSV" "$ROWS_LIVE" 
 #
 # THE ALIAS IS GONE WITH ITS READER. Slot 3 answered to `rigor` too (A-39) so the evidence
 # gate's `validate_task_ledger` could read the retired five-column task ledger's rigor cell
-# through this library. One ledger shape deleted that reader and that table: a task-scale plan
-# carries the one `## Tasks` table, whose slot 3 is `kind`. The retired table below still parses
-# by its header — its id and status read by name — and its `rigor` column now reaches no slot.
-cat > "$SANDBOX/task-scale-ledger.md" <<'TASK_SCALE_EOF'
+# through this library. One ledger shape deleted that reader and that table: every plan
+# carries the one `## Tasks` table, whose slot 3 is `kind`. The page below is that table's nine
+# cells, its fields taken by name, and `rigor` is a name the contract no longer answers to.
+cat > "$SANDBOX/kind-slot.md" <<'KIND_SLOT_EOF'
 ---
-scale: task
-current: T2
+canonical_sdlc_version: 15
 ---
 
 ## Tasks
 
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | single | fix the frontmatter parser | done |
-| T2 | refactor | double | extract the ledger helper | active |
-| T3 | refactor |  | inherits the frontmatter rigor | pending |
-TASK_SCALE_EOF
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | fix the frontmatter parser | — | 30m | REQ-1 | a.sh | — |
+| T2 | 4 | test | extract the ledger helper | T1 | 30m | REQ-1 | b.sh | — |
+| T3 | 4 | build | two empty cells |  |  | REQ-1 | c.sh | — |
+KIND_SLOT_EOF
 
-ROWS_TASK_SCALE="$(call units_rows "$SANDBOX/task-scale-ledger.md")"
-expect_eq "the five-column task-scale ledger yields its three rows" "3" "$(nlines "$ROWS_TASK_SCALE")"
-expect_eq "…id from slot 1 and status from slot 10, by header name" \
-  "T1 done
-T2 active
-T3 pending" \
-  "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ print $1, $10 }')"
-expect_eq "…and its rigor column reaches no slot: slot 3 reads empty on every row" \
-  "[][][]" \
-  "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ printf "[%s]", $3 }')"
-expect_eq "units_field takes the row's id and status by name" "T2 active" \
+ROWS_KIND="$(call units_rows "$SANDBOX/kind-slot.md")"
+expect_eq "the nine-cell page yields its three rows" "3" "$(nlines "$ROWS_KIND")"
+expect_eq "units_field takes the row's id and kind by name" "T2 test" \
   "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
      row="$(units_rows "$2" | sed -n 2p)"
-     printf "%s %s" "$(units_field "$row" id)" "$(units_field "$row" status)"' \
-     _ "$LIB" "$SANDBOX/task-scale-ledger.md")"
+     printf "%s %s" "$(units_field "$row" id)" "$(units_field "$row" kind)"' \
+     _ "$LIB" "$SANDBOX/kind-slot.md")"
 expect_eq "…and refuses rigor, a name the contract no longer carries (rc 1)" "1" \
   "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
      row="$(units_rows "$2" | sed -n 2p)"
      units_field "$row" rigor >/dev/null; echo $?' \
-     _ "$LIB" "$SANDBOX/task-scale-ledger.md")"
+     _ "$LIB" "$SANDBOX/kind-slot.md")"
 expect_eq "…and refuses a column name the contract does not carry" "1" \
   "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_field "x" intent' _ "$LIB" >/dev/null 2>&1; echo $?)"
-expect_eq "an empty cell reads empty, not as the cell after it" "" \
-  "$(printf '%s\n' "$ROWS_TASK_SCALE" | sed -n 3p | awk -F'\t' '{ print $3 }')"
+expect_eq "an empty cell reads empty, not as the cell after it: T3's deps and size, then its serves" "[][][REQ-1]" \
+  "$(printf '%s\n' "$ROWS_KIND" | sed -n 3p | awk -F'\t' '{ printf "[%s][%s][%s]", $6, $7, $8 }')"
 
-# ============================================================
 section "3 — units_rows reads the ## Tasks section and nothing else"
-# ============================================================
 
 ROWS_DECOYS="$(call units_rows "$SANDBOX/decoys.md")"
 expect_eq "…over 22 real rows, not two empty strings" "22" "$(nlines "$ROWS_DECOYS")"
@@ -388,58 +334,54 @@ expect_eq "a plan with no ## Tasks section yields no rows" "" \
 expect_eq "…and says so with a non-zero status" "1" "$(call_rc units_rows "$SANDBOX/no-table.md")"
 expect_eq "a plan that has the table exits 0" "0" "$(call_rc units_rows "$SANDBOX/live.md")"
 
-# ============================================================
 section "4 — units_ready: pending and every dep landed; the step is a label (wave-20 Δ1)"
-# ============================================================
 #
-# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, ADR-036). Through 1.8.6 the step argument FILTERED: a
-# row was ready only at its own step. Readiness is now the prerequisite graph — a work row is
+# Readiness is the prerequisite graph — a work row is
 # ready when it is pending and every prerequisite has landed, whatever its step — so the
 # argument no longer filters a work row. It still decides the gate-act rows (§17).
 
 expect_eq "step 4: a row whose dep is still pending is not ready, and its siblings are" \
-  "$(printf 'T3\nT5')" "$(call units_ready "$SANDBOX/ready-a.md" 4)"
+  "$(printf 'T3\nT5')" "$(call units_ready "$R4A" 4)"
 expect_eq "…so T4, blocked behind pending T3, is absent" "" \
-  "$(call units_ready "$SANDBOX/ready-a.md" 4 | grep -x T4)"
+  "$(call units_ready "$R4A" 4 | grep -x T4)"
 expect_eq "…and T2, already landed, is not offered again" "" \
-  "$(call units_ready "$SANDBOX/ready-a.md" 4 | grep -x T2)"
+  "$(call units_ready "$R4A" 4 | grep -x T2)"
 expect_eq "…and asked at step 3 the same rows are ready: the argument is not a filter (Δ1)" \
-  "$(printf 'T3\nT5')" "$(call units_ready "$SANDBOX/ready-a.md" 3)"
+  "$(printf 'T3\nT5')" "$(call units_ready "$R4A" 3)"
 
 expect_eq "step 5 with every Step-4 row landed: the ready rows, in TABLE order" \
-  "$(printf 'T7\nT5')" "$(call units_ready "$SANDBOX/ready-b.md" 5)"
+  "$(printf 'T7\nT5')" "$(call units_ready "$R4B" 5)"
 expect_eq "…a dep naming an id the table does not carry is never ready" "" \
-  "$(call units_ready "$SANDBOX/ready-b.md" 5 | grep -x T6)"
+  "$(call units_ready "$R4B" 5 | grep -x T6)"
 expect_eq "…asked at step 4 the Step-5 rows are still ready: their deps landed (Δ1)" \
-  "$(printf 'T7\nT5')" "$(call units_ready "$SANDBOX/ready-b.md" 4)"
+  "$(printf 'T7\nT5')" "$(call units_ready "$R4B" 4)"
 expect_eq "…and at step 9 too: no work row waits for the run to reach its step" \
-  "$(printf 'T7\nT5')" "$(call units_ready "$SANDBOX/ready-b.md" 9)"
+  "$(printf 'T7\nT5')" "$(call units_ready "$R4B" 9)"
 
 # A `—` deps cell names no dependency; so do `-` and an empty cell.
-cat > "$SANDBOX/ready-dashes.md" <<'DASH_EOF'
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | em dash | implementor | — | 1m | x | a | pending |
-| T2 | 4 | build | hyphen | implementor | - | 1m | x | b | pending |
-| T3 | 4 | build | empty |  implementor |  | 1m | x | c | pending |
-DASH_EOF
+R4D="$(plan_fixture --current 4 "$SANDBOX/ready/plans/e/ready-dashes.plan.md" task \
+  '| T1 | 4 | build | em dash | implementor | — | — | 1m | x | a | — | — | pending |' \
+  '| T2 | 4 | build | hyphen | implementor | - | — | 1m | x | b | — | — | pending |' \
+  '| T3 | 4 | build | empty | implementor |  | — | 1m | x | c | — | — | pending |')"
 expect_eq "an em dash, a hyphen and an empty cell all mean no dependency" \
-  "$(printf 'T1\nT2\nT3')" "$(call units_ready "$SANDBOX/ready-dashes.md" 4)"
+  "$(printf 'T1\nT2\nT3')" "$(call units_ready "$R4D" 4)"
+# A GATE ACT WAITS FOR ITS STEP: the close row, its dep landed, is held below step 9 and ready at it.
+R4G="$(plan_fixture --current 4 "$SANDBOX/ready/plans/e/ready-gate.plan.md" task \
+  '| T1 | 4 | build | landed | implementor | — | — | 15m | REQ-x | a.sh | — | — | landed |' \
+  '| T20 | 9 | close | the close | orchestrator | T1 | — | 15m | REQ-x | .bionic/docs/record/e/T20.md | — | — | pending |')"
+expect_eq "a gate act whose deps landed is held for its step at Step 4 and ready at Step 9" \
+  "T20: step 9 close row waits for current: 9||T20" "$(call units_held "$R4G" 4)|$(call units_ready "$R4G" 4)|$(call units_ready "$R4G" 9)"
 
-# ============================================================
 section "6 — units_validate: one line per broken invariant, naming the id and the rule"
-# ============================================================
 
 VAL_BAD="$(call units_validate "$SANDBOX/broken.md")"
 
-# SIX INVARIANTS ARE BROKEN, one row each. T7, a Step-6 row reaching only T1, used to be the
+# FIVE INVARIANTS ARE BROKEN, one row each. T7, a Step-6 row reaching only T1, used to be the
 # seventh — "every Step-5+ row depends transitively on every Step-4 row" — and that rule is
 # gone (wave-26 T2, D2): a row waits for what it reads, never for every build row. So every
-# line names one of the six offending rows, and T7 draws none.
-expect_eq "every violation line names one of the six offending rows" "" \
-  "$(printf '%s\n' "$VAL_BAD" | grep -vE '^(T1|X1|T3|T4|T5|T6): ')"
+# line names one of the five offending rows, and T7 draws none.
+expect_eq "every violation line names one of the five offending rows" "" \
+  "$(printf '%s\n' "$VAL_BAD" | grep -vE '^(T1|X1|T3|T4|T6): ')"
 expect_eq "…and exits 1" "1" "$(call_rc units_validate "$SANDBOX/broken.md")"
 
 expect_contains "an id used twice is named once, as a duplicate" \
@@ -457,9 +399,7 @@ expect_eq "a Step-6 row that reaches one Step-4 row of five draws no violation" 
 expect_eq "the one well-formed row draws no violation of its own" "0" \
   "$(printf '%s\n' "$VAL_BAD" | grep -c '^T1: [^d]' | tr -d ' ')"
 
-# ============================================================
 section "7 — units_validate: a missing column is a violation of the table, not of a row"
-# ============================================================
 
 VAL_MISSING="$(call units_validate "$SANDBOX/missing-column.md")"
 expect_contains "a schema with no step column is refused, naming the column" \
@@ -469,293 +409,7 @@ expect_eq "a plan with no ## Tasks section at all is refused" "1" \
   "$(call_rc units_validate "$SANDBOX/no-table.md")"
 expect_contains "…naming the absent section" "## Tasks" "$(call units_validate "$SANDBOX/no-table.md")"
 
-# ============================================================
-section "8 — the differential: the OLD FILL derivation and units_ready answer the same"
-# ============================================================
-#
-# WHAT THIS PROVES, and why a refactor needs it. REQ-1e deleted `slice_table` and
-# `slice_ready` from hooks/session-poker.sh and pointed the tick at `units_ready`. A
-# refactor that changes the answer is not a refactor, and "the suite is still green" does
-# not say that: the suite's own FILL fixtures were migrated in the same commit. So the OLD
-# derivation is kept HERE, lifted byte-for-byte out of hooks/session-poker.sh at 1f48673
-# (`git show 1f48673:hooks/session-poker.sh`), and run beside the new one over the same
-# tables. A diff of the two answers is the claim.
-#
-# TWO SPECIMENS, for the two things that could have moved:
-#   - THE 1.4.0 SPECIMEN (tests/fixtures/migration/wave-1.4.0-slices.md, the retired
-#     four-column shape) against a ten-column twin carrying the same ids, deps and
-#     statuses. This is the MIGRATION claim: the same schedule, written the new way,
-#     dispatches the same batch.
-#   - THIS WAVE'S OWN TEN-COLUMN TABLE. Here the two readers are asked DIFFERENT
-#     questions on purpose — the old one has no step to scope by — so the identity is
-#     between the old answer and the UNION of `units_ready` over Steps 3-9. That union is
-#     the whole of what the old reader could say; the per-step split is what REQ-1e added.
-#
-# NOT VACUOUS. The 1.4.0 specimen lands every row, so its final state has an EMPTY ready
-# set and "both agree" would be true of two broken readers. The configurations below
-# rewind it: config k is the first k ids `landed` and the rest `pending`, which walks the
-# plan back along its own timeline, and the run asserts that at least one configuration
-# produced a non-empty answer before it believes any of the equalities.
-
-# The OLD derivation, VERBATIM. Do not repair, reformat or improve anything between the
-# markers: its value is that it is the code that shipped, and an edit here would turn the
-# differential into a comparison of two things this wave wrote.
-cat > "$SANDBOX/old-fill.sh" <<'OLD_FILL_EOF'
-# --- lifted verbatim from hooks/session-poker.sh at 1f48673 ---
-normalize_newlines() {
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
-}
-
-slice_table() {  # <plan> -> id<TAB>deps<TAB>status, one per row
-  normalize_newlines "$1" 2>/dev/null | awk '
-    function trim(v) { sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); return v }
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    !intable {
-      if ($0 !~ /^[[:space:]]*\|/) next
-      n = split($0, c, "|")
-      idc = 0; depc = 0; stc = 0
-      for (i = 1; i <= n; i++) {
-        t = trim(c[i])
-        if (t == "id") idc = i
-        else if (t == "deps") depc = i
-        else if (t == "status") stc = i
-      }
-      if (idc && depc && stc) intable = 1
-      next
-    }
-    {
-      if ($0 !~ /^[[:space:]]*\|/) exit
-      n = split($0, c, "|")
-      id = trim(c[idc])
-      # The |---|---| separator row, and any row whose id cell is empty or punctuation.
-      if (id == "" || id ~ /^[-: ]+$/) next
-      printf "%s\t%s\t%s\n", id, trim(c[depc]), trim(c[stc])
-    }'
-}
-
-slice_ready() {  # <table> -> the ready ids, one per line, in table order
-  # ONE PASS TO REMEMBER, one to decide, over the same stream: a dependency may be named
-  # before or after the row that depends on it, so nothing can be answered until the whole
-  # table has been read. Table order is preserved by indexing on NR.
-  printf '%s\n' "$1" | awk -F'\t' '
-    $1 == "" { next }
-    { n = n + 1; id[n] = $1; dep[n] = $2; st[$1] = $3 }
-    END {
-      for (i = 1; i <= n; i++) {
-        if (st[id[i]] != "pending") continue
-        deps = dep[i]
-        gsub(/[[:space:]]/, "", deps)
-        # A cell with no alphanumeric character names no dependency: the empty cell, the
-        # hyphen and the em dash the plan actually uses are all spelled this one way, and
-        # matching the dash byte-for-byte would put a Unicode literal in a bash 3.2 awk
-        # program for no gain.
-        if (deps !~ /[A-Za-z0-9]/) { print id[i]; continue }
-        m = split(deps, d, ",")
-        ready = 1
-        for (j = 1; j <= m; j++) {
-          if (d[j] == "" || d[j] !~ /[A-Za-z0-9]/) continue
-          if (st[d[j]] != "landed") { ready = 0; break }
-        }
-        if (ready) print id[i]
-      }
-    }'
-}
-# --- end of the lifted text ---
-OLD_FILL_EOF
-
-# old_ready <plan file> -> the ids the RETIRED derivation would have filled, one per line.
-old_ready() {
-  bash -c '. "$1" >/dev/null 2>&1 || exit 127; slice_ready "$(slice_table "$2")"' \
-    _ "$SANDBOX/old-fill.sh" "$1"
-}
-
-# new_ready <plan file> <step> -> the same question asked of the shipped library.
-new_ready() { call units_ready "$1" "$2"; }
-
-# sorted <string> -> the set, one per line, in a canonical order. The two readers are
-# required to agree on WHICH ids, and both already preserve table order; sorting here keeps
-# a future ordering change from reading as a membership difference.
-sorted() { [ -z "$1" ] && return 0; printf '%s\n' "$1" | sort; }
-
-# ---------- specimen A: the 1.4.0 schedule, old shape and new ----------
-
-DIFF_IDS="$(awk -F'|' '/^\| [A-Z]/ { gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2 }' \
-  "$REPO_ROOT/tests/fixtures/migration/wave-1.4.0-slices.md")"
-DIFF_DEPS_OF() {  # <id> -> that row's deps cell, verbatim
-  awk -F'|' -v want="$1" '
-    /^\| [A-Z]/ {
-      id = $2; gsub(/^[ \t]+|[ \t]+$/, "", id)
-      if (id == want) { d = $3; gsub(/^[ \t]+|[ \t]+$/, "", d); print d; exit }
-    }' "$REPO_ROOT/tests/fixtures/migration/wave-1.4.0-slices.md"
-}
-
-# write_pair <k> — the first k ids landed, the rest pending, written twice: once in the
-# retired four-column shape the old reader was built for, once in the ten-column schema.
-write_pair() {
-  local k="$1" i=0 id deps st
-  {
-    printf -- '## Slices\n\n| id | deps | complexity | status |\n|---|---|---|---|\n'  # retired: slice
-    i=0
-    while IFS= read -r id; do
-      [ -n "$id" ] || continue
-      i=$((i + 1)); st=pending; [ "$i" -le "$k" ] && st=landed
-      printf -- '| %s | %s | complex | %s |\n' "$id" "$(DIFF_DEPS_OF "$id")" "$st"
-    done <<DIFF_IDS_EOF
-$DIFF_IDS
-DIFF_IDS_EOF
-  } > "$SANDBOX/diff-old-$k.md"
-  {
-    printf -- '---\ncurrent: 4\n---\n\n## Tasks\n\n'
-    printf -- '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
-    printf -- '|---|---|---|---|---|---|---|---|---|---|\n'
-    i=0
-    while IFS= read -r id; do
-      [ -n "$id" ] || continue
-      i=$((i + 1)); st=pending; [ "$i" -le "$k" ] && st=landed
-      printf -- '| %s | 4 | build | a row | implementor | %s | 15m | REQ-x | a.sh | %s |\n' \
-        "$id" "$(DIFF_DEPS_OF "$id")" "$st"
-    done <<DIFF_IDS_EOF2
-$DIFF_IDS
-DIFF_IDS_EOF2
-  } > "$SANDBOX/diff-new-$k.md"
-}
-
-DIFF_MISMATCH=""
-DIFF_NONEMPTY=0
-DIFF_K=0
-while [ "$DIFF_K" -le 19 ]; do
-  write_pair "$DIFF_K"
-  DIFF_A="$(sorted "$(old_ready "$SANDBOX/diff-old-$DIFF_K.md")")"
-  DIFF_B="$(sorted "$(new_ready "$SANDBOX/diff-new-$DIFF_K.md" 4)")"
-  [ -n "$DIFF_A" ] && DIFF_NONEMPTY=$((DIFF_NONEMPTY + 1))
-  if [ "$DIFF_A" != "$DIFF_B" ]; then
-    DIFF_MISMATCH="${DIFF_MISMATCH}config ${DIFF_K}: old=[${DIFF_A}] new=[${DIFF_B}]
-"
-  fi
-  DIFF_K=$((DIFF_K + 1))
-done
-
-expect_eq "twenty configurations of the 1.4.0 schedule: the two readers never disagree" \
-  "" "$DIFF_MISMATCH"
-expect_eq "…and the comparison had something to compare (configurations with a ready row)" \
-  "yes" "$([ "$DIFF_NONEMPTY" -ge 10 ] && echo yes || echo no)"
-
-# THE POWER CHECK the equality above needs. Two readers that both answered nothing would
-# satisfy it. Doctor ONE cell of one configuration — a dependency that has not landed — and
-# the old reader's answer must change; that is the comparison having teeth.
-write_pair 6
-DIFF_BASE="$(sorted "$(old_ready "$SANDBOX/diff-old-6.md")")"
-expect_contains "config 6 has ADOPT ready — every one of its five dependencies has landed" \
-  "ADOPT" "$DIFF_BASE"
-# Rewind ONE of those five. ADOPT must leave the answer, and nothing else may move.
-sed 's/^| L-ROOT | — | complex | landed |$/| L-ROOT | — | complex | pending |/' \
-  "$SANDBOX/diff-old-6.md" > "$SANDBOX/diff-old-6-doctored.md"
-sed 's/^| L-ROOT | 4 | build | a row | implementor | — | 15m | REQ-x | a.sh | landed |$/| L-ROOT | 4 | build | a row | implementor | — | 15m | REQ-x | a.sh | pending |/' \
-  "$SANDBOX/diff-new-6.md" > "$SANDBOX/diff-new-6-doctored.md"
-DIFF_DOC_OLD="$(sorted "$(old_ready "$SANDBOX/diff-old-6-doctored.md")")"
-expect_eq "an unlanded dependency drops ADOPT from the OLD answer, so the equality is not vacuous" \
-  "no" "$([ "$DIFF_BASE" = "$DIFF_DOC_OLD" ] && echo yes || echo no)"
-expect_absent "…ADOPT is the row that left" "ADOPT" "$DIFF_DOC_OLD"
-expect_eq "…and the shipped library moved with it, not against it" \
-  "$DIFF_DOC_OLD" "$(sorted "$(new_ready "$SANDBOX/diff-new-6-doctored.md" 4)")"
-
-# ---------- specimen B: this wave's own ten-column table ----------
-#
-# The old reader takes `id`, `deps` and `status` off this table by header NAME and ignores
-# every other column, `step` included — so its answer is the union of what `units_ready`
-# says at each step, and nothing else.
-# wave_at <pending id>... — this wave's table VERBATIM, with the named ids `pending` and
-# every other row `landed`. Only the status cell moves; the ten columns, the ids, the deps
-# and the step cells are the plan's own. The snapshot's own statuses leave nothing ready
-# (the rows behind the pending ones are `active`), and a differential between two empty
-# answers measures nothing — so the schedule is driven to states that have work in them.
-wave_at() {
-  local want=" $* "
-  {
-    printf -- '---\ncurrent: 4\n---\n\n## Tasks\n\n'
-    awk -F'|' -v want="$want" '
-      function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
-      /^\|[ \t]*T[0-9]+[ \t]*\|/ {
-        id = trim($2)
-        st = (index(want, " " id " ") > 0) ? "pending" : "landed"
-        sub(/\|[^|]*\|$/, "| " st " |")
-        print
-        next
-      }
-      { print }
-    ' "$SANDBOX/tasks-table.md"
-  } > "$SANDBOX/diff-wave.md"
-}
-
-# union_ready — units_ready asked once per step, 3 through 9, folded into one set. That is
-# the whole of what the old reader could ever have said about this table, since it has no
-# step to scope by.
-union_ready() {
-  local u="" st
-  for st in 3 4 5 6 7 8 9; do
-    u="${u}$(new_ready "$SANDBOX/diff-wave.md" "$st")
-"
-  done
-  # `sort -u`, NOT `sort` (wave-20 Δ1): the per-step answers were disjoint while the step
-  # filtered, and now a work row is ready at every step, so the union is a set of repeats.
-  printf '%s' "$u" | grep -v '^$' | sort -u || true
-}
-
-# Three states of the wave's own schedule: one with work at a single step, one with work at
-# two steps at once (which is where the old reader and a per-step reader must differ), and
-# the snapshot's own all-but-one state.
-WAVE_MISMATCH=""
-WAVE_STATES="T10 T13 T14|T10|T13 T17"
-OLD_IFS="$IFS"; IFS='|'
-for WAVE_STATE in $WAVE_STATES; do
-  IFS="$OLD_IFS"
-  wave_at $WAVE_STATE
-  WAVE_UNION="$(union_ready)"
-  WAVE_OLD="$(sorted "$(old_ready "$SANDBOX/diff-wave.md")")"
-  if [ "$WAVE_OLD" != "$WAVE_UNION" ]; then
-    WAVE_MISMATCH="${WAVE_MISMATCH}pending=[${WAVE_STATE}] old=[${WAVE_OLD}] union=[${WAVE_UNION}]
-"
-  fi
-  IFS='|'
-done
-IFS="$OLD_IFS"
-
-expect_eq "on this wave's own table the old answer is the union of units_ready over Steps 3-9" \
-  "" "$WAVE_MISMATCH"
-
-# NOT VACUOUS, and then THE ONE PLACE THEY MUST DIFFER — the reason REQ-1e made the change.
-# With a Step-4 row and a Step-5 row both ready, the old reader names both; asked about one
-# step, the new reader names only that step's.
-wave_at T10 T13 T14
-WAVE_UNION="$(union_ready)"
-WAVE_OLD="$(sorted "$(old_ready "$SANDBOX/diff-wave.md")")"
-expect_eq "…with T10 (step 4), T13 and T14 (step 5) all ready at once" \
-  "T10
-T13
-T14" "$WAVE_UNION"
-# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, Δ6; ADR-036). Through 1.8.6 the per-step split was the
-# point of this row: asked about Step 4, units_ready named only T10. Readiness is now the
-# prerequisite graph, so for WORK rows the answer at any step IS the old whole-table answer.
-expect_eq "asked at Step 4, units_ready names every work row whose deps landed, whatever its step (Δ1)" \
-  "T10
-T13
-T14" "$(sorted "$(new_ready "$SANDBOX/diff-wave.md" 4)")"
-expect_eq "…which is exactly the old whole-table reader's answer" \
-  "$WAVE_OLD" "$(sorted "$(new_ready "$SANDBOX/diff-wave.md" 4)")"
-# THE ONE PLACE THEY STILL DIFFER (Δ6): a gate act. T20 is the Step-8 `integrate` row; its
-# real prerequisite is a gate passing, so it waits for `current:` to reach Step 8 even when
-# its deps have landed. The old reader, which had no step, would have named it at Step 4.
-wave_at T20
-expect_contains "the old reader names the Step-8 integrate row whose deps landed" "T20" \
-  "$(old_ready "$SANDBOX/diff-wave.md")"
-expect_absent "…units_ready at Step 4 does not: a gate act waits for its step (Δ6)" "T20" \
-  "$(new_ready "$SANDBOX/diff-wave.md" 4)"
-expect_eq "…and at Step 8 it does" "T20" "$(new_ready "$SANDBOX/diff-wave.md" 8)"
-
-# ============================================================
 section "9 — a markdown-escaped pipe in a cell (the critic's Issue 1)"
-# ============================================================
 #
 # `\|` IS THE ONE ESCAPE A GFM TABLE CELL DEFINES, and it is a raw `|` to `split()`. A
 # reader that splits the record as written opens an extra field at the escape and reads
@@ -768,21 +422,21 @@ section "9 — a markdown-escaped pipe in a cell (the critic's Issue 1)"
 # are correct. The docblock's old claim — "a cell never contains a literal `|`, so there
 # is no escaping to undo" — was true of the RAW byte and false of the table.
 #
-# TWO FIXTURES, and the second is the critic's own control. A purpose-built table isolates
-# the shift; the derived one puts the live plan's actual row back and asks the scheduler
-# the question the wave asked it.
+# TWO FIXTURES, and the second is the critic's own control. A purpose-built page at 15 isolates
+# the shift, with escapes in a task cell and in a Files cell after one; the derived one puts the
+# live plan's actual row back and asks the validator of it.
+#
+# The purpose-built page holds its approval and both landings in its log, beside the same page with the escapes spent.
+ES15="$SANDBOX/esc/plans/e/esc.plan.md"; mkdir -p "${ES15%/*}" "$SANDBOX/esc/record/esc" "$SANDBOX/esc/record/esc-control"
+{ printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '%s\n' '| T1 | 4 | build | the five PreToolUse\|Bash walls fold into one process | — | 90m | REQ-1f | payload/scripts/lib/walls.sh | — |' \
+    '| T2 | 4 | build | matches \|first\| and \|second\| both | T1 | 10m | REQ-1f | hooks/a\|b.sh | — |' '| T3 | 5 | verify | plain prose, no escape anywhere | T1, T2 | 20m | all | record/x.md | — |'
+} > "$ES15"
+awk '{ gsub(/\\[|]/, "-"); print }' "$ES15" > "${ES15%/*}/esc-control.plan.md"
+printf 'run/v1|ev=%s|at=2026-10-20T00:00:0%sZ\n' 'step|n=5' 1 'approval|key=step3|by=me|said=approved' 2 'published|row=T1' 3 'published|row=T2' 4 \
+  | tee "$SANDBOX/esc/record/esc-control/run.log" > "$SANDBOX/esc/record/esc/run.log"
 
-cat > "$SANDBOX/escaped-cell.md" <<'ESCAPED_EOF'
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | the five PreToolUse\|Bash walls fold into one process | senior-implementor | — | 90m | REQ-1f | payload/scripts/lib/walls.sh | landed |
-| T2 | 4 | build | matches \|first\| and \|second\| both | implementor | T1 | 10m | REQ-1f | hooks/a.sh | landed |
-| T3 | 5 | verify | plain prose, no escape anywhere | test-runner | T1, T2 | 20m | all | record/x.md | pending |
-ESCAPED_EOF
-
-ROWS_ESC="$(call units_rows "$SANDBOX/escaped-cell.md")"
+ROWS_ESC="$(call units_rows "$ES15")"
 
 expect_eq "three data rows, escapes and all" "3" "$(nlines "$ROWS_ESC")"
 expect_eq "every row still carries exactly thirteen fields" "3" \
@@ -792,35 +446,36 @@ expect_eq "every row still carries exactly thirteen fields" "3" \
 # the escape, so asserting the escaped cell alone would pass on a reader that recovered the
 # text and lost the columns.
 ESC_T1="$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' '$1 == "T1"')"
-expect_eq "…and field 5 is still the agent"  "senior-implementor" "$(printf '%s\n' "$ESC_T1" | cut -f5)"
 expect_eq "…and field 6 is still deps"       "—"                  "$(printf '%s\n' "$ESC_T1" | cut -f6)"
 expect_eq "…and field 7 is still size"       "90m"                "$(printf '%s\n' "$ESC_T1" | cut -f7)"
 expect_eq "…and field 8 is still serves"     "REQ-1f"             "$(printf '%s\n' "$ESC_T1" | cut -f8)"
 expect_eq "…and field 9 is still Files"      "payload/scripts/lib/walls.sh" \
   "$(printf '%s\n' "$ESC_T1" | cut -f9)"
-expect_eq "…and field 10 is still the status" "landed"            "$(printf '%s\n' "$ESC_T1" | cut -f10)"
 
 # TWO ESCAPES IN ONE CELL, and the restore is per-occurrence rather than per-cell.
 ESC_T2="$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' '$1 == "T2"')"
 expect_eq "a cell carrying two escaped pipes reads back with both" \
   "matches |first| and |second| both" "$(printf '%s\n' "$ESC_T2" | cut -f4)"
-expect_eq "…and its status is still the status" "landed" "$(printf '%s\n' "$ESC_T2" | cut -f10)"
+expect_eq "…and the Files cell after it keeps its own escape" "hooks/a|b.sh" "$(printf '%s\n' "$ESC_T2" | cut -f9)"
 
 # THE TWO VERBS, which is where the shift was actually costing the wave.
 expect_eq "units_validate finds no violation in a table whose only oddity is the escape" \
-  "" "$(call units_validate "$SANDBOX/escaped-cell.md")"
-expect_eq "…and exits 0" "0" "$(call_rc units_validate "$SANDBOX/escaped-cell.md")"
-expect_eq "units_ready can still schedule the Step-5 row behind those two" \
-  "T3" "$(call units_ready "$SANDBOX/escaped-cell.md" 5)"
+  "" "$(call units_validate "$ES15")"
+expect_eq "…and exits 0" "0" "$(call_rc units_validate "$ES15")"
+expect_eq "units_ready can still schedule the Step-5 row behind those two, on a page at 15" "T3" "$(call units_ready "$ES15" 5)"
+expect_eq "…and the escape changes NOTHING about that answer: the same page with the escapes spent schedules the same" \
+  "$(call units_ready "$ES15" 5)" "$(call units_ready "${ES15%/*}/esc-control.plan.md" 5)"
 
 # ── the critic's control, on this wave's own schedule ────────────────────────
 #
 # THE SPECIMEN PREDATES T23 (it was spliced at 1f48673). The row below is the live plan's
-# own, reproduced verbatim — the plan tree is gitignored and absent from a worktree, so it
-# cannot be read here without breaking hermeticity. The transform then extends T13's and
-# T14's deps cells the way the live plan does and lands every row but those two, which is
-# the state the tick was asked about when it answered nothing.
-T23_ROW='| T23 | 4 | build | 1f-e: the five PreToolUse\|Bash walls fold by the same bionic_fold into one process (hooks/bash-walls.sh); differential vs the five originals incl. stdout JSON merge; hooks.json 16 → 12 (AC-1f.5) | senior-implementor | T12 | 90m | REQ-1f | payload/scripts/lib/walls.sh, hooks/bash-walls.sh, hooks/hooks.json | landed |'
+# own, cut to nine cells as the specimen is — the plan tree is gitignored and absent from a
+# worktree, so it cannot be read here without breaking hermeticity. The transform then
+# extends T13's and T14's deps cells the way the live plan does, and the page's log lands
+# every row but those two, which is the state the tick was asked about when it answered
+# nothing. While its step-3 doc row is open, that row waits on the head and every build row
+# waits on it, so the same page with an empty log is a read cycle.
+T23_ROW='| T23 | 4 | build | 1f-e: the five PreToolUse\|Bash walls fold by the same bionic_fold into one process (hooks/bash-walls.sh); differential vs the five originals incl. stdout JSON merge; hooks.json 16 → 12 (AC-1f.5) | T12 | 90m | REQ-1f | payload/scripts/lib/walls.sh, hooks/bash-walls.sh, hooks/hooks.json | — |'
 
 # THE ROW TRAVELS BY FILE, NEVER BY `awk -v`. An assignment on the command line is scanned
 # for escape sequences, so `\|` reaches the program as a bare `|` and the fixture would lose
@@ -828,14 +483,13 @@ T23_ROW='| T23 | 4 | build | 1f-e: the five PreToolUse\|Bash walls fold by the s
 # fixture read back `PreToolUse|Bash` and the RED run passed the wrong assertion.)
 printf '%s\n' "$T23_ROW" > "$SANDBOX/t23-row.md"
 
+EL="$SANDBOX/esc/plans/e/esc-live.plan.md"; mkdir -p "$SANDBOX/esc/record/esc-live"
 {
-  printf -- '---\ncurrent: 5\n---\n\n## Tasks\n\n'
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n'
   awk '
     FNR == NR { t23 = $0; next }
     /^\|[ \t]*T[0-9]+[ \t]*\|/ {
-      st = ($0 ~ /^\|[ \t]*T1[34][ \t]*\|/) ? "| pending |" : "| landed |"
       sub(/\| T2, T4, T5, T6, T8, T12, T22 \|/, "| T2, T4, T5, T6, T8, T12, T22, T23 |")
-      sub(/\|[^|]*\|$/, st)
       print
       if ($0 ~ /^\|[ \t]*T12[ \t]*\|/) print t23
       next
@@ -843,107 +497,41 @@ printf '%s\n' "$T23_ROW" > "$SANDBOX/t23-row.md"
     { print }
   ' "$SANDBOX/t23-row.md" "$SANDBOX/tasks-table.md"
   printf -- '\n## Verification Matrix\n'
-} > "$SANDBOX/escaped-live.md"
+} > "$EL"
+awk -F'|' '/^\| T[0-9]+ / { r = $2; gsub(/ /, "", r); if (r != "T13" && r != "T14") printf "run/v1|ev=published|row=%s|commit=c|by=w|at=2026-10-20T00:00:00Z\n", r }' \
+  "$EL" > "$SANDBOX/esc/record/esc-live/run.log"
 
-# THE CONTROL IS THE SAME FILE WITH THE ESCAPE SPENT — one hyphen where the backslash-pipe
-# was, nothing else touched. Two answers that differ can only differ because of it.
-awk '{ gsub(/\\[|]/, "-"); print }' "$SANDBOX/escaped-live.md" > "$SANDBOX/escaped-live-control.md"
-
-
-READY_ESC="$(call units_ready "$SANDBOX/escaped-live.md" 5)"
-READY_CTL="$(call units_ready "$SANDBOX/escaped-live-control.md" 5)"
-
-expect_eq "on the wave's own schedule the control schedules T13 and T14 at Step 5" \
-  "$(printf 'T13\nT14')" "$READY_CTL"
-expect_eq "…and the escape changes NOTHING about that answer" "$READY_CTL" "$READY_ESC"
 expect_eq "units_validate clears the escaped schedule too" "" \
-  "$(call units_validate "$SANDBOX/escaped-live.md")"
+  "$(call units_validate "$EL")"
 
-# T23's own row, which is the one the shift mangled: its agent was read as its deps and its
-# Files as its status.
-ESC_T23="$(call units_rows "$SANDBOX/escaped-live.md" | awk -F'\t' '$1 == "T23"')"
-expect_eq "T23's agent is the agent"   "senior-implementor" "$(printf '%s\n' "$ESC_T23" | cut -f5)"
+# T23's own row, which is the one the shift mangled: a cell after the escape was read one slot early.
+ESC_T23="$(call units_rows "$EL" | awk -F'\t' '$1 == "T23"')"
 expect_eq "T23's deps is the deps"     "T12"                "$(printf '%s\n' "$ESC_T23" | cut -f6)"
-expect_eq "T23's status is the status" "landed"             "$(printf '%s\n' "$ESC_T23" | cut -f10)"
 expect_contains "T23's task cell keeps its pipe" "PreToolUse|Bash" \
   "$(printf '%s\n' "$ESC_T23" | cut -f4)"
 
-# ============================================================
 
 section "§ORDER — build, regression, review, release: units_validate refuses any other order naming the rows; units_order reads it"
-# A pair out of order is refused when neither row is dropped and one is open; landed history is not judged.
-OR_P="$SANDBOX/order.plan.md"
-or_plan() {  # <row>... -> OR_P: a reads table holding a landed build row and the rows given
-  { printf -- '---\ncurrent: 4\n---\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh | landed | |\n'
-    printf '%s\n' "$@"; } > "$OR_P"
-}
-OR_REG='| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | pending | approval:plan, head |'
-OR_REV='| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | pending | approval:plan, head |'
-OR_REL='| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | pending | approval:plan, head |'
-or_plan "$OR_REG" "$OR_REV" "$OR_REL"
-expect_eq "ORD-1 control: regression at 5, review at 6, release at 7: no violation (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
-expect_eq "ORD-1b …and units_order names the regression row" "T5|0" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
-or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
+# A pair out of order is refused when neither row is dropped and one is open; landed history is not judged. Each page is
+# at 15, its rows' nine cells written by o5 and the run's log beside it by o5log.
+O5="$SANDBOX/docs/plans/e/o5.plan.md"; O5_LOG="$SANDBOX/docs/record/o5/run.log"; mkdir -p "${O5%/*}" "${O5_LOG%/*}"
+o5() { printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' > "$O5"; printf '| %s | %s | %s | t | %s | 30m | R | %s | — |\n' "$@" >> "$O5"; }   # <id step kind deps files>...
+o5log() { printf 'run/v1|ev=%s|at=2026-11-01T00:00:00Z\n' 'step|n=7' "$@" > "$O5_LOG"; }   # <event>... -> the run's log
+ov() { call units_validate "$O5" > "$SANDBOX/.ov"; printf '%s|%s' "$(cat "$SANDBOX/.ov")" "$CALL_RC"; }
+O5_REG="T5 5 test — r/T5.md"; O5_REV="T6 6 review — r/T6.md"; O5_REL="T7 7 doc — CHANGELOG.md"
 OR_REGLINE='T5: the regression row comes after the review row T6; the order is build, regression, review, release: put T5 at step 5, ahead of T6'
-expect_eq "ORD-2 the regression after the release (the old order): refused with rc 1, one line naming T5 and the first row it follows, T6" \
-  "$OR_REGLINE|1" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
-expect_eq "ORD-2b …and units_order reads no order" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
-or_plan "$OR_REV" "${OR_REG/| 5 | test |/| 6 | test |}" "$OR_REL"
-expect_eq "ORD-3 the regression at the review's step, after it in the table: refused with rc 1, one line naming T5 and T6" \
-  "$OR_REGLINE|1" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
-or_plan "$OR_REG" "$OR_REL" "${OR_REV/| 6 | review |/| 7 | review |}"
-expect_eq "ORD-4 the release ahead of a review row: refused with rc 1, one line naming T7 and T6" \
-  "T7: the release row comes ahead of the review row T6; the order is build, regression, review, release: put T7 at step 7, after T6|1" \
-  "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
-or_plan "$OR_REV" "$OR_REL" "${OR_REG/| 5 | test |/| 7 | test |}"
-sed 's/ pending | approval/ landed | approval/' "$OR_P" > "$OR_P.x" && mv "$OR_P.x" "$OR_P"
-expect_eq "ORD-5 the ORD-2 plan with every row landed: history is not judged (rc 0)" "|0" "$(call units_validate "$OR_P")|$(call_rc units_validate "$OR_P")"
-or_plan "$OR_REG" "$OR_REL"
-expect_eq "ORD-6 no review row: the regression ahead of the release validates, and is the order" "|T5" "$(call units_validate "$OR_P")|$(call units_order "$OR_P")"
-or_plan "$OR_REG" "$OR_REV"
-expect_eq "ORD-7 no release row: no order to read (rc 1)" "|1" "$(call units_order "$OR_P")|$(call_rc units_order "$OR_P")"
-
-
-section "§POST — a review row after a landed release is admitted when it reads only approval:plan, head and the rows landed past the release"
-# The fix that lands after the release is read as a piece, so its reader row stands after the release row. It is
-# admitted only when the release row has landed and the reader names nothing written before the release; while the
-# release is open the order text refuses it as before. Each case projects the row the way task-add does
-# (units_add_row, then units_validate on the projection).
-PO_P="$SANDBOX/post.plan.md"
-po_plan() {  # <release status> -> PO_P: build, regression, review and release rows, and a build row landed past the release
-  { printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh, .bionic/docs/record/w/T1.md | landed | |\n'
-    printf '| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | landed | approval:plan, head |\n'
-    printf '| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | landed | approval:plan, head |\n'
-    printf '| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | %s | approval:plan, head |\n' "$1"
-    printf '| T8 | 7 | build | the fix after the release | implementor | — | 30 | REQ-1 | lib/b.sh, .bionic/docs/record/w/T8.md | landed | approval:plan |\n'
-  } > "$PO_P"
-}
-po_add() {  # <reads> -> PO_P with the review row T9 added past the release, as task-add projects it
-  call units_add_row "$PO_P" T9 7 review "the critic reads the fix as a piece" critic — 20 REQ-1 \
-    .bionic/docs/record/w/T9-adversarial.md "$1" > "$PO_P.new" && mv "$PO_P.new" "$PO_P"
-}
-PO_ORD='T7: the release row comes ahead of the review row T9; the order is build, regression, review, release: put T7 at step 7, after T9'
-po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md'
-expect_eq "POST-0 precondition: the projection carries T9 after the release row T7 and the fix row T8" "T7 T8 T9" \
-  "$(call units_rows "$PO_P" | awk -F'\t' '$2 == 7 { printf "%s%s", (n++ ? " " : ""), $1 }')"
-expect_eq "POST-1 the release landed and T9 reads approval:plan, head and the fix row's record: admitted (no line, rc 0)" "|0" \
-  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
-po_plan pending; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md'
-expect_eq "POST-2 the same reader while the release row is open: refused with the order text (rc 1)" "$PO_ORD|1" \
-  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
-po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T1.md'
-expect_eq "POST-3 the release landed and T9 reads a row written before it: refused with the order text (rc 1)" "$PO_ORD|1" \
-  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
-po_plan landed; po_add 'approval:plan, head'
-expect_eq "POST-4 the release landed and T9 names no row it reads: refused with the order text, a whole read stays ahead of the release (rc 1)" "$PO_ORD|1" \
-  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
-po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md, .bionic/docs/record/w/T6.md'
-expect_eq "POST-5 the release landed and T9 reads the fix and a pre-release reading: refused with the order text (rc 1)" "$PO_ORD|1" \
-  "$(call units_validate "$PO_P")|$(call_rc units_validate "$PO_P")"
+# shellcheck disable=SC2086
+o5 $O5_REG $O5_REV $O5_REL; o5log
+expect_eq "ORD-1b units_order names the regression row of the ordered page" "T5|0" "$(call units_order "$O5")|$(call_rc units_order "$O5")"
+# shellcheck disable=SC2086
+o5 $O5_REV $O5_REL ${O5_REG/ 5 / 7 }
+expect_eq "ORD-2b the regression after the review: units_order reads no order" "|1" "$(call units_order "$O5")|$(call_rc units_order "$O5")"
+# shellcheck disable=SC2086
+o5 $O5_REG $O5_REL
+expect_eq "ORD-6 no review row: the regression ahead of the release validates, and is the order" "|0|T5" "$(ov)|$(call units_order "$O5")"
+# shellcheck disable=SC2086
+o5 $O5_REG $O5_REV
+expect_eq "ORD-7 no release row: no order to read (rc 1)" "|1" "$(call units_order "$O5")|$(call_rc units_order "$O5")"
 
 section "§AFTER-PUBLISH — after the release is the order the landing record published in, not the plan's step and table position"
 # A fix row born at step 4 stands ahead of the release row in the plan's order and publishes after it. The reader
@@ -954,66 +542,55 @@ section "§AFTER-PUBLISH — after the release is the order the landing record p
 AP_REPO="$SANDBOX/ap-repo"
 git init -q "$AP_REPO" && mkdir -p "$AP_REPO/.bionic/docs/plans" "$AP_REPO/.bionic/docs/record/ap"
 AP_P="$AP_REPO/.bionic/docs/plans/ap.plan.md"
-AP_REC="$AP_REPO/.bionic/docs/record/ap/landing-proofs.log"
 AP_H="$(printf '%040d' 1)"
-ap_plan() {  # <fix row status> -> AP_P: the POST fixture with the fix row T8 born at step 4, after the release row in the table
-  { printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh, .bionic/docs/record/w/T1.md | landed | |\n'
-    printf '| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | landed | approval:plan, head |\n'
-    printf '| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | landed | approval:plan, head |\n'
-    printf '| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | landed | approval:plan, head |\n'
-    printf '| T8 | 4 | build | the fix born at step 4 | implementor | — | 30 | REQ-1 | lib/b.sh, .bionic/docs/record/w/T8.md | %s | approval:plan |\n' "$1"
-  } > "$AP_P"
-  call units_add_row "$AP_P" T9 7 review "the critic reads the fix as a piece" critic — 20 REQ-1 \
-    .bionic/docs/record/w/T9-adversarial.md 'approval:plan, head, .bionic/docs/record/w/T8.md' > "$AP_P.new" && mv "$AP_P.new" "$AP_P"
-}
-ap_pub() {  # <row>... -> AP_REC: a published event for each row, in the order given
-  : > "$AP_REC"
-  local r
-  for r in "$@"; do printf 'line/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" >> "$AP_REC"; done
-}
 ap_state() { printf '%s|%s|%s' "$(call units_validate "$AP_P")" "$(call_rc units_validate "$AP_P")" "$(call units_post_readers "$AP_P")"; }
 AP_T9="$(printf 'T9\tpending\tunread')"
+PO_ORD='T7: the release row comes ahead of the review row T9; the order is build, regression, review, release: put T7 at step 7, after T9'
 
-ap_plan landed; ap_pub T1 T5 T6 T7 T8
-expect_eq "AP-0 precondition: the record holds both the release row T7 and the fix row T8, T7 first" "T7 T8" \
-  "$(awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i ~ /^row=T[78]$/) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }' "$AP_REC")"
+# AT 15 the page holds each row's nine cells, T9 waiting in its deps on the fix row, and the run's log its step, its
+# approval and a published event for each row landed, in the order they landed.
+AP_LOG="$AP_REPO/.bionic/docs/record/ap/run.log"
+ap15() {  # <published row>... -> AP_P at 15, and its log
+  local r
+  { printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '| %s | %s | %s | t | %s | 30 | REQ-1 | %s | — |\n' T1 4 build — 'lib/a.sh, .bionic/docs/record/w/T1.md' T5 5 test — .bionic/docs/record/w/T5.md \
+      T6 6 review — .bionic/docs/record/w/T6.md T7 7 doc — CHANGELOG.md T8 4 build — 'lib/b.sh, .bionic/docs/record/w/T8.md' \
+      T9 7 review T8 .bionic/docs/record/w/T9-adversarial.md; } > "$AP_P"
+  printf 'run/v1|ev=%s|at=2026-10-12T00:00:00Z\n' 'step|n=7' 'approval|key=step3|by=fixture|said=approved' > "$AP_LOG"
+  for r in "$@"; do printf 'run/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T00:00:00Z\n' "$r" "$AP_H"; done >> "$AP_LOG"
+}
+
+ap15 T1 T5 T6 T7 T8
+expect_eq "AP-0 precondition: the log holds both the release row T7 and the fix row T8, T7 first" "T7 T8" \
+  "$(awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i ~ /^row=T[78]$/) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }' "$AP_LOG")"
 expect_eq "AP-1 the fix row published after the release: T9 reading its record is admitted (no line, rc 0) and listed for the card" \
   "|0|$AP_T9" "$(ap_state)"
-ap_pub T1 T5 T6 T8 T7
-expect_eq "AP-2 the same plan with the record's order reversed, the fix published before the release: refused with the order text, nothing listed" \
+ap15 T1 T5 T6 T8 T7
+expect_eq "AP-2 the same plan with the log's order reversed, the fix published before the release: refused with the order text, nothing listed" \
   "$PO_ORD|1|" "$(ap_state)"
-rm -f "$AP_REC"
-expect_eq "AP-3 the same plan with no landing record: plan order decides, and the step-4 fix row is not past the release (refused, nothing listed)" \
+ap15
+expect_eq "AP-3 the same plan with no landing in its log: plan order decides, and the step-4 fix row is not past the release (refused, nothing listed)" \
   "$PO_ORD|1|" "$(ap_state)"
-ap_plan pending; ap_pub T1 T5 T6 T7
+ap15 T1 T5 T6 T7
 expect_eq "AP-4 the fix row open and unpublished, the release published: it will publish past the release, so T9 is admitted and listed" \
   "|0|$AP_T9" "$(ap_state)"
-ap_plan landed; : > "$AP_REC"
-for r in T1 T5 T6 T7 T8; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
-expect_eq "AP-5 a record of landed: headers alone is read in its order too: T8 after T7 is admitted" "|0|$AP_T9" "$(ap_state)"
-ap_plan landed; : > "$AP_REC"
-for r in T1 T5 T6 T8 T7; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
-expect_eq "AP-5b …and with those headers reversed the differential control refuses" "$PO_ORD|1|" "$(ap_state)"
 
 # A PLAN VERB'S DRY COPY NAMES NO RECORD, so the origin plan is the second operand: the record is read from the plan the
 # copy was made from, and the copy is judged as the plan is. The copy sits beside the plan under the name a verb gives it.
 AP_COPY="$AP_P.task-add-dry.4242"
 ap_copy_state() { printf '%s|%s|%s' "$(call units_validate "$AP_COPY" "$1")" "$(call_rc units_validate "$AP_COPY" "$1")" \
   "$(call units_post_readers "$AP_COPY" "$1")"; }
-ap_plan landed; ap_pub T1 T5 T6 T7 T8; cp "$AP_P" "$AP_COPY"
+ap15 T1 T5 T6 T7 T8; cp "$AP_P" "$AP_COPY"
 expect_eq "AP-6 the copy of a plan whose record published the fix row after the release, judged with the plan as origin: admitted and listed as the plan is" \
   "$(ap_state)" "$(ap_copy_state "$AP_P")"
 expect_eq "AP-6b …and that answer is an admission, so the equality above is not two refusals" "|0|$AP_T9" "$(ap_copy_state "$AP_P")"
 expect_eq "AP-7 the control: the same copy with no origin names no record and is refused by plan order, nothing listed" "$PO_ORD|1|" "$(ap_copy_state "")"
-ap_pub T1 T5 T6 T8 T7
+ap15 T1 T5 T6 T8 T7
 expect_eq "AP-8 the copy with the origin whose record published the fix row BEFORE the release: refused with the order text, as the plan is" \
   "$PO_ORD|1|" "$(ap_copy_state "$AP_P")"
 rm -f "$AP_COPY"
 
 section "§JUDGE — covered at the last green whole run's head; past it each commit owes its row's suites, never a second whole run"
-# ============================================================
 
 # At the last green whole run's head the judge holds the head covered; past it, a commit no landing proves is named,
 # and no whole run is asked. A verdict is keyed by the commit it ran at, so a key of any other kind proves nothing.
@@ -1027,9 +604,9 @@ printf 'b\n' > "$JR/b.sh"; git -C "$JR" add b.sh; git -C "$JR" commit -qm H1
 JH1="$(git -C "$JR" rev-parse HEAD)"
 git -C "$JR" commit -q --allow-empty -m H2
 JH2="$(git -C "$JR" rev-parse HEAD)"
-printf -- '---\ncurrent: 5\n---\n\n## SDLC State\n\nproved: kind=regression head=%s at=2026-01-01T00:00:00Z evidence=whole.log\n' \
-  "$JH" > "$SANDBOX/judge-plan.md"
-judge() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_floor_judge "$2" "$3" "$4"' _ "$PROOF_LIB" "$SANDBOX/judge-plan.md" "$JR" "$1"; }
+JP="$(plan_fixture --current 5 "$SANDBOX/judge/plans/judge.plan.md" task)"
+printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=whole.log|at=2026-10-20T00:00:00Z\n' "$JH" >> "$(plan_fixture_log "$JP")"
+judge() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_floor_judge "$2" "$3" "$4"' _ "$PROOF_LIB" "$JP" "$JR" "$1"; }
 unproved() { printf 'uncovered\tcommit %.12s (no landing row) is not proved: no run of its row\047s suites is recorded at it' "$1"; }
 
 expect_eq "the fixture's three heads are three commits" "3" \
@@ -1053,31 +630,30 @@ mkdir -p "$RR/payload/.claude-plugin" "$RR/payload/commands" "$RR/payload/integr
 for f in CHANGELOG.md payload/.claude-plugin/plugin.json payload/commands/help.md payload/integrity/rendered.sha256 \
   tests/release-check.test.sh docs/adrs/adr-001-a.md; do printf 'x\n' > "$RR/$f"; done
 git -C "$RR" add -A; git -C "$RR" commit -qm release; RH="$(git -C "$RR" rev-parse HEAD)"
-printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\nproved: kind=check head=%s at=2026-01-01T00:00:00Z evidence=check.log\n' "$RH" > "$RR/plan.md"
-bash -c '. "$1" && . "$2" || exit 1; for s in $(_proof_release_readers); do line_event "$3" verdict row=T8 "commit=$4" "suite=$s" result=green log=- admitted=- width=-; done' _ "$LINE_LIB" "$PROOF_LIB" "$RR/plan.md" "$RH"
-cover() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_cover "$2" "$3" "$4"; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RB" "$RH"; }
+RP="$(plan_fixture --current 7 "$RR/.bionic/docs/plans/release.plan.md" task)"
+printf 'run/v1|ev=proof|kind=check|head=%s|evidence=check.log|at=2026-10-20T00:00:00Z\n' "$RH" >> "$(plan_fixture_log "$RP")"
+bash -c '. "$1" && . "$2" || exit 1; for s in $(_proof_release_readers); do line_event "$3" verdict row=T8 "commit=$4" "suite=$s" result=green log=- admitted=- width=-; done' _ "$LINE_LIB" "$PROOF_LIB" "$RP" "$RH"
+cover() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_cover "$2" "$3" "$4"; echo "rc=$?"' _ "$PROOF_LIB" "$RP" "$RB" "$RH"; }
 expect_eq "a release commit with the check suite and a promoted ADR, a check and its readers green at it: release" "$(printf 'cover %s release\nrc=0' "$RH")" "$(cover)"
 
 section "§WALK — the regression walk excuses a real release merge whose check passed, as the judge's cover reads it"
-# ============================================================
 
 # A path's place in the release set is asked apart from its place in the docs: CHANGELOG.md is in both, and a release
 # merge whose every path is in the set is excused by the check that passed at it, never sent to a landing row. Live
 # tier, read-only: this repository's own release merges, pinned by hash, skipped by version and hash when absent.
 # Without the check line the same merge is named as not proved, so the excuse is the check's.
-WK_PASS="$SANDBOX/walk-pass.md"; WK_NONE="$SANDBOX/walk-none.md"
-printf -- '---\ncurrent: 5\n---\n\n## SDLC State\n\n' > "$WK_NONE"
-cp "$WK_NONE" "$WK_PASS"
+WK_NONE="$(plan_fixture --current 5 "$SANDBOX/walk/plans/walk-none.plan.md" task)"
+WK_PASS="$(plan_fixture --current 5 "$SANDBOX/walk/plans/walk-pass.plan.md" task)"
 walk() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4^1" "$4" ""; echo "rc=$?"' _ "$PROOF_LIB" "$1" "$REPO_ROOT" "$2" </dev/null; }
 expect_eq "WALK-0 the release commit built above, CHANGELOG.md among its paths, a check passing at it: excused (rc 0)" "rc=0" \
-  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4" "$5" ""; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RR" "$RB" "$RH" </dev/null)"
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4" "$5" ""; echo "rc=$?"' _ "$PROOF_LIB" "$RP" "$RR" "$RB" "$RH" </dev/null)"
 WK_N=0
 while read -r v m; do
   if ! git -C "$REPO_ROOT" cat-file -e "$m^{commit}" 2>/dev/null || ! git -C "$REPO_ROOT" cat-file -e "$m^1^{commit}" 2>/dev/null; then
     echo "SKIP: WALK $v merge ${m:0:12}: the merge $m or its first parent is absent from this repository"; continue
   fi
   WK_N=$((WK_N + 1))
-  printf 'proved: kind=check head=%s at=2026-10-20T00:00:00Z evidence=check-%s.log\n' "$m" "$v" >> "$WK_PASS"
+  printf 'run/v1|ev=proof|kind=check|head=%s|evidence=check-%s.log|at=2026-10-20T00:00:0%sZ\n' "$m" "$v" "$WK_N" >> "$(plan_fixture_log "$WK_PASS")"
   expect_eq "WALK-$WK_N the $v merge ${m:0:12} with no check and no landing row: the walk names it not proved (rc 1)" \
     "$(printf 'commit %.12s (no landing row) is not proved: no run of its row\047s suites is recorded at it\nrc=1' "$m")" \
     "$(walk "$WK_NONE" "$m")"
@@ -1089,7 +665,6 @@ done <<EOF
 EOF
 
 section "§SECOND — regression-run at a head past the plan's whole run runs it again, and at the head the run read too"
-# ============================================================
 
 # FIXTURE FIDELITY: one real repository on its working branch; the plan bound to a session through the product's own
 # binder; the whole run recorded through the product's own writers (tests/lib/regression-fixture.sh); the verb is
@@ -1105,8 +680,8 @@ sec_git init -q; sec_git config user.name "Dana Fixture"; sec_git checkout -q -b
 printf '.bionic/\n' > "$SEC/.gitignore"; printf 'one\n' > "$SEC/a.sh"
 printf 'regression-command: touch %s/ran\n' "$SEC_ROOT" > "$SEC/.bionic/config.yaml"
 sec_git add -A; sec_git commit -qm base; SEC_H="$(sec_git rev-parse HEAD)"
-{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n---\n# plan\n\n'
-  printf '## SDLC State\n\ncurrent: 5\nworking-branch: wave/01-second\nintegration-branch: main\n'; } > "$SEC_PLAN"
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nworking-branch: wave/01-second\nintegration-branch: main\n---\n# plan\n' > "$SEC_PLAN"
+printf 'run/v1|ev=step|n=5|at=2026-10-20T00:00:00Z\n' > "$SEC/.bionic/docs/$SEC_REL/run.log"
 bound_marker "$SEC" "$SEC_SID" "$SEC_PLAN" >/dev/null 2>&1 || :
 sec_poke() {  # -> SEC_OUT (stdout and stderr), SEC_RC: regression-run [flags…] as the bound session, in the repository
   SEC_RC=0
@@ -1116,10 +691,10 @@ sec_poke() {  # -> SEC_OUT (stdout and stderr), SEC_RC: regression-run [flags…
 sec_ran() { [ -e "$SEC_ROOT/ran" ] && printf yes || printf no; }
 sec_logs() { find "$SEC/.bionic/docs/$SEC_REL" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
 sec_rec() { bash -c '. "$1/payload/scripts/lib/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$BIONIC_SCRIPTS_DIR" "$SEC_PLAN"; }
-sec_runline() { /usr/bin/grep -F "|ev=run|log=$SEC_REL/$1|" "$(sec_rec)" 2>/dev/null || :; }   # <log name> -> its run line
+sec_runline() { cat "$(sec_rec)" 2>/dev/null | /usr/bin/grep -F "|ev=run|log=$SEC_REL/$1|" || :; }   # <log name> -> its run line in the run's log
 printf 'all green\n' | regression_fixture "$SEC_PLAN" "$SEC/.bionic/docs/$SEC_REL/regression-run-$SEC_H.log" "$SEC_H" 0 0
 expect_eq "SEC-0 precondition: the record holds a whole run at H, clean, and no run has started" "1|no|1" \
-  "$(/usr/bin/grep -c "^line/v1|ev=run|log=$SEC_REL/regression-run-$SEC_H.log|head=$SEC_H|dirty=0|" "$(sec_rec)" 2>/dev/null || :)|$(sec_ran)|$(sec_logs)"
+  "$(sec_runline "regression-run-$SEC_H.log" | /usr/bin/grep -c "^run/v1|ev=run|log=$SEC_REL/regression-run-$SEC_H.log|head=$SEC_H|dirty=0|")|$(sec_ran)|$(sec_logs)"
 
 # SEC-2 first, at the head the whole run read: this arm does not refuse it, so the declared regression starts.
 sec_poke
@@ -1146,44 +721,13 @@ expect_contains "SEC-1d …and its run line names the person as its starter, wit
   "|starter=person|reason=the user asked for a second run|at=" "$(sec_runline "regression-run-$SEC_H1.log")"
 
 
-# ============================================================
-section "§STEP-FIELD — units_step_field reads the block units_step_fields writes: the first key line, fences skipped"
-# ============================================================
-# The Step-7 advance and close-out's epic row both read the Step 7 block's `adr:` pointer; this is their one reader,
-# beside the writer, reading the block the writer writes. FIXTURE FIDELITY: a planted plan whose Step 7 block is
-# written by `units_step_fields` itself, with a fenced decoy block above and a second `adr:` line under the first.
-# fails-when: the reader reads the fenced decoy, the second line, another step's block, or calls a missing key found.
-SF_PLAN="$SANDBOX/step-field.plan.md"
-printf '# plan\n\n## SDLC State\n\ncurrent: 7\n```\n- Step 7: a fenced example\n  adr: fenced.md\n```\n- Step 7: n/a: no ADR owed here\n- Step 8: merge: main @ 0123abc\n  cleanup: n/a\n\n## Tasks\n' > "$SF_PLAN"
-sf_lib() { bash -c '. "$1" || exit 9; shift; "$@"' _ "$LIB" "$@"; }
-sf_lib units_step_fields "$SF_PLAN" 7 "adr=adrs/epic-x/adr-061-the-pointer.md" > "$SF_PLAN.w" && mv "$SF_PLAN.w" "$SF_PLAN"
-printf '%s\n' "$(awk '{ print } /^  adr: adrs/ { print "  adr: second.md" }' "$SF_PLAN")" > "$SF_PLAN.w" && mv "$SF_PLAN.w" "$SF_PLAN"
-expect_contains "SF-0 precondition: the writer put the adr: line under the Step 7 line" \
-  "- Step 7: n/a: no ADR owed here
-  adr: adrs/epic-x/adr-061-the-pointer.md" "$(cat "$SF_PLAN")"
-sf_get() { SF_OUT="$(sf_lib units_step_field "$@")"; SF_RC=$?; }
-sf_get "$SF_PLAN" 7 adr
-expect_eq "SF-1 the first adr: line of the Step 7 block, not the fenced decoy's or the second (exit 0)" \
-  "0|adrs/epic-x/adr-061-the-pointer.md" "$SF_RC|$SF_OUT"
-sf_get "$SF_PLAN" 7 n/a
-expect_eq "SF-2 a key the step line itself opens with is read from the step line" "0|no ADR owed here" "$SF_RC|$SF_OUT"
-sf_get "$SF_PLAN" 8 cleanup
-expect_eq "SF-3 another step's block is its own: Step 8's cleanup:" "0|n/a" "$SF_RC|$SF_OUT"
-sf_get "$SF_PLAN" 8 adr
-expect_eq "SF-4 a key the block does not carry: exit 2, nothing printed" "2|" "$SF_RC|$SF_OUT"
-sf_get "$SF_PLAN" 5 adr
-expect_eq "SF-5 a step with no line: exit 1, nothing printed" "1|" "$SF_RC|$SF_OUT"
-
-
-# ============================================================
 section "§DEBT — the review-born count: exempt under fix-policy: or counted, and the three task-add rules each held by a row a removal turns red"
-# ============================================================
 # A review-born row rated inside fix-policy: is exempt from fix-cap:; one the person promoted from outside it, or one
 # born of a finding in another plan's record directory, counts. `units_born_counted` is the one reader of that test,
 # and the landing line and task-add read it. The rows below pin the reader, the landing line's count, and the three
 # rules task-add holds on a born row: the cap refusal, the fourth fix on one file, and the count its line prints.
-# FIXTURE FIDELITY: planted plans in the shape s34's fixture writes (tests/session-poker.prelude.sh), the born markers
-# in the shapes `task-add --born` writes them, the readings in `proof-add review`'s shape; every task-add is the real
+# FIXTURE FIDELITY: planted plans at 15, the page's nine cells and the run's log, the born events as `task-add --born`
+# writes them, the reading as `proof-add review`'s event; every task-add is the real
 # verb, run as a session bound to the plan through the product's own binder, against the shipped tree and against a
 # copy of it with one rule removed (hooks/ beside scripts/, the tree's own scripts and library linked in, as
 # session-poker-5's §CHECK mutant is built).
@@ -1192,8 +736,9 @@ section "§DEBT — the review-born count: exempt under fix-policy: or counted, 
 DB_SID="6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b"
 DB_ROOT="$SANDBOX/debt"; mkdir -p "$DB_ROOT/home" "$DB_ROOT/config/bionic" "$DB_ROOT/gate" "$DB_ROOT/no-plugins"
 DB_OWN="record/wave-01-debt"; DB_CARRIED="record/wave-00-prior"
-db_plan() {  # <repo> <fix-cap> <tasks rows> <ledger lines> [<frontmatter line>] -> the plan path, bound to DB_SID
-  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-debt.plan.md" h
+db_plan() {  # <repo> <fix-cap> <tasks rows> <born events> [<header line>] -> the plan path at 15, bound to DB_SID
+  # Its log: the steps to 4, the approval, the carried review, T1 landed, T2 active in its tree, then each born event.
+  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-debt.plan.md" h e n=0
   mkdir -p "${f%/*}" "$1/.bionic/docs/specs/epic-99-fixture" "$1/.bionic/docs/$DB_OWN" "$1/.bionic/docs/$DB_CARRIED"
   printf '# requirements\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-debt.requirements.md"
   printf '# spec\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-debt.spec.md"
@@ -1201,29 +746,22 @@ db_plan() {  # <repo> <fix-cap> <tasks rows> <ledger lines> [<frontmatter line>]
   printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nfindings: 2\nfinding: 1 S2 on lib/c1.sh:1 the first carried defect\nfinding: 2 S2 on lib/c2.sh:1 the second carried defect\nshown: 1 cat lib/c1.sh\nshown: 2 cat lib/c2.sh\n' \
     "$h" "$h" > "$1/.bionic/docs/$DB_CARRIED/critic.md"
   {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: bugfix\n'
     printf 'rigor: double\nfix-cap: %s\n%sscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n' "$2" "${5:+$5
 }"
-    printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
-    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\n'
-    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n'
-    printf 'proved: kind=review head=%s at=2026-10-20T00:00:00Z evidence=%s/critic.md question=adversarial reader=w-adv result=fail scope=piece\n\n' "$h" "$DB_CARRIED"
-    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-debt.requirements.md\n'
-    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-debt.spec.md\n'
-    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-debt.plan.md\n'
-    printf -- '- Step 4: opened\n  worktree: .worktrees/01-debt\n  base-sha: abc1234\n  branch: wave/01-debt\n'
-    printf -- '- T1: landed at record/T1.md\n- T2: dispatched to w-T2\n%s- T5: pending dispatch — .worktrees/01-T5\n\n' "${4:+$4
-}"
-    printf '## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
-    printf '| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |\n'
+    printf 'walk: exempt\ndeploy_target: n/a\nworking-branch: wave/01-debt\nbase-sha: abc1234\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n# fixture wave\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | — | 30 | REQ-1 | a.sh | — |\n| T2 | 4 | build | the second build | — | 30 | REQ-1 | b.sh | — |\n'
     printf '%s' "${3:+$3
 }"
-    printf '| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 | REQ-1 | — | — | — | pending |\n\n'
+    printf '| T5 | 5 | verify | the floor | T1, T2 | 30 | REQ-1 | — | — |\n\n'
   } > "$f"
+  { printf '%s\n' 'step|n=1' 'step|n=2' 'step|n=3' 'step|n=4' 'approval|key=step3|by=fixture|said=approved' \
+      "proof|kind=review|head=$h|evidence=$DB_CARRIED/critic.md|question=adversarial|reader=w-adv|result=fail|scope=piece" \
+      'dispatch|row=T1|name=implementor' 'published|row=T1' 'dispatch|row=T2|name=w-T2' 'tree|row=T2|path=.worktrees/01-T2'
+    [ -z "$4" ] || printf '%s\n' "$4"
+  } | while IFS= read -r e; do n=$((n + 1)); printf 'run/v1|ev=%s|at=2026-10-20T00:00:%02dZ\n' "$e" "$n"; done > "$1/.bionic/docs/$DB_OWN/run.log"
   bound_marker "$1" "$DB_SID" "$f" >/dev/null 2>&1 || :
   printf '%s' "$f"
 }
@@ -1234,13 +772,17 @@ db_repo() {  # <label> -> a fresh repository with one commit, engaged by DB_SID
   : > "$r/.bionic/tmp/engaged-$DB_SID.state"
   printf '%s' "$r"
 }
-db_row() { printf '| %s | 4 | build | fix %s | implementor | — | 30 | REQ-1 | %s | — | — | pending |' "$1" "$1" "$2"; }   # <id> <files>
-db_led() { printf -- '- %s: pending dispatch — added by task-add at 2026-10-20T00:00:00Z born: %s' "$1" "$2"; }   # <id> <marker>
-db_poke() {  # <poker> <repo> <id> <files> <born> -> DB_OUT, DB_RC: task-add of a step-4 build row as DB_SID
-  DB_RC=0
+db_row() { printf '| %s | 4 | build | fix %s | — | 30 | REQ-1 | %s | — |' "$1" "$1" "$2"; }   # <id> <files>
+db_led() {  # <id> <marker> -> the row's born event as task-add --born writes it (lib/units.sh `units_born_event`)
+  local r="${2%% of=*}" f="" m=""; [ "$r" = "$2" ] || { f="${2#* of=}"; f="${f%% *}"; }
+  case "$2" in *' promoted') m='|promoted=yes' ;; esac
+  printf 'born|row=%s|reason=%s%s%s' "$1" "$r" "${f:+|finding=$f}" "$m"
+}
+db_poke() {  # <poker> <repo> <id> <files> <born> -> DB_OUT, DB_RC: the step-4 build row an edit adds, then task-add of it as DB_SID
+  local p; p="$(sed -n 's/^plan=//p' "$2/.bionic/tmp/engaged-$DB_SID.state")"; DB_RC=0
+  awk -v r="| $3 | 4 | build | Fix $3. The defect is gone. · born: review | — | 30 | REQ-1 | $4 | — |" '/^\| T5 \| 5 \|/ { sub(/T1, T2/, "&, " id) } { print } /^\| T5 \| 5 \|/ { print r }' id="$3" "$p" > "$p.t" && mv "$p.t" "$p"
   DB_OUT="$(cd "$2" && env CLAUDE_CODE_SESSION_ID="$DB_SID" HOME="$DB_ROOT/home" CLAUDE_CONFIG_DIR="$DB_ROOT/config" \
-    BIONIC_GATE_DIR="$DB_ROOT/gate" BIONIC_PLUGINS_DIR="$DB_ROOT/no-plugins" \
-    bash "$1" task-add "$3" 4 build "Fix $3. The defect is gone." bionic:implementor '—' 30 REQ-1 "$4" --born "$5" 2>&1)" || DB_RC=$?
+    BIONIC_GATE_DIR="$DB_ROOT/gate" BIONIC_PLUGINS_DIR="$DB_ROOT/no-plugins" bash "$1" task-add "$3" --born "$5" 2>&1)" || DB_RC=$?
 }
 db_lib() { bash -c '. "$1/units.sh" >/dev/null 2>&1 && . "$1/run.sh" >/dev/null 2>&1 || exit 9; shift; "$@"' _ "$REPO_ROOT/payload/scripts/lib" "$@"; }
 
@@ -1286,8 +828,8 @@ db_cap() {  # <poker> -> green when a counted row past fix-cap: 1 is refused nam
   p="$(db_plan "$r" 1 "$(db_row T3 lib/c1.sh)" "$(db_led T3 "review S2 on of=$DB_CARRIED/critic.md#1")")"
   db_poke "$1" "$r" T6 lib/c2.sh "$DB_CARRIED/critic.md#2"
   case "$DB_RC|$DB_OUT" in
-    "1|"*"task-add refused — review-born rows: 1 of cap 1 are counted (0 exempt under fix-policy: S1,S2-on); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=2 at the card."*) echo green ;;
-    "0|"*) [ -n "$(/usr/bin/grep '^- T6: ' "$p")" ] && echo "red: admitted" || echo "red: exit 0 with no row" ;;
+    "1|"*"task-add refused — review-born rows: 1 of cap 1 are counted (0 exempt under fix-policy: S1,S2-on); T6 stands in the plan unborn, the person's to remove; this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=2 at the card."*) echo green ;;
+    "0|"*) echo "red: admitted" ;;
     *) echo "red: $DB_RC" ;;
   esac
 }
@@ -1302,7 +844,7 @@ $(db_led T6 'review S2 on')")"
   db_poke "$1" "$r" T7 lib/x.sh 'review S2 on'
   case "$DB_RC|$DB_OUT" in
     "1|"*"task-add refused — a fourth fix on lib/x.sh: T3, T4, T6 already fix it"*) echo green ;;
-    "0|"*) [ -n "$(/usr/bin/grep '^- T7: ' "$p")" ] && echo "red: admitted" || echo "red: exit 0 with no row" ;;
+    "0|"*) echo "red: admitted" ;;
     *) echo "red: $DB_RC" ;;
   esac
 }
@@ -1349,5 +891,168 @@ DBM_COUNT="$(db_mutant count 'say "task-add — [$]TA_ID is review-born ')"
 expect_eq "DEBT-9 precondition: the count mutant removes the one line, parses, and differs" "1 0 differs" "$(db_mut_ok count "$DBM_COUNT")"
 expect_eq "DEBT-9b with the count line removed, DEBT-6's check goes red: the row lands and its line says no count" "red: no exempt" "$(db_count "$DBM_COUNT")"
 
-# ============================================================
+section "§ASK — the units readers ask the plan's one parser: a row edited by hand reads as the reader's row, and a proof wait still asks the judge"
+#
+# A ROW EDITED BY HAND. A later edit changes only T2: its deps cell becomes T1, and a tab pasted from an editor
+# stays in its task cell. A record split on that tab reads every later cell one slot late, so deps answered the
+# slot before it; read through lib/plan-read.sh, the cell is the one the reader's `row` reads.
+AK_P="$SANDBOX/ask.plan.md"
+ak_plan() {  # <T2 task cell> <T2 deps cell> -> a page at 15
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | one | — | 30m | R | a.sh | — |\n| T2 | 4 | build | %s | %s | 30m | R | b.sh | — |\n' "$1" "$2"
+}
+ak_t2() { call units_rows "$AK_P" | awk -F'\t' '$1 == "T2"'; }
+ak_plan two — > "$AK_P"
+expect_eq "ASK-1 before the edit, units_field T2 deps reads no dependency" "—" "$(call units_field "$(ak_t2)" deps)"
+ak_plan "$(printf 'two\tpasted')" T1 > "$AK_P"
+expect_eq "ASK-2 after the edit, units_field T2 deps answers the edit, as the reader's row reads it" "T1 T1" \
+  "$(call units_field "$(ak_t2)" deps) $(bash -c '. "$1" && plan_read_row "$2" Tasks id T2' _ "${LIB%/*}/plan-read.sh" "$AK_P" | sed -n 's/^deps=//p')"
+#
+# A PROOF WAIT ASKS THE JUDGE. The floor row reads proof:review by its kind default; the review proof stands at
+# an older head, and the rows the reads name have landed. Ready only when the judge reads the reviews covered.
+# At 15: nine cells, T2 waiting on T1 by its id; the step, the approval, both landings and the review proof in the log.
+AK_J="$SANDBOX/ask/plans/ask-judge.plan.md"; mkdir -p "${AK_J%/*}" "$SANDBOX/ask/record/ask-judge"
+{ printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n'
+  printf '|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | b | — | 30m | R | src/a.sh | — |\n'
+  printf '| T2 | 6 | review | r | T1 | 30m | R | .bionic/docs/record/w/r.md | — |\n| T3 | 6 | test | the floor | — | 30m | R | .bionic/docs/record/w/f.md | — |\n'
+} > "$AK_J"
+printf 'run/v1|ev=%s|at=2026-10-20T00:00:0%sZ\n' 'step|n=6' 1 'approval|key=step3|by=me|said=approved' 2 'published|row=T1' 3 'published|row=T2' 4 \
+  "proof|kind=review|head=$(printf 'a%.0s' {1..40})|question=adversarial|result=pass|scope=piece" 5 > "$SANDBOX/ask/record/ask-judge/run.log"
+ak_ready() { ( export UNITS_READINGS_STATE="$1"; call units_ready "$AK_J" 6 ); }
+expect_eq "ASK-3 the floor row with the reviews covered at the head is ready; past the proof at an older head it is not" "T3|" \
+  "$(ak_ready covered)|$(ak_ready 'review adversarial critic piece uncovered')"
+# THE FIX POLICY IS THE HEADER'S: a `fix-policy:` line in the page's text below it is no policy, so the default stands.
+printf -- '---\nrigor: double\n---\n\n# p\n\nfix-policy: S1\n' > "$AK_P"
+expect_eq "ASK-4 a fix-policy: line below the header is not the plan's policy: the default answers" "S1,S2-on" \
+  "$(bash -c '. "$1/units.sh" && . "$1/run.sh" && units_fix_policy "$2"' _ "${LIB%/*}" "$AK_P" 2>/dev/null)"
+
+section "§LIVE — a row's state and agent are the run's: a launch in the log, on the plan and its dry copy"
+LV_P="$SANDBOX/docs/plans/e/w.plan.md"; LV_LOG="$SANDBOX/docs/record/w/run.log"; mkdir -p "${LV_P%/*}" "${LV_LOG%/*}"
+{ printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | one | — | 30m | R | a.sh | — |\n| T2 | 4 | build | two | — | 30m | R | b.sh | — |\n'; } > "$LV_P"
+lv() { call units_rows "${2:-$LV_P}" | awk -F'\t' -v r="$1" '$1 == r { print $10 "/" $5 }'; }
+lv_log() { bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append "${@:3}"' _ "${LIB%/*}" "$LV_LOG" "$@"; }
+# The run's step and approval, and T1's launch under a1, stand in the log before T2's launch.
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z > "$LV_LOG"
+lv_log dispatch row=T1 name=a1 brief=b sum=s
+lv_log dispatch row=T2 name=w-T2 brief=b sum=s
+cp "$LV_P" "$LV_P.dry.1"
+expect_eq "LIVE-2 a launch in the log reads active under its name, on the plan and its dry copy, and is not ready" \
+  "active/w-T2 active/w-T2 active/a1|" "$(lv T2) $(lv T2 "$LV_P.dry.1") $(lv T1)|$(call units_ready "$LV_P" 4)"
+call units_dispatch_back "$LV_P" T2 w-T2
+
+section "§BORN — a row's birth is one born event in the run's log, and a marker in the page's text is none"
+lv_ev() { bash -c '. "$1/reader.sh" && reader_facts "$2"' _ "${LIB%/*}" "$LV_P" | grep -c "^run/v1|ev=$1|.*row=$2|"; }
+call units_born_event "$LV_P" T2 "review S1 on" "record/w/r.md#1"; BN_RC=$CALL_RC
+call units_born_event "$LV_P" T1
+expect_eq "BORN-1 the writer appends one born event per row, the reader lists each once" "0 1 1" "$BN_RC $(lv_ev born T2) $(lv_ev born T1)"
+expect_eq "BORN-2 the cap's count, the findings and the marks read the review-born row from the log; the plain one is none of them" \
+  "T2	S1 on	b.sh|T2	pending	record/w/r.md#1|T2	review	S1 on" \
+  "$(call units_born "$LV_P")|$(call units_born_findings "$LV_P")|$(call units_born_marks "$LV_P")"
+printf '\n## SDLC State\n\n- T1: born: review S2 on of=record/w/r.md#2\n' >> "$LV_P"
+expect_eq "BORN-3 a born marker in the page's text, with no born event, is no born row: the born rows are the log's alone" \
+  "T2	review	S1 on|T2	pending	record/w/r.md#1" "$(call units_born_marks "$LV_P")|$(call units_born_findings "$LV_P")"
+sed -i.bak '/^## SDLC State$/,$d' "$LV_P"
+
+section "§BACK — a launch taken back is the log's cancel, the plan untouched"
+lv_log dispatch row=T2 name=w-T2b brief=b sum=s; BK_SUM="$(cksum < "$LV_P")"
+call units_row_back "$LV_P" T2
+expect_eq "BACK-1 a launch in the log returns to pending by one cancel, the plan untouched" "pending/ 1 same" \
+  "$(lv T2) $(grep -c '|ev=cancel|of=dispatch|row=T2|name=w-T2b|' "$LV_LOG") $([ "$(cksum < "$LV_P")" = "$BK_SUM" ] && echo same)"
+
+section "§TREE — a row's tree and base are the run's: the newest tree event in the log"
+TV_P="$SANDBOX/docs/plans/e/t.plan.md"; LV_LOG="$SANDBOX/docs/record/t/run.log"; mkdir -p "${LV_LOG%/*}"
+{ printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | one | — | 30m | R | a.sh | — |\n| T2 | 4 | build | two | — | 30m | R | b.sh | — |\n'; } > "$TV_P"
+tv() { call units_rows "$TV_P" | awk -F'\t' -v r="$1" '$1 == r { print $10 "/" $5 "/" $11 "/" $12 }'; }
+lv_log dispatch row=T1 name=a1 brief=b sum=s
+lv_log tree row=T1 path=.worktrees/t1 branch=wt/t1 base=1111aaaa by=a1
+TV_SUM="$(cksum < "$TV_P")"
+lv_log tree row=T2 path=.worktrees/t2 branch=wt/t2 base=2222bbbbccccdddd by=w-T2
+expect_eq "TREE-1 a tree in the log fills the row's tree and base, its state untouched, beside a launched row's own" \
+  "pending//.worktrees/t2/2222bbbb active/a1/.worktrees/t1/1111aaaa" "$(tv T2) $(tv T1)"
+lv_log dispatch row=T2 name=w-T2 brief=b sum=s
+lv_log tree row=T2 path=.worktrees/t2b branch=wt/t2b base=3333eeee by=w-T2
+expect_eq "TREE-2 with its launch it reads active under its name in its newest tree, and the plan is unchanged" \
+  "active/w-T2/.worktrees/t2b/3333eeee same" "$(tv T2) $([ "$(cksum < "$TV_P")" = "$TV_SUM" ] && echo same)"
+
+section "§LEDGER — a landed row with no line of its own is the reader's to answer: admitted when it answers landed"
+LV_LOG="$SANDBOX/docs/record/w/run.log"; call units_dispatch_back "$LV_P" T1 a1; lv_log published row=T2 commit=abcdef1 by=w-T2b
+expect_eq "LEDGER-1 T2 landed by its event, with no line in the plan, owes nothing: the reader answers landed" "landed|" "$(lv T2 | cut -d/ -f1)|$(call units_findings "$LV_P")"
+
+section "§DROP — a drop in the run's log is the row's one answer at 15: dropped for the reader and the fill, holding no slot, a wait on it met"
+DP="$SANDBOX/docs/plans/e/d.plan.md"; LV_LOG="$SANDBOX/docs/record/d/run.log"; mkdir -p "${LV_LOG%/*}"; dq() { bash -c '. "$1/reader.sh" && reader_main "$2" "${@:3}"' _ "${LIB%/*}" "$DP" "$@"; }
+printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n%s\n%s\n%s\n' '| T1 | 4 | build | one | — | 30m | R | a.sh | — |' '| T2 | 4 | build | two | T1 | 30m | R | b.sh | — |' '| T3 | 4 | build | three | — | 30m | R | c.sh | — |' > "$DP"
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'dispatch|row=T3|name=w-T3|brief=b|sum=s' 3Z 'drop|row=T1|why=no longer owed' 4Z 'drop|row=T3|why=no longer owed' 5Z > "$LV_LOG"
+expect_eq "DROP-1 T1 and T3, one of them launched, read dropped by the reader and the fill; T2's wait on T1 is met, the only row ready" \
+  "state=dropped state=dropped dropped/ dropped/w-T3|T2|ready=T2" "$(dq status T1 | head -1) $(dq status T3 | head -1) $(lv T1 "$DP") $(lv T3 "$DP")|$(call units_ready "$DP" 4)|$(dq stop | grep '^ready=')"
+call units_drop_event "$DP" T2 'the person said so'; DP_RC=$CALL_RC; call units_drop_event "$DP" T2 'a|b'
+expect_eq "DROP-2 the one writer appends the person's words, and refuses words holding a bar" "0 2 1 state=dropped" "$DP_RC $CALL_RC $(grep -c '|ev=drop|row=T2|why=the person said so|at=' "$LV_LOG") $(dq status T2 | head -1)"
+
+section "§UNTIMED — a dispatch with no instant, in the one row fold: the reader's dispatched while no other fact of its row stands, never the fill's launch"
+printf 'run/v1|ev=%s\n' 'step|n=4|at=2026-11-01T00:00:01Z' 'published|row=T2|commit=c2|by=w|at=2026-11-01T00:00:02Z' 'dispatch|row=T1|name=a1|brief=b|sum=s' 'dispatch|row=T2|name=a2|brief=b|sum=s' > "$LV_LOG"
+expect_eq "UNTIMED-1 alone it reads dispatched and after a landing landed, and the fill holds neither launched" "state=dispatched state=landed pending/ landed/" "$(dq status T1 | head -1) $(dq status T2 | head -1) $(lv T1 "$DP") $(lv T2 "$DP")"
+printf 'run/v1|ev=%s\n' 'tree|row=T1|path=/x/t1|branch=wt/t1|base=aaaaaaaaaaaa' 'tree|row=T2|path=/x/t2|branch=wt/t2|base=bbbbbbbbbbbb|at=2026-11-01T00:00:03Z' >> "$LV_LOG"
+expect_eq "UNTIMED-2 a tree line with no instant is the reader's tree and never the fill's; one with its instant is both" "tree=/x/t1 tree=/x/t2 T1:/ T2:/x/t2/bbbbbbbb" \
+  "$(dq status T1 | grep '^tree=') $(dq status T2 | grep '^tree=') $(call units_rows "$DP" | awk -F'\t' '$1 == "T1" || $1 == "T2" { printf "%s%s:%s/%s", s, $1, $11, $12; s = " " }')"
+
+section "§NAMED — a task at 15 names in its deps the approval it waits on: admitted, held until it stands, its name the one approve takes"
+sed 's/| T1 | 30m/| T1, approval:D7 | 30m/' "$DP" > "$DP.n"; mv "$DP.n" "$DP"; sed 's/approval:D7/aproval:D7/' "$DP" > "$DP.bad"; printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$LV_LOG"
+expect_eq "NAMED-1 the wait is admitted; a misspelled one is refused, naming it" "|T2: dep aproval:D7 names no row in the table" "$(call units_validate "$DP")|$(call units_validate "$DP.bad")"
+NM_A="$(call units_ready "$DP" 4)|$(dq stop | grep '^ready=')|$(call units_approval_names "$DP" | paste -sd' ' -)"; printf 'run/v1|ev=approval|key=D7|by=me|at=2026-11-01T00:00:04Z\n' >> "$LV_LOG"
+expect_eq "NAMED-2 the fill and the reader hold T2 while D7 is absent and ready it once it stands; D7 is the name approve takes" "T3|ready=T3|D7 plan T2 T3|ready=T2 T3" "$NM_A $(call units_ready "$DP" 4 | paste -sd' ' -)|$(dq stop | grep '^ready=')"
+expect_eq "NAMED-7 asked for one task, its names alone; a plan it cannot read is a failure it returns, where the whole list answers nothing" "D7 plan|1|0" "$(call units_approval_names "$DP" T2 | paste -sd' ' -)|$(call_rc units_approval_names "$DP.none" T2)|$(call_rc units_approval_names "$DP.none")"
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=2' 1Z 'approval|key=step3|by=me' 2Z > "$LV_LOG"
+expect_eq "NAMED-4 every task waits on the plan's approval by its kind: with the run at step 2, the fill offers none at step 4, as the reader offers none" "|ready=" "$(call units_ready "$DP" 4)|$(dq stop | grep '^ready=')"
+RP="$SANDBOX/docs/plans/e/r.plan.md"; LV_LOG="$SANDBOX/docs/record/r/run.log"; mkdir -p "${LV_LOG%/*}"; rw() { call units_waiting "$RP" 8 | awk -F'\t' '$2 ~ /^approval:/ { print $1 " " $2 }'; }
+sed 's/| T2 | 4 | build | two | T1, approval:D7 |/| T2 | 8 | integrate | two | approval:release |/' "$DP" > "$RP"; printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=8' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$LV_LOG"; RW_A="$(rw)"; sed -i.bak 's/| approval:release |/| — |/' "$RP"
+expect_eq "NAMED-6 with no release row an integrate task waits on the release approval it names, never on the one its kind implies" "T2 approval:release|" "$RW_A|$(rw)"
+expect_eq "NAMED-3 the stop wall's edit that makes a row wait names the deps cell and a row's id at 15" "deps RID" "$(bash -c '. "$1/stop.sh" && stop_wait_cell "$2"' _ "${LIB%/*}" "$DP")"
+
+section "§ORDER-15 — the order and its exception past the release: a row is open unless the run's log lands or drops it, and the fix read as a piece is the reader's waits"
+# shellcheck disable=SC2086
+o5 $O5_REG $O5_REV $O5_REL; o5log
+expect_eq "ORD15-1 control: regression at 5, review at 6, release at 7, all open: admitted (rc 0)" "|0" "$(ov)"
+# shellcheck disable=SC2086
+o5 $O5_REV $O5_REL ${O5_REG/ 5 / 7 }; O5_A="$(ov)"; o5log 'published|row=T5|commit=c1|by=w' 'published|row=T6|commit=c2|by=w' 'published|row=T7|commit=c3|by=w'; O5_B="$(ov)"; o5log 'drop|row=T5|why=not owed'
+expect_eq "ORD15-2 the regression after the review: refused with the order's own words (rc 1); every row landed, or the regression dropped: not judged" "$OR_REGLINE|1 |0 |0" "$O5_A $O5_B $(ov)"
+# shellcheck disable=SC2086
+o5 $O5_REG $O5_REL ${O5_REV/ 6 / 7 }; o5log
+expect_eq "ORD15-3 the release ahead of a review: refused with the order's own words (rc 1)" \
+  "T7: the release row comes ahead of the review row T6; the order is build, regression, review, release: put T7 at step 7, after T6|1" "$(ov)"
+# shellcheck disable=SC2086
+o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T8 r/T9.md; o5log 'published|row=T1|commit=c1|by=w' 'published|row=T5|commit=c2|by=w' 'published|row=T6|commit=c3|by=w'
+O5_A="$(ov)"; printf 'run/v1|ev=published|row=T7|commit=c4|by=w|at=2026-11-01T00:00:01Z\n' >> "$O5_LOG"; O5_B="$(ov)"; sed -i.bak 's/| review | t | T8 |/| review | t | T1 |/' "$O5"
+expect_eq "ORD15-4 a review past the release waiting on the fix T8: refused while the release is open, admitted once the log lands it, refused when it waits on T1 written before it" \
+  "$PO_ORD|1 |0 $PO_ORD|1" "$O5_A $O5_B $(ov)"
+# shellcheck disable=SC2086
+o5 $O5_REV ${O5_REG/ 5 / 6 } $O5_REL; o5log
+expect_eq "ORD15-6 the regression at the review's step, after it in the table: refused with the order's own words (rc 1)" "$OR_REGLINE|1" "$(ov)"
+# shellcheck disable=SC2086
+o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review — r/T9.md
+o5log 'published|row=T1|commit=c1|by=w' 'published|row=T5|commit=c2|by=w' 'published|row=T6|commit=c3|by=w' 'published|row=T7|commit=c4|by=w'; O5_A="$(ov)"
+# shellcheck disable=SC2086
+o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review 'T8, T6' r/T9.md
+expect_eq "ORD15-7 the release landed, a review past it that names no row it waits on, or the fix and a reading written before the release: refused each (rc 1)" \
+  "$PO_ORD|1 $PO_ORD|1" "$O5_A $(ov)"
+# shellcheck disable=SC2086
+o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T8 r/T9.md; O5_A="$(call units_post_readers "$O5")"; sed -i.bak 's/| review | t | T8 |/| review | t | T1 |/' "$O5"
+expect_eq "ORD15-5 the card's question at 15, as release-approval's §POST asks it at 14: the review past the landed release waiting on the fix is named, open and unread; waiting on T1 it is not" \
+  "T9	pending	unread|" "$O5_A|$(call units_post_readers "$O5")"
+
+section "§DEPS-15 — a row at 15 waits by its deps and its kind's default alone: no step hold, the release approval once, the questions tag judged at the write"
+W5="$SANDBOX/docs/plans/e/w5.plan.md"; mkdir -p "$SANDBOX/docs/record/w5"
+W5_ROWS=(T2 4 build two T3 b.sh T3 4 build three — c.sh T12 4 build late — e.sh T5 5 test reg — r/T5.md T6 6 review 'rev · questions: evidence' — r/T6.md T9 7 doc rel — CHANGELOG.md T10 8 integrate merge approval:release r/T10.md)
+printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' > "$W5"; printf '| %s | %s | %s | %s | %s | 30m | R | %s | — |\n' "${W5_ROWS[@]}" >> "$W5"
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=6' 1Z 'approval|key=step3|by=me' 2Z > "$SANDBOX/docs/record/w5/run.log"
+w9() { printf '%s %s' "$(call units_waiting "$1" 6 | awk -F'\t' '$1 == "T9" { print $2 }' | sort -u | paste -sd' ' -)" "$(call plan_read_waits "$1" T9 | awk -F'\t' '$2 == "wait" { print $3 }' | paste -sd' ' -)"; }
+expect_eq "DEPS-2 the release text at 15 waits on what it reads and on no step, for the fill and the reader" \
+  "head approval:plan" "$(w9 "$W5")"
+expect_eq "DEPS-4 an integrate row at 15 whose deps name the release approval waits on it once" \
+  "proof:regression,proof:review,head,approval:release" "$(call plan_read_waits "$W5" T10 | head -1 | cut -f4)"
+DQ_TAIL="which is no list of questions: each one of evidence adversarial structure, once, comma-separated with no space"; DQ_OUT="$(call units_validate "$W5"; printf '|%s' "$CALL_RC")"
+for v in 's/: evidence |/: evidense |/' 's/: evidence |/: |/' 's/: evidence |/: evidence,evidence |/' 's/| three |/| three · questions: structure |/'; do sed "$v" "$W5" > "$W5.v"; DQ_OUT="$DQ_OUT $(call units_validate "$W5.v")"; done
+expect_eq "DEPS-5 at 15 the validator holds the questions tag to the verb's rule: a word outside the set, an empty tag, a question twice, a tag on a row no review" \
+  "|0 T6: task declares questions: evidense, $DQ_TAIL T6: task declares questions: (empty), $DQ_TAIL T6: task declares questions: evidence,evidence, $DQ_TAIL T3: task declares questions: structure; only a review row is dealt questions" "$DQ_OUT"
+
 finish

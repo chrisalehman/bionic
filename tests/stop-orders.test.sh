@@ -1,6 +1,5 @@
 #!/bin/bash
 # Tests for hooks/stop-orders.sh — the human's stop order, and the batch stand-down
-# (epic-16 wave-02 task S3; R3, R8; AC-2's user-ordered half and AC-11).
 #
 # HERMETIC. Every run happens inside a mktemp'd repo with its own roster, its own sweeper
 # ledger and its own session key; nothing here stops an agent, reads the live installed
@@ -92,8 +91,9 @@ so_mark() {  # <repo> <name> <landed commit> — the name's roster line marked l
 so_bind_plan() {  # <repo> <working-branch> -> echoes the plan path
   local repo="$1" wb="$2" p
   p="$repo/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  mkdir -p "${p%/*}" "$repo/.bionic/tmp"
-  printf -- '---\nworking-branch: %s\n---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n' "$wb" > "$p"
+  mkdir -p "${p%/*}" "$repo/.bionic/tmp" "$repo/.bionic/docs/record/wave-x"
+  printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: %s\n---\n# fixture plan\n' "$wb" > "$p"
+  printf 'run/v1|ev=step|n=4|at=2026-09-23T00:00:00Z\n' >> "$repo/.bionic/docs/record/wave-x/run.log"
   printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$p" > "$repo/.bionic/tmp/engaged-$SID.state"
   printf '%s\n' "$p"
 }
@@ -274,8 +274,7 @@ run_orders "$R5" standdown
 expect_contains "…and the ack is what puts it in the batch" "1 row(s) have landed" "$OUT"
 
 # THE APPEND-ONLY ADVANCE, pinned in this suite because standdown now reads the roster
-# through ONE pre-loop fold instead of re-walking the file per verdict row (ap review P-1,
-# epic-16 w2 Step-6 remediation R4). The behaviour is unchanged and that is the point of
+# through ONE pre-loop fold instead of re-walking the file per verdict row. That is the point of
 # the pin: a contract advances along the roster and every writer copies the fields forward,
 # so the LAST row carrying a name is the authoritative one, and a rewrite that starts
 # taking the first row must not be able to stay green here. The cross-script half — the
@@ -352,8 +351,6 @@ R7WT="$SANDBOX/worktree-wt"
 # A REAL `git worktree add` (never a mocked path) — built from the repo root, since
 # `git worktree add` resolves relative paths against pwd (.claude/rules/git-worktree-docs.md).
 git -C "$R7" worktree add -q -b w-r3-wt "$R7WT" >/dev/null 2>&1
-# (fixture sanity check removed epic-18 W3 4/6: not a subject-under-test assertion --
-#  it verified git worktree add itself, not hooks/stop-orders.sh; see ledger-stop-orders.md)
 
 run_orders "$R7" standdown
 expect_status "from the main repo root, standdown sees the true roster" 0 "$ST"
@@ -380,7 +377,6 @@ section "Section 6: standdown LANDS NOTHING; a row is stoppable by its roster ma
 # named `<x>` (or `W-<X>`) holds `.worktrees/<x>`.
 
 R8="$(make_repo standdown-lands-nothing)"
-R8_REAL="$(cd "$R8" && pwd -P)"
 echo seed > "$R8/README.md"
 git -C "$R8" add README.md >/dev/null 2>&1
 git -C "$R8" commit -qm seed >/dev/null 2>&1
@@ -447,10 +443,7 @@ R8TR="$R8CFG/projects/$R8SLUG/$SID.jsonl"
 # THE ANSWER BODY IS BUILT BY tests/lib/live-answer.sh (S17, spec AC-27/AC-28): the self
 # line, the `Teammates (N):` header and every teammate row come out of the committed corpus
 # at tests/fixtures/claude/listagents-answers.jsonl with only this suite's names and
-# statuses substituted in place. The private builder that used to sit here re-typed the
-# harness's separator, its ref suffix and its recognition anchor — three spellings of that
-# anchor across the tree, and the one thing standing between "empty answer" and
-# "unrecognised body".
+# statuses substituted in place.
 # FRESH because the answer postdates the last user prompt.
 LIVE_ANSWER_TYPE="bionic:implementor"
 plant_live() {  # <transcript> <fresh|stale> <name>...
@@ -554,9 +547,8 @@ expect_contains "…while the real still-at-it beside it is still live" "[live]"
 # `Subagents (N):` header rather than `Teammates (N):` — before the fix, `live_agents`
 # (payload/scripts/lib/agents.sh) parsed only the Teammates block, so a panel carrying
 # ONLY a Subagents block answered zero live agents and every held row read `[not live]`
-# regardless of whether its agent was still running. T12's live bed hit exactly this
-# (live-rows-802ee6d.md F2): the literal `STANDDOWN <name>` line could never print in a
-# `-p` bed for the same reason. `tests/lib/live-answer.sh`'s composer only substitutes
+# regardless of whether its agent was still running.
+# `tests/lib/live-answer.sh`'s composer only substitutes
 # into the corpus's Teammates shape (its own header says so), so this body is hand-built —
 # the same precedent that suite's Teammates-forgery shapes are hand-written rather than
 # routed through the composer.
@@ -597,9 +589,7 @@ section "Section 8: stopped <name> acks the row it stops; standdown drops a row 
 # An unknown or already-acked name is a refusal, exit 2: the sweeper would record an unknown
 # name and warn, and a second ack says nothing new.
 #
-# STOPPED NOW CHECKS WHAT STANDDOWN ALREADY CHECKS (wave-19 T1 follow-up, critic C4). Before
-# this fix `stopped` acked ANY open row on the strength of the name alone — still-live or
-# UNMET — and since T4 that ack frees the name for a fresh dispatch while the agent it named
+# STOPPED CHECKS WHAT STANDDOWN ALREADY CHECKS: an ack frees the name for a fresh dispatch while the agent it named
 # is still running (dispatch-preflight.sh:2272 treats any ack newer than the launch as the
 # name closing). So a FRESH panel reading must confirm the name is gone: present on the
 # panel -> refused, naming it live; a stale or absent panel -> refused, because a verb that
@@ -630,10 +620,8 @@ expect_status "stopped on an UNMET row under a stale panel is refused, exit 2 (C
 expect_contains "…naming the verdict" "UNMET" "$OUT$ERR"
 expect_absent "…and acks nothing" "|name=open-one|" "$(s9_ledger)"
 
-# UNMET AND GONE FROM A FRESH PANEL: closed, reason abandoned (wave-19 T1e, audit V-1; REQ-1
-# AC-1.2). This is T1's own original fixture — `open-one`'s deliverable never exists — and
-# the agent it named was stopped before it landed (w19-T6 this wave). Refusing it left the
-# name blocked and counted against the budget with no close but a hand `sweeper ack`. The
+# UNMET AND GONE FROM A FRESH PANEL: closed, reason abandoned. `open-one`'s deliverable never exists, and refusing
+# it would leave the name blocked and counted against the budget with no close but a hand `sweeper ack`. The
 # ack is attributed honestly: `reason=abandoned`, never `landed` — nothing landed — and never
 # the tick's `moot-and-gone`, which names a row that had nothing to produce.
 plant_live "$R9TR" fresh
@@ -741,8 +729,7 @@ git -C "$R11/.worktrees/acked-gone-lease" commit -qm "acked-gone-lease work" >/d
 R11SLUG=$(so_slug "$R11")
 mkdir -p "$R8CFG/projects/$R11SLUG"
 R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
-# THE DELIVERABLE IS WRITTEN (wave-19 T1f, review R2-1). Before T1f this row's n3.md was never
-# written, so the row was UNMET and this block pinned a merge of work nobody landed. A lease
+# THE DELIVERABLE IS WRITTEN. A lease
 # ends in a merge only for a landed row (MET or WAIVED); the UNMET shape is R12 below.
 echo landed > "$R11/.bionic/docs/record/n3.md"
 so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c" "" "" "" \
@@ -817,8 +804,6 @@ if [ -d "$R12/.worktrees/half-done" ] && [ -f "$R12/.worktrees/half-done/partial
 else
   no "…its tree stands, the partial work still in it"
 fi
-R12_LE=$(printf '%s\n' "$OUT" | sed -n '/LEASES/,$p')
-R12_REAL=$(cd "$R12" && pwd -P)   # the verb names trees under the physical repo path
 
 # ============================================================
 section "Section 9: stopped — STILL-LIVE is not a close on its own; a fresh, absent panel overrides the progress-artifact shape (wave-19 T1g, audit V2-1, critic C2-2)"
@@ -940,13 +925,13 @@ fi
 
 
 # ============================================================
-section "§TREE: stopped finds a landed row's tree by the plan's Tasks cell when the session's record lacks it, removes it, and names it"
+section "§TREE: stopped finds a landed row's tree by its row's tree in the run's log when the session's record lacks it, removes it, and names it"
 # ============================================================
 #
 # THE TREE GOES AT THE STOP, WHOEVER SPAWNED IT. A row's tree is recorded under the session whose carrier made
 # it; after a `/clear` that is a predecessor, and the name's convention spelling (`.worktrees/w45-t1`) is never
-# the dispatcher's (`.worktrees/45-T1`). So `stopped` reads the plan's `## Tasks` worktree cell for the row whose
-# agent cell is the name, removes that tree when the row carries the landing's mark, and says what it removed;
+# the dispatcher's (`.worktrees/45-T1`). So `stopped` asks the run for the tree of the row the name was dispatched
+# to, removes that tree when the row carries the landing's mark, and says what it removed;
 # where it finds no tree there, it says that too, naming where it looked.
 # FIXTURE FIDELITY: the tree is made by `spawn-worktree.sh create --for` under a predecessor session, the mark by
 # the roster's one marker (`so_mark`), the panel by tests/lib/live-answer.sh.
@@ -954,25 +939,16 @@ section "§TREE: stopped finds a landed row's tree by the plan's Tasks cell when
 RT="$(make_repo stopped-tree)"; RT_REAL="$(cd "$RT" && pwd -P)"
 echo seed > "$RT/README.md"; git -C "$RT" add README.md >/dev/null 2>&1; git -C "$RT" commit -qm seed >/dev/null 2>&1
 RT_P="$RT/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${RT_P%/*}"
-cat > "$RT_P" <<'RTP'
----
-working-branch: wave/fixture
----
-# fixture plan
-
-## SDLC State
-
-current: 4
-
-## Tasks
-
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | row one | w45-T1 | — | | 10 | REQ-1 | T1.txt | .worktrees/45-T1 | | active |
-| T2 | 4 | build | row two | w45-T2 | — | | 10 | REQ-1 | T2.txt | .worktrees/45-T2 | | active |
-RTP
+{ printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/fixture\n---\n# fixture plan\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T%s | 4 | build | row %s | — | 10 | REQ-1 | T%s.txt | — |\n' 1 one 1 2 two 2; } > "$RT_P"
+mkdir -p "$RT/.bionic/docs/record/wave-x"
+printf 'run/v1|ev=%s|at=2026-09-23T00:00:0%sZ\n' 'step|n=4' 1 'dispatch|row=T1|name=w45-T1' 2 'tree|row=T1|path=.worktrees/45-T1' 3 \
+  'dispatch|row=T2|name=w45-T2' 4 'tree|row=T2|path=.worktrees/45-T2' 5 > "$RT/.bionic/docs/record/wave-x/run.log"
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$RT_P" > "$RT/.bionic/tmp/engaged-$SID.state"
 RT_PRED="77777777-8888-4999-8aaa-bbbbbbbbbbbb"
+mkdir -p "$RT/.bionic/docs/record/wave-x/briefs"
+printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' T1 w45-T1 0 > "$RT/.bionic/docs/record/wave-x/briefs/w45-T1.md"
 ( cd "$RT" && CLAUDE_CODE_SESSION_ID="$RT_PRED" bash "$HERE/../payload/scripts/spawn-worktree.sh" create \
     "$(git -C "$RT" rev-parse HEAD)" wt/45-T1 --for w45-T1 >/dev/null 2>&1 )
 RT_T1="$RT_REAL/.worktrees/45-T1"
@@ -992,7 +968,7 @@ expect_eq "(tt0) the predecessor's record names the tree" "$(printf '%s\nrc=0' "
 expect_eq "(tt0b) …and this session's names none" "rc=1" "$(rt_ws "$SID")"
 run_orders_cfg "$RT" stopped w45-T1
 expect_status "(tt1) stopped closes the landed row (exit 0)" 0 "$ST"
-expect_contains "(tt1b) …finds its tree by the Tasks cell, removes it and names it" \
+expect_contains "(tt1b) …finds its tree by its row's tree, removes it and names it" \
   "stopped: w45-T1 — its tree is removed: ${RT_T1} (branch wt/45-T1 stays; landed ${RT_C1:0:12}" "$OUT"
 expect_false "(tt2) …the tree is gone" test -d "$RT_T1"
 expect_eq "(tt2b) …and its branch stays" "$RT_C1" "$(git -C "$RT" rev-parse --verify -q wt/45-T1)"
@@ -1000,6 +976,31 @@ run_orders_cfg "$RT" stopped w45-T2
 expect_status "(tt3) stopped closes a landed row whose cell names no tree on disk (exit 0)" 0 "$ST"
 expect_contains "(tt3b) …and says it found no tree, naming where it looked" \
   "stopped: w45-T2 — its tree is not found: ${RT_REAL}/.worktrees/45-T2" "$OUT"
+
+# ============================================================
+section "§BACK: stopped on an agent gone unlanded takes its row's launch back, so the row is offered again"
+# ============================================================
+# A row launched by the log reads running until a cancel of its launch stands.
+# FIXTURE FIDELITY: the launch is written by the one appender, the rows read through lib/units.sh, the panel planted.
+# fails-when: an abandoned agent's row reads running for good, or its launch is taken back twice.
+RB="$(make_repo stopped-back)"; RB_P="$RB/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${RB_P%/*}" "$RB/.bionic/docs/record/wave-x"
+{ printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n'
+  printf '|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | one | — | 30 | R | a.sh | — |\n'
+  printf '| T2 | 4 | build | two | — | 30 | R | b.sh | — |\n'; } > "$RB_P"
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$RB_P" > "$RB/.bionic/tmp/engaged-$SID.state"
+RB_LIB="$HERE/../payload/scripts/lib"
+bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append step n=4 && RUN_LOG="$2" log_append approval key=step3 by=fixture said=approved && RUN_LOG="$2" log_append dispatch row=T1 name=w-log brief=b sum=s && RUN_LOG="$2" log_append dispatch row=T2 name=w-cell brief=b sum=s' _ "$RB_LIB" "$RB/.bionic/docs/record/wave-x/run.log"
+so_roster_row "$RB" w-log ".bionic/docs/record/never-log.md" "" "w-log@session-6c85684c"
+so_roster_row "$RB" w-cell ".bionic/docs/record/never-cell.md" "" "w-cell@session-6c85684c"
+RBSLUG=$(so_slug "$RB"); mkdir -p "$R8CFG/projects/$RBSLUG"; plant_live "$R8CFG/projects/$RBSLUG/$SID.jsonl" fresh
+rb_rows() { bash -c '. "$1/units.sh" 2>/dev/null; units_rows "$2" | awk -F"\t" "{ printf \"%s/%s/%s \", \$1, \$10, \$5 }"; echo "ready=$(units_ready "$2" 4 | tr "\n" ,)"' _ "$RB_LIB" "$RB_P"; }
+rb_cancels() { grep -c '|ev=cancel|' "$RB/.bionic/docs/record/wave-x/run.log"; }
+expect_eq "(bk0) before: T1 and T2 run by the log, neither offered" "T1/active/w-log T2/active/w-cell ready=" "$(rb_rows)"
+run_orders_cfg "$RB" stopped w-log
+expect_status "(bk1) stopped closes the gone, unlanded agent (exit 0)" 0 "$ST"
+expect_eq "(bk1b) …its row reads pending and is offered, by exactly one cancel" "T1/pending/ T2/active/w-cell ready=T1, 1" "$(rb_rows) $(rb_cancels)"
+run_orders_cfg "$RB" stopped w-log
+expect_status "(bk3) once its row is back, a closed name is refused as ever (exit 2)" 2 "$ST"
 
 
 # ============================================================

@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for hooks/patrol-duties-gate.sh — the PATROL-DUTIES WALL (task-scale
-# session task-dispatch-wall-channel-loss, T5).
+# Tests for hooks/patrol-duties-gate.sh — the PATROL-DUTIES WALL.
 #
 # THE CONTRACT UNDER TEST. A Patrol tick is a turn the machine started, not the
 # user, and its two standing duties — refresh the subagent panel, refresh the
@@ -94,17 +93,9 @@ make_env() {  # -> project dir on stdout
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
   : > "$dir/.bionic/tmp/engaged-$SID.state"
-  # APPROVED (wave-26 T13; D3): the run's ledger is live on its `approved-by:` line, and 23b
-  # reads the fill ledger's line a live Stop writes.
-  cat > "$dir/.bionic/docs/plans/$PLAN_REL" <<'EOF'
----
-governing-skill: canonical-sdlc
----
-## SDLC State
-
-current: 4
-approved-by: fixture 2026-10-04T00:00Z "approved"
-EOF
+  # APPROVED: the run's ledger is live on its approval, and 23b reads the fill ledger's line a live Stop writes.
+  # The page is at 15, its step and approval in the run's log.
+  plan_fixture "$dir/.bionic/docs/plans/$PLAN_REL" task > /dev/null
   # BOUND TO ITS PLAN (wave-23-fixit-1810, REQ-1, D1). An empty marker beside an open plan is
   # the unbound state, whose `fallback` plan is announced and never acted on — the basename
   # discharge below would never count. Group 24/25 drive the unbound state on purpose.
@@ -199,12 +190,6 @@ a_tool_sidechain() {  # <dir> <name>
     >> "$1/transcript.jsonl"
 }
 
-a_tool_agentid() {  # <dir> <name>
-  jq -nc --arg n "$2" '{type:"assistant",isSidechain:false,agentId:"aworker-5fb2ff80f2de21f7",
-      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_1",name:$n,input:{}}]}}' \
-    >> "$1/transcript.jsonl"
-}
-
 # The orchestrator's own words: a turn's prose, and the one place a stand-down decline may be
 # written. DEFINED WITH THE OTHER ENTRY BUILDERS, above every case (wave-21 T14): §4's 35e calls
 # it, and a definition in §5 left those calls printing "command not found" while the case passed.
@@ -230,7 +215,7 @@ stdin_for() {  # <project> <transcript-path> [event] [stop_hook_active]
 # where the ENV value is primary and the payload a witness — so a driver that left the
 # RUNNER's own CLAUDE_CODE_SESSION_ID in the environment would drive every fixture under the
 # operator's real session id, find no marker under it, and pass every case in silence. The
-# same mirroring hooks/stop-guard.sh's and dispatch-preflight's suites already do.
+# same mirroring the suites of hooks/stop.sh and dispatch-preflight already do.
 fire() {  # <project> [event] [stop_hook_active]
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" <<< "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-Stop}" "${3:-false}")" 2>"${PE1_ERRFILE:-/dev/null}")
   # THE USER STREAM, kept for the AC-E1.3 section at the end (task 13). The JSON reason
@@ -281,7 +266,6 @@ expect_block() {  # <label> <must-contain> [must-not-contain]
   ok "$1"
 }
 
-LA_MISSING="ListAgents"
 TL_MISSING="TaskList or a plan-ledger write"
 
 section "Section 2: discrimination — what counts, and when"
@@ -360,10 +344,10 @@ d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm; a_tool "$d" ListAgents; a_
 fire "$d"; expect_block "22: …and with a plan, the same turn is refused the same way" "session-poker.sh tick" "$TL_MISSING"
 
 # 23: THE GATE WRITES NOTHING. It is a gate, and gates only read (TDD §3.2). The one file the
-# Stop process writes is the fill ledger's recorder's (wave-20 REQ-5, AC-5.5), which is not
-# this gate: it appends one line under the run's record directory and touches nothing else.
+# Stop process writes is the run's log, where the recorder of the turn's `stop` event, which is
+# not this gate, appends one line under the run's record directory and touches nothing else.
 d=$(make_env); u_tick "$d"
-_led="$d/.bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log"
+_led="$d/.bionic/docs/record/${PLAN_REL%.plan.md}/run.log"
 _before=$(find "$d" -type f ! -path "$_led" | sort | cksum)
 fire "$d"
 _after=$(find "$d" -type f ! -path "$_led" | sort | cksum)
@@ -608,8 +592,6 @@ sd_order() {  # <dir> <name> [by]
 sd_stood() {  # <dir> <name>
   sd_met "$1" "$2"; sd_order "$1" "$2"
 }
-
-SD_MISSING="stand-down unanswered"
 
 # 48: neither stopped nor declined -> block, naming the agent and the way out.
 d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"

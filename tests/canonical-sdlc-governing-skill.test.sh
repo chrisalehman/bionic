@@ -11,7 +11,6 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
-. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 # The column counter for the AC-E1.3 sweep: the em dash is three bytes and one column,
 # so a byte count would pass a line that wraps.
@@ -86,7 +85,6 @@ make_project() {
 # whose artifact lives in another tree engages THAT tree.
 GS_SID="5e4d3c2b-1a09-4876-9b5c-4d3e2f1a0b9c"
 engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$GS_SID.state"; }
-unengage() { rm -f "$1/.bionic/tmp/engaged-$GS_SID.state"; }
 
 # Runs hook with a synthetic Write payload for $FILE with $CONTENT.
 HOOK_VSTDERR=""
@@ -190,26 +188,6 @@ run_edit() {
   rm -f "$tmp_err"
 }
 
-# gs_find_bash52 — prints the path to a bash >= 5.2 interpreter (the version that turned on
-# `patsub_replacement`, review R1) if one is reachable, and fails silently otherwise. Checked in
-# this order because /opt/homebrew/bin/bash is the ONE named in the review's own measurement,
-# but a machine without Homebrew may still have a modern bash first on PATH.
-gs_find_bash52() {
-  local cand resolved ver major minor
-  for cand in /opt/homebrew/bin/bash /usr/local/bin/bash bash; do
-    resolved=$(command -v "$cand" 2>/dev/null) || continue
-    ver=$("$resolved" -c 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"' 2>/dev/null) || continue
-    major="${ver%%.*}"
-    minor="${ver#*.}"
-    case "$major$minor" in *[!0-9]*) continue ;; esac
-    if [ "$major" -gt 5 ] || { [ "$major" -eq 5 ] && [ "$minor" -ge 2 ]; }; then
-      printf '%s' "$resolved"
-      return 0
-    fi
-  done
-  return 1
-}
-
 # Same semantics as the framework's expect_eq (label, expected, actual;
 # string equality) -- delegated rather than reimplemented so the counting
 # and section-floor bookkeeping run through the ONE definition (AC-12, A-16).
@@ -225,10 +203,9 @@ assert_contains() { expect_contains "$1" "$2" "$3"; }
 #   intent/rigor/scale — triple values (default build/double/wave);
 #     value OMIT drops the line entirely (missing-field cases).
 #   step    — sdlc-step (default 3).
-#   version — canonical_sdlc_version (default 14); OMIT drops the line.
+#   version — canonical_sdlc_version (default 15, a plan's version); OMIT drops the line.
 #   mode    — if set, inject a `mode:` line (split-brain guard case).
 #   omit    — space-separated flag names to drop (missing-flag cases).
-#   matrix  — yes|no; drop the "## Verification Matrix" section when no.
 #   walk    — if set, inject a `walk: <value>` line (default OMIT, no line).
 #   override — if set, inject the given full `rigor-override: ...` line
 #              verbatim (default OMIT, no line).
@@ -239,7 +216,7 @@ assert_contains() { expect_contains "$1" "$2" "$3"; }
 #             about design must satisfy that arm to keep testing its own
 #             subject. Plan-targeting cases never set it.
 build_plan() {
-  local intent=build rigor=double scale=wave step=3 version=14 mode="OMIT" omit=" " matrix=yes
+  local intent=build rigor=double scale=wave step=3 version=15 mode="OMIT" omit=" "
   local skill="superpowers:writing-plans"
   local walk="OMIT" override="OMIT" waived="OMIT"
   # goal: yes (default) | no | empty — K5.4. "yes" injects a real '## Goal' paragraph as
@@ -259,7 +236,6 @@ build_plan() {
       version=*) version="${arg#version=}" ;;
       mode=*)    mode="${arg#mode=}" ;;
       omit=*)    omit=" ${arg#omit=} " ;;
-      matrix=*)  matrix="${arg#matrix=}" ;;
       skill=*)   skill="${arg#skill=}" ;;
       walk=*)    walk="${arg#walk=}" ;;
       override=*) override="${arg#override=}" ;;
@@ -307,31 +283,21 @@ A concise paragraph describing this fixture'"'"'s goal.
 ' ;;
     no)    : ;;
   esac
-  if [ "$matrix" = yes ]; then
-    out+='
-## Verification Matrix
-
-stack-health: n/a: no long-running serve observed
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+  out+='
+# Plan body
 '
-  else
-    out+='
-# Plan body without a matrix section
-'
-  fi
   printf '%s' "$out"
 }
 
 VALID_FRONTMATTER="$(build_plan)"
+# A document that is no plan is written at 14, as it may be.
+VALID_DOC_FRONTMATTER="$(build_plan version=14)"
 
 # A wave-scale spec must satisfy the design wall (wave-02 AC-2). Cases below
 # that write a plan fixture to a *.spec.md path are not about design, so they
 # carry the waiver token and keep testing their own subject.
 SPEC_DESIGN_WAIVER='design-waived: test-fixture 2026-08-02 covered by the design-wall cases'
-VALID_SPEC_FRONTMATTER="$(build_plan waived="$SPEC_DESIGN_WAIVER")"
+VALID_SPEC_FRONTMATTER="$(build_plan version=14 waived="$SPEC_DESIGN_WAIVER")"
 
 MISSING_FM='# Plan body, no frontmatter
 '
@@ -360,13 +326,13 @@ echo "Write: spec file with valid frontmatter → allow"
 run_write "$project/.bionic/docs/specs/epic-01-demo/wave-01-x.spec.md" "$VALID_SPEC_FRONTMATTER"
 
 echo "Write: adr file with valid frontmatter → allow"
-run_write "$project/.bionic/docs/adrs/epic-01-demo/adr-001-x.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/adrs/epic-01-demo/adr-001-x.md" "$VALID_DOC_FRONTMATTER"
 
 echo "Write: continuation.md with valid frontmatter → allow"
-run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$VALID_DOC_FRONTMATTER"
 
 echo "Write: continuation-checkpoint.md with valid frontmatter → allow"
-run_write "$project/.bionic/docs/plans/epic-01-demo/continuation-checkpoint.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuation-checkpoint.md" "$VALID_DOC_FRONTMATTER"
 
 echo "Write: README.md under plans dir, no frontmatter → allow (not an enforced artifact)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/README.md" "# some notes"
@@ -403,8 +369,9 @@ fi
 # canonical_sdlc_version: exactly one supported value
 # ============================================================
 #
-# The hook supports canonical_sdlc_version: 14 and nothing else. Every other
-# value blocks with exit 2 and a message naming the value found. One
+# The hook supports canonical_sdlc_version: 14, and for a plan 15 as well (its
+# shape is tests/plan-page.test.sh's). Every other value blocks with exit 2 and a
+# message naming the value found. One
 # table-driven case over representative bad values — an older number, a much
 # older number, a legacy single digit, a far-future number, an empty value,
 # and non-numeric garbage — because there is one behavior here, not one per
@@ -431,21 +398,20 @@ assert_eq "absent version blocks" 2 "$HOOK_EXIT"
 #
 # Governance keys off the triple: presence + whole-value enum validation,
 # the `mode:` split-brain guard, the 5 discriminator + 2 opt-in flags,
-# `model_plan`, and a `## Verification Matrix` at sdlc-step >= 3 for
-# wave/epic plans.
+# and `model_plan`.
 #
 # Enums: intent ∈ {build,bugfix,refactor,tune,spike,incident-response};
 #        rigor ∈ {single,double,double}; scale ∈ {task,wave,epic}.
 #
 # No intent × scale cell is barred (T9, epic-18-w1): every combination that
-# clears the enum + flag + matrix checks writes cleanly, including the three
+# clears the enum and flag checks writes cleanly, including the three
 # cells a prior version refused (bugfix·epic, spike·epic,
 # incident-response·epic) — the triple is the user's whole call, not a
 # derivable refusal.
 
 project=$(make_project)
 
-echo "valid plan (full triple + flags + model_plan + matrix) → allow"
+echo "valid plan (full triple + flags + model_plan) → allow"
 run_write "$project/.bionic/docs/plans/epic-01-demo/valid.plan.md" "$(build_plan)"
 assert_eq "accepts_valid_plan exit 0" 0 "$HOOK_EXIT"
 
@@ -517,36 +483,13 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/no-mp.plan.md" "$(build_plan
 assert_eq "blocks_missing_model_plan exit 2" 2 "$HOOK_EXIT"
 assert_contains "blocks_missing_model_plan names model_plan" "model_plan" "$HOOK_VSTDERR"
 
-echo "*.plan.md at sdlc-step 3 without matrix → block"
-run_write "$project/.bionic/docs/plans/epic-01-demo/no-matrix.plan.md" "$(build_plan step=3 matrix=no)"
-assert_eq "blocks_missing_matrix exit 2" 2 "$HOOK_EXIT"
-assert_contains "blocks_missing_matrix names the matrix" "Verification Matrix" "$HOOK_STDERR"
-
-echo "*.plan.md at sdlc-step 2 without matrix → allow (matrix locks at Step 3)"
-run_write "$project/.bionic/docs/plans/epic-01-demo/step2.plan.md" "$(build_plan step=2 matrix=no)"
-assert_eq "matrix_not_required_before_step3 exit 0" 0 "$HOOK_EXIT"
-
-echo "scale: task at sdlc-step 3 without matrix → allow (task plans carry a ledger)"
-run_write "$project/.bionic/docs/plans/epic-01-demo/task.plan.md" "$(build_plan scale=task step=3 matrix=no)"
-assert_eq "task_scale_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
-
-echo "spec at sdlc-step 3 without matrix → allow (matrix is a plan-body artifact)"
-run_write "$project/.bionic/docs/specs/epic-01-demo/no-matrix.spec.md" \
-  "$(build_plan step=3 matrix=no waived="$SPEC_DESIGN_WAIVER")"
-assert_eq "spec_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
-
-echo "continuation.md at sdlc-step 3 without matrix → allow"
-run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$(build_plan step=3 matrix=no)"
-assert_eq "continuation_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
-
 # ============================================================
 # walk: enum (epic-14 AC-3)
 # ============================================================
 #
 # `walk:` is optional at THIS hook — absence is never blocked here; the
-# evidence-gate hook fail-closes on absence at Step 5 (A1/A7,
-# .bionic/docs/plans/epic-14-verification-power/wave-01-cheapest-first.plan.md
-# — division of labor between the two hooks). When the key IS present, only
+# evidence-gate hook fail-closes on absence at Step 5 (the division of labor
+# between the two hooks). When the key IS present, only
 # the literal values `required` and `exempt` are legal; anything else blocks,
 # naming both legal values.
 
@@ -688,7 +631,7 @@ cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
-rigor-minimum: double
+rigor-minimum: "double"
 ---
 
 # Epic
@@ -696,7 +639,7 @@ EOF
 run_write "$project/.bionic/docs/plans/epic-01-demo/epic-minimum.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "floor_epic_violation_logs exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_epic stderr names epic-minimum" "epic-minimum" "$HOOK_STDERR"
-assert_contains "floor_epic audit names epic-minimum" "epic-minimum" "$(read_audit "$project")"
+assert_contains "floor_epic audit names the quoted level" "epic minimum double" "$(read_audit "$project")"
 
 echo "epic-minimum: epic names a plan that doesn't exist → silent (fail-open)"
 project=$(make_project)
@@ -790,14 +733,6 @@ section "AC-10: computed root resolution"
 # The five criteria below drive the HOOK, through its real stdin contract, on
 # four fixture roots — so what they observe is the root the hook resolved and
 # acted on, never a reimplementation of the walk.
-#
-# THE EXTRACTION THIS PARAGRAPH USED TO DESCRIBE IS GONE (close-out finding
-# A-43, removed at T8). `ac10_src=$(awk '/^resolve_project_root\(\)/,/^\}/' ...)`
-# was assigned here and never read, and it had been evaluating to the EMPTY
-# STRING for as long as it stood: this hook defines no `resolve_project_root`
-# — it calls `project_root`, which lib/root.sh owns. A dead assignment whose
-# value was also empty is two kinds of nothing, and the comment above it was
-# describing a seam the section does not use.
 
 # main: a repo WITH .bionic/ (untracked, so the worktree checkout has none).
 # wt:   a linked worktree of main, given its own .bionic/ on purpose — the
@@ -949,7 +884,7 @@ section "THEMES: at wave and epic scale a requirements write holds its REQs unde
 # ============================================================
 # fails-when: the flat list writes, or a themed one is refused.
 # th_req <scale> <body> -> a requirements artifact: the shared frontmatter and Goal, then <body>.
-th_req() { printf '%s\n%s' "$(build_plan scale="$1" step=1 matrix=no skill=agent-skills:idea-refine)" "$2"; }
+th_req() { printf '%s\n%s' "$(build_plan version=14 scale="$1" step=1 skill=agent-skills:idea-refine)" "$2"; }
 # th_theme <heading> <first body line> <REQ id...> -> one `## ` section holding those REQs.
 th_theme() {
   local h="$1" first="$2" r; shift 2
@@ -996,4 +931,22 @@ assert_eq "THEMES-7 at task scale the flat list is written" 0 "$HOOK_EXIT"
 # gives every other section in this file) would hide the exact defect this
 # AC guards.
 echo
+# A plan at 15 has its Tasks rows judged at the write as a plan at 14 has: one id twice, or a kind outside the vocabulary, is refused naming the row.
+g15() { run_write "$project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan version=15 step=4)$(printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | One. | — | 30 | R | a.sh | — |\n%s\n' "$1")"
+  printf '%s|%s' "$HOOK_EXIT" "$(printf '%s\n' "$HOOK_VSTDERR" | /usr/bin/grep -o "T[12]: [a-z]* [a-z]*" | head -1)"; }
+assert_eq "V15-ROW-1 a second row of one id is refused at the write, the row named" "2|T1: duplicate id" "$(g15 '| T1 | 4 | build | Two. | — | 30 | R | b.sh | — |')"
+assert_eq "V15-ROW-2 a row of a kind outside the vocabulary is refused, the row named" "2|T2: kind bogus" "$(g15 '| T2 | 4 | bogus | Two. | — | 30 | R | b.sh | — |')"
+assert_eq "V15-ROW-3 the same table whose second row has its own id and a known kind is admitted" "0|" "$(g15 '| T2 | 4 | build | Two. | — | 30 | R | b.sh | — |')"
+# The words, called directly (lib/write-gate.sh): every key says a fact, a fix and a detail that names the artifact; no key says nothing.
+WG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/write-gate.sh"
+wg() { bash -c '. "$1"; shift; write_gate_say "$@" || exit $?; printf "%s|%s|%s" "$WG_FACT" "$WG_FIX" "$WG_DETAIL"' _ "$WG" "$@"; }
+assert_eq "WG-1 a key says its fact, fix and detail" "this artifact declares no governing skill|add a 'governing-skill:' line|canonical-sdlc artifact 'x.plan.md' is missing a 'governing-skill:' frontmatter field.
+Path: /p/x.plan.md
+Fix: add a non-empty 'governing-skill: <skill-id>' line to the frontmatter block." "$(wg no-governing x.plan.md /p/x.plan.md)"
+assert_contains "WG-2 a frame key renders the path under the artifact" "invalid scale: 'huge' — allowed: task|wave|epic
+Path: /p/x.plan.md" "$(wg bad-scale x.plan.md /p/x.plan.md huge)"
+wh() { bash -c '. "$1"; . "$2"; shift 2; write_gate_header_fault "$@"; echo "rc=$? ${WG_FAULT[*]}"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh" "$WG" "$@"; }
+assert_eq "WG-4 the header's first fault is named; a whole header has none" "rc=0 bad-scale huge|rc=0 mode|rc=1 " \
+  "$(wh '' build double huge '' 0 '' 0 '' 0 '')|$(wh x build double wave '' 0 '' 0 '' 0 '')|$(wh '' build double wave '' 0 '' 0 '' 0 '')"
+assert_eq "WG-3 a key that is none of these says nothing, rc 2" "2 " "$(wg nope x /p >/dev/null; echo "$?") $(wg nope x /p 2>/dev/null)"
 finish

@@ -38,8 +38,7 @@ ROSTER_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
 
 # The library is sourced ONCE, here, and never into this suite's own shell: `roster.sh`
 # defines `roster_row` and `live_ids_of_name`, and a private definition of either name in
-# a test file is the shadow tests/stop-guard.test.sh and tests/fail-direction-table.test.sh
-# both carry a comment about. A subshell per call keeps the suite honest for the same price.
+# a test file is the shadow tests/fail-direction-table.test.sh carries a comment about. A subshell per call keeps the suite honest for the same price.
 lib() {  # <fn> [args...] -> that roster.sh function's stdout; its status is this call's
   bash -c '. "$1"; shift; "$@"' _ "$ROSTER_SH" "$@"
 }

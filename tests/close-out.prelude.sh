@@ -17,25 +17,9 @@
 # WHAT IT NEVER HOLDS. A fixture: a repository one section builds and a later one reads is not a helper, so
 # those sections share a part instead (§PARKED builds the repository §ONE-WRITER reads; both are part 4).
 #
-# THE SUITE: payload/scripts/close-out.sh: the Step 8/9 tail, performed
-# by one script that attests its own acts (epic-23 wave-13-fixit-180, REQ-4; AC-4.1,
-# AC-4.3, AC-4.4; design ledger D5, D6).
-#
-# WHAT IT OWNS. Four sections, each hermetic against a fixture project under a mktemp
-# sandbox with HOME redirected into it — never this repository, never the real plan,
-# never the real archive:
-#
-#   §1  AC-4.1  `run` performs every act on a fixture at Step 8: the merge readback,
-#               the worktree sweep, the tmp wipe, the TaskUpdate instruction, the
-#               continuation, the epic row, the patrol instruction, the handoff
-#               rewrite, the two lifecycle blocks with `attested-by:`, the gate
-#               dry-run, and the archive. Then the REAL hooks/bash-walls.sh, on a
-#               `git commit` payload, allows the commit the script's blocks describe.
-#   §2  AC-4.3  a `wt/*` branch carrying a commit the working branch never took
-#               refuses BY NAME and performs nothing; a fully reachable one is deleted.
-#   §3  AC-4.4  a second `run` prints `already closed` and touches nothing — the plan,
-#               the epic plan and the continuation keep their checksums.
-#   §4          `check` is a diagnosis: it reports and changes not one byte.
+# THE SUITE: payload/scripts/close-out.sh, the Step 8/9 tail performed by one script that attests its own acts. Every
+# section is hermetic against a fixture project under a mktemp sandbox with HOME redirected into it: never this
+# repository, never the real plan, never the real archive.
 #
 # WHY A GIT FIXTURE AND NOT A STUB. Two of the acts are git verdicts — `merge-base
 # --is-ancestor` and `git cherry` — and both are exactly the kind of answer a stub
@@ -200,21 +184,17 @@ AC-1:
 PLAN_HEAD
 }
 
-# fixture_epic_text -> an epic plan that is itself OPEN (current: 4), carrying a shipped
-# wave table with one existing row. Open on purpose: an open sibling is what keeps
+# fixture_epic_text -> an epic page at 15 that is itself OPEN (its run's log holds no step, so it stands at step 0),
+# carrying a shipped wave table with one existing row. Open on purpose: an open sibling is what keeps
 # `archive_run` from moving a wave out of a container epic, which is this repository's
 # own shape and the one §1 asserts against.
 fixture_epic_text() {
   cat <<'EPIC'
 ---
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 ---
 
 # epic-fx
-
-## SDLC State
-
-current: 4
 
 ## Waves — shipped
 
@@ -272,15 +252,53 @@ mk_fixture() {
     git checkout -q main
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
   )
+  co_page15 "$p"
   plant_facts "$p"
   printf '%s\n' "$p"
 }
+
+# Every builder here writes the run a version-15 plan holds, its page made the version-15 one by co_page15 <project>: both branches in its header;
+# no state, matrix or handoff section; each Tasks row in its nine authored cells; each criterion a row of `## Eval design`. The run's log beside it holds what those parts said, each in the
+# shape its writer appends: a step per step to the plan's current one, the plan's approval, each row's dispatch, tree
+# and landing, each discharged criterion's proof. A handoff written into the page is no fact the reader answers, so
+# none is written. The instants are fixed and one apart; the reader folds the log in the order its lines stand.
+co_page15() {
+  local plan="$1/$PLAN_REL" log="$1/$LOG_REL"
+  mkdir -p "${log%/*}" || return 1
+  awk -v lf="$log" '
+    function ev(s) { printf "run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n", s, ++t > lf }
+    function cells(l, c,   n, i) { n = split(l, c, "|"); for (i = 2; i < n; i++) gsub(/^[ \t]+|[ \t]+$/, "", c[i]); return n }
+    FNR == 1 { pass++; sec = "" }
+    /^## / { sec = substr($0, 4) }
+    pass == 1 && sec == "SDLC State" { if ($0 ~ /^(integration|working)-branch: /) hk = hk $0 "\n"; if ($1 == "current:") cur = $2
+      if ($1 == "approved-by:") { by = $2; said = $0; sub(/^[^"]*"/, "", said); sub(/"$/, "", said) } }
+    pass == 1 && sec == "Verification Matrix" { if (/^\| AC-/) { cells($0, c); ac[++na] = c[2]; tr[c[2]] = c[3]; st[c[2]] = c[4]; au[c[2]] = c[6] }
+      else if (/^[A-Z]+-[0-9.]+:$/) b = substr($0, 1, length($0) - 1); else if (b != "" && match($0, /^  [a-z-]+: /)) k[b, $1] = substr($0, RLENGTH + 1) }
+    pass == 1 { next }
+    FNR == 1 { for (i = 1; i <= cur; i++) ev("step|n=" i); if (by != "") ev("approval|key=step3|by=" by "|said=" said) }
+    FNR == 1 || hd { if ($0 == "---" && hd) printf "%s", hk; hd = ($0 != "---" || FNR == 1); sub(/^canonical_sdlc_version: 14$/, "canonical_sdlc_version: 15"); print; next }
+    /^## / && sec == "Verification Matrix" { print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
+      for (i = 1; i <= na; i++) { a = ac[i]; e = k[a, "tier-run:"]; printf "| — | fixture | %s | %s | %s | %s |\n", a, tr[a], (e == "" ? "—" : "`" e "`"), k[a, "fails-when:"]
+        if (st[a] == "discharged") ev("proof|ac=" a "|evidence=" k[a, "evidence:"] "|auditor=" au[a]) }
+      print ""; next }
+    sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff" { next }
+    sec == "Tasks" && /^\|/ { n = cells($0, c); if (!nh) { for (i = 2; i < n; i++) col[c[i]] = i; nh = 1; print "| id | step | kind | task | deps | size | serves | Files | artifact |"; next }
+      if (c[2] ~ /^-+$/) { print "|---|---|---|---|---|---|---|---|---|"; next }
+      printf "| %s | %s | %s | %s | %s | %s | %s | %s | — |\n", c[col["id"]], c[col["step"]], c[col["kind"]], c[col["task"]], c[col["deps"]], c[col["size"]], c[col["serves"]], c[col["Files"]]
+      w = ("worktree" in col) ? c[col["worktree"]] : "—"; s = c[col["status"]]; if (s != "pending") ev("dispatch|row=" c[col["id"]] "|name=" c[col["agent"]])
+      if (w != "—" && w != "") ev("tree|row=" c[col["id"]] "|path=" w); if (s == "landed") ev("published|row=" c[col["id"]]); next }
+    { print }' "$plan" "$plan" > "$plan.15" && mv "$plan.15" "$plan"
+}
+
+# card.test.sh and notify.test.sh read in_fixture, fixture_git, fixture_plan_text, fixture_epic_text, plant_facts, mk_fixture,
+# co_page15 and advance_to out of this file by name, so each calls nothing outside that set, or it runs there as a command
+# not found.
 
 # plant_facts <project> -> what the run owes, held at the working branch's head, as a run that
 # reached Step 7 has it (wave-27 T14; D3): the working branch checked out in a linked worktree
 # beside the project (`<project>-wave`), and the floor and every reading lib/proof.sh `facts_owed`
 # deals the plan's rigor and scale, each `result=pass`, at that head. The lines are the product's
-# (`proof_line` placed by `proof_add_line`, the pair `proof-add` writes through); session-poker
+# (`proof_line`, each its proof event); session-poker
 # §56 holds the verb that writes them, and close-out and the gate read plan text whatever wrote
 # it. `close-out.sh run` and `check`, and `current 8`, refuse unless `facts_state` holds these.
 # A plan whose working branch is not a branch here gets nothing: there is no head to hold.
@@ -290,10 +308,12 @@ plant_facts() {
   wb="$(sed -n 's/^working-branch: //p' "$plan" | head -1)"
   h="$(fixture_git "$p" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null)" || return 0
   # A REAL BASE (the T45 ruling): the judge deals no reading on a plan with no base-sha naming a
-  # commit, so the run's base, the root commit the working branch grew from, is written first.
+  # commit, so the run's base, the root commit the working branch grew from, is written first, in the header, where
+  # the judge reads it: after its working-branch:, or last in it on a page at 14, whose branch is in its state section.
   /usr/bin/grep -q '^base-sha:' "$plan" || {
-    sed "s/^working-branch: .*/&\\
-base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan" > "$plan.b" && mv "$plan.b" "$plan"; }
+    awk -v b="base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)" 'NR == 1 && $0 == "---" { h = 1; print; next }
+      h && $0 == "---" { if (!d) print b; d = 1; h = 0 } { print } h && !d && /^working-branch: / { print b; d = 1 }' \
+      "$plan" > "$plan.b" && mv "$plan.b" "$plan"; }
   fixture_git "$p" worktree list --porcelain 2>/dev/null | grep -qxF "branch refs/heads/$wb" \
     || fixture_git "$p" worktree add -q "$p-wave" "$wb" >/dev/null 2>&1
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
@@ -304,7 +324,7 @@ base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan"
             review) l="$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/$q-$scope.md" "$q" w-read pass "$scope")" ;;
             *) continue ;;
           esac
-          proof_add_line "$2" "$l" > "$2.pf" && mv "$2.pf" "$2"
+          f="${l#proved: }"; LOG_AT=2026-10-04T12:00:00Z proof_event "$2" ${f/ at=2026-10-04T12:00:00Z/}
         done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
 }
 
@@ -348,6 +368,26 @@ mk_census_fixture() {
   local name="$1" working="$2" rows="$3"
   local p="$SANDBOX/$name"
   local aroot="$SANDBOX/$name-archive"
+  local title="census tests only" cols="| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |"
+  local sep="|---|---|---|---|---|---|---|---|---|---|---|" matrix=""
+  if [ -n "${CO_NOWT:-}" ]; then
+    title="no worktree column at all (C4)"; cols="${cols% worktree |}"; sep="${sep%---|}"
+    matrix="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
+  tier-run: bash tests/close-out-1.test.sh
+  readback: the two lifecycle blocks the script wrote
+
+"
+  fi
   mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/docs/record" "$p/.bionic/tmp" "$aroot"
   printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
   # The dry-run now judges the OPEN plan (T16), so the matrix evidence file must exist.
@@ -368,7 +408,7 @@ walk: exempt
 archive-root: ${aroot}
 ---
 
-# fixture register plan — census tests only
+# fixture register plan — ${title}
 
 ## SDLC State
 
@@ -386,11 +426,11 @@ approved-by: fixture 2026-09-14T00:00Z "approved"
 
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |
-|---|---|---|---|---|---|---|---|---|---|---|
+${cols}
+${sep}
 ${rows}
 
-## Handoff
+${matrix}## Handoff
 
 - resume point: Step 8 open; the tail has not run.
 - open blockers: none.
@@ -404,6 +444,7 @@ PLAN_CENSUS
     git add -A >/dev/null 2>&1
     git commit -q -m "seed" >/dev/null 2>&1
   )
+  co_page15 "$p"
   printf '%s\n' "$p"
 }
 
@@ -418,98 +459,40 @@ mk_census_branch() {
 # shape research R1 reports as every plan this repository shipped through wave-16, and
 # every consumer plan on 1.8.3 (critic C4). `units_has_column <plan> worktree` reads
 # false against this table, which is the fork `wt_unreached`'s C4 fix reads.
-mk_census_fixture_nowt() {
-  local name="$1" working="$2" rows="$3"
-  local p="$SANDBOX/$name"
-  local aroot="$SANDBOX/$name-archive"
-  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/docs/record" "$p/.bionic/tmp" "$aroot"
-  printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
-  # The dry-run now judges the OPEN plan (T16), so the matrix evidence file must exist.
-  printf 'generic fixture proof — this suite tests the tail, not the artifact.\n' \
-    > "$p/.bionic/docs/record/generic-evidence.md"
-  cat > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md" <<PLAN_CENSUS
----
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: bugfix
-rigor: single
-scale: wave
-deploy_target: n/a
-use_worktree: false
-has_ui: false
-multi_agent: false
-walk: exempt
-archive-root: ${aroot}
----
-
-# fixture register plan — no worktree column at all (C4)
-
-## SDLC State
-
-integration-branch: main
-working-branch: ${working}
-base: main @ fixture
-intent: bugfix
-rigor: single
-scale: wave
-current: 7
-approved-by: fixture 2026-09-14T00:00Z "approved"
-
-- Step 7: CLOSED — n/a: no ADR owed by a fixture
-- Step 8: (pending)
-
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-${rows}
-
-## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash tests/close-out-1.test.sh
-  readback: the two lifecycle blocks the script wrote
-
-## Handoff
-
-- resume point: Step 8 open; the tail has not run.
-- open blockers: none.
-PLAN_CENSUS
-  (
-    in_fixture "$p" || exit 1
-    git init -q . >/dev/null 2>&1
-    git symbolic-ref HEAD refs/heads/main
-    printf '.bionic/\n' > .gitignore
-    printf 'seed\n' > file.txt
-    git add -A >/dev/null 2>&1
-    git commit -q -m "seed" >/dev/null 2>&1
-  )
-  printf '%s\n' "$p"
-}
+mk_census_fixture_nowt() { CO_NOWT=1 mk_census_fixture "$@"; }
 
 PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
 EPIC_REL=".bionic/docs/plans/epic-fx/epic.plan.md"
 CONT_REL=".bionic/docs/record/wave-01-fixture/continuation.md"
-UNITS_LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
+LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
+TASKS_WORDS="mark every 4/"
 
-# advance_to <project> <N> -> the fixture plan's `current:` moved to N by `units_set_current`,
-# the writer the `current` verb itself calls (hooks/session-poker.sh, the `current)` arm), so
-# the plan holds the bytes the verb writes. The verb's own dry commit is NOT asked here: until
-# wave-27 T14 it demands the Step-8 block close-out writes, and from T14 it demands the
-# review facts; §E2E is the row that drives the whole verb.
+# co_handoff_rel <project> -> where the run's handoff was written, from the project's root, as the reader answers it
+co_handoff_rel() { bash "$REPO_ROOT/payload/scripts/reader.sh" "$1/$PLAN_REL" handoff 2>/dev/null | sed -n 's/^path=//p'; }
+
+# co_step_answer <project> [<n>] -> the reader's step answer for the fixture's run; with <n>, the answer the reader gives
+# over the run's log as it stood at its last step-<n> event, the log cut there and nothing else of the run read.
+co_step_answer() {
+  if [ -z "${2:-}" ]; then bash "$REPO_ROOT/payload/scripts/reader.sh" "$1/$PLAN_REL" step 2>/dev/null; return; fi
+  bash -c '. "$1/lib/reader.sh" || exit 9
+    f="$(awk -v n="|ev=step|n=$3|" "{ l[NR] = \$0; if (index(\$0, n)) c = NR } END { for (i = 1; i <= c; i++) print l[i] }" "$2")"
+    [ -n "$f" ] || exit 1
+    reader_facts() { printf "%s\n" "$f"; }; reader_q_step -' _ "$REPO_ROOT/payload/scripts" "$1/$LOG_REL" "$2" 2>/dev/null
+}
+
+# release_approved <project> -> the person's release approval at the working branch's head, the event the approve verb
+# appends: a run with a row that integrates is asked it at the close.
+release_approved() {
+  local wb; wb="$(sed -n 's/^working-branch: //p' "$1/$PLAN_REL" | head -1)"
+  printf 'run/v1|ev=approval|key=release|by=Dana Fixture|head=%s|said=Ship it.|at=2026-10-04T12:30:00Z\n' \
+    "$(fixture_git "$1" rev-parse --verify -q "refs/heads/$wb")" >> "$1/$LOG_REL"
+}
+
+# advance_to <project> <N> -> the run stood at step N: one step event appended to its log, as the `current` verb
+# appends it. §E2E drives the verb.
 advance_to() {
-  local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "advance_to: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
-  bash -c '. "$1" && units_set_current "$2" "$3"' _ "$UNITS_LIB" "$plan" "$2" > "$plan.adv" \
-    && mv "$plan.adv" "$plan"
+  printf 'run/v1|ev=step|n=%s|at=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$1/$LOG_REL"
 }
 
 # ---------- drivers ----------
@@ -624,10 +607,8 @@ branch_exists() {
   fi
 }
 
-# hoisted from section 0o
 ROWS_NOWT="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | active |"
 
-# hoisted from section ANY-BRANCH
 mk_task_pr_fixture() {
   local name="$1" working="$2" p
   p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"; advance_to "$p" 8
@@ -643,25 +624,14 @@ mk_task_pr_fixture() {
   printf '%s\n' "$p"
 }
 
-# hoisted from section 4e
 presence_state() {
   printf 'br=%s tmp=%s cont=%s cur8=%s epicrow=%s' \
     "$(branch_exists "$1" "wt/01-x")" "$(tmp_entries "$1")" \
     "$([ -f "$1/$CONT_REL" ] && echo yes || echo no)" \
-    "$(grep -qE '^current: 8$' "$1/$PLAN_REL" && echo yes || echo no)" \
+    "$(co_step_answer "$1" | grep -qx 'n=8' && echo yes || echo no)" \
     "$(grep -c '^| 01 ' "$1/$EPIC_REL")"
 }
 
-# hoisted from section 4e
-# step_lines <plan> <N> -> how many `Step N:` lines `## SDLC State` carries.
-step_lines() {
-  awk -v n="$2" '
-    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
-    insdlc && $0 ~ "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+" n "[[:space:]]*:" { c++ }
-    END { print c + 0 }' "$1"
-}
-
-# hoisted from section 4f
 # table_rows <file> <kind> -> the data rows (not header, not rule) of the table whose header
 # is `| wave |` AND carries (kind=shipped) or lacks (kind=planned) a `shipped` cell.
 table_rows() {
@@ -679,20 +649,17 @@ table_rows() {
   ' "$1"
 }
 
-# hoisted from section 4f
 # rows_with_wave <file> <kind> <num> -> how many data rows of that table lead with <num>.
 rows_with_wave() {
   table_rows "$1" "$2" | grep -cE "^\|[[:space:]]*$3[[:space:]]*\|" | tr -d ' '
 }
 
-# hoisted from section 4f
 # adr_cell <project> -> the trimmed ADRs cell (column 5) of the wave-01 row in the shipped table.
 adr_cell() {
   table_rows "$1/$EPIC_REL" shipped | grep -E '^\|[[:space:]]*01[[:space:]]*\|' | awk -F'|' '
     { c = $6; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }'
 }
 
-# hoisted from section 4f
 # set_plan_keys <project> <spec-line|-> <adrs-line|-> -> inserts the given frontmatter lines
 # after `walk:` ("-" inserts nothing).
 set_plan_keys() {
@@ -709,44 +676,35 @@ set_plan_keys() {
     { print } /^walk:/ { printf "%s", ENVIRON["EXTRA"] }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
 }
 
-# hoisted from section CARRY
 CARRY_REC="record/wave-01-fixture/rev.md"
 
-# hoisted from section CARRY
-# carry_plant <project> <line>... -> each line inside the plan's ## SDLC State, after approved-by:
+# carry_plant <project> <line>... -> each `deferred:` line its run's deferral event: a `stated=` holding a `|` cannot be
+# a field, and a `check:` line is a retired verb's, so neither is written
 carry_plant() {
-  local proj="$1" plan="$1/$PLAN_REL" l; shift
+  local proj="$1"; shift
   case "$proj" in "$SANDBOX"/*) : ;; *) echo "carry_plant: refusing outside the sandbox: '$proj'" >&2; return 1 ;; esac
-  local lines=""
-  for l in "$@"; do lines="${lines}${l}
-"; done
-  CARRY_LINES="$lines" awk '{ print } /^approved-by: / && !d { printf "%s", ENVIRON["CARRY_LINES"]; d = 1 }' "$plan" > "$plan.carry" \
-    && mv "$plan.carry" "$plan"
+  printf '%s\n' "$@" | awk '/^deferred: / { s = substr($0, 11); split(s, w, " "); t = substr(s, index(s, "\"") + 1)
+    r = substr(t, index(t, "\"") + 1); t = substr(t, 1, index(t, "\"") - 1); o = "|ref=" w[1] "|severity=" w[2] "|reach=" w[3] "|to=deferred|title=" t
+    if (match(r, /stated="[^"]*"/) && !index(r, "|")) o = o "|stated=" substr(r, RSTART + 8, RLENGTH - 9)
+    print "run/v1|ev=finding" o "|at=2026-10-04T12:00:00Z" }' >> "$proj/$LOG_REL"
 }
 
-# hoisted from section CARRY
 # carry_section <continuation> -> what stands under the heading `## Deferrals`, up to the next `## `,
 # blank lines dropped; nothing when there is no such heading.
 carry_section() {
   awk '/^## / { s = ($0 == "## Deferrals"); next } s && NF { print }' "$1"
 }
 
-# hoisted from section CARRY
 CARRY_W="wave-01-fixture"
 
-# hoisted from section CARRY
 CARRY_PREV="wave-00-prev"
 
-# hoisted from section LANDINGS
 LAND_GATE="$SANDBOX/land-gate"; mkdir -p "$LAND_GATE/requests"
 
-# hoisted from section LANDINGS
 LAND_C="$(printf 'c%.0s' $(seq 40))"
 
-# hoisted from section §HAND-HOLDS
 HH_GATE="$SANDBOX/hh-gate"; mkdir -p "$HH_GATE/requests"
 
-# hoisted from section §HAND-HOLDS
 # hh_report <project> [flags…] -> the poker's landing-report over that project's plan, stdout only
 hh_report() {
   local proj="$1"; shift
@@ -755,19 +713,18 @@ hh_report() {
       BIONIC_GATE_DIR="$HH_GATE" bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report "$@" "$proj/$PLAN_REL" 2>/dev/null )
 }
 
-# hoisted from section DEBT-CARD
-debt_plant() {  # <project> -> the ledger: three items, five touches, one burned
+debt_plant() {  # <project> -> the run's debts, as the debt verb's events: three items, five touches, one burned
   local d="$1/.bionic/docs/record/wave-01-fixture"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "debt_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   mkdir -p "$d"
-  printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
-    'tree_count | duplicate | lib/a.sh:1, lib/b.sh:2 | raised-by record/wave-01-fixture/critic-structure.md | touches 4 | —' \
-    'log_shim | one-case-abstraction | lib/c.sh:3 | raised-by record/wave-01-fixture/critic-structure.md | touches 1 | burned T3' \
-    'pair_x | unpinned-pair | lib/d.sh:9 | raised-by record/wave-01-fixture/critic-adversarial.md | touches 0 | —' > "$d/debt.md"
+  printf 'run/v1|ev=debt|%s|at=2026-10-04T12:00:00Z\n' \
+    'concept=tree_count|kind=duplicate|sites=lib/a.sh:1, lib/b.sh:2|raised-by=record/wave-01-fixture/critic-structure.md|touches=4' \
+    'concept=log_shim|kind=one-case-abstraction|sites=lib/c.sh:3|raised-by=record/wave-01-fixture/critic-structure.md|touches=1|burned=T3' \
+    'concept=pair_x|kind=unpinned-pair|sites=lib/d.sh:9|raised-by=record/wave-01-fixture/critic-adversarial.md|touches=0' >> "$d/run.log"
 }
 
 require_helpers in_fixture fixture_git contains fixture_plan_text fixture_epic_text mk_fixture \
                 add_unreached_branch add_foreign_unreached_branch run_close run_close_as gate_rc \
                 run_open_rc tmp_entries sha_of branch_exists plant_tmp_session tmp_file_exists \
                 mk_census_fixture mk_census_branch mk_census_fixture_nowt advance_to \
-                mk_task_pr_fixture presence_state step_lines table_rows rows_with_wave adr_cell set_plan_keys carry_plant carry_section hh_report debt_plant
+                mk_task_pr_fixture presence_state table_rows rows_with_wave adr_cell set_plan_keys carry_plant carry_section hh_report debt_plant

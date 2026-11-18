@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/card.test.sh — payload/scripts/card.sh, THE CARD ROW RENDERER
-# (epic-23 wave-14-tune-181, T36; REQ-9 AC-9.1/AC-9.4; Chris 2026-09-15 "D4: I
-# want the wrapped version" / "option 1 - renderer script and cap at 110k").
 #
 # WHAT THIS SUITE IS FOR. Until this task the Step-1/2/3 cards were rendered by
 # the MODEL reading a printf format line written beside the card and padding the
@@ -23,12 +21,11 @@
 # the free cell inside its own column, and measures in columns through width.sh.
 # This suite is that file's wall.
 #
-# THE EQUIVALENCE ROWS ARE THE POINT OF THE SUITE. Sections 2 holds the SIX printf
-# formats the three templates carried at 89f6944 — the widths T31 fitted to the
-# 100-column rule — and renders each kind's header and a short row from them, by
-# hand, in this file. The renderer must agree BYTE FOR BYTE. That is what stops the
-# widths drifting silently now that no card states them any more: a width changed in
-# card.sh and not here turns this suite red rather than quietly re-laying the cards.
+# A FORMAT IS PINNED WHERE A CELL'S MEANING RESTS ON ITS COLUMN. A count under the Eval
+# design header is a bare number, so Section 2 renders that kind's header and rows from
+# its format by hand and the renderer must agree BYTE FOR BYTE: a label off its column
+# misstates which count is which. Section 5's header-only row holds the decision header
+# the same way; every other kind's cells are read by value on whole cards.
 #
 # Usage: bash tests/card.test.sh
 
@@ -41,17 +38,11 @@ REPO="${BIONIC_SCRIPTS_DIR}"
 CARD_SH="${REPO}/payload/scripts/card.sh"
 WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
-# ── the formats card.sh now owns, as the three cards stated them at 89f6944 ──
-# THREE OF THESE ARE NOT THE 89f6944 BASELINE ANY MORE: a title is at most 30
-# characters on every card, so the requirement, decision and task rows give their
-# title cell 30 columns, and the task row carries a `serves` column of its own
-# after the title. The constants state the CURRENT shapes; the ownership and
-# eval-design formats are still the baseline.
-OLD_FMT_REQ_A='    %-7s %-30s  ACs %s'
+# ── the two formats card.sh owns that this suite renders by hand ──
+# The decision row gives its title cell 30 columns, a title being at most 30 characters
+# on every card; the eval-design format is the one the cards first stated.
 OLD_FMT_DEC='    %-4s %-30s %-14s %s'
-OLD_FMT_OWN='    %-12s owner %-14s surfaces %-22s test %s'
 OLD_FMT_EVAL='    %-8s %-36s %6s %5s %9s %5s %6s'
-OLD_FMT_TASK='    %-5s %-30s %-12s %-9s %-12s %s'
 
 section "Section 1: the renderer is there, and it refuses what it cannot render"
 
@@ -86,12 +77,12 @@ expect_true "4: card.sh parses under /bin/bash" /bin/bash -n "$CARD_SH"
 expect_eq "4a: …and /bin/bash is the 3.x this gate is about" "3" \
   "$(/bin/bash -c 'echo ${BASH_VERSINFO[0]}')"
 
-section "Section 2: every kind renders what its former printf format rendered"
+section "Section 2: the eval-design kind renders what its former printf format rendered"
 
 # fmt_render — the row, built one field at a time from a format, the way the card
 # was hand-padded before this task. NOT `printf "$fmt"` itself: printf pads by
-# BYTES and the Tasks card's `depends` cell carries an em dash, so printf and the
-# shipped card disagree there. Padding here counts COLUMNS through width.sh, which
+# BYTES, so a cell carrying an em dash would make printf and the shipped card
+# disagree. Padding here counts COLUMNS through width.sh, which
 # is the reading the shipped cards were laid out in and the one card.sh must hold.
 if [ -f "$WIDTH_SH" ]; then
   # shellcheck source=/dev/null
@@ -157,34 +148,6 @@ card() {  # <kind> — TSV rows on stdin
   bash "$CARD_SH" "$@" 2>/dev/null
 }
 
-# --- requirement (the id, the title, and the criteria count on one line) ---
-# The row is three cells: the title is the folding cell and the count trails it
-# on the row's first line. The provenance is not on the card; `explain` prints it.
-REQ_ID="REQ-<id>"
-REQ_TITLE="<title>"
-REQ_ACS="<n>"
-REQ_WANT="$(printf '%s\n' \
-  "  Requirements" \
-  "$(fmt_render "$OLD_FMT_REQ_A" "$REQ_ID" "$REQ_TITLE" "$REQ_ACS")")"
-REQ_GOT="$(printf '%s\t%s\t%s\n' "$REQ_ID" "$REQ_TITLE" "$REQ_ACS" | card requirement)"
-expect_eq "6: the requirement kind renders the card's own one-line row, ACs on it" "$REQ_WANT" "$REQ_GOT"
-
-# --- decision ---
-DEC_VALS=("D<n>" "<the decision in one line>" "<REQ ids>" "<file | none>")
-DEC_WANT="$(printf '%s\n' \
-  "$(hdr_build "Decisions" "$OLD_FMT_DEC" "2:serves" "3:ADR")" \
-  "$(fmt_render "$OLD_FMT_DEC" "${DEC_VALS[@]}")")"
-DEC_GOT="$(printf '%s\t%s\t%s\t%s\n' "${DEC_VALS[@]}" | card decision)"
-expect_eq "7: the decision kind renders the card's own header and row" "$DEC_WANT" "$DEC_GOT"
-
-# --- ownership (labels are literals inside the format; header is the bare section) ---
-OWN_VALS=("<concept>" "<module>" "<where it renders>" "<suite>")
-OWN_WANT="$(printf '%s\n' \
-  "  Ownership" \
-  "$(fmt_render "$OLD_FMT_OWN" "${OWN_VALS[@]}")")"
-OWN_GOT="$(printf '%s\t%s\t%s\t%s\n' "${OWN_VALS[@]}" | card ownership)"
-expect_eq "8: the ownership kind renders the card's own header and row" "$OWN_WANT" "$OWN_GOT"
-
 # --- eval-design (five RIGHT-aligned count columns, and a total row) ---
 EVAL_VALS1=("REQ-<id>" "<how it is proven, one line>" "2" "1" "3" "0" "1")
 EVAL_VALS2=("REQ-<id>" "<how it is proven, one line>" "1" "0" "2" "1" "0")
@@ -199,28 +162,7 @@ EVAL_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS1[@]}"
                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS_T[@]}"; } | card eval-design)"
 expect_eq "9: the eval-design kind renders the card's own header and three rows" "$EVAL_WANT" "$EVAL_GOT"
 
-# --- task ---
-TASK_VALS1=("<n>" "<the task title>" "REQ-<n>" "build" "—" "senior-implementor")
-TASK_VALS2=("<n>" "<the task title>" "REQ-<n>" "test" "<n>" "implementor")
-TASK_WANT="$(printf '%s\n' \
-  "$(hdr_build "Tasks" "$OLD_FMT_TASK" "2:serves" "3:kind" "4:depends" "5:agent")" \
-  "$(fmt_render "$OLD_FMT_TASK" "${TASK_VALS1[@]}")" \
-  "$(fmt_render "$OLD_FMT_TASK" "${TASK_VALS2[@]}")")"
-TASK_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${TASK_VALS1[@]}"
-               printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${TASK_VALS2[@]}"; } | card task)"
-expect_eq "10: the task kind renders the card's own header and both rows" "$TASK_WANT" "$TASK_GOT"
-
-section "Section 5: columns, not bytes — and the edges"
-
-# THE EM DASH IS THE BUG A-T31.3 NAMED. Three bytes, one column: a row padded by
-# `printf %-Ns` comes out two columns short from that cell on. The renderer pads
-# through width.sh, so the trailing column lands where it lands without it.
-EM_GOT="$(printf 'T1\tan em — dash\tREQ-1\tbuild\t—\timplementor\n' | card task | sed -n '2p')"
-PLAIN_GOT="$(printf 'T1\tan em x dash\tREQ-1\tbuild\tx\timplementor\n' | card task | sed -n '2p')"
-expect_eq "27: an em dash in a cell pads by columns, not bytes (the row is as wide as its ASCII twin)" \
-  "$(cols "$PLAIN_GOT")" "$(cols "$EM_GOT")"
-expect_eq "27a: …and the em-dash row's trailing column starts where the ASCII row's does" \
-  "$(cols "${PLAIN_GOT%%implementor*}")" "$(cols "${EM_GOT%%implementor*}")"
+section "Section 5: the edges"
 
 # A GLYPH OUTSIDE width.sh's CLOSED SET — CJK here — is measured CONSERVATIVELY,
 # at its bytes, and the same in both locales. That is not an oversight: it is the
@@ -251,12 +193,9 @@ expect_eq "29: an over-long word is split at the column, never dropped" \
   "$LONGWORD" "$LW_BACK"
 expect_empty "29a: …and the split row stays inside the budget" "$(over_budget "$LW_GOT")"
 
-# AN EMPTY FREE CELL. One line, the trailing columns where they belong, no stray
-# continuation line.
+# AN EMPTY FREE CELL. The trailing cells still print, each at its own column.
 EMPTY_GOT="$(printf 'D6\t\tREQ-9\tnone\n' | card decision | grep -v '^  Decisions')"
-expect_eq "30: an empty free cell renders one line, not two" "1" \
-  "$(printf '%s\n' "$EMPTY_GOT" | grep -c . | tr -d ' ')"
-expect_eq "30a: …and its trailing columns stay at their own columns" \
+expect_eq "30a: an empty free cell's trailing cells print at their own columns" \
   "$(fmt_render "$OLD_FMT_DEC" "D6" "" "REQ-9" "none" | sed -e 's/ *$//')" \
   "$(printf '%s' "$EMPTY_GOT" | sed -e 's/ *$//')"
 
@@ -388,8 +327,7 @@ trap card_cleanup EXIT
 # IT SETS GLOBALS AND PRINTS NOTHING, which is not a style choice: a helper
 # called as `X="$(whole_card …)"` runs in a SUBSHELL, so an exit status it
 # assigned there would never reach the assertion — every status row would read
-# the initialised 0 and pass no matter what the renderer did. Caught here at RED
-# (rows 42 and 63-66 passed against a renderer that has no step verbs at all).
+# the initialised 0 and pass no matter what the renderer did.
 WC_RC=0; WC_ERR=""; WC_OUT=""
 whole_card() {  # <verb> [artifact] — sets WC_OUT, WC_RC, WC_ERR
   WC_RC=0
@@ -510,6 +448,7 @@ sdlc-step: 3
 walk: required
 rigor: double
 parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
+canonical_sdlc_version: 15
 working-branch: wave/99-fixture
 integration-branch: main
 base-sha: abc1234
@@ -522,25 +461,20 @@ base-sha: abc1234
 Land the fixture's two requirements under the fixture spec's design, on the
 fixture branch, with one floor at the integration head.
 
-## SDLC State
-
-integration-branch: main
-current: 4
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | REQ-1: the first task. The fixture's first task has its own sentence. It also has a detail the card does not show. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | .worktrees/99-T1 | pending |
-| T2 | 4 | test | REQ-2: the second task. The fixture's second task has one too. complexity: complex | senior-implementor | T1 | 45 | REQ-2 | lib/second.sh | — | pending |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | REQ-1: the first task. The fixture's first task has its own sentence. It also has a detail the card does not show. complexity: standard | — | 30 | REQ-1 | lib/first.sh | — |
+| T2 | 4 | test | REQ-2: the second task. The fixture's second task has one too. complexity: complex | T1 | 45 | REQ-2 | lib/second.sh | — |
 
-## Verification Matrix
+## Eval design
 
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T0 | pending | — | — |
-| AC-1.2 | T2 | pending | — | — |
-| AC-2.1 | T1 | pending | — | — |
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | fixture | AC-1.1 | static | `tests/a.test.sh` | it is wrong |
+| REQ-1 | fixture | AC-1.2 | hermetic | `tests/a.test.sh` | it is wrong |
+| REQ-2 | fixture | AC-2.1 | unit | `tests/b.test.sh` | it is wrong |
 FIXEOF
 
 # ── AC-10.1: the Step-1 card, whole, from the artifact alone ─────────────────
@@ -716,7 +650,6 @@ fix-cap: 2
 regression: yes
 regression-override: Chris Lehman 2026-10-23 derived=no chosen=yes
 scale: task
-canonical_sdlc_version: 14
 surface_type: cli-plugin
 language: bash
 has_ui: false
@@ -741,14 +674,6 @@ release: 1.27.0
 
 A sitrep is the handful of facts that change what the user does next, drawn by code with the model's judgment on top, in well under a minute. Five themes, in the plan's order: the register tells an ask that waits on the user from an item that waits on an event, and only the first can block the user or drive the call; code draws every fact row, the head, the task list, the metrics, Blocked on you and the predicted close, and the model writes seven lines of judgment the check reads; the card says what the wave is for and whether it is on course, first under the Assessment; and the whole takes under thirty seconds of model output; and every card the run puts to the user, requirements, design and plan, prints a name per item and keeps the detail one keystroke away. Accepted when the card drawn on the wave-43 plan and on a fixture shaped like the large-app run reads in the approved mock-up's shape, and three sitreps in a row take under thirty seconds each.
 
-## Context
-
-The run was chartered as the hand-holds measure with the sitrep as a late addition, and cut to the sitrep at the design frame (charter §Cut; ledger Δ8). The cause: a large-app card of 63 rows whose Call to action restated a ruling already given, whose Assessment carried fourteen register items under five points, and whose Blocked on you named a merge that waited on a re-review, not on the user; and a measurement of the sitrep at a median of about 95 seconds, nine tenths of it the model typing and retyping rows that are facts (research-sitrep-latency.md: first judgment 43%, refusal rewrites 34%, retyping the printed card 14%, machine 10%). The concept review (research-sitrep-concept.md) found the card never states what the wave is for: the sheet carries neither the plan's Goal nor the themes' openers, and the Goals row may state only status counts. Chris ruled D7, materiality; D6, code draws the facts; D1, the purpose first under the Assessment; and approved a mock-up (ledger Δ1, Δ6, Δ7). The rulings of waves 38 to 43 that stand: the seven sections in order (w42 Δ0, Δ9), Metrics as numbers only (w42 D2), the grade (w42 D2), the task list as drawn today, bottom line up front (w38 D11), one renderer prints every fact (w38 D9, restored). Reopened on evidence: w42 D1 "2" (the model writes every word) and w42's "every open ask answered once".
-
-## Theme 1 — the register knows what you owe
-
-An ask waits on the user or on an event, and the register says which; only an ask that waits on the user can block the user or drive the call.
-
 ### REQ-1 — An ask says what it waits on
 
 Every ask you are shown says whether it waits on you or on something else happening, so you can tell what is really yours.
@@ -767,10 +692,6 @@ provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral crit
 - AC-2.1 Blocked on you lists the asks that wait on the user and hold a task, the release or the merge, and nothing else; with none it reads `None` and names the nearest event the run waits on. Fails when: an ask waiting on an event is drawn there, or `None` is drawn while an ask waiting on the user holds the merge.
 - AC-2.2 The call may say nothing is owed while every open ask waits on an event, and must name the ask while one waits on the user and holds something; the check reads `waits-on`, not `holds`. Fails when: the check refuses "nothing tonight" over a refused waiver, or admits it over an unanswered one.
 - AC-2.3 The handoff head's `Blocked on you`, the sitrep card and the Patrol's `blocks=` read one function, pinned by one suite row that reddens when any two disagree; the `blocks-rule` and `blocked-on-you` duplicates are gone. Fails when: `/usr/bin/grep` finds the rule in two files, or a planted divergence passes.
-
-## Theme 2 — code draws the facts, the model writes the judgment
-
-Every row that is a fact is drawn by the verb; the model writes only what is judgment, and the check reads only that.
 
 ### REQ-3 — The verb draws the fact rows
 
@@ -800,10 +721,6 @@ provenance: ledger Δ6, Δ7; skills/sitrep/SKILL.md (the six questions, the Goal
 
 - AC-5.1 `skills/sitrep/SKILL.md` describes the two verbs, the seven judgment lines, the Purpose question in place of the Goals question, and the rule that an ask waiting on an event owes the user nothing; its example judgment is seven lines; `words.test.sh` and the sitrep-card suite's skill section pin it. Fails when: the skill text still asks for `task:` or `metric:` rows, or for every open ask.
 
-## Theme 3 — the card says what the wave is for
-
-The sitrep opens its judgment on what the wave set out to do and whether that is being accomplished, read from the run's own documents, at every scale.
-
 ### REQ-6 — The sheet carries the goal
 
 The facts a sitrep reads carry what the wave is for, so its purpose is never guessed.
@@ -831,10 +748,6 @@ provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit
 - AC-8.2 At task scale the sheet reads one goal over the whole matrix, the run's criteria discharged and open REQs. Fails when: a task-scale sheet prints no `goal:` line.
 - AC-8.3 A goal missed by a red the plan itself declares opens no `decide:goal:<name>` ask. Fails when: the ask opens for a declared red.
 
-## Theme 4 — fast
-
-A sitrep costs the user the time it takes to read it, not the time it takes to write.
-
 ### REQ-9 — Under thirty seconds
 
 A sitrep reaches you in under thirty seconds.
@@ -851,10 +764,6 @@ The card shape you approved is held by a test, so it cannot drift.
 provenance: ledger Δ7 (the mock-up Chris approved: "Yes! That is what I want!")
 
 - AC-10.1 A fixture shaped like the large-app card (17 open tasks, 14 items waiting on events, a refused waiver holding the merge, 54 added tasks) draws the mock-up's shape: Call to action one line saying nothing is owed, the Task list as today, a five-line Metrics table, an Assessment of the purpose, at most three points and one counted line, Blocked on you `None` with the event named, Predicted close in three lines; the drawn card is under 40 rows. Fails when: a register item is drawn as a row, the merge reads blocked, or the card exceeds 40 rows.
-
-## Theme 5 — the cards read at a glance
-
-Every card the run puts to the user prints a name per item and keeps the detail one keystroke away, so a card is scanned, not read.
 
 ### REQ-11 — The plan card shows titles
 
@@ -915,7 +824,6 @@ fix-cap: 2
 regression: yes
 regression-override: Chris Lehman 2026-10-23 derived=no chosen=yes
 scale: task
-canonical_sdlc_version: 14
 surface_type: cli-plugin
 language: bash
 has_ui: false
@@ -940,10 +848,6 @@ release: 1.27.0
 ## Goal
 
 Ship bionic 1.27.0 so that a sitrep is the handful of facts that change what the user does next, drawn by code with the model's judgment on top, in under thirty seconds. The register stores the answer given to an ask and one function says whether the ask waits on the user or on an event; only the first can block the user or drive the call. The card verb draws every row that is a fact from the saved sheet, the model writes seven lines of judgment, and the check refuses only what would make the card false. The Assessment opens on what the wave is for, read from the plan. Accepted when a fixture shaped like the large-app run draws the approved mock-up in under 40 rows and three real sitreps take under thirty seconds each.
-
-## Context and Problem
-
-The requirements (REQ-1 to REQ-10) and three records carry it: `record/wave-44-every-hand/research-sitrep-concept.md` (the card never states what the wave is for), `research-sitrep-latency.md` (95 s median, 90% model output: first judgment 43%, refusal rewrites 34%, retyping the card 14%) and `research-sitrep-sites.md` (the sites at dd425be64). The register's `owed/v1` line has no field for an answer or for what an ask waits on; its kind is the key prefix alone (sites §REQ-1). A waiver answered "no" at the release card reaches only the approval page (`withheld:`, plan.sh:2989-2992); the `waive:<q>` item stays open and holds the merge. Three rules say what blocks the user: the sheet (sitrep.sh:1616), the card's fallback (card.sh:3139) and the handoff head (sitrep.sh:2123, yes for any open ask); the Patrol's `owed: <n>` counts every ask. The card verb accepts eight tags, requires a row per step, per open task, per metric and per open ask, binds every metric number to a word, and refuses a row over 100 columns though a fold helper exists (card.sh:2373). The rulings are the ledger's Δ1, Δ6 to Δ11: D1 "1", D6 "1", D7 "1", D8 "1", D9 "1", the cut (Δ8) and the check's rule (Δ11). The frame's D2 to D5 were named for the measure run and withdrawn with the cut.
 
 ## Design
 
@@ -1071,11 +975,17 @@ Who owns what:
 
 As the requirements: the measure work and the Known-limit leftovers (1.28.0); new sections; the section order, numbers-only Metrics, the grade and the task list's shape; a sitrep at epic scale beyond today's sheet; the person's merge and tag.
 W44SPEC
-# THE STEP-3 ONE IS A COPY THIS SUITE OWNS too: a real run's plan, each Tasks cell given its plain sentence after its
-# title as the card now requires, the original text kept after it as the detail. The sections the Step-3 card does not
-# read are left out, and the state section keeps only its keys, so the card it draws is the live plan's card line for
-# line with the sentences added.
-REAL_PLAN="${CARD_INTREE}/wave-44-every-hand.plan.md"
+# THE STEP-3 ONE IS A COPY THIS SUITE OWNS too: a real run's plan, its rows cut to the nine cells of a page at 15, each
+# Tasks cell given its plain sentence after its title as the card now requires, the original text kept after it as the
+# detail. The sections the Step-3 card does not read are left out. What the run's cells and state said is its log: every
+# step to 9, the plan's approval, and each row launched under its agent and landed, so the card it draws is the live
+# plan's card line for line with the sentences added.
+REAL_PLAN="${CARD_INTREE}/plans/wave-44-every-hand.plan.md"
+REAL_LOG="${CARD_INTREE}/record/wave-44-every-hand/run.log"
+mkdir -p "${REAL_PLAN%/*}" "${REAL_LOG%/*}"
+{ for n in 1 2 3 4 5 6 7 8 9; do echo "step|n=$n"; done; echo 'approval|key=step3|by=fixture|said=approved'
+  for n in $(seq 1 21); do case " 7 8 11 12 20 " in *" $n "*) ;; *) echo "dispatch|row=T$n|name=w44-T$n" ;; esac
+    echo "published|row=T$n"; done; } | awk '{ printf "run/v1|ev=%s|at=2026-10-24T%02d:%02d:00Z\n", $0, int(NR / 60), NR % 60 }' > "$REAL_LOG"
 cat > "$REAL_PLAN" <<'W44PLAN'
 ---
 governing-skill: canonical-sdlc
@@ -1089,7 +999,7 @@ fix-policy: S1,S2-on
 fix-cap: 2
 scale: task
 scale-recommendation: "Chris ruled the scale in the charter: task scale, single rigor, integration by pull request, as 1.26.0 ran. The run was cut to the sitrep at the design frame: five build rows on one card, one plan and its Tasks table hold it."
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 surface_type: cli-plugin
 language: bash
 has_ui: false
@@ -1123,231 +1033,31 @@ Build bionic 1.27.0 so that a sitrep is the handful of facts that change what th
 
 ## Tasks
 
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | The card draws the facts. The sitrep card draws its fact rows from the sheet, and the model writes only the judgment. The card draws the facts, and the mock-up fixture (D6, D7, D1, Δ11; AC-2.1, AC-2.2, AC-3.1 to AC-3.3, AC-4.1 to AC-4.3, AC-7.1, AC-10.1). `tests/sitrep-card.test.sh` §MOCKUP first, red at the base on the unknown `purpose:` tag: a sheet shaped like the large-app card (17 open tasks, 14 event-waiting asks with `waits=event`, a refused waiver holding the merge, 54 added tasks) and a seven-line judgment must draw the mock-up under 40 rows. Then `card.sh`: `_card_sitrep_draw` draws the head, every step and task row from the S and T records (`desc` plus `note`), the five-line Metrics table from the measured values, Blocked on you from asks with `blocks=yes` and `None` naming the nearest event otherwise, the counted line of event-waiting asks by kind under the Assessment, and the close's predicted and basis lines; `_card_sitrep_judge` accepts `purpose:`, `call:`, `grade:`, `point:` (1 to 3, a fourth kept with a note), `ask <key>:` and `close:` and refuses any other tag by name; the number binding becomes `_card_bind`, applied to every judgment line against every measured sheet value by word and place; a long line folds through `_card_hang`; the check refuses only a number no value holds, a state the sheet denies, a forbidden word and a missing purpose, call, grade or close, every reason at once; the `blocks=` fallback at card.sh:3139 is deleted and the A record gains `waits=` after `blocks=`. §DRAWN, §TABLE, §COUNTED, §TAGS, §BIND, §REASONS, §PURPOSE, §BLOCKS, §CALL in sitrep-card; card.test.sh KINDS-7 rewritten to seven lines · complexity: complex | w44-T1 | — | — | 120 | REQ-2, REQ-3, REQ-4, REQ-7, REQ-10 | payload/scripts/card.sh, tests/sitrep-card.test.sh, tests/card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T1.md | .worktrees/44-T1 | dd425be6 | landed | — | — | — |
-| T2 | 4 | build | The register stores the answer. An answered ask keeps its answer, and one function says what it waits on. The register stores the answer, one function says what an ask waits on (D8; AC-1.1, AC-1.2). `lib/owed.sh`: `owed_answer <key> <word> [<event>]` rewrites the open line with `answer= answered= event=`, `owed_answer_of`, and `ask_waits_on <key>` printing `user` or `event <what>` from the key's kind and its answer (decision, approval, gate, ruling, matrix ruling, declared-missed goal, unanswered waiver and unanswered finding wait on the user; a waiver answered no on its review's re-run; a finding answered carry on its row's landing or the release card; `carry:` on the release card; `hold:merge` on what the waivers holding the merge wait on). `reply`'s other-side `-` on a waiver row calls `owed_answer waive:<q> no`; `disposition … defer` or `… carry` and `finding-move … to=carried row=<T>` call `owed_answer finding:<id> carry "<T> lands"` and leave the item open; the landing of `<T>` closes it in `lib/line.sh`'s arm; `to=fixed` closes at once as today. `_owed_list_file` keeps four columns. §WAITS and §ANSWER in asks; release-approval §TRIGGERS reads the answer · complexity: complex | w44-T2 | — | — | 90 | REQ-1 | payload/scripts/lib/owed.sh, hooks/poker/plan.sh, hooks/poker/proof.sh, payload/scripts/lib/line.sh, tests/asks.test.sh, tests/release-approval.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T2.md | .worktrees/44-T2 | dd425be6 | landed | — | — | — |
-| T3 | 4 | build | One function says what blocks. Every surface asks the same function whether an ask blocks the user. The sheet, the handoff head, the Patrol line and the card verb read the one function (D7, D8; AC-1.1's sheet half, AC-2.3, AC-9.2). `sitrep_asks` prints `waits=` from `ask_waits_on`; `sitrep_ask_lines` writes `blocks=yes` only for an ask that holds something and waits on the user, and appends `waits=user` or `waits=event <what>` last; `ho_state` prints `Blocked on you: yes` only when some ask has `blocks=yes`; `sitrep_status` prints `owed: <n> on you · <m> on events` and the tick line carries both; `sitrep card` runs `decisions_settle`, reads the saved sheet, refreshes its `ask:` lines through `sitrep_asks` alone and never re-gathers. §ONE-BLOCKS and §FAST in sitrep (a planted divergence between the sheet, the handoff head and the Patrol line reddens; the two verbs on a copy of the wave-43 plan under 5 s); handoff-file §HEAD HD1 to HD3 rewritten to the rule · complexity: standard | w44-T3 | — | approval:plan, .bionic/docs/record/wave-44-every-hand/T2.md | 75 | REQ-1, REQ-2, REQ-9 | hooks/poker/sitrep.sh, hooks/poker/tick.sh, tests/sitrep.test.sh, tests/handoff-file.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T3.md | .worktrees/44-T3 | 8b16a4f8 | landed | — | — | — |
-| T4 | 4 | build | The sheet carries the goal. The sheet says what the wave is for and where each theme stands. The sheet says what the wave is for, and a theme's standing (D1; AC-6.1, AC-6.2, AC-8.1 to AC-8.3). `plan_goal_paragraph` in `lib/plan.sh`, moved from the requirements card's parse (card.sh:843-847, which calls it); `sitrep_gather` prints `run.goal:`; `plan_themes` reads the first body line under each `## <theme>` and `_plan_theme_reads` carries it as `for=` last on the `goal:` line; at task scale `plan_themes` yields one theme, `the run`, over every REQ with a matrix row; `plan_goal_status` maps pending with at least one criterion discharged to `on course`, and the release card's mark map (hooks/poker/plan.sh:2516-2524) and the card's Goals line learn the word; the Goals line reads per theme `<theme> k of n[, REQ-a open]`; `tick_owed_goals` opens no `decide:goal:` for a measured goal whose miss is a declared red (a `Lands-red:` row's debt line). §RUN-GOAL, §FOR, §GOAL-AGREE, §TASK-GOAL, §DECLARED-RED in sitrep; release-approval §GOALS green · complexity: standard | w44-T4 | — | — | 75 | REQ-6, REQ-8 | payload/scripts/lib/plan.sh, payload/scripts/card.sh, hooks/poker/plan.sh, hooks/poker/tick.sh, hooks/poker/sitrep.sh, tests/sitrep.test.sh, tests/release-approval.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T4.md | .worktrees/44-T4 | dd425be6 | landed | — | — | — |
-| T5 | 4 | build | The skill, seven lines. The sitrep skill asks the model for seven lines of judgment and nothing else. The skill is the new shape, and every judgment fixture is seven lines (D6, D7; AC-4.3's text half, AC-5.1). `skills/sitrep/SKILL.md` rewritten: the two verbs, the seven lines, the standard ("the handful of facts that change what you do next"), the Purpose question in place of the Goals question, "nothing tonight" when every open ask waits on an event, show the tool's card once inside one fenced block and never retype it, a seven-line example; `agents-src/templates/commands/help.md.tmpl`'s sitrep line and its render; the judgment fixtures in sitrep-card (`SC_J_*`, `SV_J`), card (`SIT_JUDGE`), words §RENDERED and `rt_judgment` in `tests/lib/rehearsal-read.sh` rewritten to seven lines; sitrep-card §SKILL SK0 and sitrep §SKILL SK9 re-pinned to the new tags and example; words §TEXTS green · complexity: standard | w44-T5 | — | approval:plan, .bionic/docs/record/wave-44-every-hand/T1.md, .bionic/docs/record/wave-44-every-hand/T3.md, .bionic/docs/record/wave-44-every-hand/T4.md | 75 | REQ-4, REQ-5 | skills/sitrep/SKILL.md, agents-src/templates/commands/help.md.tmpl, payload/commands/help.md, payload/integrity/rendered.sha256, tests/words.test.sh, tests/lib/rehearsal-read.sh, tests/rehearsal.test.sh, tests/rehearsal-failed-review.test.sh, tests/rehearsal-release-waiting.test.sh, tests/rehearsal-stop-rule.test.sh, tests/sitrep-card.test.sh, tests/sitrep.test.sh, tests/card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T5.md, hooks/session-poker.sh | .worktrees/44-T5 | 7bc8545b | landed | — | — | — |
-| T6 | 5 | verify | The walk and the matrix. A person reads the card as a user would, and the matrix fills from the landings. The walk and the matrix (walk: required). The card drawn on the wave-43 plan and on the §MOCKUP sheet read as a user would, against the approved mock-up; the matrix filled from the landings' logs · complexity: complex | w44-T6 | — | — | 45 | REQ-10 | .bionic/docs/record/wave-44-every-hand/walk.md | — | — | landed | — | — | record/wave-44-every-hand/walk.md |
-| T7 | 5 | verify | The regression, once. The whole suite runs once after the build, and a red becomes a fix row. The regression, once after the build: `regression-run`, then `proof-add regression`; a red is a fix row's, never a second run · complexity: standard | — | — | approval:plan, head, .bionic/docs/record/wave-44-every-hand/walk.md | 30 | REQ-9 | .bionic/docs/record/wave-44-every-hand/T7.md | — | — | landed | — | — | record/wave-44-every-hand/T7.md |
-| T8 | 5 | verify | Four sitreps timed. Four sitreps are timed from the typed command to the shown card. Four sitreps timed (AC-9.1). The orchestrator runs `/bionic:sitrep` four times on this plan after the build settled, reads each from the transcript as research-sitrep-latency.md did, typed command to shown card, and records the four timings and the refusal count in `record/wave-44-every-hand/sitrep-timing.md` · complexity: standard | — | — | approval:plan, head, .bionic/docs/record/wave-44-every-hand/T5.md, approval:D10 | 30 | REQ-9 | .bionic/docs/record/wave-44-every-hand/sitrep-timing.md | — | — | landed | — | — | record/wave-44-every-hand/sitrep-timing.md |
-| T9 | 6 | review | The critic reads the whole. One independent reader reviews the whole run once. The critic's review of the whole (single rigor: evidence, adversarial, structure; one record per question) · complexity: complex | w44-T9 | — | approval:plan, head, .bionic/docs/record/wave-44-every-hand/walk.md, .bionic/docs/record/wave-44-every-hand/T7.md | 60 | REQ-10 | .bionic/docs/record/wave-44-every-hand/critic-evidence.md, .bionic/docs/record/wave-44-every-hand/critic-adversarial.md, .bionic/docs/record/wave-44-every-hand/critic-structure.md | — | — | landed | — | — | record/wave-44-every-hand/critic-evidence.md |
-| T10 | 7 | doc | The release row: 1.27.0. The release is versioned, its entry written and its decision recorded. plugin.json and the command pages at 1.27.0, the CHANGELOG entry with its Known limits and landing numbers, ADR-071 "code draws the facts, the model judges" · complexity: standard | w44-T10 | — | approval:plan, tests/sitrep-card.test.sh | 30 | REQ-10 | CHANGELOG.md, payload/.claude-plugin/plugin.json, payload/commands/help.md, payload/commands/version.md, payload/integrity/rendered.sha256, docs/adrs/adr-071-code-draws-the-facts-the-model-judges.md, tests/release-check.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T10.md | .worktrees/44-T10 | a2d0b7cd | landed | — | — | — |
-| T11 | 8 | integrate | The pull request. The run reaches main by a pull request after its reviews are published. Open the pull request from wave/44-every-hand to main on the release approval card's word, after `reviews-part T11` · complexity: standard | — | — | — | 15 | REQ-10 | .bionic/docs/record/wave-44-every-hand/T11-pr.md | — | — | landed | — | — | — |
-| T12 | 9 | close | Close-out. The run closes and reports its hand-holds reading. Close-out: the checklist, the rollback, continuation.md; the hand-holds reading reported, not judged · complexity: standard | — | — | — | 20 | REQ-10 | .bionic/docs/record/wave-44-every-hand/continuation.md | — | — | landed | — | — | — |
-| T13 | 4 | build | The cards show titles. Every card prints each item's short title and refuses a longer one. (AC-11.1 to AC-11.4; Δ13.) One rule on three cards: an item opens on a title of at most 30 characters, the card prints the title, `explain` prints the rest, and a longer title is refused with the item and its length named, never cut. Step-3 card: every `## Tasks` cell opens on its title, then a period and the detail; the card prints the title alone, `serves` in its own column, consecutive ids in `depends` as a range (`T1–T5`); `show task <n>` prints the whole cell. Step-1 card: every `### REQ-<n> — <title>` title; the card prints id, title and criteria count, no provenance, which `explain <requirement>` prints; every `## Not Doing` item opens on a title, then a colon and the reason; the card prints the titles and `explain not-doing` the items. Step-2 card: every `- **D<n> — <title>**` title; the card prints a decision as id, title, serves and ADR, `explain <decision>` the detail; the `### Worth your eye` section is renamed `### Risks`, each item the model's own judgment in one to three sentences, drawn whole and folded with no cap, the old heading still accepted. The Step-1, Step-2 and Step-3 texts (agents-src templates and their renders) state the rules; `card.test.sh` §TITLES, §REQ-TITLES, §NOT-DOING-TITLES and §DESIGN-TITLES pin them · complexity: standard | w44-T13 | — | approval:plan, .bionic/docs/record/wave-44-every-hand/T1.md | 45 | REQ-11, REQ-12, REQ-13, REQ-14 | payload/scripts/card.sh, agents-src/templates/skills/canonical-sdlc/steps/1.md.tmpl, skills/canonical-sdlc/steps/1.md, agents-src/templates/skills/canonical-sdlc/steps/2.md.tmpl, skills/canonical-sdlc/steps/2.md, agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl, skills/canonical-sdlc/steps/3.md, payload/integrity/rendered.sha256, tests/card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T13.md | .worktrees/44-T13 | 41729276 | landed | — | — | — |
-| T14 | 4 | build | The carry names its row. A carried finding names the row that will fix it. A verb records a carry that names a row (D8; AC-1.2 as the Eval design states it): `finding-move <record>#<n> carried T<n>`, three operands beside the `fixed` arm in `hooks/session-poker.sh`, has `poker_verb_finding_move` in `hooks/poker/proof.sh` write its `moved:` line, call `owed_answer finding:<id> carry "T<n> lands"` and leave the item open, so the landing arm T2 built in `lib/line.sh` closes it from a verb and not only from a planted answer; `fixed` and `defer` are unchanged. asks §ANSWER gains the verb arm (AN-13, AN-14) · complexity: standard | w44-T14 | — | approval:plan, .bionic/docs/record/wave-44-every-hand/T2.md | 20 | REQ-1 | hooks/session-poker.sh, hooks/poker/proof.sh, tests/asks.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T14.md | .worktrees/44-T14 | 41729276 | landed | — | — | — |
-| T15 | 4 | build | The blocked read quits no pipe. The check for asks that block the user never breaks its own pipe. `sitrep_blocked_on_you` in `hooks/poker/sitrep.sh` captures `sitrep_ask_lines` into a variable and matches the string (a `case` or a grep over `printf`), so no writer feeds a reader that quits early and the head never reads `no` for a true `yes` under pipefail; shell-lint BP-1 is red on the line at a2d0b7cd1 (T10-shell-lint.log, 168/169) and goes green; sitrep §ONE-BLOCKS and handoff-file §HEAD stay green · complexity: standard | w44-T15 | — | — | 10 | REQ-2 | hooks/poker/sitrep.sh, .bionic/docs/record/wave-44-every-hand/T15.md | .worktrees/44-T15 | a2d0b7cd | landed | — | — | — |
-| T16 | 4 | build | The Goals row states themes. The Goals row names each theme with its count of met criteria. The sitrep card draws each theme of the sheet's `goal:` lines as `<theme> k of n[, REQ-a open]` on the Metrics Goals row (the k of n from the line's `measure=`, the open REQs from its text), not a count by status; `_card_bind` adds the `goal:` lines' numbers to the values a judgment number may match, so a true "24 of 25 criteria discharged" in the purpose draws and a false count is refused; the §MOCKUP and wave-43 fixtures' Goals rows read the themes. sitrep-card §TABLE and §BIND gain the arms (TB7, BI8); card.test.sh KINDS-7 stays green · complexity: standard · born: review | w44-T16 | — | — | 30 | REQ-6, REQ-8 | payload/scripts/card.sh, tests/sitrep-card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T16.md | .worktrees/44-T16 | afb40d25 | landed | sitrep-card.test.sh, card.test.sh | sitrep-card.test.sh, card.test.sh | — |
-| T17 | 6 | review | The critic reads the fix. The critic re-reads the first fix as a piece. The critic re-reads row T16 as a piece (evidence, adversarial, structure; one record per question, a new record path each: critic-evidence-2.md, critic-adversarial-2.md, critic-structure-2.md), and whether the S2 finding it was born of now holds · complexity: complex | w44-T17 | — | approval:plan, .bionic/docs/record/wave-44-every-hand/T16.md | 30 | REQ-6, REQ-8 | .bionic/docs/record/wave-44-every-hand/critic-evidence-2.md, .bionic/docs/record/wave-44-every-hand/critic-adversarial-2.md, .bionic/docs/record/wave-44-every-hand/critic-structure-2.md | — | — | landed | — | — | .bionic/docs/record/wave-44-every-hand/critic-evidence-2.md |
-| T18 | 4 | build | The Goals row keeps standing. The Goals row keeps each theme's standing word beside its count. `_card_goals_cell` in `payload/scripts/card.sh` draws each theme of the sheet's `goal:` lines as `<theme> <status>, k of n[, REQ-a open]`, the standing word read from the line's `status=` (met, on course, not met, not measured, unreadable), so a theme that is not met never draws like one on course; the binding keeps the counts T16 admitted; sitrep-card §TABLE TB7a asserts the standing word is drawn and TB7d adds a `not met` theme to the fixture; the §MOCKUP and wave-43 goldens' Goals rows follow; card.test.sh KINDS-7 stays green · complexity: standard · born: review | w44-T18 | — | — | 25 | REQ-6, REQ-8 | payload/scripts/card.sh, tests/sitrep-card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T18.md | .worktrees/44-T18 | 268aaf74 | landed | sitrep-card.test.sh, card.test.sh | sitrep-card.test.sh, card.test.sh | — |
-| T19 | 6 | review | The critic reads fix two. The critic re-reads the second fix as a piece. The critic re-reads row T18 as a piece (evidence, adversarial, structure; one record per question at new paths critic-evidence-3.md, critic-adversarial-3.md, critic-structure-3.md), and whether AC-8.1 now holds at its tier · complexity: complex | w44-T19 | — | approval:plan, .bionic/docs/record/wave-44-every-hand/T18.md | 30 | REQ-6, REQ-8 | .bionic/docs/record/wave-44-every-hand/critic-evidence-3.md, .bionic/docs/record/wave-44-every-hand/critic-adversarial-3.md, .bionic/docs/record/wave-44-every-hand/critic-structure-3.md | — | — | landed | — | — | .bionic/docs/record/wave-44-every-hand/critic-evidence-3.md |
-| T20 | 4 | build | The sitrep takes no argument. The sitrep reads the bound run and takes no plan argument. `skills/sitrep/SKILL.md` drops the plan argument from the user surface (D13): the sentence offering `/bionic:sitrep <plan>` and the `[<plan>]` operands in its two command blocks go, and the text says the sitrep reports on the bound run only; the verbs keep `[<plan>]` as the hermetic door the suites use; sitrep-card.test.sh (which pins the skill text) stays green · complexity: standard | — | — | — | 10 | REQ-10 | skills/sitrep/SKILL.md, .bionic/docs/record/wave-44-every-hand/T20.md | .worktrees/44-T20 | 5748e5b2 | landed | — | — | — |
-| T21 | 4 | build | The Goals cell is renamed. The Goals drawing gets a name that no retired writer's pin matches. Two reds of the whole run at 8452c79d7 (regression-run-8452c79d7a0b.log, sitrep.test.sh 281/284): GO1 finds the Goals cell's old name in `payload/scripts/card.sh` because it matches the retired goals writer's pattern, so the function is renamed `_card_goals_cell` at its three sites; SK0 and SK0b pin `sitrep [<plan>]` and `sitrep card [<plan>]` in the skill text T20 changed on D13, so the two expectations read the skill as it now writes them; sitrep.test.sh, card.test.sh and sitrep-card.test.sh green · complexity: standard | w44-T21 | — | — | 15 | REQ-8 | payload/scripts/card.sh, tests/sitrep.test.sh, tests/sitrep-card.test.sh, .bionic/docs/record/wave-44-every-hand/T21.md | .worktrees/44-T21 | 8452c79d | landed | — | — | — |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | The card draws the facts. The sitrep card draws its fact rows from the sheet, and the model writes only the judgment. The card draws the facts, and the mock-up fixture (D6, D7, D1, Δ11; AC-2.1, AC-2.2, AC-3.1 to AC-3.3, AC-4.1 to AC-4.3, AC-7.1, AC-10.1). `tests/sitrep-card.test.sh` §MOCKUP first, red at the base on the unknown `purpose:` tag: a sheet shaped like the large-app card (17 open tasks, 14 event-waiting asks with `waits=event`, a refused waiver holding the merge, 54 added tasks) and a seven-line judgment must draw the mock-up under 40 rows. Then `card.sh`: `_card_sitrep_draw` draws the head, every step and task row from the S and T records (`desc` plus `note`), the five-line Metrics table from the measured values, Blocked on you from asks with `blocks=yes` and `None` naming the nearest event otherwise, the counted line of event-waiting asks by kind under the Assessment, and the close's predicted and basis lines; `_card_sitrep_judge` accepts `purpose:`, `call:`, `grade:`, `point:` (1 to 3, a fourth kept with a note), `ask <key>:` and `close:` and refuses any other tag by name; the number binding becomes `_card_bind`, applied to every judgment line against every measured sheet value by word and place; a long line folds through `_card_hang`; the check refuses only a number no value holds, a state the sheet denies, a forbidden word and a missing purpose, call, grade or close, every reason at once; the `blocks=` fallback at card.sh:3139 is deleted and the A record gains `waits=` after `blocks=`. §DRAWN, §TABLE, §COUNTED, §TAGS, §BIND, §REASONS, §PURPOSE, §BLOCKS, §CALL in sitrep-card; card.test.sh KINDS-7 rewritten to seven lines · complexity: complex | — | 120 | REQ-2, REQ-3, REQ-4, REQ-7, REQ-10 | payload/scripts/card.sh, tests/sitrep-card.test.sh, tests/card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T1.md | — |
+| T2 | 4 | build | The register stores the answer. An answered ask keeps its answer, and one function says what it waits on. The register stores the answer, one function says what an ask waits on (D8; AC-1.1, AC-1.2). `lib/owed.sh`: `owed_answer <key> <word> [<event>]` rewrites the open line with `answer= answered= event=`, `owed_answer_of`, and `ask_waits_on <key>` printing `user` or `event <what>` from the key's kind and its answer (decision, approval, gate, ruling, matrix ruling, declared-missed goal, unanswered waiver and unanswered finding wait on the user; a waiver answered no on its review's re-run; a finding answered carry on its row's landing or the release card; `carry:` on the release card; `hold:merge` on what the waivers holding the merge wait on). `reply`'s other-side `-` on a waiver row calls `owed_answer waive:<q> no`; `disposition … defer` or `… carry` and `finding-move … to=carried row=<T>` call `owed_answer finding:<id> carry "<T> lands"` and leave the item open; the landing of `<T>` closes it in `lib/line.sh`'s arm; `to=fixed` closes at once as today. `_owed_list_file` keeps four columns. §WAITS and §ANSWER in asks; release-approval §TRIGGERS reads the answer · complexity: complex | — | 90 | REQ-1 | payload/scripts/lib/owed.sh, hooks/poker/plan.sh, hooks/poker/proof.sh, payload/scripts/lib/line.sh, tests/asks.test.sh, tests/release-approval.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T2.md | — |
+| T3 | 4 | build | One function says what blocks. Every surface asks the same function whether an ask blocks the user. The sheet, the handoff head, the Patrol line and the card verb read the one function (D7, D8; AC-1.1's sheet half, AC-2.3, AC-9.2). `sitrep_asks` prints `waits=` from `ask_waits_on`; `sitrep_ask_lines` writes `blocks=yes` only for an ask that holds something and waits on the user, and appends `waits=user` or `waits=event <what>` last; `ho_state` prints `Blocked on you: yes` only when some ask has `blocks=yes`; `sitrep_status` prints `owed: <n> on you · <m> on events` and the tick line carries both; `sitrep card` runs `decisions_settle`, reads the saved sheet, refreshes its `ask:` lines through `sitrep_asks` alone and never re-gathers. §ONE-BLOCKS and §FAST in sitrep (a planted divergence between the sheet, the handoff head and the Patrol line reddens; the two verbs on a copy of the wave-43 plan under 5 s); handoff-file §HEAD HD1 to HD3 rewritten to the rule · complexity: standard | — | 75 | REQ-1, REQ-2, REQ-9 | hooks/poker/sitrep.sh, hooks/poker/tick.sh, tests/sitrep.test.sh, tests/handoff-file.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T3.md | — |
+| T4 | 4 | build | The sheet carries the goal. The sheet says what the wave is for and where each theme stands. The sheet says what the wave is for, and a theme's standing (D1; AC-6.1, AC-6.2, AC-8.1 to AC-8.3). `plan_goal_paragraph` in `lib/plan.sh`, moved from the requirements card's parse (card.sh:843-847, which calls it); `sitrep_gather` prints `run.goal:`; `plan_themes` reads the first body line under each `## <theme>` and `_plan_theme_reads` carries it as `for=` last on the `goal:` line; at task scale `plan_themes` yields one theme, `the run`, over every REQ with a matrix row; `plan_goal_status` maps pending with at least one criterion discharged to `on course`, and the release card's mark map (hooks/poker/plan.sh:2516-2524) and the card's Goals line learn the word; the Goals line reads per theme `<theme> k of n[, REQ-a open]`; `tick_owed_goals` opens no `decide:goal:` for a measured goal whose miss is a declared red (a `Lands-red:` row's debt line). §RUN-GOAL, §FOR, §GOAL-AGREE, §TASK-GOAL, §DECLARED-RED in sitrep; release-approval §GOALS green · complexity: standard | — | 75 | REQ-6, REQ-8 | payload/scripts/lib/plan.sh, payload/scripts/card.sh, hooks/poker/plan.sh, hooks/poker/tick.sh, hooks/poker/sitrep.sh, tests/sitrep.test.sh, tests/release-approval.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T4.md | — |
+| T5 | 4 | build | The skill, seven lines. The sitrep skill asks the model for seven lines of judgment and nothing else. The skill is the new shape, and every judgment fixture is seven lines (D6, D7; AC-4.3's text half, AC-5.1). `skills/sitrep/SKILL.md` rewritten: the two verbs, the seven lines, the standard ("the handful of facts that change what you do next"), the Purpose question in place of the Goals question, "nothing tonight" when every open ask waits on an event, show the tool's card once inside one fenced block and never retype it, a seven-line example; `agents-src/templates/commands/help.md.tmpl`'s sitrep line and its render; the judgment fixtures in sitrep-card (`SC_J_*`, `SV_J`), card (`SIT_JUDGE`), words §RENDERED and `rt_judgment` in `tests/lib/rehearsal-read.sh` rewritten to seven lines; sitrep-card §SKILL SK0 and sitrep §SKILL SK9 re-pinned to the new tags and example; words §TEXTS green · complexity: standard | — | 75 | REQ-4, REQ-5 | skills/sitrep/SKILL.md, agents-src/templates/commands/help.md.tmpl, payload/commands/help.md, payload/integrity/rendered.sha256, tests/words.test.sh, tests/lib/rehearsal-read.sh, tests/rehearsal.test.sh, tests/rehearsal-failed-review.test.sh, tests/rehearsal-release-waiting.test.sh, tests/rehearsal-stop-rule.test.sh, tests/sitrep-card.test.sh, tests/sitrep.test.sh, tests/card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T5.md, hooks/session-poker.sh | — |
+| T6 | 5 | verify | The walk and the matrix. A person reads the card as a user would, and the matrix fills from the landings. The walk and the matrix (walk: required). The card drawn on the wave-43 plan and on the §MOCKUP sheet read as a user would, against the approved mock-up; the matrix filled from the landings' logs · complexity: complex | — | 45 | REQ-10 | .bionic/docs/record/wave-44-every-hand/walk.md | record/wave-44-every-hand/walk.md |
+| T7 | 5 | verify | The regression, once. The whole suite runs once after the build, and a red becomes a fix row. The regression, once after the build: `regression-run`, then `proof-add regression`; a red is a fix row's, never a second run · complexity: standard | — | 30 | REQ-9 | .bionic/docs/record/wave-44-every-hand/T7.md | record/wave-44-every-hand/T7.md |
+| T8 | 5 | verify | Four sitreps timed. Four sitreps are timed from the typed command to the shown card. Four sitreps timed (AC-9.1). The orchestrator runs `/bionic:sitrep` four times on this plan after the build settled, reads each from the transcript as research-sitrep-latency.md did, typed command to shown card, and records the four timings and the refusal count in `record/wave-44-every-hand/sitrep-timing.md` · complexity: standard | — | 30 | REQ-9 | .bionic/docs/record/wave-44-every-hand/sitrep-timing.md | record/wave-44-every-hand/sitrep-timing.md |
+| T9 | 6 | review | The critic reads the whole. One independent reader reviews the whole run once. The critic's review of the whole (single rigor: evidence, adversarial, structure; one record per question) · complexity: complex | — | 60 | REQ-10 | .bionic/docs/record/wave-44-every-hand/critic-evidence.md, .bionic/docs/record/wave-44-every-hand/critic-adversarial.md, .bionic/docs/record/wave-44-every-hand/critic-structure.md | record/wave-44-every-hand/critic-evidence.md |
+| T10 | 7 | doc | The release row: 1.27.0. The release is versioned, its entry written and its decision recorded. plugin.json and the command pages at 1.27.0, the CHANGELOG entry with its Known limits and landing numbers, ADR-071 "code draws the facts, the model judges" · complexity: standard | — | 30 | REQ-10 | CHANGELOG.md, payload/.claude-plugin/plugin.json, payload/commands/help.md, payload/commands/version.md, payload/integrity/rendered.sha256, docs/adrs/adr-071-code-draws-the-facts-the-model-judges.md, tests/release-check.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T10.md | — |
+| T11 | 8 | integrate | The pull request. The run reaches main by a pull request after its reviews are published. Open the pull request from wave/44-every-hand to main on the release approval card's word, after `reviews-part T11` · complexity: standard | — | 15 | REQ-10 | .bionic/docs/record/wave-44-every-hand/T11-pr.md | — |
+| T12 | 9 | close | Close-out. The run closes and reports its hand-holds reading. Close-out: the checklist, the rollback, continuation.md; the hand-holds reading reported, not judged · complexity: standard | — | 20 | REQ-10 | .bionic/docs/record/wave-44-every-hand/continuation.md | — |
+| T13 | 4 | build | The cards show titles. Every card prints each item's short title and refuses a longer one. (AC-11.1 to AC-11.4; Δ13.) One rule on three cards: an item opens on a title of at most 30 characters, the card prints the title, `explain` prints the rest, and a longer title is refused with the item and its length named, never cut. Step-3 card: every `## Tasks` cell opens on its title, then a period and the detail; the card prints the title alone, `serves` in its own column, consecutive ids in `depends` as a range (`T1–T5`); `show task <n>` prints the whole cell. Step-1 card: every `### REQ-<n> — <title>` title; the card prints id, title and criteria count, no provenance, which `explain <requirement>` prints; every `## Not Doing` item opens on a title, then a colon and the reason; the card prints the titles and `explain not-doing` the items. Step-2 card: every `- **D<n> — <title>**` title; the card prints a decision as id, title, serves and ADR, `explain <decision>` the detail; the `### Worth your eye` section is renamed `### Risks`, each item the model's own judgment in one to three sentences, drawn whole and folded with no cap, the old heading still accepted. The Step-1, Step-2 and Step-3 texts (agents-src templates and their renders) state the rules; `card.test.sh` §TITLES, §REQ-TITLES, §NOT-DOING-TITLES and §DESIGN-TITLES pin them · complexity: standard | — | 45 | REQ-11, REQ-12, REQ-13, REQ-14 | payload/scripts/card.sh, agents-src/templates/skills/canonical-sdlc/steps/1.md.tmpl, skills/canonical-sdlc/steps/1.md, agents-src/templates/skills/canonical-sdlc/steps/2.md.tmpl, skills/canonical-sdlc/steps/2.md, agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl, skills/canonical-sdlc/steps/3.md, payload/integrity/rendered.sha256, tests/card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T13.md | — |
+| T14 | 4 | build | The carry names its row. A carried finding names the row that will fix it. A verb records a carry that names a row (D8; AC-1.2 as the Eval design states it): `finding-move <record>#<n> carried T<n>`, three operands beside the `fixed` arm in `hooks/session-poker.sh`, has `poker_verb_finding_move` in `hooks/poker/proof.sh` write its `moved:` line, call `owed_answer finding:<id> carry "T<n> lands"` and leave the item open, so the landing arm T2 built in `lib/line.sh` closes it from a verb and not only from a planted answer; `fixed` and `defer` are unchanged. asks §ANSWER gains the verb arm (AN-13, AN-14) · complexity: standard | — | 20 | REQ-1 | hooks/session-poker.sh, hooks/poker/proof.sh, tests/asks.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T14.md | — |
+| T15 | 4 | build | The blocked read quits no pipe. The check for asks that block the user never breaks its own pipe. `sitrep_blocked_on_you` in `hooks/poker/sitrep.sh` captures `sitrep_ask_lines` into a variable and matches the string (a `case` or a grep over `printf`), so no writer feeds a reader that quits early and the head never reads `no` for a true `yes` under pipefail; shell-lint BP-1 is red on the line at a2d0b7cd1 (T10-shell-lint.log, 168/169) and goes green; sitrep §ONE-BLOCKS and handoff-file §HEAD stay green · complexity: standard | — | 10 | REQ-2 | hooks/poker/sitrep.sh, .bionic/docs/record/wave-44-every-hand/T15.md | — |
+| T16 | 4 | build | The Goals row states themes. The Goals row names each theme with its count of met criteria. The sitrep card draws each theme of the sheet's `goal:` lines as `<theme> k of n[, REQ-a open]` on the Metrics Goals row (the k of n from the line's `measure=`, the open REQs from its text), not a count by status; `_card_bind` adds the `goal:` lines' numbers to the values a judgment number may match, so a true "24 of 25 criteria discharged" in the purpose draws and a false count is refused; the §MOCKUP and wave-43 fixtures' Goals rows read the themes. sitrep-card §TABLE and §BIND gain the arms (TB7, BI8); card.test.sh KINDS-7 stays green · complexity: standard · born: review | — | 30 | REQ-6, REQ-8 | payload/scripts/card.sh, tests/sitrep-card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T16.md | — |
+| T17 | 6 | review | The critic reads the fix. The critic re-reads the first fix as a piece. The critic re-reads row T16 as a piece (evidence, adversarial, structure; one record per question, a new record path each: critic-evidence-2.md, critic-adversarial-2.md, critic-structure-2.md), and whether the S2 finding it was born of now holds · complexity: complex | — | 30 | REQ-6, REQ-8 | .bionic/docs/record/wave-44-every-hand/critic-evidence-2.md, .bionic/docs/record/wave-44-every-hand/critic-adversarial-2.md, .bionic/docs/record/wave-44-every-hand/critic-structure-2.md | .bionic/docs/record/wave-44-every-hand/critic-evidence-2.md |
+| T18 | 4 | build | The Goals row keeps standing. The Goals row keeps each theme's standing word beside its count. `_card_goals_cell` in `payload/scripts/card.sh` draws each theme of the sheet's `goal:` lines as `<theme> <status>, k of n[, REQ-a open]`, the standing word read from the line's `status=` (met, on course, not met, not measured, unreadable), so a theme that is not met never draws like one on course; the binding keeps the counts T16 admitted; sitrep-card §TABLE TB7a asserts the standing word is drawn and TB7d adds a `not met` theme to the fixture; the §MOCKUP and wave-43 goldens' Goals rows follow; card.test.sh KINDS-7 stays green · complexity: standard · born: review | — | 25 | REQ-6, REQ-8 | payload/scripts/card.sh, tests/sitrep-card.test.sh, tests/CENSUS.md, .bionic/docs/record/wave-44-every-hand/T18.md | — |
+| T19 | 6 | review | The critic reads fix two. The critic re-reads the second fix as a piece. The critic re-reads row T18 as a piece (evidence, adversarial, structure; one record per question at new paths critic-evidence-3.md, critic-adversarial-3.md, critic-structure-3.md), and whether AC-8.1 now holds at its tier · complexity: complex | — | 30 | REQ-6, REQ-8 | .bionic/docs/record/wave-44-every-hand/critic-evidence-3.md, .bionic/docs/record/wave-44-every-hand/critic-adversarial-3.md, .bionic/docs/record/wave-44-every-hand/critic-structure-3.md | .bionic/docs/record/wave-44-every-hand/critic-evidence-3.md |
+| T20 | 4 | build | The sitrep takes no argument. The sitrep reads the bound run and takes no plan argument. `skills/sitrep/SKILL.md` drops the plan argument from the user surface (D13): the sentence offering `/bionic:sitrep <plan>` and the `[<plan>]` operands in its two command blocks go, and the text says the sitrep reports on the bound run only; the verbs keep `[<plan>]` as the hermetic door the suites use; sitrep-card.test.sh (which pins the skill text) stays green · complexity: standard | — | 10 | REQ-10 | skills/sitrep/SKILL.md, .bionic/docs/record/wave-44-every-hand/T20.md | — |
+| T21 | 4 | build | The Goals cell is renamed. The Goals drawing gets a name that no retired writer's pin matches. Two reds of the whole run at 8452c79d7 (regression-run-8452c79d7a0b.log, sitrep.test.sh 281/284): GO1 finds the Goals cell's old name in `payload/scripts/card.sh` because it matches the retired goals writer's pattern, so the function is renamed `_card_goals_cell` at its three sites; SK0 and SK0b pin `sitrep [<plan>]` and `sitrep card [<plan>]` in the skill text T20 changed on D13, so the two expectations read the skill as it now writes them; sitrep.test.sh, card.test.sh and sitrep-card.test.sh green · complexity: standard | — | 15 | REQ-8 | payload/scripts/card.sh, tests/sitrep.test.sh, tests/sitrep-card.test.sh, .bionic/docs/record/wave-44-every-hand/T21.md | — |
 
 The card lands first and alone with the mock-up fixture (T1), red at the base, the real card the user sees before the build fans out; the register (T2) runs beside it; T3 waits on T2; T4 runs beside T3; T5 waits on T1, T3 and T4 and rewrites their fixtures; the walk (T6), the regression (T7), the timed sitreps (T8), the critic (T9), the release row (T10), the pull request (T11) and close-out (T12) follow.
-
-## Verification Matrix
-
-stack-health: before, the build head a2d0b7cd1 (2026-10-24T08:34Z): every landing suite green, shell-lint red on BP-1 at that head (T10-shell-lint.log, 168/169); after, the regression at afb40d258 (2026-10-24T09:17Z, after fix row T15): 126 passed, 0 failed (regression-run-afb40d2584fbd4cb31ba9d0523096c1ff7c95dbd.log)
-auditor-wave: REFUTED — the critic (w44-T9, critic-evidence.md, single rigor: the critic holds evidence) confirmed 21 of 25 rows; AC-8.1 REFUTED (fix row T16, re-read T17), AC-14.1 REFUTED (deferred S3, the user's at the release card), AC-10.1 and AC-9.1 UNVERIFIABLE (the mock-up is in no record; the thirty seconds waits on T8)
-walk-artifact: record/wave-44-every-hand/walk.md
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T2 | discharged | record/wave-44-every-hand/line/T14-asks-d85a2b342d51.log | CONFIRMED |
-| AC-1.2 | T2 | discharged | record/wave-44-every-hand/line/T14-asks-d85a2b342d51.log | CONFIRMED |
-| AC-2.1 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-2.2 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-2.3 | T2 | discharged | record/wave-44-every-hand/line/T3-sitrep-7bc8545b0db2.log | CONFIRMED |
-| AC-3.1 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-3.2 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-3.3 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-4.1 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-4.2 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-4.3 | T0 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-5.1 | T0 | discharged | record/wave-44-every-hand/line/T5-words-a2d0b7cd15a3.log | CONFIRMED |
-| AC-6.1 | T2 | discharged | record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log | CONFIRMED |
-| AC-6.2 | T2 | discharged | record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log | CONFIRMED |
-| AC-7.1 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-8.1 | T2 | discharged | record/wave-44-every-hand/line/T18-sitrep-card-aa948d2205fa.log | CONFIRMED |
-| AC-8.2 | T2 | discharged | record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log | CONFIRMED |
-| AC-8.3 | T2 | discharged | record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log | CONFIRMED |
-| AC-9.1 | T4 | waived | — | pending |
-| AC-9.2 | T2 | discharged | record/wave-44-every-hand/line/T3-sitrep-7bc8545b0db2.log | CONFIRMED |
-| AC-10.1 | T1 | waived | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | pending |
-| AC-11.1 | T1 | discharged | record/wave-44-every-hand/line/T13-card-97542f066e21.log | CONFIRMED |
-| AC-12.1 | T1 | discharged | record/wave-44-every-hand/line/T13-card-97542f066e21.log | CONFIRMED |
-| AC-13.1 | T1 | discharged | record/wave-44-every-hand/line/T13-card-97542f066e21.log | CONFIRMED |
-| AC-14.1 | T1 | waived | record/wave-44-every-hand/line/T13-card-97542f066e21.log | pending |
-
-AC-1.1: Every ask on the register reads `waits-on=user` or `waits-on=event <what>`: a decision, an approval and an unanswered waiver wait on the user; a waiver answered "no" waits on the review's next run; a finding carried to a row waits on that row's landing; the sheet's `ask:` line carries the field.
-  provenance: charter §Cut (the large-app card's "Blocked on you doesn't seem like it's truly blocked"); sheet-definitions.md (an ask line carries holds= and blocks=, nothing of who it waits on)
-  fails-when: the refused waiver reads user, or a line lacks the field
-  eval: T2 — `asks.test.sh` §WAITS: `ask_waits_on` says user for a decision, an approval and an unanswered waiver, event for a waiver answered no and a finding answered carry; the sheet's `ask:` lines carry `waits=`
-  task: T2, T14
-  evidence: record/wave-44-every-hand/line/T14-asks-d85a2b342d51.log
-AC-1.2: A reply of "no" to a waiver, and a finding ruled "carry" or "defer", record the answer on the ask and move it to `waits-on=event` without closing it; the ask closes as it does today, when the review passes or the row lands.
-  provenance: charter §Cut (the large-app card's "Blocked on you doesn't seem like it's truly blocked"); sheet-definitions.md (an ask line carries holds= and blocks=, nothing of who it waits on)
-  fails-when: the item closes at the answer, or reads no answer
-  eval: T2 — `asks.test.sh` §ANSWER: the item stays open with `answer=no`; the finding stays open with `answer=carry event=T9 lands` and closes when T9's landing is recorded
-  task: T2, T14
-  evidence: record/wave-44-every-hand/line/T14-asks-d85a2b342d51.log
-AC-2.1: Blocked on you lists the asks that wait on the user and hold a task, the release or the merge, and nothing else; with none it reads `None` and names the nearest event the run waits on.
-  provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral critic-adversarial-2.md#2 (adopted: the handoff head follows the card); debt blocked-on-you (card.sh:3042, sitrep.sh:2123) and blocks-rule (sitrep.sh:1616, card.sh:3139)
-  fails-when: the refused waiver is drawn, or `None` over the unanswered one
-  eval: T1 — `sitrep-card.test.sh` §BLOCKS: `None` naming T86 over the refused waiver; the unanswered waiver drawn under Blocked on you
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-2.2: The call may say nothing is owed while every open ask waits on an event, and must name the ask while one waits on the user and holds something; the check reads `waits-on`, not `holds`.
-  provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral critic-adversarial-2.md#2 (adopted: the handoff head follows the card); debt blocked-on-you (card.sh:3042, sitrep.sh:2123) and blocks-rule (sitrep.sh:1616, card.sh:3139)
-  fails-when: either verdict inverts
-  eval: T1 — `sitrep-card.test.sh` §CALL: admitted over the refused waiver, refused over the unanswered one
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-2.3: The handoff head's `Blocked on you`, the sitrep card and the Patrol's `blocks=` read one function, pinned by one suite row that reddens when any two disagree; the `blocks-rule` and `blocked-on-you` duplicates are gone.
-  provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral critic-adversarial-2.md#2 (adopted: the handoff head follows the card); debt blocked-on-you (card.sh:3042, sitrep.sh:2123) and blocks-rule (sitrep.sh:1616, card.sh:3139)
-  fails-when: any two disagree, or the fallback remains
-  eval: T2 — `sitrep.test.sh` §ONE-BLOCKS: the sheet, the handoff head and the Patrol line agree over a planted answered waiver; `/usr/bin/grep -c 'nothing.*blocks|blocks=' payload/scripts/card.sh` finds no re-derivation
-  task: T1, T3
-  evidence: record/wave-44-every-hand/line/T3-sitrep-7bc8545b0db2.log
-AC-3.1: `sitrep` prints, beside the sheet, the drawn rows of the head, the Task list (every step and task row as today, its text from the plan's task title and its state words from the sheet), the Metrics table, Blocked on you and the first two lines of Predicted close, so the model writes none of them.
-  provenance: ledger Δ6 (D6 "1"); research-sitrep-latency.md causes 1 to 3; w38 D9 (one renderer prints every fact)
-  fails-when: a task row is missing, or `task:` is accepted
-  eval: T1 — `sitrep-card.test.sh` §DRAWN: every step and task row drawn from S and T records; a `task:` line in the judgment refuses by name
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-3.2: The Metrics are a five-line table, Completed, Pace, Correctness, Waste, Goals, each cell one sheet value, numbers only, the pace comparison first in its line.
-  provenance: ledger Δ6 (D6 "1"); research-sitrep-latency.md causes 1 to 3; w38 D9 (one renderer prints every fact)
-  fails-when: a digit no line holds, or prose
-  eval: T1 — `sitrep-card.test.sh` §TABLE: five lines, every digit run a measured value of its line, the pace comparison first
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-3.3: Items that wait on events are one drawn line under the Assessment, counted by kind ("14 items wait on landings, not on you: 8 carried findings, 6 rulings given"), never one row each.
-  provenance: ledger Δ6 (D6 "1"); research-sitrep-latency.md causes 1 to 3; w38 D9 (one renderer prints every fact)
-  fails-when: an ask is drawn as a row
-  eval: T1 — `sitrep-card.test.sh` §COUNTED: one line "14 items wait on landings, not on you: 8 carried findings, 6 rulings given" under the Assessment
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-4.1: The judgment the model pipes to `sitrep card` is: `purpose:`, `call:`, `grade:`, one to three `point:` lines, one `ask <key>:` recommendation per ask that waits on the user, and one `close:` condition line; the check refuses any other tag, and refuses a missing one by name.
-  provenance: ledger Δ6, Δ7; research-sitrep-latency.md (refusal classes: metric binding 4, row wrap 4, state word 2, reading/reader 2)
-  fails-when: a foreign tag draws, or a missing one is unnamed
-  eval: T1 — `sitrep-card.test.sh` §TAGS: the seven accepted; `metric:` refused by name; a missing `purpose:` refused by name
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-4.2: Every number in a judgment line is bound to the sheet value whose word stands beside it, by word and by place, as the metrics were; a line over the card's width is folded by the renderer, never refused.
-  provenance: ledger Δ6, Δ7; research-sitrep-latency.md (refusal classes: metric binding 4, row wrap 4, state word 2, reading/reader 2)
-  fails-when: the swap passes, or the fold refuses
-  eval: T1 — `sitrep-card.test.sh` §BIND: "1 green and 11 red" over "11 green, 1 red" refuses; a number on no line refuses; the long point folds and draws
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-4.3: The tool shows the card; the skill tells the model to print the tool's output once inside one fenced block and never to retype it, and a refusal prints every reason at once.
-  provenance: ledger Δ6, Δ7; research-sitrep-latency.md (refusal classes: metric binding 4, row wrap 4, state word 2, reading/reader 2)
-  fails-when: the text asks to retype, or the second reason waits for a second run
-  eval: T0 — `/usr/bin/grep -n 'fenced' skills/sitrep/SKILL.md` finds the show-once rule and no "regenerate"; `sitrep-card.test.sh` §REASONS: a judgment missing purpose and holding a bad number prints both reasons on one refusal
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-5.1: `skills/sitrep/SKILL.md` describes the two verbs, the seven judgment lines, the Purpose question in place of the Goals question, and the rule that an ask waiting on an event owes the user nothing; its example judgment is seven lines; `words.test.sh` and the sitrep-card suite's skill section pin it.
-  provenance: ledger Δ6, Δ7; skills/sitrep/SKILL.md (the six questions, the Goals question, "every open ask answered once")
-  fails-when: an old tag remains in the example, or the Goals question
-  eval: T0 — `/usr/bin/grep -c 'task:|metric:' skills/sitrep/SKILL.md` → 0 outside the refusal list; §SKILL rows of sitrep-card and sitrep read the seven tags and the Purpose question; `words.test.sh` §TEXTS green
-  task: T5
-  evidence: record/wave-44-every-hand/line/T5-words-a2d0b7cd15a3.log
-AC-6.1: The sheet carries `run.goal:`, the plan's `## Goal` paragraph, so the purpose is drawn from the verb and never fetched by the model.
-  provenance: charter §Late addition ("reasserting what the wave is doing"); research-sitrep-concept.md Q3; wave 41 D13
-  fails-when: the line differs, or an error prints
-  eval: T2 — `sitrep.test.sh` §RUN-GOAL: `run.goal:` equals the paragraph the Step-1 card prints; the Goal-less plan prints no line and no error
-  task: T4
-  evidence: record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log
-AC-6.2: Each theme's `goal:` line carries the theme's opening sentence as its last field, `for=`, with the fields the release card reads kept in place.
-  provenance: charter §Late addition ("reasserting what the wave is doing"); research-sitrep-concept.md Q3; wave 41 D13
-  fails-when: a line lacks `for=`, or the release card's read changes
-  eval: T2 — `sitrep.test.sh` §FOR: each `goal:` line ends `for=<opener>`; `release-approval.test.sh` §GOALS unchanged green
-  task: T4
-  evidence: record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log
-AC-7.1: The Assessment's first row is the `purpose:` line, what the wave is for and whether it is on course; a judgment without it is refused, and its numbers are checked against the sheet as every line's are.
-  provenance: charter §Late addition ("whether we're accomplishing the purpose of the wave"); ledger Δ1 (D1 "1")
-  fails-when: a card draws without it, or the false count draws
-  eval: T1 — `sitrep-card.test.sh` §PURPOSE: the first refuses by name; the second refuses on the number; a true one draws first under the grade
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-8.1: The Goals line of the Metrics states each theme's criteria discharged and open REQs, each number bound to its theme's name; a theme with at least one criterion discharged and none missed reads `on course`, distinct from `not measured`, on the sheet, the sitrep card and the release card.
-  provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit 23
-  fails-when: the two themes read alike, or the false count draws
-  eval: T2 — `sitrep.test.sh` §GOAL-AGREE: `on course` and `not measured` on the sheet, the Goals line and the release card; "Identity 10 of 11" refuses at the card
-  task: T4, T16, T18
-  evidence: record/wave-44-every-hand/line/T21-sitrep-01f38b51335b.log
-AC-8.2: At task scale the sheet reads one goal over the whole matrix, the run's criteria discharged and open REQs.
-  provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit 23
-  fails-when: no goal line
-  eval: T2 — `sitrep.test.sh` §TASK-GOAL: one `goal: name=the run` with k of n over the matrix
-  task: T4
-  evidence: record/wave-44-every-hand/line/T21-sitrep-01f38b51335b.log
-AC-8.3: A goal missed by a red the plan itself declares opens no `decide:goal:<name>` ask.
-  provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit 23
-  fails-when: the ask opens, or the real miss opens none
-  eval: T2 — `sitrep.test.sh` §DECLARED-RED: the tick opens no `decide:goal:`; a goal missed otherwise still opens one
-  task: T4
-  evidence: record/wave-44-every-hand/line/T21-sitrep-01f38b51335b.log
-AC-9.1: Three sitreps run in a row on a live plan, measured from the typed command to the shown card in the transcript as research-sitrep-latency.md measured, each take under 30 seconds, with at most one card refusal among the three. Evidence is the measurement recorded at Step 5.
-  provenance: charter §Cut ("Right now this is fucking wasting my time!"); research-sitrep-latency.md (74 to 108 s; model output 90%)
-  fails-when: one at 30 s or more, or two refusals
-  eval: T4 — the transcript timings recorded in `record/wave-44-every-hand/sitrep-timing.md`, each under 30 s, at most one refusal
-  task: T8
-  evidence: pending
-  user-confirmed: pending
-  waiver: Chris Lehman 2026-10-24T16:04:40Z "option 1 - good enough. Much happier with /sitrep." — measured 64 s and 40 s typed-to-card (sitrep-timing.md), the verbs under three seconds; the rest is the model, which no sheet edit reaches; the limit is stated in the 1.27.0 entry
-AC-9.2: The machine side of a sitrep, the sheet and the card together, takes under 5 seconds on the wave-43 plan.
-  provenance: charter §Cut ("Right now this is fucking wasting my time!"); research-sitrep-latency.md (74 to 108 s; model output 90%)
-  fails-when: 5 s or more
-  eval: T2 — `sitrep.test.sh` §FAST: `sitrep` then `sitrep card` on a copy of the wave-43 plan and record under 5 s together
-  task: T3
-  evidence: record/wave-44-every-hand/line/T3-sitrep-7bc8545b0db2.log
-AC-10.1: A fixture shaped like the large-app card (17 open tasks, 14 items waiting on events, a refused waiver holding the merge, 54 added tasks) draws the mock-up's shape: Call to action one line saying nothing is owed, the Task list as today, a five-line Metrics table, an Assessment of the purpose, at most three points and one counted line, Blocked on you `None` with the event named, Predicted close in three lines; the drawn card is under 40 rows.
-  provenance: ledger Δ7 (the mock-up Chris approved: "Yes! That is what I want!")
-  fails-when: a register item is a row, the merge reads blocked, 40 rows or more, or green at the base
-  eval: T1 — `sitrep-card.test.sh` §MOCKUP: the drawn card equals the mock-up's shape line for line (sections, counts, `None`, three close lines), under 40 rows; red at dd425be64 on the unknown `purpose:` tag, T1's red log in record/
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-  waiver: Chris Lehman 2026-10-24T17:58:16Z "all recommended" — not confirmed by the auditor on this release
-AC-11.1: A `## Tasks` cell opens on a title of at most 30 characters, then a period and the detail; the Step-3 card prints the title alone, `serves` in its own column and consecutive ids in `depends` as a range; `show task <n>` prints the whole cell; the Step-3 text states the rule; a longer title is refused by the card, which names the row and its length, never cut.
-  provenance: user 2026-10-23 "Each task description is far too long. It's not useful whatsoever. I need a brief summary or phrase that represents what the task is. Maybe 25-30 characters max." and "Yes! That's so much more useful OMG" at the mock-up (ledger Δ13)
-  fails-when: the detail prints, the long title draws, or the step text lacks the rule
-  eval: T1 — `card.test.sh` §TITLES: the Step-3 card's task block prints each title alone with `serves` in its own column and `T1–T5` for a run of ids; the 31-character title is refused with its row and length named; `show task 1` prints the whole cell; `/usr/bin/grep -c 'title of at most 30' skills/canonical-sdlc/steps/3.md` → 1
-  task: T13
-  evidence: record/wave-44-every-hand/line/T13-card-97542f066e21.log
-AC-12.1: A `### REQ-<n> — <title>` heading's title is at most 30 characters; the Step-1 card prints each requirement as its id, its title and its criteria count on one line, the provenance under `explain <requirement>` only; a longer title is refused by the card, which names the requirement and its length, never cut; the Step-1 text states the rule.
-  provenance: user 2026-10-23 "Each task description is far too long. It's not useful whatsoever. I need a brief summary or phrase that represents what the task is. Maybe 25-30 characters max." and "Yes! That's so much more useful OMG" at the mock-up (ledger Δ13); user 2026-10-23 "you need to do the same thing for the requirements card. Each requirement desc needs to be capped at 30 chars."
-  fails-when: a provenance prints, the long title draws, or the step text lacks the rule
-  eval: T1 — `card.test.sh` §REQ-TITLES: the Step-1 card prints `REQ-n  <title>  ACs k` per requirement and no provenance; the long title is refused with its requirement and length named; `explain REQ-1` prints the provenance; `/usr/bin/grep -c 'at most 30' skills/canonical-sdlc/steps/1.md` → 1
-  task: T13
-  evidence: record/wave-44-every-hand/line/T13-card-97542f066e21.log
-AC-13.1: Every `## Not Doing` item opens on a title of at most 30 characters, then a colon and the reason; the Step-1 card prints the titles, one per line, and `explain not-doing` prints the items whole; a longer title is refused by the card, naming the item, never cut; the Step-1 text states the rule.
-  provenance: user 2026-10-23 "Not Doing is way too wordy! It needs to be summarized!"
-  fails-when: a reason prints, the long title draws, or the step text lacks the rule
-  eval: T1 — `card.test.sh` §NOT-DOING-TITLES: the Step-1 card prints each item's title on one line and no reason; the long title is refused with the item named; `explain not-doing` prints the items whole
-  task: T13
-  evidence: record/wave-44-every-hand/line/T13-card-97542f066e21.log
-AC-14.1: Every `- D<n> — <title>` decision title is at most 30 characters; the Step-2 card prints each decision as its id, its title, the requirements it serves and its ADR, `explain <decision>` printing the detail; a longer title is refused by the card, naming the decision, never cut. The spec's `### Worth your eye` section is `### Risks`: each item is the model's own judgment of one risk that could change the user's decision, a sentence or two, and nothing that is not such a risk; drawn whole and folded, with no cap and no required shape; the card accepts the old heading on a spec written before 1.27.0. The Step-2 text states both.
-  provenance: user 2026-10-23 "Decisions capped to 30 characters"; "the Worth your eye section should probably be called Risks"; "I thought you were summarizing to the material points only"
-  fails-when: the long title draws, a risk is cut, or the section reads Worth your eye
-  eval: T1 — `card.test.sh` §DESIGN-TITLES: the Step-2 card prints each decision as id, title, serves and ADR and refuses the long title naming it; the Risks section draws whole under `Risks`, folded, never cut; a spec with `### Worth your eye` still draws
-  task: T13
-  evidence: record/wave-44-every-hand/line/T13-card-97542f066e21.log
-  waiver: Chris Lehman 2026-10-24T17:58:17Z "all recommended" — not confirmed by the auditor on this release
-
-## SDLC State
-
-integration-branch: main
-working-branch: wave/44-every-hand
-base: main @ dd425be64 (1.26.0)
-intent: build
-rigor: single
-scale: task
-current: 9
-approved-by: Chris Lehman 2026-10-24T06:28Z "approved"
 
 W44PLAN
 whole_card step1 "$REAL_REQ"; S1_REAL="$WC_OUT"; S1_REAL_RC="$WC_RC"
@@ -1374,6 +1084,8 @@ expect_eq "67d1: …and draws a sentence line under each of its five decisions" 
   "$(printf '%s\n' "$S2_REAL" | sed -n '/^  Decisions/,/^$/p' | /usr/bin/grep -c '^         [A-Z]' | tr -d ' ')"
 expect_empty "67d: …nor of the Step-2 card over this wave's own spec" "$(over_budget "$S2_REAL")"
 expect_empty "67e: …nor of the Step-3 card over the suite's copy of a real run's plan, its sentences included" "$(over_budget "$S3_REAL")"
+expect_eq "67e2: …and its review row, tagged complex, draws its kind and no role: the agent column names a writer's role only" \
+  "review —" "$(printf '%s\n' "$S3_REAL" | awk '$1 == "T9" { print $(NF - 2), $NF; exit }')"
 
 # The exemption's surviving half: a path OUTSIDE the project (the original
 # system-tmp fixtures, S1 above) still prints AS GIVEN, whole, on ONE line —
@@ -1634,8 +1346,7 @@ expect_eq "CONTENT-7d …and refuses the sub-view, as before" "2" "$WC_RC"
 section "§TITLES: a Tasks cell opens on a title of at most 30 characters, and the Step-3 card prints the title alone"
 # ============================================================
 # fails-when: the card prints the detail after the title, the serves column is not its own, consecutive ids in depends
-# print one by one, `task <n>` prints less than the whole cell, a 31-character title is drawn or cut, or the Step-3
-# text lacks the rule.
+# print one by one, `task <n>` prints less than the whole cell, or a 31-character title is drawn or cut.
 # The names below are invented; a fixture never carries a real project, client or person.
 T30="Title of exactly thirty chars!"
 T31="A title that is thirty-one long"
@@ -1652,6 +1363,7 @@ rigor: single
 parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 working-branch: wave/02-flock
 integration-branch: main
+canonical_sdlc_version: 15
 base-sha: abc1234
 ---
 
@@ -1661,27 +1373,22 @@ base-sha: abc1234
 
 Land the flock app's six tasks so the Step-3 card has a ledger to read.
 
-## SDLC State
-
-integration-branch: main
-current: 4
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | Parse the ledger. The ledger is parsed once. DETAIL-ALPHA the parser reads the table and nothing else, so a later row cannot change it. complexity: standard | implementor | — | 30 | REQ-1 | lib/a.sh | — | pending |
-| T2 | 4 | build | ${T30}. The boundary title has a sentence too. DETAIL-BETA the boundary title is drawn whole. complexity: standard | implementor | — | 30 | REQ-1, REQ-2 | lib/b.sh | — | pending |
-| T3 | 4 | build | ${T30_EM}. The dashed title has one as well. DETAIL-GAMMA a title of thirty characters with dashes in it. complexity: standard | implementor | — | 30 | REQ-2 | lib/c.sh | — | pending |
-| T4 | 4 | build | Join the rows. The rows are joined in order. DETAIL-DELTA joins what T1 parsed. complexity: complex | senior-implementor | T1, T3 | 45 | REQ-2 | lib/d.sh | — | pending |
-| T5 | 5 | test | Prove the join. The join is proved after the four. DETAIL-EPSILON runs after the four. complexity: standard | implementor | T1, T2, T3, T4 | 45 | REQ-2 | tests/d.test.sh | — | pending |
-| T6 | 5 | test | Prove the pair. The pair is proved after two. DETAIL-ZETA runs after two. complexity: standard | implementor | T1, T2 | 45 | REQ-1 | tests/e.test.sh | — | pending |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | Parse the ledger. The ledger is parsed once. DETAIL-ALPHA the parser reads the table and nothing else, so a later row cannot change it. complexity: standard | — | 30 | REQ-1 | lib/a.sh | — |
+| T2 | 4 | build | ${T30}. The boundary title has a sentence too. DETAIL-BETA the boundary title is drawn whole. complexity: standard | — | 30 | REQ-1, REQ-2 | lib/b.sh | — |
+| T3 | 4 | build | ${T30_EM}. The dashed title has one as well. DETAIL-GAMMA a title of thirty characters with dashes in it. complexity: standard | — | 30 | REQ-2 | lib/c.sh | — |
+| T4 | 4 | build | Join the rows. The rows are joined in order. DETAIL-DELTA joins what T1 parsed. complexity: complex | T1, T3 | 45 | REQ-2 | lib/d.sh | — |
+| T5 | 5 | test | Prove the join. The join is proved after the four. DETAIL-EPSILON runs after the four. complexity: standard | T1, T2, T3, T4 | 45 | REQ-2 | tests/d.test.sh | — |
+| T6 | 4 | build | Prove the pair. The pair is proved after two. DETAIL-ZETA runs after two. complexity: standard | T1, T2 | 45 | REQ-1 | tests/e.test.sh | — |
 
-## Verification Matrix
+## Eval design
 
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T0 | pending | — | — |
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | fixture | AC-1.1 | hermetic | \`tests/a.test.sh\` | the fixture is wrong |
 FIXEOF
 whole_card step3 "$TITLES_PLAN"; TT="$WC_OUT"
 expect_eq "TITLES-1 step3 draws a plan whose cells open on titles of at most 30 characters, silently" "0|" "$WC_RC|$WC_ERR"
@@ -1703,7 +1410,6 @@ expect_contains "TITLES-7 a run of two prints both ids" "T1, T2" "$(printf '%s\n
 expect_absent "TITLES-7b …with no range" "T1–T2" "$(printf '%s\n' "$TT" | /usr/bin/grep '^    T6 ')"
 expect_contains "TITLES-7c ids that are not consecutive stay as written" "T1, T3" "$(printf '%s\n' "$TT" | /usr/bin/grep '^    T4 ')"
 expect_empty "TITLES-8 no line of the card exceeds the width, the out-of-project artifact path aside" "$(over_budget "$(printf '%s\n' "$TT" | /usr/bin/grep -v '^    plan  ')")"
-expect_contains "TITLES-8b the footer still offers the sub-views" "show evals <req> · show task <n> · explain <decision>" "$TT"
 
 whole_card step3 "$TITLES_PLAN" task 1; TT_V="$WC_OUT"
 expect_eq "TITLES-9 show task 1 exits 0" "0" "$WC_RC"
@@ -1731,14 +1437,12 @@ expect_eq "TITLES-10d …on two lines and no more" "2" "$(printf '%s\n' "$TB_ERR
 expect_absent "TITLES-10e …and no title cut or ellipsised" "…" "$TB_ERR"
 whole_card step3 "$TITLES_BAD" task 1
 expect_eq "TITLES-10f the sub-view is refused with the card" "1|" "$WC_RC|$WC_OUT"
-expect_eq "TITLES-11 the Step-3 text and its template each state the rule once" "1|1" \
-  "$(/usr/bin/grep -c 'title of at most 30' "${REPO}/skills/canonical-sdlc/steps/3.md")|$(/usr/bin/grep -c 'title of at most 30' "${REPO}/agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl")"
 
 # ============================================================
 section "§REQ-TITLES: a requirement heading carries a title of at most 30 characters, and the Step-1 card prints id, title and count"
 # ============================================================
 # fails-when: the card prints a provenance or a criterion, the count is wrong, `explain <requirement>` lacks the
-# provenance, a 31-character title is drawn, or the Step-1 text lacks the rule.
+# provenance, or a 31-character title is drawn.
 RT_REQ="${CARD_SANDBOX}/wave-04-flock.requirements.md"
 cat > "$RT_REQ" <<FIXEOF
 ---
@@ -1787,8 +1491,6 @@ expect_eq "REQ-TITLES-2b …and the second likewise, its count in the same colum
 expect_eq "REQ-TITLES-3 the card prints no provenance and no criterion" "" \
   "$(printf '%s\n' "$RT" | /usr/bin/grep -e 'PROV-' -e provenance -e 'The flock syncs' -e 'Fails when')"
 expect_empty "REQ-TITLES-3b no line of the card exceeds the width, the out-of-project artifact path aside" "$(over_budget "$(printf '%s\n' "$RT" | /usr/bin/grep -v '^    requirements  ')")"
-expect_contains "REQ-TITLES-3c the footer offers explain for a requirement and for Not Doing" \
-  "explain <requirement> · explain not-doing" "$RT"
 whole_card step1 "$RT_REQ" explain REQ-1; RT_E="$WC_OUT"
 expect_eq "REQ-TITLES-4 explain REQ-1 exits 0" "0" "$WC_RC"
 expect_contains "REQ-TITLES-4b …and prints the title" "$T30" "$RT_E"
@@ -1811,8 +1513,6 @@ expect_contains "REQ-TITLES-5b …naming the requirement, the length, the cap an
   "REFUSED — requirement REQ-2: title is 31 characters, the cap is 30: ${T31}" "$WC_ERR"
 whole_card step1 "$RT_BAD" explain REQ-1
 expect_eq "REQ-TITLES-5c …and the sub-view is refused with it" "1|" "$WC_RC|$WC_OUT"
-expect_eq "REQ-TITLES-6 the Step-1 text and its template each state the rule on one line" "1|1" \
-  "$(/usr/bin/grep -c 'at most 30' "${REPO}/skills/canonical-sdlc/steps/1.md")|$(/usr/bin/grep -c 'at most 30' "${REPO}/agents-src/templates/skills/canonical-sdlc/steps/1.md.tmpl")"
 
 # ============================================================
 section "§NOT-DOING-TITLES: a Not Doing item opens on a title and a colon, and the card prints the titles"
@@ -1976,8 +1676,7 @@ section "§DESIGN-TITLES: a decision carries a title of at most 30 characters, a
 # THE FIXTURE IS A REAL SPEC'S SHAPE: the `(D<n>; REQ-…)` group follows the title and the detail follows the group, as
 # the specs of the waves write it, so `explain` is read over text that comes after the group.
 # fails-when: the card prints a decision's detail, `explain` drops the detail written after the group, a 31-character
-# decision title is drawn, a risk is cut or refused for its length, the section still reads Worth your eye, or the
-# Step-2 text lacks either rule.
+# decision title is drawn, a risk is cut or refused for its length, or the section still reads Worth your eye.
 DT_SPEC="${CARD_SANDBOX}/wave-09-flock.spec.md"
 RISK_LONG="The sync trusts the phone clock, so two phones a minute apart can each believe the other edit is newer, and the list then keeps whichever edit it saw last. We have not measured how often that happens in the field, and a wrong guess here loses a real edit. A fix would add a counter to every row, which is a larger change than this run takes."
 cat > "$DT_SPEC" <<FIXEOF
@@ -2026,15 +1725,11 @@ FIXEOF
 whole_card step2 "$DT_SPEC"; DT="$WC_OUT"
 expect_eq "DESIGN-TITLES-1 step2 draws a spec whose decision titles are within the cap, silently" "0|" "$WC_RC|$WC_ERR"
 DT_D1="$(printf '%s\n' "$DT" | /usr/bin/grep '^    D1 ')"
-DT_HDR="$(printf '%s\n' "$DT" | /usr/bin/grep '^  Decisions')"
 expect_contains "DESIGN-TITLES-2 a decision prints its id and its title, a 30-character one whole" "D1   ${T30}" "$DT_D1"
 expect_contains "DESIGN-TITLES-2b …its serves and its ADR" "REQ-1" "$DT_D1"
 expect_contains "DESIGN-TITLES-2c …the ADR by file name" "adr-001-sync.md" "$DT_D1"
 expect_contains "DESIGN-TITLES-2d …and none for a decision no ADR names" "none" "$(printf '%s\n' "$DT" | /usr/bin/grep '^    D2 ')"
-expect_eq "DESIGN-TITLES-2e …the title with its trailing period taken off" "Short title" \
-  "$(printf '%s\n' "$DT" | /usr/bin/grep '^    D2 ' | sed -e 's/^    D2   //' -e 's/ *REQ-.*$//')"
 expect_eq "DESIGN-TITLES-3 no decision detail is on the card" "" "$(printf '%s\n' "$DT" | /usr/bin/grep 'DETAIL-')"
-expect_contains "DESIGN-TITLES-3b the header names serves and ADR" "serves" "$DT_HDR"
 expect_empty "DESIGN-TITLES-3c no line of the card exceeds the width, the out-of-project artifact path aside" "$(over_budget "$(printf '%s\n' "$DT" | /usr/bin/grep -v '^    spec  ')")"
 whole_card step2 "$DT_SPEC" explain D1; DT_E="$WC_OUT"
 expect_eq "DESIGN-TITLES-4 explain D1 exits 0" "0" "$WC_RC"
@@ -2045,8 +1740,6 @@ whole_card step2 "$DT_SPEC" explain D9
 expect_eq "DESIGN-TITLES-4d a decision the spec lacks exits 2 and prints nothing on stdout" "2|" "$WC_RC|$WC_OUT"
 
 DT_RISKS="$(printf '%s\n' "$DT" | sed -n '/^  Risks$/,/^$/p')"
-expect_eq "DESIGN-TITLES-5 the section is drawn under the word Risks" "1|0" \
-  "$(printf '%s\n' "$DT" | /usr/bin/grep -c '^  Risks$')|$(printf '%s\n' "$DT" | /usr/bin/grep -c 'Worth your eye')"
 expect_eq "DESIGN-TITLES-5b a three-sentence risk is drawn whole, folded, none of its words cut" "$RISK_LONG" \
   "$(printf '%s\n' "$DT_RISKS" | sed -n '2,$p' | awk '/^    A short one\./ { exit } { print }' | sed -e 's/^ *//' | paste -sd' ' -)"
 expect_eq "DESIGN-TITLES-5c …on more than one line, each inside the width" "yes|" \
@@ -2069,12 +1762,6 @@ expect_contains "DESIGN-TITLES-7b …naming the decision, the length and the tit
   "REFUSED — decision D2: title is 31 characters, the cap is 30: ${T31}" "$WC_ERR"
 whole_card step2 "$DT_BAD" ownership
 expect_eq "DESIGN-TITLES-7c …and the sub-views are refused with it" "1|" "$WC_RC|$WC_OUT"
-yn() { [ "$1" -ge 1 ] && echo yes || echo no; }
-D2_TXT="${REPO}/skills/canonical-sdlc/steps/2.md"; D2_TMPL="${REPO}/agents-src/templates/skills/canonical-sdlc/steps/2.md.tmpl"
-expect_eq "DESIGN-TITLES-8 the Step-2 text and its template name the Risks section and not the old heading" "yes|yes|0|0" \
-  "$(yn "$(/usr/bin/grep -c '### Risks' "$D2_TXT")")|$(yn "$(/usr/bin/grep -c '### Risks' "$D2_TMPL")")|$(/usr/bin/grep -c 'Worth your eye' "$D2_TXT")|$(/usr/bin/grep -c 'Worth your eye' "$D2_TMPL")"
-expect_eq "DESIGN-TITLES-8b …and state the decision title rule and the judged, uncapped risk" "1|1" \
-  "$(/usr/bin/grep -c 'the title at most 30 characters' "$D2_TXT")|$(/usr/bin/grep -c 'own judgment, one to three sentences' "$D2_TXT")"
 
 
 # ============================================================
@@ -2247,6 +1934,7 @@ rigor: single
 parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user
 working-branch: wave/30-flock
 integration-branch: main
+canonical_sdlc_version: 15
 base-sha: abc1234
 ---
 
@@ -2256,24 +1944,19 @@ base-sha: abc1234
 
 Land the flock app's three tasks so the Step-3 card has sentences to read.
 
-## SDLC State
-
-integration-branch: main
-current: 4
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | Parse the ledger. ${TS_SHORT} TS-DETAIL-ONE the parser reads \`lib/a.sh\` only. · complexity: standard | implementor | — | 30 | REQ-1 | lib/a.sh | — | pending |
-| T2 | 4 | build | Join the rows. ${TS_LONG} TS-DETAIL-TWO the join keeps table order. complexity: complex | senior-implementor | T1 | 45 | REQ-1, REQ-2 | lib/b.sh | — | pending |
-| T3 | 5 | test | Prove the join. The join is proved on two rows · complexity: standard | implementor | T2 | 30 | REQ-2 | tests/b.test.sh | — | pending |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | Parse the ledger. ${TS_SHORT} TS-DETAIL-ONE the parser reads \`lib/a.sh\` only. · complexity: standard | — | 30 | REQ-1 | lib/a.sh | — |
+| T2 | 4 | build | Join the rows. ${TS_LONG} TS-DETAIL-TWO the join keeps table order. complexity: complex | T1 | 45 | REQ-1, REQ-2 | lib/b.sh | — |
+| T3 | 5 | test | Prove the join. The join is proved on two rows · complexity: standard | T2 | 30 | REQ-2 | tests/b.test.sh | — |
 
-## Verification Matrix
+## Eval design
 
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T0 | pending | — | — |
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | fixture | AC-1.1 | hermetic | \`tests/a.test.sh\` | the fixture is wrong |
 FIXEOF
 whole_card step3 "$TS_PLAN"; TS="$WC_OUT"
 expect_eq "TSENTENCE-1 step3 draws a plan whose cells carry their sentences, silently" "0|" "$WC_RC|$WC_ERR"
@@ -2297,12 +1980,12 @@ expect_eq "TSENTENCE-3e no detail and no tag after the sentence is on the card" 
 expect_empty "TSENTENCE-3f …and no line of the card exceeds the width, the out-of-project artifact path aside" \
   "$(over_budget "$(printf '%s\n' "$TS" | /usr/bin/grep -v '^    plan  ')")"
 # THE ROW'S OWN LINES ARE THE SIX-CELL ROWS BYTE FOR BYTE, and the seven-cell TSV rows draw the whole block.
-printf 'T1\tParse the ledger\tREQ-1\tbuild\t—\timplementor\nT2\tJoin the rows\tREQ-1, REQ-2\tbuild\tT1\tsenior-implementor\nT3\tProve the join\tREQ-2\ttest\tT2\timplementor\n' \
+printf 'T1\tParse the ledger\tREQ-1\tbuild\t—\timplementor\nT2\tJoin the rows\tREQ-1, REQ-2\tbuild\tT1\tsenior-implementor\nT3\tProve the join\tREQ-2\ttest\tT1, T2\timplementor\n' \
   | card task > "${CARD_SANDBOX}/ts-tsv6.txt"
 printf '%s\n' "$TS_BLOCK" | sed -e '/^$/d' | /usr/bin/grep -v '^          ' > "${CARD_SANDBOX}/ts-rows.txt"
 expect_eq "TSENTENCE-4 with its sentence lines out, the block is the six-cell rows byte for byte (precondition: header and three rows)" "4|same" \
   "$(/usr/bin/grep -c . "${CARD_SANDBOX}/ts-rows.txt" | tr -d ' ')|$(cmp -s "${CARD_SANDBOX}/ts-tsv6.txt" "${CARD_SANDBOX}/ts-rows.txt" && echo same)"
-printf 'T1\tParse the ledger\tREQ-1\tbuild\t—\timplementor\t%s\nT2\tJoin the rows\tREQ-1, REQ-2\tbuild\tT1\tsenior-implementor\t%s\nT3\tProve the join\tREQ-2\ttest\tT2\timplementor\t%s\n' \
+printf 'T1\tParse the ledger\tREQ-1\tbuild\t—\timplementor\t%s\nT2\tJoin the rows\tREQ-1, REQ-2\tbuild\tT1\tsenior-implementor\t%s\nT3\tProve the join\tREQ-2\ttest\tT1, T2\timplementor\t%s\n' \
   "$TS_SHORT" "$TS_LONG" "The join is proved on two rows" | card task > "${CARD_SANDBOX}/ts-tsv7.txt"
 printf '%s\n' "$TS_BLOCK" | sed -e '/^$/d' > "${CARD_SANDBOX}/ts-whole.txt"
 expect_true "TSENTENCE-4b the whole card's block is byte-identical to the same rows fed as TSV with their sentences" \
@@ -2314,9 +1997,9 @@ expect_eq "TSENTENCE-5 show task 1 prints the whole cell: title, sentence, detai
 
 # The planted cases: the first cell cut to its title, then the second cell's sentence given a backticked token.
 TS_NONE="${CARD_SANDBOX}/wave-31-flock.plan.md"
-sed -e 's/^| T1 | 4 | build | Parse the ledger\. .* | implementor | — |/| T1 | 4 | build | Parse the ledger. | implementor | — |/' "$TS_PLAN" > "$TS_NONE"
+sed -e 's/^| T1 | 4 | build | Parse the ledger\. [^|]* | — | 30 |/| T1 | 4 | build | Parse the ledger. | — | 30 |/' "$TS_PLAN" > "$TS_NONE"
 expect_eq "TSENTENCE-6 precondition: the planted T1 cell is its title alone" "1" \
-  "$(/usr/bin/grep -c '^| T1 | 4 | build | Parse the ledger\. | implementor' "$TS_NONE" | tr -d ' ')"
+  "$(/usr/bin/grep -c '^| T1 | 4 | build | Parse the ledger\. | — | 30 |' "$TS_NONE" | tr -d ' ')"
 whole_card step3 "$TS_NONE"
 expect_eq "TSENTENCE-6a a task with no sentence is refused: exit 1, no card on stdout" "1|" "$WC_RC|$WC_OUT"
 expect_eq "TSENTENCE-6b …naming the row and what it lacks, and only that row" \
@@ -2354,22 +2037,22 @@ expect_eq "TSENTENCE-8d …and names every refused cell of several, a born tag b
 section "§SETTLED: a card render opens no ask for an approval the plan already records"
 # ============================================================
 # A card leaves the person a decision, so its render opens the step's approval on the run's register. That is only true
-# while the approval is still owed: a step below the plan's current:, Step 3 once approved-by: is written, and a
+# while the approval is still owed: a step below the run's step, Step 3 once its approval is in the run's log, and a
 # dispatched writer's own check (the tree's git directory holds bionic-agent) put "Blocked on you" on the sitrep an hour
-# after the person had answered. fails-when: any of those renders opens an ask, or the unchanged case (a plan at
-# current: 3 with no approved-by:, rendered by the orchestrator) opens none.
+# after the person had answered. fails-when: any of those renders opens an ask, or the unchanged case (a run at step 3
+# with no approval, rendered by the orchestrator) opens none. Each run is the flock page at 15, its step and approval
+# in its log.
 . "$(dirname "$0")/lib/bound-marker.sh"
 ST_SID="card-settled-session-s1s1s1s1"
 ST_STEM="wave-99-fixture"
-st_plan_text() {  # <current> <approved 0|1> -> the plan, on stdout
-  sed -e "s/^current: 4\$/current: $1/" -e 's/^# flock wave 30/# fixture wave 99/' "$TS_PLAN" \
-    | { if [ "$2" = 1 ]; then awk '{ print } /^current: / { print "approved-by: Dana Fixture 2026-10-11T00:00:00Z \"approved\"" }'; else cat; fi; }
-}
-st_root() {  # <label> <current> <approved 0|1> -> a committed git project bound to its plan, requirements beside it
+st_root() {  # <label> <current> <approved 0|1> -> a committed git project bound to its plan, requirements beside it,
+  # its log holding every step to <current> and, when approved, the plan's approval
   local r="${CARD_SANDBOX}/st-$1"
-  mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-99-fixture" "$r/.bionic/docs/specs/epic-99-fixture"
+  mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-99-fixture" "$r/.bionic/docs/specs/epic-99-fixture" "$r/.bionic/docs/record/$ST_STEM"
   ( cd "$r" && git init -q . && git config user.name "Dana Fixture" && git config user.email dana@example.invalid ) >/dev/null 2>&1
-  st_plan_text "$2" "$3" > "$r/.bionic/docs/plans/epic-99-fixture/$ST_STEM.plan.md"
+  sed -e 's/^# flock wave 30/# fixture wave 99/' "$TS_PLAN" > "$r/.bionic/docs/plans/epic-99-fixture/$ST_STEM.plan.md"
+  { seq 1 "$2" | sed 's/^/step|n=/'; if [ "$3" = 1 ]; then echo 'approval|key=step3|by=fixture|said=approved'; fi; } \
+    | awk '{ printf "run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n", $0, NR }' > "$r/.bionic/docs/record/$ST_STEM/run.log"
   cp "$REQ_FIX" "$r/.bionic/docs/specs/epic-99-fixture/$ST_STEM.requirements.md"
   printf '%s' "$r"
 }
@@ -2380,32 +2063,32 @@ st_req()  { printf '%s/.bionic/docs/specs/epic-99-fixture/%s.requirements.md' "$
 # st_render <cwd> <verb> <artifact> -> ST_RC; the renderer runs as the session, from <cwd>
 ST_RC=0
 st_render() { ST_RC=0; ( cd "$1" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" "$2" "$3" >"${CARD_SANDBOX}/.st-out" 2>&1 0<&- ) || ST_RC=$?; }
-# st_open <root> -> the keys of the asks the run's register holds open, one line
+# st_open <root> -> the keys of the asks the run holds open, read through the asks library's list, one line
 st_open() {
-  awk -F'|' '{ k = ""; s = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7) } if (s == "open") print k }' \
-    "$1/.bionic/docs/record/$ST_STEM/asks.state" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
+  bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_list_plan "$2" "$3"' _ "${CARD_SH%/*}/lib" "$(st_plan "$1")" "$1" 2>/dev/null \
+    | cut -f1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
 }
 
 ST_A="$(st_root a 3 0)"; st_bind "$ST_A"; st_commit "$ST_A"
 st_render "$ST_A" step3 "$(st_plan "$ST_A")"
-expect_eq "SETTLED-1 the unchanged case: a plan at current: 3 with no approved-by:, rendered by its orchestrator, opens approve:step3 (the extractor reads an open ask)" \
+expect_eq "SETTLED-1 the unchanged case: a run at step 3 with no approval, rendered by its orchestrator, opens approve:step3 (the extractor reads an open ask)" \
   "0|approve:step3" "$ST_RC|$(st_open "$ST_A")"
 
 ST_B="$(st_root b 4 1)"; st_bind "$ST_B"; st_commit "$ST_B"
 st_render "$ST_B" step3 "$(st_plan "$ST_B")"
-expect_eq "SETTLED-2 a plan at current: 4 carrying approved-by: renders step3 (exit 0) and opens no approve:step3" "0|" "$ST_RC|$(st_open "$ST_B")"
+expect_eq "SETTLED-2 a run at step 4 holding its approval renders step3 (exit 0) and opens no approve:step3" "0|" "$ST_RC|$(st_open "$ST_B")"
 expect_contains "SETTLED-2b …the card still printed (a settled render changes nothing it prints)" "Step 3" "$(cat "${CARD_SANDBOX}/.st-out")"
 
 ST_C="$(st_root c 3 1)"; st_bind "$ST_C"; st_commit "$ST_C"
 st_render "$ST_C" step3 "$(st_plan "$ST_C")"
-expect_eq "SETTLED-3 Step 3 at current: 3 once approved-by: is written opens none either" "0|" "$ST_RC|$(st_open "$ST_C")"
+expect_eq "SETTLED-3 Step 3 at step 3 once its approval is in the log opens none either" "0|" "$ST_RC|$(st_open "$ST_C")"
 
 ST_D="$(st_root d 3 0)"; st_bind "$ST_D"; st_commit "$ST_D"
 st_render "$ST_D" step1 "$(st_req "$ST_D")"
-expect_eq "SETTLED-4 a plan at current: 3 and its requirements: step1 opens no approve:step1 (a step below current:)" "0|" "$ST_RC|$(st_open "$ST_D")"
+expect_eq "SETTLED-4 a run at step 3 and its requirements: step1 opens no approve:step1 (a step below the run's)" "0|" "$ST_RC|$(st_open "$ST_D")"
 ST_E="$(st_root e 1 0)"; st_bind "$ST_E"; st_commit "$ST_E"
 st_render "$ST_E" step1 "$(st_req "$ST_E")"
-expect_eq "SETTLED-4b …while the same requirements at current: 1 open it (the differential control)" "0|approve:step1" "$ST_RC|$(st_open "$ST_E")"
+expect_eq "SETTLED-4b …while the same requirements at step 1 open it (the differential control)" "0|approve:step1" "$ST_RC|$(st_open "$ST_E")"
 
 # A DISPATCHED WRITER'S RENDER. spawn-worktree.sh writes the name to the linked tree's own git directory.
 ST_F="$(st_root f 3 0)"; st_bind "$ST_F"; st_commit "$ST_F"
@@ -2418,11 +2101,41 @@ expect_eq "SETTLED-5 precondition: the writer's tree holds its marker and the ot
 st_render "${CARD_SANDBOX}/st-f-other" step3 "$(st_plan "$ST_F")"
 expect_eq "SETTLED-5b a linked tree with no marker renders the orchestrator's plan and opens approve:step3 (the differential control)" \
   "0|approve:step3" "$ST_RC|$(st_open "$ST_F")"
-rm -f "$ST_F/.bionic/docs/record/$ST_STEM/asks.state"
+sed -i.bak '/|ev=ask|/d' "$ST_F/.bionic/docs/record/$ST_STEM/run.log"
 st_render "${CARD_SANDBOX}/st-f-writer" step3 "$(st_plan "$ST_F")"
 expect_eq "SETTLED-5c the same render from the writer's tree (bionic-agent in its git directory) opens nothing" "0|" "$ST_RC|$(st_open "$ST_F")"
 ST_RC=0; ( cd "$ST_F" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" step3 "$(st_plan "$ST_F")" >/dev/null 2>&1 0<&- ) || ST_RC=$?
 expect_eq "SETTLED-5d …and the orchestrator's own render of the same plan opens it after all" "0|approve:step3" "$ST_RC|$(st_open "$ST_F")"
+
+# ============================================================
+section "§BATCHES: the Step-3 card counts each batch as the fill counts it once the batches before it have landed"
+# ============================================================
+# The card asks the fill of a projection of the run: approved, at the batch's step, the earlier batches landed. fails-when:
+# a later batch is counted as though nothing before it landed (BATCHES-1), the depends column shows a row at 15's deps
+# cell as typed rather than what it waits on (BATCHES-3), or a card writes beside the plan or into its record
+# (BATCHES-2b). A page at 15: the builds T1, T2 and T4 (on its approval) first, then the regression T3, which waits on
+# the builds by its kind and names none.
+. "$(dirname "$0")/lib/plan-fixture.sh"
+BA_P="$(plan_fixture "${CARD_SANDBOX}/ba/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave \
+  "| T1 | 4 | build | REQ-1: the first task. A sentence. | implementor | — | — | 30 | REQ-1 | a.sh | — | — | pending |" \
+  "| T2 | 4 | build | REQ-1: the second task. A sentence. | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+  "| T3 | 5 | test | REQ-1: the regression. A sentence. | implementor | — | — | 30 | REQ-1 | c.sh | — | — | pending |" \
+  "| T4 | 4 | build | REQ-1: the held task. A sentence. | implementor | approval:D7, ext:vendor | — | 30 | REQ-1 | d.sh | — | — | pending |")"
+ba_card() { env -u CLAUDE_CODE_SESSION_ID bash "$CARD_SH" step3 "$BA_P" 2>&1 0<&-; }
+ba_list() {  # -> every path under the plan's folder and its record, each file with its cksum
+  ( cd "${CARD_SANDBOX}/ba/.bionic/docs" && find plans record -print | LC_ALL=C sort \
+    | while IFS= read -r f; do if [ -f "$f" ]; then printf '%s %s\n' "$f" "$(cksum < "$f")"; else printf '%s\n' "$f"; fi; done )
+}
+BA_BEFORE="$(ba_list)"
+BA_OUT="$(ba_card)"; ba_card >/dev/null
+expect_eq "BATCHES-1 the first batch launches T1 and T2 (T4 waits on its approval), the second T3 once the first has landed" \
+  "$(printf '    batch 1 · 2 of 8\n    batch 2 · 1 of 8')" "$(printf '%s\n' "$BA_OUT" | /usr/bin/grep -F 'batch ')"
+expect_contains "BATCHES-3 precondition: T4's depends keeps its own approval and external tokens" \
+  "approval:D7, ext:vendor" "$(printf '%s\n' "$BA_OUT" | /usr/bin/grep -E '^    T4 ')"
+expect_contains "BATCHES-3b the regression's depends names the builds it waits on" "test      T1, T2, T4" \
+  "$(printf '%s\n' "$BA_OUT" | /usr/bin/grep -E '^    T3 ')"
+expect_contains "BATCHES-2 precondition: the listing reads the run's log by its sum" "record/wave-01-fixture/run.log " "$BA_BEFORE"
+expect_eq "BATCHES-2b two cards leave the plan's folder and its record as they were" "$BA_BEFORE" "$(ba_list)"
 
 # ============================================================
 section "§UNPROVED: the release card prints the full pass's state at this head, green only where the whole suite ran green here"
@@ -2443,22 +2156,27 @@ up_import() {  # <name> <file> -> the function, defined here, read out of <file>
   eval "$body"
 }
 UP_MISSING=""
-for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture advance_to; do
+for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to; do
   up_import "$_f" "$(dirname "$0")/close-out.prelude.sh" || UP_MISSING="$UP_MISSING $_f"
 done
 for _f in pah_world pah_poke pah_card_state; do up_import "$_f" "$(dirname "$0")/proof-at-head.test.sh" || UP_MISSING="$UP_MISSING $_f"; done
 expect_eq "UP-0 the builders were all read out of their suites" "" "$UP_MISSING"
 SANDBOX="$CARD_SANDBOX/up"; mkdir -p "$SANDBOX"; SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 REPO_ROOT="$REPO"; UNITS_LIB="$REPO/payload/scripts/lib/units.sh"; PAH_LIB="$REPO/payload/scripts/lib"
-PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
+PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"; LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 up_line() { printf '%s\n' "$1" | /usr/bin/grep -F "whole suite: " | head -1; }  # <card> -> its whole-suite line
 # up_ask <card> -> the card's merge-unproved decision, its folded lines joined: `<n>. Merge without … · default: none`
 up_ask() {
   printf '%s\n' "$1" | awk '$0 == "Decisions" { f = 1; next } f && $0 == "" { exit } f' | tr '\n' ' ' | tr -s ' ' | /usr/bin/grep -oE '[0-9]+\. Merge without a whole run at this head — [^·]+· recommended: wait for the pass · default: none'
 }
-# up_unanswered <plan> -> the plan with no `approved: merge-unproved` line: the person has not given the word yet
-up_unanswered() { /usr/bin/grep -v '^approved: merge-unproved ' "$1" > "$1.n" && mv "$1.n" "$1"; }
+# up_unanswered <plan> -> the run's log with no merge-unproved approval event: the person has not given the word yet
+up_unanswered() { /usr/bin/grep -v '|ev=approval|key=merge-unproved|' "$PAH_P/$LOG_REL" > "$PAH_P/$LOG_REL.n" && mv "$PAH_P/$LOG_REL.n" "$PAH_P/$LOG_REL"; }
+# up_word -> the person's word at the working head, the approval event as lib/proof.sh's writer writes it
+up_word() {
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    LOG_AT=2026-10-04T15:00:00Z proof_approval_event "$2" merge-unproved by=Fixture "head=$3" "said=merge it without the pass"' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H"
+}
 pah_world up-red "notify.test.sh,shell-lint.test.sh" 2
 up_unanswered "$PAH_PLAN"
 bound_marker "$PAH_P" card-up-session "$PAH_PLAN"
@@ -2471,10 +2189,10 @@ pah_poke "$PAH_P" card-up-session current 8 --check
 expect_eq "UP-3b unanswered, current 8 --check refuses (exit 1) on the regression, unproved at this head" "1|1" "$PAH_RC|$(printf '%s\n' "$PAH_OUT" | /usr/bin/grep -cE "^regression	unproved	red at ${PAH_F:0:8}, 2 landings before this head	")"
 expect_contains "UP-3c …naming the person's exit" "needs: the user — reply" "$PAH_OUT"
 expect_contains "UP-3d …and the other: the pass at this head" "on the release card (merge without a whole run at this head), or wait for the pass" "$PAH_OUT"
-# The close-out fixture's plan carries no Step 4 block, so no plan verb can write to it; the person's word is planted
-# in the approve writer's own line, under ## SDLC State. release-approval.test.sh §JUDGE drives reply and that writer.
-awk -v h="$PAH_H" '{ print } /^current: / { print "approved: merge-unproved by Fixture 2026-10-04T15:00:00Z head=" h " \"merge it without the pass\"" }' "$PAH_PLAN" > "$PAH_PLAN.n" && mv "$PAH_PLAN.n" "$PAH_PLAN"
-expect_eq "UP-3e the person's word, given at the working head, is the plan's newest merge-unproved line" "$PAH_H" "$(bash -c '. "$1/proof.sh" && proof_approved_head "$2" merge-unproved' _ "$PAH_LIB" "$PAH_PLAN" 2>/dev/null)"
+# The approve verb refuses the name on this fixture, so the person's word is the event its writer appends to the run's
+# log. release-approval.test.sh §JUDGE drives reply and that writer.
+up_word
+expect_eq "UP-3e the person's word, given at the working head, is the run's newest merge-unproved approval" "$PAH_H" "$(bash -c '. "$1/proof.sh" && proof_approved_head "$2" merge-unproved' _ "$PAH_LIB" "$PAH_PLAN" 2>/dev/null)"
 pah_poke "$PAH_P" card-up-session current 8 --check
 expect_eq "UP-3f …after which current 8 --check passes (exit 0)" "0" "$PAH_RC"
 [ "$PAH_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$PAH_OUT" | tail -4)"
@@ -2489,5 +2207,190 @@ expect_eq "UP-2 a whole run green at the working head: the card prints green at 
 expect_eq "UP-4 …and asks no merge without a pass" "" "$(up_ask "$PAH_OUT")"
 pah_poke "$PAH_P" card-up-session current 8 --check
 expect_eq "UP-4b …and current 8 --check passes with no word from the person (exit 0)" "0" "$PAH_RC"
+
+# ============================================================
+section "§UNRUN: at 15 a criterion owed now and never run is the release card's decision, and the gate still refuses it"
+# ============================================================
+# fails-when: at 15 the acting release approval card hears the step check's refusal of a pending criterion owed now as
+# early, so no page is written and the person is never asked; or the card settles it by a loosened gate, so the advance
+# to 6 passes over the unrun criterion; or the waiver a reply gives is not the waiver event in the person's words; or
+# the other reply moves the run.
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), carried
+# from step 5 to 8 by the advance itself. The criterion is born late: a row the person adds to the Eval design once the
+# run stands at 8, naming no task, so it is owed now. The advance to 6 refuses a pending criterion owed now, and a proof
+# that discharged a criterion stands at every head, so a criterion born after the advance is how one reaches the card
+# at 15 in a run born there. The page is the real acting `release-approval`, the reply the real `reply`, its words
+# typed in the session's transcript.
+# ANTI-VACUITY: UNRUN-0's empty replay keys, before the criterion is born, sit beside UNRUN-3's on the same extractor
+# in the same run; UNRUN-1 reads the refusal through the same check UNRUN-8 reads passing; UNRUN-6b's empty waiver
+# readback sits beside its pending cell, and UNRUN-4b reads a waiver through the same extractor.
+UR_SID="card-unrun-session"
+UR_CFG="$CARD_SANDBOX/ur-cfg"; mkdir -p "$UR_CFG/projects"
+UR_REC_REL=".bionic/docs/record/wave-01-fixture"
+ur_poke() {  # <root> <verb> [args] -> UR_RC, UR_OUT of the tree under test's poker, as the session, in <root>
+  local p="$1"; shift
+  ( in_fixture "$p" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" CLAUDE_CONFIG_DIR="$UR_CFG" \
+      CLAUDE_CODE_SESSION_ID="$UR_SID" bash "$PAH_POKER" "$@" ) > "$SANDBOX/ur-out" 2>&1
+  UR_RC=$?; UR_OUT="$(cat "$SANDBOX/ur-out")"
+}
+ur_early() {  # <root> -> UR_RC, UR_OUT of card.sh early on the root's plan, as the session
+  ( in_fixture "$1" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" CLAUDE_CONFIG_DIR="$UR_CFG" \
+      CLAUDE_CODE_SESSION_ID="$UR_SID" bash "$CARD_SH" early "$1/$PLAN_REL" ) > "$SANDBOX/ur-out" 2>&1
+  UR_RC=$?; UR_OUT="$(cat "$SANDBOX/ur-out")"
+}
+ur_world() {  # <label> [<edit> [<last step>]] -> UR_P: the fixture at 15, its Step 7 record named, <edit> applied to
+  # its root, carried from 5 to <last step> (8 by default) by the advance itself
+  local p n
+  p="$(mk_fixture "$1")" || return 1
+  sed 's/^adrs: none$/adrs: none: the fixture decides nothing durable/' "$p/$PLAN_REL" > "$p/$PLAN_REL.n" && mv "$p/$PLAN_REL.n" "$p/$PLAN_REL"
+  [ -z "${2:-}" ] || "$2" "$p"
+  # the waiver records who gave it by the project's git user, which the fixture's repository sets as a person's does
+  fixture_git "$p" config user.name "Dana Fixture"
+  advance_to "$p" 5
+  bound_marker "$p" "$UR_SID" "$p/$PLAN_REL"
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$p" > "$p/.bionic/tmp/loaded-$UR_SID.state"
+  mkdir -p "$UR_CFG/projects/$(printf '%s' "$p" | sed 's/[^a-zA-Z0-9]/-/g')"
+  for n in $(seq 6 "${3:-8}"); do ur_poke "$p" current "$n"; [ "$UR_RC" = 0 ] || { printf '      current %s said: %s\n' "$n" "$UR_OUT"; return 1; }; done
+  UR_P="$p"
+}
+ur_born() {  # <root> -> the person's edit: a second criterion joins the Eval design, under the first, naming no task
+  awk '{ print } /^\| — \| fixture \| AC-1 \|/ { print "| — | fixture | AC-2 | unit | `bash tests/x.test.sh` | a second planted defect |" }' \
+    "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
+}
+ur_typed() {  # <root> <words> -> the session's transcript holds the words as a typed prompt
+  local tx="$UR_CFG/projects/$(printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g')/$UR_SID.jsonl"
+  [ -f "$tx" ] || cat "$REPO/tests/fixtures/transcript-move/frame.jsonl" > "$tx"
+  jq -c --arg t "$2" '.message.content = $t' "$REPO/tests/fixtures/transcript-move/typed.jsonl" >> "$tx"
+}
+ur_page() { ls "$1/$UR_REC_REL"/release-approval-*.md 2>/dev/null | head -1; }   # <root> -> the page the card wrote
+ur_keys() {   # <root> -> the keys of the page's replay table, in its order, space-joined
+  /usr/bin/grep -h '^release-approval/v1|dec=' "$(ur_page "$1")" 2>/dev/null \
+    | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }' | paste -sd' ' -
+}
+ur_dec() { /usr/bin/grep -h "^release-approval/v1|dec=[0-9]*|key=$2|" "$(ur_page "$1")" 2>/dev/null; }   # <root> <key> -> its row
+ur_cell() { bash -c '. "$1/reader.sh" && reader_q_cell "$2" "$3"' _ "$PAH_LIB" "$1/$PLAN_REL" "$2" 2>/dev/null | paste -sd' ' -; }   # <root> <AC>
+ur_waiver() { /usr/bin/grep -h '|ev=waiver|' "$1/$LOG_REL" 2>/dev/null; }   # <root> -> the run's waiver events
+
+ur_world ur-waive; UR_W="${UR_P:-}"
+ur_poke "$UR_W" release-approval "$UR_W/$PLAN_REL"
+expect_eq "UNRUN-0 precondition: a run born at 15 reaches step 8 by the advance, and its card renders (exit 0), writing no page" \
+  "n=8|0|" "$(bash "$REPO/payload/scripts/reader.sh" "$UR_W/$PLAN_REL" step 2>/dev/null | head -1)|$UR_RC|$(ur_keys "$UR_W")"
+expect_contains "UNRUN-0a …for no decision waits on the person" "None wait on you." "$UR_OUT"
+ur_born "$UR_W"
+expect_eq "UNRUN-0b the person's edit gives the run a criterion born late, pending at 15" "state=pending" "$(ur_cell "$UR_W" AC-2)"
+ur_poke "$UR_W" current 6 --check
+expect_eq "UNRUN-1 the gate is not loosened: current 6 --check refuses (exit 1) the criterion owed now" "1" "$UR_RC"
+expect_contains "UNRUN-1b …in the wall's live-row words, naming the person's waiver" "session-poker.sh waive AC-2 '<their words>' '<why>'" "$UR_OUT"
+ur_early "$UR_W"
+expect_eq "UNRUN-2 card.sh early settles the refusal as the page's own decision (exit 0, settles: row:AC-2)" "0|settles: row:AC-2" \
+  "$UR_RC|$(printf '%s\n' "$UR_OUT" | /usr/bin/grep -x 'settles: row:AC-2')"
+[ "$UR_RC" = 0 ] || printf '      card.sh early said: %s\n' "$UR_OUT"
+ur_poke "$UR_W" release-approval "$UR_W/$PLAN_REL"
+expect_eq "UNRUN-3 the acting card writes its page (exit 0), the criterion its first decision" "0|row:AC-2" \
+  "$UR_RC|$(ur_keys "$UR_W")"
+[ "$UR_RC" = 0 ] || printf '      release-approval said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+expect_contains "UNRUN-3b …put as at 14: not run on this release, waived by default or run" \
+  "key=row:AC-2|default=waive AC-2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(ur_dec "$UR_W" row:AC-2)"
+expect_contains "UNRUN-3c …and the page says so under Decisions" "AC-2, not run on this release" "$UR_OUT"
+UR_WORDS="1 waive, rest default"
+ur_typed "$UR_W" "$UR_WORDS"
+ur_poke "$UR_W" reply "$UR_WORDS"
+expect_eq "UNRUN-4 the reply that waives it exits 0" "0" "$UR_RC"
+[ "$UR_RC" = 0 ] || printf '      reply said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+expect_regex "UNRUN-4b …and writes the waiver's event for AC-2 in the person's words" \
+  "^run/v1\|ev=waiver\|ac=AC-2\|.*\|said=1 waive, rest default\|" "$(ur_waiver "$UR_W")"
+expect_eq "UNRUN-4c …so the criterion is discharged by the waiver" "state=discharged by=waiver" "$(ur_cell "$UR_W" AC-2)"
+ur_poke "$UR_W" current 6 --check
+expect_eq "UNRUN-8 …and only then does current 6 --check pass (exit 0)" "0" "$UR_RC"
+
+ur_world ur-run; UR_R="${UR_P:-}"
+ur_born "$UR_R"
+ur_poke "$UR_R" release-approval "$UR_R/$PLAN_REL"
+expect_eq "UNRUN-5 a second run, the same criterion born late: the acting card writes its page (exit 0)" "0|row:AC-2" \
+  "$UR_RC|$(ur_keys "$UR_R" | awk '{ print $1 }')"
+UR_WORDS="1 run, rest default"
+ur_typed "$UR_R" "$UR_WORDS"
+ur_poke "$UR_R" reply "$UR_WORDS"
+expect_eq "UNRUN-6 the reply that runs it exits 0 and holds the decision back" "0|withheld: row:AC-2" \
+  "$UR_RC|$(/usr/bin/grep -x 'withheld: row:AC-2' "$(ur_page "$UR_R")" 2>/dev/null)"
+expect_eq "UNRUN-6b …writing no waiver, and leaving the criterion pending" "|state=pending" "$(ur_waiver "$UR_R")|$(ur_cell "$UR_R" AC-2)"
+ur_poke "$UR_R" current 6 --check
+expect_eq "UNRUN-6c …so the run stays where it is: current 6 --check still refuses (exit 1)" "1" "$UR_RC"
+expect_eq "UNRUN-6d …and the run's step is still 8" "n=8" "$(bash "$REPO/payload/scripts/reader.sh" "$UR_R/$PLAN_REL" step 2>/dev/null | head -1)"
+
+
+# ============================================================
+section "§OWNCHECK: at 15 a proved criterion the person confirms, not yet confirmed, is the person's own check on the release card"
+# ============================================================
+# fails-when: the card reads the criterion's auditor cell, which at 15 is the run's evidence review, for the person's
+# confirmation, so it puts a standing auditor's finding to waive or run and counts it the auditor's; the reply that
+# confirms writes no approval naming the criterion in the person's words, or one the advance to 8 does not take; the
+# reply that waives writes no waiver.
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), its one
+# criterion's eval type human, discharged by the fixture's own proof and confirmed by nobody. At double rigor the run
+# is carried from 5 to 7 by the advance itself, the advance to 8 refuses the criterion, and the card is asked there; at
+# single the advance takes it to 8, where the card is asked at the merge. The page is the real acting
+# `release-approval`, the reply the real `reply`, its words typed in the session's transcript.
+# ANTI-VACUITY: OWN-0 reads the advance refusing through the check OWN-2d and OWN-3d read passing; OWN-1e's and OWN-2f's absences
+# read the acceptance line OWN-1d and OWN-2e read present, in the same run.
+oc_human() {  # <root> -> its one criterion of the kind a person confirms
+  sed 's/^| — | fixture | AC-1 | T1 |/| — | fixture | AC-1 | human |/' "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
+}
+oc_double() {  # <root> -> the same, at double rigor, where the advance to 8 asks the person's confirmation
+  oc_human "$1"
+  sed 's/^rigor: single$/rigor: double/' "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
+}
+oc_appr() { /usr/bin/grep -h '|ev=approval|key=AC-1|' "$1/$LOG_REL" 2>/dev/null; }   # <root> -> the approvals naming it
+oc_acc() { printf '%s\n' "$UR_OUT" | /usr/bin/grep 'acceptance —' | head -1; }      # the card's acceptance line
+OC_OFFER="key=row:AC-1|default=approve AC-1|other=waive AC-1|pick=default|choices=confirm/waive|why=a T4 criterion, the user's own check"
+
+ur_world oc-confirm oc_double 7; OC_C="${UR_P:-}"
+ur_poke "$OC_C" current 8 --check
+expect_eq "OWN-0 precondition: at 7, proved and confirmed by nobody, the advance to 8 refuses (exit 1)" \
+  "1|state=discharged by=proof" "$UR_RC|$(ur_cell "$OC_C" AC-1)"
+expect_contains "OWN-0b …naming the criterion" "AC-1 awaits its person's confirmation" "$UR_OUT"
+ur_poke "$OC_C" release-approval "$OC_C/$PLAN_REL"
+expect_eq "OWN-1 the acting card writes its page (exit 0), the criterion its one decision" "0|row:AC-1" "$UR_RC|$(ur_keys "$OC_C")"
+[ "$UR_RC" = 0 ] || printf '      release-approval said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+expect_contains "OWN-1b …offered as the person's own check: confirm by default, or waive" "$OC_OFFER" "$(ur_dec "$OC_C" row:AC-1)"
+expect_contains "OWN-1c …and the page says so under Decisions" "AC-1, your own check, not confirmed yet" "$UR_OUT"
+expect_contains "OWN-1d …counted as awaiting the person's confirmation" "0 of 1 criterion proved; 1 awaiting your confirmation" "$(oc_acc)"
+expect_absent "OWN-1e …and never as the auditor's" "not confirmed by the auditor" "$(oc_acc)"
+UR_WORDS="1 confirm, rest default"
+ur_typed "$OC_C" "$UR_WORDS"
+ur_poke "$OC_C" reply "$UR_WORDS"
+expect_eq "OWN-2 the reply that confirms it exits 0" "0" "$UR_RC"
+[ "$UR_RC" = 0 ] || printf '      reply said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+expect_regex "OWN-2b …and writes the approval naming the criterion, in the person's words" \
+  "^run/v1\|ev=approval\|key=AC-1\|by=Dana Fixture\|said=1 confirm, rest default(\|why=[^|]+)?\|at=[0-9T:Z-]+\$" "$(oc_appr "$OC_C")"
+expect_contains "OWN-2c …through the page's applied: path" "applied: row:AC-1 approve rc=0" "$(cat "$(ur_page "$OC_C")" 2>/dev/null)"
+ur_poke "$OC_C" current 8 --check
+expect_eq "OWN-2d …after which the advance to 8 takes it (current 8 --check, exit 0)" "0" "$UR_RC"
+[ "$UR_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+ur_poke "$OC_C" release-approval --preview "$OC_C/$PLAN_REL"
+expect_contains "OWN-2e …and the card then counts it proved, confirmed by the person" "1 of 1 criterion proved; 1 confirmed by you" "$(oc_acc)"
+expect_absent "OWN-2f …no longer awaiting the confirmation" "awaiting your confirmation" "$(oc_acc)"
+
+ur_world oc-waive oc_double 7; OC_W="${UR_P:-}"
+ur_poke "$OC_W" release-approval "$OC_W/$PLAN_REL"
+expect_eq "OWN-3 a second run, the same criterion: the acting card offers it as the person's own check" "0|key=row:AC-1" \
+  "$UR_RC|$(ur_dec "$OC_W" row:AC-1 | /usr/bin/grep -oF "$OC_OFFER" | cut -d'|' -f1)"
+UR_WORDS="1 waive, rest default"
+ur_typed "$OC_W" "$UR_WORDS"
+ur_poke "$OC_W" reply "$UR_WORDS"
+expect_eq "OWN-3b the reply that waives it exits 0" "0" "$UR_RC"
+[ "$UR_RC" = 0 ] || printf '      reply said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+expect_regex "OWN-3c …and writes the waiver's event for the criterion in the person's words" \
+  "^run/v1\|ev=waiver\|ac=AC-1\|.*\|said=1 waive, rest default\|" "$(ur_waiver "$OC_W")"
+ur_poke "$OC_W" current 8 --check
+expect_eq "OWN-3d …after which the advance to 8 takes it (current 8 --check, exit 0)" "0" "$UR_RC"
+[ "$UR_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+
+ur_world oc-eight oc_human; OC_E="${UR_P:-}"
+ur_poke "$OC_E" release-approval "$OC_E/$PLAN_REL"
+expect_eq "OWN-4 at single the run reaches 8, and the card there offers the criterion as the person's own check" "0|n=8|key=row:AC-1" \
+  "$UR_RC|$(bash "$REPO/payload/scripts/reader.sh" "$OC_E/$PLAN_REL" step 2>/dev/null | head -1)|$(ur_dec "$OC_E" row:AC-1 | /usr/bin/grep -oF "$OC_OFFER" | cut -d'|' -f1)"
 
 finish

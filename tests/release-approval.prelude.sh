@@ -2,7 +2,7 @@
 # Sourced by tests/release-approval.test.sh and tests/release-approval-2.test.sh after resolve-roots.sh and assert.sh; not
 # a suite. One file promised more than the suite bar (lib/line.sh LINE_SUITE_BAR), so it is cut at a section boundary.
 # It holds the world and every helper above the old file's first section, plus `fc_published`, never a fixture one
-# section builds for a later one; tests/asks.test.sh reads six of these helpers by name.
+# section builds for a later one.
 #
 # THE SUITE (the old file's own header, whole):
 # tests/release-approval.test.sh — THE RELEASE APPROVAL CARD: hooks/session-poker.sh `release-approval` and `reply`, and
@@ -19,14 +19,13 @@
 # or `current <N> --check` is red for N = 6, 7 or 8 (`card.sh early`); `--preview` renders it anyway and records
 # nothing. The verb gathers the facts and `card.sh release` draws the page at the shared width. One
 # reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
-# approve, waive, waive-row, confirm-row and finding-move with the user's words.
+# approve, waive and finding-move with the user's words.
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
-# every proof line in its production writer's shape (`proof_line`, `proof_floor_line`), and five reading records in
-# the readers' grammar, one carrying an S3 finding. The release row T2 and the build row T1 are landed; the
-# integrate row T3 reads `approval:release, approval:merge, head`. The second matrix row, unproved, is `pending` with the
-# auditor's CONFIRMED. The user's words stand in a transcript where the CLI writes one, under a CLAUDE_CONFIG_DIR
+# every proof an event in the shape `proof_event` appends, and five reading records in the readers' grammar, one
+# carrying an S3 finding. The release row T2 and the build row T1 are landed; the integrate row T3 waits on
+# `approval:merge`. The second criterion has no proof. The user's words stand in a transcript where the CLI writes one, under a CLAUDE_CONFIG_DIR
 # of this suite's own, with the session's load record beside the root (lib/said.sh's two witnesses).
 #
 # ANTI-VACUITY. Each refusal stands beside a render on the same verb and fixture with one fact moved; every absence
@@ -71,10 +70,10 @@ fc_record adversarial adversarial piece "$FC_S3"
 fc_record structure structure piece
 fc_record adversarial-whole adversarial whole
 fc_record structure-whole structure whole
-fc_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$FC_LIB" "$@"; }
-fc_floor() {  # <head> [<owed suites>] -> a regression proof at <head>, as its writer writes it
-  bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/wave-x/floor.log "${3:-}"' _ "$FC_LIB" "$1" "${2:-}"
+fc_line() {  # <kind> <head> <at> <evidence> [<question> <reader> <result> <scope>] -> a proof event, its fields as proof_event appends them
+  printf 'run/v1|ev=proof|kind=%s|head=%s|evidence=%s%s|at=%s\n' "$1" "$2" "$4" "${5:+|question=$5|reader=$6|result=$7|scope=$8}" "$3"
 }
+fc_floor() { fc_line regression "$1" 2026-10-12T11:00:00Z "record/wave-x/floor.log${2:+|owed=$2}"; }  # <head> [<owed suites>] -> a regression proof at <head>
 fc_reads() {  # <head> -> the five readings a double wave plan is dealt, at <head>
   fc_line review "$1" 2026-10-12T12:00:00Z record/wave-x/evidence.md evidence w-read pass piece
   fc_line review "$1" 2026-10-12T12:00:00Z record/wave-x/adversarial.md adversarial w-read pass piece
@@ -83,33 +82,43 @@ fc_reads() {  # <head> -> the five readings a double wave plan is dealt, at <hea
   fc_line review "$1" 2026-10-12T12:00:00Z record/wave-x/structure-whole.md structure w-read pass whole
 }
 PFC="$RFC/.bionic/docs/plans/wave-x.plan.md"
-fc_plan() {  # <proof lines> [<sed edit>] -> PFC at current: 8, bound to this session; the record and the ledger cleared
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
-    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\nrelease: 1.0.0\n---\n# plan\n\n## SDLC State\n\n'
-    printf 'integration-branch: main\ncurrent: 8\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-22T00:00Z approved\n'
-    printf -- '- Step 4: dispatched, record/wave-x/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$FC_B"
-    printf -- '- T1: landed %s 2026-10-12T10:00:00Z\n- T2: landed %s 2026-10-12T13:00:00Z\n' "$FC_C" "$FC_R"
-    printf -- '- Step 5: regression, record/wave-x/floor.log\n  auditor: CONFIRMED, record/wave-x/audit.md\n'
-    printf -- '- Step 6: review at record/wave-x/review.md\n'
-    printf -- '- Step 7: documented at record/wave-x/docs.md\n  n/a: no decision this run\n'
-    printf '%s\n' "$1"
-    printf '\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |\n'
-    printf '| T2 | 7 | doc | the release 1.0.0 | implementor | — | 30 | REQ-1 | CHANGELOG.md | — | — | landed | approval:plan, head |\n'
-    printf '| T3 | 8 | integrate | merge into main | orchestrator | — | 10 | REQ-1 | — | — | — | pending | approval:release, approval:merge, head |\n'
-    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
-    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    printf '| AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |\n| AC-1.2 | T1 | pending | see AC-1.2 | CONFIRMED |\n\n'
-    printf 'AC-1.1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
-    printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
-    printf 'AC-1.2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
-    printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
-  } | sed -e "${2:-}" > "$PFC"
-  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" \
-    "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
+# THE PAGE AT 15. fc_plan writes the run as a page at 15 holds it: the branches, the base, the documents line and the
+# integration branch in its header; the Tasks rows in their nine authored cells; each criterion a row of Eval design,
+# the pending one naming the close (9) as its task, so no step before the close owes it. The run's log holds the steps
+# to 8, then by instant the plan's approval, T1's and T2's landings, the events the first argument gives (the proofs,
+# as `fc_line` writes them) and the line's events a section put in FC_SEED, a landing there for T1 standing in place of
+# the plan's own; then the rows' events as written to FC_EV: each row's dispatch and the first criterion's proof, with the
+# auditor's word and no instant. The second argument is a sed edit over the page and the log; the third, a function
+# given the page's path, edits the page and FC_EV for what its edit means. `fc_owed_now` takes the pending criterion's
+# task away, so it is owed now and never run, which the gate refuses at Step 6 and the card puts as its decision.
+FC_SEED="$TMPROOT/fc-seed.log"; FC_EV="$TMPROOT/fc-ev.log"
+fc_owed_now() {  # <page> -> the page with the pending criterion's task taken away, so it is owed now
+  sed 's/^\(| — | AC-1\.2 | .*\)| 9 |$/\1| — |/' "$1" > "$1.new" && mv "$1.new" "$1"
+}
+fc_page15() {  # -> PFC, the run's page at 15
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\n'
+  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\nrelease: 1.0.0\nworking-branch: wave/01-fixture\n'
+  printf 'base-sha: %s\nadrs: none — no decision this run\nintegration-branch: main\n---\n# plan\n\n## Tasks\n\n' "$FC_B"
+  printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the x writer | — | 30 | REQ-1 | lib/x.sh | — |\n| T2 | 7 | doc | the release 1.0.0 | — | 30 | REQ-1 | CHANGELOG.md | — |\n'
+  printf '| T3 | 8 | integrate | merge into main | approval:merge | 10 | REQ-1 | — | — |\n\n## Eval design\n\n'
+  printf '| Requirement | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|\n'
+  printf '| — | AC-1.1 | T1 | — | the planted defect this eval must go red on | — |\n| — | AC-1.2 | T1 | — | a second planted defect | 9 |\n\n'
+}
+fc_plan() {  # <events> [<sed edit>] [<edit function>] -> PFC at current: 8, bound to this session; the record and the ledger cleared
+  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/run.log" \
+    "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")" "$FC_EV"
+  fc_page15 > "$PFC"
+  printf 'run/v1|ev=dispatch|row=%s|at=\n' T1\|name=implementor T2\|name=implementor T3\|name=orchestrator > "$FC_EV"
+  printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|auditor=CONFIRMED|at=\n' >> "$FC_EV"
+  [ -z "${3:-}" ] || "$3" "$PFC" || { echo "fc_plan: the edit $3 failed on $PFC" >&2; exit 2; }
+  { printf 'run/v1|ev=step|n=%s|at=\n' 4 5 6 7 8
+    { printf 'run/v1|ev=approval|key=step3|by=fixture|at=2026-09-22T00:00Z\n'
+      /usr/bin/grep -q '|ev=published|row=T1|' "$FC_SEED" 2>/dev/null || printf 'run/v1|ev=published|row=T1|commit=%s|at=2026-10-12T10:00:00Z\n' "$FC_C"
+      printf 'run/v1|ev=published|row=T2|commit=%s|at=2026-10-12T13:00:00Z\n%s\n' "$FC_R" "$1"; cat "$FC_SEED" 2>/dev/null
+    } | awk -F'|' 'NF { a = $NF; sub(/^at=/, "", a); printf "%s\t%06d\t%s\n", a, NR, $0 }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2n | cut -f3-
+    cat "$FC_EV"; } | sed -e "${2:-}" > "$FC_REC/run.log"
+  sed -e "${2:-}" "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
   bind_marker "$RFC" "$PFC"
 }
 # THE SETTLED RUN: the whole suite ran green at R, the head, so nothing about the merge is the person's to decide;
@@ -123,7 +132,7 @@ FC_PROJ="$FC_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_s
 mkdir -p "$FC_PROJ" "$FC_CFG/bionic"
 printf '80\n' > "$FC_CFG/bionic/share"   # the prelude's pinned share, kept under this suite's own config dir
 printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RFC" > "$RFC/.bionic/tmp/loaded-$SID.state"
-export CLAUDE_CONFIG_DIR="$FC_CFG"
+export CLAUDE_CONFIG_DIR="$FC_CFG"; SAID_CFG="$FC_CFG"   # said_as adds to this suite's own transcript
 FC_TX="$FC_PROJ/$SID.jsonl"
 FC_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
 fc_typed() {  # <prompt>... -> the transcript holds each as a typed prompt of this session
@@ -147,6 +156,7 @@ fc_pages() { ( cd "$FC_REC" && ls release-approval-*.md 2>/dev/null ) | LC_ALL=C
 fc_table() { /usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null; }  # the record's replay table
 fc_keys() { fc_table | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }'; }
 fc_row() { /usr/bin/grep -E "^\| $1 \|" "$PFC" | awk -F'|' '{ gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4 }'; }  # <AC> -> its status cell
+fc_appr() { /usr/bin/grep -h -e "^approved: $1 " -e "^run/v1|ev=approval|key=$1|" "$PFC" "$FC_REC/run.log" 2>/dev/null; }  # <name> -> its approvals, the plan's lines then the log's
 fc_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$FC_LIB" "$RFC" "$SID" 2>/dev/null | cut -f1; }
 fc_owe() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_open "$4" "fixture: $4" "poker: fixture item $4"' _ "$FC_LIB" "$RFC" "$SID" "$1"; }
 fc_heads() { printf '%s\n' "$FC_OUT" | sed -n -E 's/^(Bottom line|Goals|Tests|Reviews|Findings|Decisions)( — .*)?$/\1/p' | paste -sd'|' -; }
@@ -158,7 +168,7 @@ fc_under() {  # <section> -> the page's lines under that section head, to the ne
 
 # THE LANDING'S EVENTS, as the line writes them (hoisted from part 1's §BORN; part 2's sections call it too).
 fc_published() {  # <row> <commit> -> a landing's events: its suites ready, its green verdict at the commit, published
-  printf 'line/v1|ev=ready|row=%s|suites=tests/a.test.sh|at=2026-10-12T13:50:00Z\n' "$1"
-  printf 'line/v1|ev=verdict|row=%s|commit=%s|suite=a.test.sh|result=green|log=/fixture/%s.log|at=2026-10-12T13:55:00Z\n' "$1" "$2" "$1"
-  printf 'line/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=2026-10-12T14:00:00Z\n' "$1" "$2" "$1"
+  printf 'run/v1|ev=ready|row=%s|suites=tests/a.test.sh|at=2026-10-12T13:50:00Z\n' "$1"
+  printf 'run/v1|ev=verdict|row=%s|commit=%s|suite=a.test.sh|result=green|log=/fixture/%s.log|at=2026-10-12T13:55:00Z\n' "$1" "$2" "$1"
+  printf 'run/v1|ev=published|row=%s|commit=%s|kind=land|by=w-%s|why=landed|at=2026-10-12T14:00:00Z\n' "$1" "$2" "$1"
 }

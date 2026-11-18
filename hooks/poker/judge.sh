@@ -40,20 +40,39 @@ OWED_ROWS
   return 0
 }
 
-# cur8_unruled -> the AC id of each matrix row the advance to 8 finds unruled, one per line: walls.sh
-# `matrix_unruled`, the commit gate's own reader and predicate (`matrix_row_ruled`), asked in a subshell so nothing
-# walls.sh defines outlives it. Never a second reading of the matrix here: the advance and every commit after it
-# answer one row one way. rc 1 when the library or the reader cannot be had.
+# cur8_unruled [awaiting] -> the AC id of each criterion the advance to 8 finds unruled, one per line: walls.sh
+# `matrix_unruled`, the commit gate's own reader and predicate (`matrix_row_ruled`) over the reader's answer, the
+# evidence review read at the working head, asked in a subshell so nothing walls.sh defines outlives it. Never a second
+# reading of the criteria here: the advance and every commit after it answer one row one way. With `awaiting`, only the
+# ids that also await their person (`matrix_row_awaits`). rc 1 when the library cannot be had, 2 when the run's facts
+# could not be read.
 cur8_unruled() {
   [ -f "$BIONIC_LIB/walls.sh" ] || return 1
   ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 || exit 1
     declare -F matrix_unruled >/dev/null 2>&1 || exit 1
-    matrix_unruled "$PV_PLAN" 8 )
+    matrix_unruled "$PV_PLAN" 8 "${PV_HEAD8:-}" "$@" )
 }
 
-# cur8_unruled_line <AC> -> the refusal's line for an unruled row: the matrix arm's own fact, as a commit at
-# current: 8 is refused with it, so the release approval card settles it as `row:<AC>` whichever refusal names it.
+# cur8_awaiting_line -> the printf format of the refusal's line for an unruled row that awaits its person, its one %s the
+# criterion. THE ONE SPELLING of it: the release approval card (payload/scripts/card.sh `_card_settles`) reads this
+# function from this file, so it settles the line by the words the judge prints, as it does `cur8_unapproved_line`.
+cur8_awaiting_line() {
+  printf '%s' "bionic: commit refused — %s awaits its person's confirmation (it is proved; its person confirms it at release: reply <n> confirm, <n> being the decision the release approval card gives it)"
+}
+
+# cur8_unruled_line <AC> -> the refusal's line for an unruled row: for a criterion in PV_AWAIT8, the ids
+# `cur8_unruled awaiting` named, its person's confirmation (`cur8_awaiting_line`); for any other, the matrix arm's own
+# fact, as a commit at current: 8 is refused with it. The release approval card settles either as `row:<AC>` whichever
+# refusal names it.
 cur8_unruled_line() {
+  local fmt
+  case $'\n'"${PV_AWAIT8:-}"$'\n' in
+    *$'\n'"$1"$'\n'*)
+      fmt="$(cur8_awaiting_line)"
+      # shellcheck disable=SC2059  # the format is cur8_awaiting_line, whose only conversion is its one %s
+      printf "$fmt" "$1"
+      return 0 ;;
+  esac
   printf 'bionic: commit refused — the auditor has not confirmed %s (rule it: the auditor confirms it, the row is waived, or a T4 row carries its user'"'"'s confirmation)' "$1"
 }
 
@@ -65,11 +84,13 @@ cur8_unruled_line() {
 # STEPS 7 AND 8 ASK IT (wave-35 T10; D10, AC-1.2): Step 7 is entered once the floor is Step 6's last act, so
 # `current 7` is held to the same judge `current 8` is, and a run never leaves Step 6 with its floor behind
 # the head.
-# IN THE ORDER build, regression, review, release (lib/units.sh `units_order`) `current 8` asks besides that the
-# newest `approved: release` line's head (lib/proof.sh `proof_approved_head`) is the working head, or one that only prose
-# touching no release-set file follows (lib/proof.sh `proof_prose_past`). The whole run need
-# not be at that head: the regression judge holds it covered past its run when every later commit is proved by the
-# suites its row named. A plan outside that order is judged as before.
+# WHENEVER THE PLAN HAS A ROW THAT INTEGRATES, whatever its other rows, or is in the order build, regression, review,
+# release (`units_order`) (lib/units.sh `units_release_asked`), `current 8` asks besides that the newest `approved:
+# release` line's head (lib/proof.sh `proof_approved_head`) is the working head, or one that only prose touching no
+# release-set file follows (lib/proof.sh `proof_prose_past`): every run that reaches the merge stops at the release
+# approval card, a run with no release row as a wave does. The whole run need not be at that head: the regression judge
+# holds it covered past its run when every later commit is proved by the suites its row named. A plan with neither is
+# asked no approval.
 # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7): lib/proof.sh `proof_branch_head`, the judge's one
 # reading of it, never the head of a checkout, so a branch no checkout holds is judged where its ref points,
 # and a branch that names no commit (deleted, or never made) is refused: there is no head, so the floor is
@@ -87,16 +108,16 @@ cover_basis() {
   facts_cover "$1" "$3" "$4" "$2"
 }
 
-# cur8_unapproved_line -> the printf format of the refusal `current 8` prints in the release order while the release
-# approval is missing, its three %s the regression row, what is missing and the working head. THE ONE SPELLING of that
-# refusal: the release approval card (payload/scripts/card.sh `_card_settles`) runs in a process of its own and reads
+# cur8_unapproved_line -> the printf format of the refusal `current 8` prints while the release approval is missing, its
+# three %s the order the plan is in with its regression row (empty for a plan with no release row), what is missing and
+# the working head. THE ONE SPELLING of that refusal: the release approval card (payload/scripts/card.sh `_card_settles`) runs in a process of its own and reads
 # this function from this file, so it settles the refusal by the words the judge prints, and a reworded refusal is
 # reworded for both. The words are a printf format, so a percent sign in them is written as two.
 cur8_unapproved_line() {
-  printf '%s' "REFUSED — current: 8 in the order (the regression row %s before review and the release) is admitted at the head the user approved for release, and %s; the user's word for the working head %s is approve release '<reply>'. The plan is unchanged."
+  printf '%s' "REFUSED — current: 8%s is admitted at the head the user approved for release, and %s; the user's word for the working head %s is approve release '<reply>'. The plan is unchanged."
 }
 
-# cur8_stale_line -> the printf format of the refusal `current 8` prints in the release order while the newest `approved:
+# cur8_stale_line -> the printf format of the refusal `current 8` prints while the newest `approved:
 # release` line names a head the working head has moved past with code or a release-set file, its two %s the working
 # head and the approved one. THE ONE SPELLING of that refusal, read by the release approval card as
 # `cur8_unapproved_line` is: a stale approval is the card's decision to renew, as a missing one is, so the card knows the
@@ -105,21 +126,28 @@ cur8_stale_line() {
   printf '%s' "REFUSED — current: 8 is admitted at the head the user approved for release: the working head %s is not the head the user approved for release, %s, and a commit past it is code or a release-set file. Land only docs past the approval, or have the user approve this head (approve release '<reply>'). The plan is unchanged."
 }
 
+# cur8_release_holds <approved head> <working head> -> 0 when an approval given at the first covers the second: the same
+# head, or one on its first-parent line past which only prose touching no release-set file landed (`proof_prose_past`).
+# THE ONE TEST of a stale release approval: `cur8_approved_head` refuses on it, and the release approval card puts the
+# approval again on it, since the advance asks the approval last and a stale one's refusal can wait behind other facts.
+cur8_release_holds() { [ "$1" = "$2" ] || proof_prose_past "$PV_PLAN" "$1" "$2"; }
+
 # cur8_approved_head -> returns when the newest `approved: release` line names the working head PV_HEAD8, or a head on its
 # first-parent line past which nothing the approval covers changed (`proof_prose_past`); otherwise refuses `current 8`,
 # exit 1, naming both heads, the plan unchanged.
 cur8_approved_head() {
-  local ah fmt missing
+  local ah fmt missing order=""
   ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || ah=""
+  [ -z "$PV_ORDER" ] || order=" in the order (the regression row $PV_ORDER before review and the release)"
   if [ -z "$ah" ]; then
     missing="$PV_PLAN carries no approved: release line"
     ! proof_approved "$PV_PLAN" release || missing="the newest approved: release line names no head"
     fmt="$(cur8_unapproved_line)"
     # shellcheck disable=SC2059  # the format is cur8_unapproved_line, whose only conversions are its three %s
-    die "$(printf "$fmt" "$PV_ORDER" "$missing" "$PV_HEAD8")"
+    die "$(printf "$fmt" "$order" "$missing" "$PV_HEAD8")"
     exit 1
   fi
-  if [ "$ah" != "$PV_HEAD8" ] && ! proof_prose_past "$PV_PLAN" "$ah" "$PV_HEAD8"; then
+  if ! cur8_release_holds "$ah" "$PV_HEAD8"; then
     fmt="$(cur8_stale_line)"
     # shellcheck disable=SC2059  # the format is cur8_stale_line, whose only conversions are its two %s
     die "$(printf "$fmt" "${PV_HEAD8:0:12}" "${ah:0:12}")"
@@ -136,7 +164,7 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   fi
   wb="$(plan_working_branch "$PV_PLAN")"
   if [ -z "$wb" ]; then
-    die "REFUSED — current: $step is admitted on the facts the run owes at the working head, and the plan names no working-branch: (## SDLC State or its frontmatter), so the regression is uncovered; the plan is unchanged."
+    die "REFUSED — current: $step is admitted on the facts the run owes at the working head, and the plan names no working-branch:, so the regression is uncovered; add 'working-branch: <branch>' to the plan's header; the plan is unchanged."
     exit 1
   fi
   PV_HEAD8="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || PV_HEAD8=""
@@ -147,23 +175,31 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
       exit 1 ;;
   esac
   PV_ORDER="$(units_order "$PV_PLAN" 2>/dev/null)" || PV_ORDER=""
-  [ "$step" != 8 ] || [ -z "$PV_ORDER" ] || cur8_approved_head
+  PV_INTEG=""; ! units_release_asked "$PV_PLAN" 2>/dev/null || PV_INTEG=yes
   # THE RULING IS THE MERGE ADVANCE'S: at 8 every matrix row is ruled, or the advance is refused naming each one.
   local unruled="" ac
   if [ "$step" = 8 ] && ! unruled="$(cur8_unruled)"; then
-    die "REFUSED — current: 8 is admitted only when every matrix row is ruled, and the matrix check (walls.sh matrix_unruled) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    die "REFUSED — current: 8 is admitted only when every matrix row is ruled, and the matrix check (walls.sh matrix_unruled) cannot be loaded from $BIONIC_LIB or the run's facts could not be read; the plan is unchanged."
     exit 2
   fi
+  # Who is awaited is the line's words only: a predicate that cannot be asked leaves the line as it was and the verdict where it is.
+  PV_AWAIT8=""
+  [ -z "$unruled" ] || PV_AWAIT8="$(cur8_unruled awaiting 2>/dev/null)" || PV_AWAIT8=""
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
   err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
   # The check-only advance (`current <N> --check`; wave-38 T1, D20) takes this judgment and not its ledger write.
   if [ "$rc" -ne 2 ] && [ -z "${PV_CHECK:-}" ]; then
     if [ "$step" = 8 ]; then cur8_owed_waivers "$out" "$unruled"; else cur8_owed_waivers "$out"; fi
   fi
-  [ "$rc" -eq 0 ] && [ -z "$unruled" ] && return 0
+  # THE APPROVAL IS ASKED LAST, once every other fact the run owes holds: it is the person's last stop, and asked
+  # first its refusal would hide the facts behind it from the release card's check of what it can settle.
+  if [ "$rc" -eq 0 ] && [ -z "$unruled" ]; then
+    [ "$step" != 8 ] || [ -z "$PV_INTEG" ] || cur8_approved_head
+    return 0
+  fi
   for ac in $unruled; do printf '%s\n' "$(cur8_unruled_line "$ac")" >&2; done
   if [ "$rc" -eq 0 ]; then
-    die "current: 8 waits on a ruling of each row above; settle each on the release approval card, or waive it with waive-row <AC> '<reply>'. The plan is unchanged."
+    die "current: 8 waits on a ruling of each row above; settle each on the release approval card, or waive it with waive <AC> '<their words>'. The plan is unchanged."
     exit 1
   fi
   if [ "$rc" -eq 2 ]; then
@@ -179,9 +215,8 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
       '$1 == "regression" && $2 == "unproved" && NF == 4 { $4 = x } { print }')"
   fi
   die "REFUSED — current: $step is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
-  # THE BASIS UNDER THE LINE (wave-37 T8; D8, AC-4.1): a `review <q> … uncovered <a>..<b>` line is a judge's "no"
-  # with no why; under it go the `cover <sha> <basis>` lines for that range and question, and the line ends with
-  # the ask that reproduces them (the `cover` verb). The text above is the refusal's own and does not change.
+  # THE BASIS UNDER THE LINE: a `review <q> … uncovered <a>..<b>` line is a judge's "no" with no why; under it go the
+  # `cover <sha> <basis>` lines for that range and question. The text above is the refusal's own and does not change.
   local cv_line cv_k cv_q cv_rest cv_st cv_rng
   while IFS= read -r cv_line; do
     [ -n "$cv_line" ] || continue
@@ -190,7 +225,7 @@ $cv_line
 COVER_LINE
     case "$cv_k:$cv_st:$cv_rng" in
       review:uncovered:?*..?*)
-        printf '%s · ask: session-poker.sh cover %s %s\n' "$cv_line" "$cv_q" "$cv_rng" >&2
+        printf '%s\n' "$cv_line" >&2
         cover_basis "$PV_PLAN" "$cv_q" "${cv_rng%%..*}" "${cv_rng##*..}" >&2 || : ;;
       *) printf '%s\n' "$cv_line" >&2 ;;
     esac
@@ -201,136 +236,53 @@ COVER_JUDGED
   exit 1
 }
 
-# current_admit -> everything `current <N>` asks before it writes, on the copy plan_verb_open made: the projection
-# of `current:` (and the Step-4 fill), the dry commit through the real gate, and the facts judge at 7 and 8. Sets
-# PV_NEW, PV_FILLED, PV_DRYMODE (`judged` once the copy has been asked; `as-is` when the copy is the plan), PV_HOW;
-# exits on every refusal in the advance's own words and code. THE ONE PATH (wave-38 T1; D20, AC-1.3): the advance
-# calls it and then swaps; `current <N> --check` calls it and stops, so the two cannot answer differently.
+# current_admit -> everything `current <N>` asks before it appends: the commit gate on the plan itself with the step it
+# moves to pending (hooks/session-poker.sh `plan_verb_dry`), and the facts judge at 7 and 8. Sets PV_HOW; exits on every refusal in
+# the advance's own words and code. THE ONE PATH: the advance calls it and then appends; `current <N> --check` calls it
+# and stops, so the two cannot answer differently. Step 8 is admitted on the judge alone (lib/proof.sh `facts_state`),
+# since what the gate asks at 8 is the close's to give, and close-out judges it itself; Step 7 asks the gate and then the
+# judge, so a refusal a real commit at 7 would meet is met here in the gate's own words.
 current_admit() {
-  if ! units_set_current "$PV_PLAN" "$PV_KEY" > "$PV_NEW" 2>/dev/null; then
-    die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State; the plan is unchanged."
-    if /usr/bin/grep -q '^##[[:space:]][[:space:]]*SDLC State' "$PV_PLAN" 2>/dev/null; then
-      die "missing: the line 'current: $PV_KEY' under ## SDLC State"
-    else
-      die "missing: a ## SDLC State section carrying 'current: $PV_KEY', above the plan's ## Tasks"
-    fi
-    exit 1
-  fi
-  PV_FILLED=""
-  if [ "$PV_KEY" = 4 ]; then
-    # lib/run.sh `plan_working_branch`, the one reader: SDLC State, then frontmatter (wave-35 T7; D14).
-    PV_WB="$(plan_working_branch "$PV_PLAN")"
-    if [ -n "$PV_WB" ]; then
-      PV_FIELDS=()
-      PV_WT="$(git -C "$PV_REPO" worktree list --porcelain 2>/dev/null \
-        | awk -v b="branch refs/heads/$PV_WB" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }')"
-      if [ -n "$PV_WT" ]; then
-        PV_WT="$(cd "$PV_WT" 2>/dev/null && pwd -P)"
-        case "$PV_WT" in
-          "$PV_REPO") PV_FIELDS+=("worktree=.") ;;
-          "$PV_REPO"/*) PV_FIELDS+=("worktree=${PV_WT#"$PV_REPO"/}") ;;
-          ?*) PV_FIELDS+=("worktree=$PV_WT") ;;
-        esac
-      fi
-      PV_SHA="$(git -C "$PV_REPO" rev-parse --short --verify -q "refs/heads/$PV_WB" 2>/dev/null)"
-      [ -n "$PV_SHA" ] && PV_FIELDS+=("base-sha=$PV_SHA")
-      PV_FIELDS+=("branch=$PV_WB")
-      # D16's PLAN FACT (wave-28 T8; A-orch-140): at wave scale the block also records the machine share the
-      # run started under, `gate_share`'s value, through the same writer; a block already carrying the line
-      # keeps it (the fill never rewrites), and a plan of another scale gets none.
-      if [ "$(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null)" = wave ] && declare -F gate_share >/dev/null 2>&1; then
-        PV_SHARE="$(gate_share 2>/dev/null)"
-        [ -z "$PV_SHARE" ] || PV_FIELDS+=("share=$PV_SHARE")
-      fi
-      if units_step_fields "$PV_NEW" 4 "${PV_FIELDS[@]}" > "$PV_NEW.2" 2>/dev/null; then
-        cmp -s "$PV_NEW.2" "$PV_NEW" || PV_FILLED="; the Step-4 block gained what it lacked of: ${PV_FIELDS[*]}"
-        mv -f "$PV_NEW.2" "$PV_NEW"
-      fi
-    fi
-  fi
-  # THE DOCUMENT STEP'S POINTER IS RENDERED WHERE THE EPIC ROW READS IT. The Step 7 block names the ADR (`adr:`,
-  # written by step-field 7) and close-out's epic row reads the plan's `adrs:` frontmatter, so the advance to 7
-  # writes the one from the other: the `adr:` value as written, or `none` when the block says n/a. A plan whose
-  # frontmatter already names its ADRs keeps the line as written; a block that says neither renders nothing.
-  if [ "$PV_KEY" = 7 ] && [ -z "$(plan_frontmatter_get "$PV_NEW" adrs 2>/dev/null)" ]; then
-    PV_ADRS="$(units_step_field "$PV_NEW" 7 adr 2>/dev/null)" || PV_ADRS=""
-    case "$PV_ADRS" in
-      n/a|n/a:*|none) PV_ADRS=none ;;
-      '') if units_step_field "$PV_NEW" 7 n/a >/dev/null 2>&1; then PV_ADRS=none
-          else case "$(units_step_text "$PV_NEW" 7 2>/dev/null)" in *n/a:*) PV_ADRS=none ;; esac; fi ;;
-    esac
-    if [ -n "$PV_ADRS" ] && PV_ADRS="$PV_ADRS" awk '
-        NR == 1 && $0 == "---" { f = 1; print; next }
-        f && $0 == "---" { print "adrs: " ENVIRON["PV_ADRS"]; f = 0; closed = 1; print; next }
-        f && /^adrs[ \t]*:/ { next }
-        { print }
-        END { if (!closed) exit 1 }' "$PV_NEW" > "$PV_NEW.2" 2>/dev/null; then
-      mv -f "$PV_NEW.2" "$PV_NEW"
-      PV_FILLED="$PV_FILLED; the frontmatter gained adrs: $PV_ADRS, from the Step 7 block"
-    fi
-  fi
-  # STEP 8 IS ADMITTED ON THE JUDGE, NOT ON A DRY COMMIT (wave-27 T14; D3, D14, AC-2.3, AC-2.4,
-  # AC-3.1, AC-7.1). The dry commit at Step 8 asked for the Step-8 block, which close-out writes
-  # and judges through the gate itself (close-out.sh `gate_preflight`), so a run closed by its
-  # tools alone could never take this step. 8 is exempt from it as 9 is from this verb, and is
-  # refused instead unless lib/proof.sh `facts_state` says every fact the run owes holds at the
-  # working head: the regression, and each reading its rigor and scale deal. Each line that does not
-  # hold is printed as the judge gave it.
-  # The mode has a name of its own: PV_DRY is the dry copy's PATH (wave-27 T76; A-orch-171).
-  # STEP 7 ASKS THE JUDGE TOO (wave-35 T10; D10, AC-1.2; A-T10-12). The copy is dry-committed at Step 7 first, as
-  # every other step's is, so the gate refuses what a real commit at Step 7 would refuse in its own words (a
-  # declared red still owed, a missing line); then the judge holds the facts the run owes at the working head;
-  # then the swap, which does not commit the copy a second time. A plan already at 7 is the swap's to say.
-  PV_DRYMODE=as-is; PV_HOW="dry-committed at that step first"
+  PV_HOW="judged at that step first"
+  case "$PV_KEY" in
+    8|8a|8b) ;;
+    # A run already at the step is judged at 8 alone, on the facts; below it there is no move to judge.
+    *) [ "$PV_CUR" != "$PV_KEY" ] || return 0 ;;
+  esac
   case "$PV_KEY" in
     7)
-      if ! cmp -s "$PV_NEW" "$PV_PLAN"; then
-        plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
-        cur7_judge 7
-        PV_DRYMODE=judged
-        PV_HOW="dry-committed at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)"
-      fi ;;
+      plan_verb_dry current "current: $PV_KEY" "$PV_KEY"
+      cur7_judge 7
+      PV_HOW="judged at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
     8|8a|8b)
       cur7_judge 8
-      PV_DRYMODE=judged; PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)"
-      [ -z "$PV_ORDER" ] || PV_HOW="$PV_HOW, the head the user approved for release" ;;
+      PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)"
+      [ -z "$PV_INTEG" ] || PV_HOW="$PV_HOW, the head the user approved for release" ;;
+    *) plan_verb_dry current "current: $PV_KEY" "$PV_KEY" ;;
   esac
-  # THE DRY COMMIT AT 5 AND 6 IS RUN HERE, NOT IN THE SWAP (wave-38 T1; D20): the swap would run it for an
-  # `as-is` copy that differs from the plan, so this runs it on the same condition and hands the swap `judged`.
-  # Whatever the advance asks before it writes is asked in this function, so `current <N> --check` asks it all.
-  if [ "$PV_DRYMODE" = as-is ] && ! cmp -s "$PV_NEW" "$PV_PLAN"; then
-    plan_verb_dry current "current: $PV_KEY" as-is "${PV_CUR%[ab]}"
-    PV_DRYMODE=judged
-  fi
 }
-  # THE STEP MOVE (wave-24 T15; REQ-9 AC-9.5, D14; A-orch-8). `current:` moves through
-  # `units_set_current`, and the copy is judged AT the step it moves to — the advance is the
-  # commit the gate is asked about, so a step whose block is not written yet is refused here,
-  # in the gate's words, and not at the first commit after it. `current: 9` is close-out's.
-  #
-  # ADVANCING TO 4 WRITES WHAT THE FIRST WRITER'S COMMIT IS REFUSED WITHOUT. The Step-4 block's
-  # `worktree:`, `base-sha:` and `branch:` (walls.sh `shape_block`) are facts of the moment of
-  # the advance: the branch is the plan's own `working-branch:`, its head is the base every
-  # writer starts from, and the checkout holding it is the worktree. Each field the block lacks
-  # is filled from those (`units_step_fields`); a field already written is never rewritten, and
-  # a fact that cannot be read is not guessed — the field stays absent and the gate says so.
-  # At wave scale the block also gains `share: <n>`, D16's plan fact (wave-28 T8, below).
+  # THE STEP MOVE. A step is an event in the run's log and nothing writes it into the plan: the advance asks what a
+  # commit at the step it moves to would be asked (current_admit), then appends the step through its one writer
+  # (lib/proof.sh `proof_step_event`). The plan's bytes are the same before and after. Step 9 is close-out's.
   poker_verb_current() {
     case "$PV_KEY" in
       9|9a|9b)
-        die "REFUSED — current: 9 is close-out's to write, with the Step 9 line (bash <plugin-root>/scripts/close-out.sh); the plan is unchanged."
+        die "REFUSED — step 9 is close-out's to take, with its delivery (bash <plugin-root>/scripts/close-out.sh); nothing was appended."
         exit 1 ;;
     esac
     plan_verb_open current
-    # THE CHECK-ONLY ADVANCE (wave-38 T1; D20, AC-1.3): `current <N> --check` runs current_admit, the advance's own
-    # path up to its swap, in a subshell, and prints its verdict above whatever that path printed; it exits as the
-    # advance would and writes nothing (the copies go with the trap, the judge's ledger write is not taken).
+    if [ -n "${PV_CUR_UNREAD:-}" ]; then
+      die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold), so the advance is judged from no step; nothing was appended. run again: session-poker.sh current $PV_KEY, once the fold's own line above is mended."
+      exit 2
+    fi
+    # THE CHECK-ONLY ADVANCE: `current <N> --check` runs current_admit, the advance's own path up to its append, in a
+    # subshell, and prints its verdict above whatever that path printed; it exits as the advance would and appends nothing.
     if [ -n "$PV_CHECK" ]; then
       PV_CK_OUT="$(current_admit 2>&1)"; PV_CK_RC=$?
       if [ "$PV_CK_RC" -eq 0 ]; then
         say "current $PV_KEY --check: would advance"
         [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT"
-        cmp -s "$PV_NEW" "$PV_PLAN" && say "current — current: $PV_KEY: the plan already reads so; the advance would write nothing."
+        [ "$PV_CUR" != "$PV_KEY" ] || say "current — the run already stands at step $PV_KEY; the advance would append nothing."
       else
         die "current $PV_KEY --check: would refuse"
         [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT" >&2
@@ -338,23 +290,15 @@ current_admit() {
       exit "$PV_CK_RC"
     fi
     current_admit
-    plan_verb_swap current "current: $PV_KEY" "$PV_DRYMODE"
-    say "current — current: $PV_KEY in $PV_PLAN (was ${PV_CUR:-none})$PV_FILLED; $PV_HOW."
+    if [ "$PV_CUR" = "$PV_KEY" ]; then
+      say "current — the run already stands at step $PV_KEY; nothing was appended."
+      exit 0
+    fi
+    if ! proof_step_event "$PV_PLAN" "$PV_KEY"; then
+      die "REFUSED — step $PV_KEY could not be appended to the run's log of $PV_PLAN; nothing was appended."
+      exit 2
+    fi
+    say "current — step $PV_KEY appended to the run's log (was ${PV_CUR:-none}); $PV_PLAN is unchanged; $PV_HOW."
     exit 0
   }
 
-  # THE BASIS, ON ASK (wave-37 T8; D8, REQ-4 AC-4.2). `cover <question> <a>..<b>` prints, on stdout, the
-  # `cover <sha> <basis>` lines `cover_basis` builds for that range and question, the ones `cur7_judge` prints under
-  # its `review <question> … uncovered <a>..<b>` line, and ends that line by asking for. It writes nothing and asks
-  # the judge nothing more: a range every commit of which holds prints no line, exit 0. A head that is no commit
-  # here, or a plan the library cannot read, is the library's sentence on stderr and exit 1. Never called from the
-  # tick or any wall.
-  poker_verb_cover() {
-    plan_verb_open cover
-    COV_VERB_LINES="$(cover_basis "$PV_PLAN" "$COV_Q" "$COV_A" "$COV_B")"; COV_RC=$?
-    [ "$COV_RC" -ne 2 ] || exit 1
-    if [ -n "${COV_VERB_LINES}" ]; then
-      printf '%s\n' "$COV_VERB_LINES"
-    fi
-    exit 0
-  }

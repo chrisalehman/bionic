@@ -154,10 +154,10 @@ detect_plugin_integrity() {
     # ${CLAUDE_PLUGIN_ROOT}. Resolve that prefix against the root we are
     # actually inspecting and confirm the file is there.
     #
-    # EVERY token, not just the first. Four of the six shipped entries CHAIN
-    # two scripts (`agent-context-guard.sh <inner>`), and the inner one is
-    # where the evidence gate, the governing-skill gate and the landing gate
-    # live. Reading `${cmd%% *}` alone called a payload missing all three
+    # EVERY token, not just the first. A command may name a second script as an
+    # argument of its first (no entry in hooks/hooks.json does today), and the
+    # inner script is as much the wiring as the outer one, so reading
+    # `${cmd%% *}` alone would call a payload missing the inner one
     # healthy. `read -a` splits on whitespace without letting the shell glob
     # the pieces; the `/*` guard then skips anything that is not a resolved
     # absolute path (a flag, a plain argument, an unexpanded env reference).
@@ -1879,8 +1879,8 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
   # is bash's, not this repo's, and it went wherever the caller's stderr went — two
   # call sites capture this function with no stderr split (doctor's load-state read,
   # and `detect_plugin_duplicates` below), so a 151-column shell diagnostic landed in
-  # doctor's PAGE and failed the 100-column arms of doctor-fleet (§20) and
-  # doctor-walls (§12.2) as though the renderer had printed a second over-budget row.
+  # doctor's PAGE and failed the doctor suites' 100-column rows as though the renderer
+  # had printed a second over-budget row.
   # The emitting shell names itself: a non-interactive bash prefixes the message with
   # BASH_SOURCE[0], which inside this function is this file.
   #

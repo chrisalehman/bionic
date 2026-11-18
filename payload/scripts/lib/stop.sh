@@ -170,9 +170,20 @@ if ! declare -F fill_ready_set >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/fill.sh"
 fi
 
-# THE FILL LEDGER'S PATH (wave-20 REQ-5, D5) and the Patrol verdict: patrol.sh owns both, and
-# the recorder below writes to the path `session-poker.sh fill-report` reads from.
-if ! declare -F fill_ledger_path >/dev/null 2>&1; then
+# THE RUN'S FACTS, LOADED AS THE TICK LOADS THEM. The step, the Step-3 approval, the standing order and the newest
+# review proof are the reader's answers (`fill_facts_load`), so a fact the run's log alone holds is this wall's fact
+# as it is the tick's, and the two never judge one turn on two readings. Once per process, and only for a bound open
+# run: every verdict below that reads them reads that plan, and a SubagentStop that reaches none pays nothing. A
+# reader that cannot load leaves the fill to read the plan as it does for every other caller.
+stop_facts_load() {  # -> always 0
+  [ -z "${_STOP_FACTS_DONE:-}" ] || return 0
+  _STOP_FACTS_DONE=1
+  [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ] || return 0
+  fill_facts_load "$BIONIC_RUN_PLAN" >/dev/null 2>&1 || :
+}
+
+# THE PATROL VERDICT: patrol.sh owns it, and the death notice below asks it.
+if ! declare -F patrol_verdict >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_STOP_LIB_DIR/patrol.sh"
 fi
@@ -416,7 +427,7 @@ _lg_path_declared() {  # <diff path> <comma-joined declared files>
 
 stop_context_spend() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
-  local TRANSCRIPT PLAN STEP _row MODEL OCCUPIED STATE_DIR STATE _plan_txt
+  local TRANSCRIPT PLAN STEP _row MODEL OCCUPIED STATE_DIR STATE
   local s_plan s_sess s_step s_occ DELTA LINE AUDIT_FILE
 
   # THE EVENT GUARD THE HOOK NEVER HAD — see this file's header. Stop only, and an
@@ -483,25 +494,11 @@ case "$BIONIC_RUN_WORD" in
 esac
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || return "$_adv"
 
-# current: from ## SDLC State — CR-normalized, fence-aware (the evidence-gate
-# defect class: fenced skeletons quoting `current:` must stay invisible).
+# The step boundary is the run's step, the reader's answer the fill duty reads too (`stop_facts_load`),
+# so a step the run's log alone holds is the step this instrument attributes spend to.
 # [INSTRUMENT]
-#
-# THE CR PASS IS THE SHELL'S NOW (REQ-10, T11). It was a whole `awk` process whose only
-# job was to turn CRLF into LF and a lone CR into LF before the parse below could see
-# lines at all; two parameter expansions over the file text do exactly that, in the same
-# order, and the parsing `awk` is unchanged. `$(< … )` reads the file without forking
-# `cat`, and the here-string hands the normalised text to the one remaining process.
-_plan_txt=$(< "$PLAN")
-_plan_txt="${_plan_txt//$'\r\n'/$'\n'}"
-_plan_txt="${_plan_txt//$'\r'/$'\n'}"
-STEP=$(awk '
-  /^```/ { fence = !fence; next }
-  fence { next }
-  /^## SDLC State/ { insec = 1; next }
-  insec && /^## / { insec = 0 }
-  insec && /^current:[[:space:]]*/ { sub(/^current:[[:space:]]*/, ""); sub(/[[:space:]]*$/, ""); print; exit }
-' <<< "$_plan_txt")
+stop_facts_load
+STEP="$(_fill_current_field "$PLAN")"
 [ -n "$STEP" ] || return "$_adv"
 
 # Last assistant entry with usage, from a bounded tail. fromjson? swallows
@@ -608,7 +605,8 @@ return "$_adv"
 # must be true or the marker leaks into a reader's answer (t6-review.md F-1, reproduced live:
 # `hooks/session-poker.sh` read the roster with no schema filter and the marker silenced its
 # overdue NOTIFY for the swept row). `hooks/execution-recorder.sh`, `hooks/session-sweeper.sh`,
-# `hooks/stop-guard.sh`, `hooks/stop-check.sh` and `hooks/stop-orders.sh` filter on the
+# the stop guard (`_sg_roster_walk`, below), the look (`observe_roster_walk`, lib/observe.sh)
+# and `hooks/stop-orders.sh` filter on the
 # `roster-state/v1|` prefix before reading a row, so the marker's `landing-swept/v1|` prefix
 # never matches. `hooks/dispatch-preflight.sh` does NOT filter on that prefix and is immune
 # only by accident: its `owning_row_for` skips any row with no `deliverable=`, a field the
@@ -723,8 +721,8 @@ return "$_adv"
 # which is why the refusal must name the row and its artifacts rather than the rule.
 # [WALL: tests/landing-gate.test.sh]
 #
-# Registered on both channels by hooks/hooks.json, and by nothing else: one Stop entry
-# for the main thread, and one behind agent-context-guard.sh for agent contexts. No
+# Registered on both channels by hooks/hooks.json, and by nothing else: hooks/stop.sh's
+# Stop entry for the main thread, and its SubagentStop entry for agent contexts. No
 # SKILL.md carries a `hooks:` key — that channel was never how this hook was delivered.
 #
 # hooks/landing-gate.sh's body — the ONE function of the four with a SubagentStop
@@ -745,7 +743,7 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
 
 # TWO EVENTS, TWO ARMS, ONE ROSTER SPLIT BETWEEN THEM. `Stop` is the sweep (below);
 # `SubagentStop` is the teammate landing verdict, and it arrives on the settings channel
-# behind hooks/agent-context-guard.sh because no subagent-context event reaches the skill
+# through hooks/stop.sh's SubagentStop entry because no subagent-context event reaches the skill
 # frontmatter at all. An absent field is not treated as a mismatch, so a hand-run payload
 # still sweeps.
 EVENT="$_ev"
@@ -1224,23 +1222,15 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
         # (wave-24 T13, D10): that list is space-joined for reading, so a path holding a
         # space would come back as two. Each path is one quoted `--files+` word here.
         #
-        # EACH IN THE SPELLING amend ACCEPTS (wave-27 T29, T42; REQ-12 AC-12.3, D21). A path at
-        # the root carries no `/`, and the amend this line printed for one was refused by amend
-        # itself. `brief_files_entry` is the Files: reader amend reads with, so a bare name it
-        # would not record comes out as `./<name>`; it lists no directory. Without lib/brief.sh
-        # the path is printed as the diff spells it, as before.
+        # EACH PATH AS THE DIFF SPELLS IT: amend reads a `--files+` value with the one reader of a
+        # brief's Files: line (lib/brief.sh `brief_contract`), which records a path at the root as
+        # written, so the line printed here is one amend accepts.
         LG_FIX_FILES=""
         while IFS= read -r LG_DF; do
           [ -n "$LG_DF" ] || continue
           _lg_path_declared "$LG_DF" "$CFILES" && continue
           LG_OUTSIDE="${LG_OUTSIDE}${LG_OUTSIDE:+ }${LG_DF}"
-          LG_SPELT="$LG_DF"
-          declare -F brief_files_entry >/dev/null 2>&1 \
-            || . "$_STOP_LIB_DIR/brief.sh" >/dev/null 2>&1
-          if declare -F brief_files_entry >/dev/null 2>&1; then
-            LG_SPELT="$(brief_files_entry "$LG_DF")"
-          fi
-          LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_SPELT")"
+          LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_DF")"
         done <<LGDIFF
 $(git -C "$LG_WT" diff --name-only "${LG_BASE}..HEAD" 2>/dev/null)
 LGDIFF
@@ -1296,6 +1286,16 @@ esac
 return 2
 }
 
+# stop_wait_cell <plan> -> `<cell> <row>`: the Tasks cell a person edits to make a row wait, and the word the edit adds
+# for the open row it waits on. A version-15 page holds a task's waits in its deps cell, a row by its id and a ruling as
+# `approval:DN`; an older page in its reads cell, a row by its record, the ruling the same.
+stop_wait_cell() {
+  declare -F plan_read_header >/dev/null 2>&1 || . "$_STOP_LIB_DIR/plan-read.sh" >/dev/null 2>&1
+  case "$(plan_read_header "${1:-}" canonical_sdlc_version 2>/dev/null)" in
+    canonical_sdlc_version=15) printf 'deps RID\n' ;;
+    *) printf 'reads RECORD\n' ;;
+  esac
+}
 
 # ─── stop_patrol_duties ───
 #
@@ -1430,8 +1430,8 @@ return 2
 #
 # IT WRITES NOTHING AND DECIDES NOTHING ELSE. No state file, no roster append, no
 # stamp: this is a gate, and gates may only read (TDD §3.2). It takes no view on
-# whether the tick's WORK was right, only on whether the two duties happened. The fill
-# ledger is written by `stop_fill_ledger` (below), a recorder hooks/stop.sh runs before
+# whether the tick's WORK was right, only on whether the two duties happened. The turn's
+# `stop` event is written by `stop_fill_ledger` (below), a recorder hooks/stop.sh runs before
 # this gate, never by the gate itself (wave-20 REQ-5).
 #
 # Registered once on the Stop channel in hooks/hooks.json, and scoped by ENGAGEMENT — this
@@ -1447,11 +1447,10 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
   local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME STREAM
   local RITUAL RITUAL_REASON TICK_MARK FILL_MISSING FILL_REASON FILL_FORMS _fill_detail
-  local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID
+  local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID _fd_cell _fd_row _fd_what
   local -a _FF_IDS
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
-  local _LS_OUT _LS_RC LAUNCH_REASON=""
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
 
@@ -1538,30 +1537,6 @@ PLAN_NAME=""
 # plan path `session_run` produced from a `find -type f`, so it names a regular file and
 # carries no trailing slash — the one case the two spellings disagree about.
 [ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="${PLAN##*/}"
-
-# ---------- THE LAUNCHES THE PLAN LACKS (wave-26 T32; D4, review-3 F2) ----------
-#
-# The launch recorder starts `session-poker.sh launch-sync` and does not wait for it, so what
-# that detached call could not record has to reach a model somewhere: the turn's end is one of
-# the two places (the Patrol tick is the other). The same transaction runs here, on a bound open
-# run only. A launch it records is silent. One it cannot record refuses the turn once, joined to
-# the other duties below, with the words and the hand commands the verb printed. A lock another
-# writer holds is left to it and says nothing. A RETRYABLE EXIT IS NOT A REFUSAL (wave-26 T51;
-# review 13 F6): 75 is another writer replacing the plan while the transaction judged its copy,
-# which the checksum is there to catch and the next caller repairs by running again. A turn end
-# is the wrong place to fail shut on that: the turn is not refused for it, the launch stays
-# unrecorded, and the next tick, which runs the same transaction before it reads the plan,
-# records it and owes its reconcile. Every other non-zero exit is a fault no retry repairs (a
-# launch the plan cannot take, the validator or the commit gate refusing the batch, a lock that
-# cannot be made, a dry commit that cannot run) and refuses the turn once, as before.
-if [ "$BIONIC_RUN_WORD" = bound-open ] && [ -n "$PLAN_NAME" ] && [ -f "${HOOK_DIR}/session-poker.sh" ]; then
-  _LS_OUT="$( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
-    bash "${HOOK_DIR}/session-poker.sh" launch-sync 2>&1 )"; _LS_RC=$?
-  case "$_LS_RC" in
-    0|75) : ;;
-    *) LAUNCH_REASON="Launches not recorded in the plan: the launch-sync transaction could not record every launch this session made, and it said: ${_LS_OUT} Fix what it names or run the commands it prints, then stop again — this gate blocks once." ;;
-  esac
-fi
 
 # ---------- the plan's BASENAME ----------
 #
@@ -1677,7 +1652,7 @@ TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 # A ROW THAT SHOULD WAIT IS MADE NOT READY, NEVER ANSWERED IN WORDS. There are good reasons not to
 # fill (a row landing this minute, a decision the user has not ruled, an order), and each is a
 # fact of the plan the tick judges once: a read of the record of the row it waits on, a read of
-# the decision (`approval:D<n>`), or the user's order under `## SDLC State`. A reason written in
+# the decision (`approval:D<n>`), or the user's order in the run's log. A reason written in
 # a reply was read again on every turn end and judged by nothing. So the refusal names the three
 # forms, and the predicate is "a ready row is undispatched", never "a reason was given".
 #
@@ -1697,16 +1672,21 @@ if [ "$FILL_SRC" = "GAP" ]; then
   # paragraph naming `min(free slots, ready rows)` of the rows. The user reads one line naming every
   # ready row the turn left (`_ST_NAMED`); the rule behind it lives in the dispatch doctrine ('The
   # FILL line is advice; the wall counts'). The model's copy adds the rows comma-joined in one
-  # dispatch line and the three forms that make a row wait, each a command it can complete:
-  # ID, RECORD, N and WORDS are upper-case words, never `<...>` a shell reads as a redirect.
+  # dispatch line and the three forms that make a row wait, two an edit of the cell that holds the row's waits
+  # (`stop_wait_cell`: deps at 15, reads before) and one a command: ID, RECORD, RID, N and WORDS are upper-case words,
+  # never `<...>` a shell reads as a redirect. An edit adds to what the cell holds, an empty reads cell being its kind's
+  # default, so the row keeps the waits that already hold it.
   # `FILL_REASON` is the same facts as one line, the form a duty paragraph takes when this refusal
   # rides beside a stand-down's.
   _fd_poker="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
+  read -r _fd_cell _fd_row <<< "$(stop_wait_cell "$PLAN")"
+  _fd_what="the record of the open row it waits on; an empty cell is its kind's default, written out first"
+  [ "$_fd_row" = RECORD ] || _fd_what="the id of the open row it waits on"
   FILL_FORMS="dispatch ${FILL_MISSING// /,}, or make each wait by one of three forms:"
-  FILL_FORMS="${FILL_FORMS}"$'\n'"a dependency: bash ${_fd_poker} task-set ID reads+=RECORD (RECORD: the record of the open row it waits on)"
-  FILL_FORMS="${FILL_FORMS}"$'\n'"a read of a ruling: bash ${_fd_poker} task-set ID reads+=approval:DN (DN: the decision nobody has ruled)"
+  FILL_FORMS="${FILL_FORMS}"$'\n'"a dependency: edit ID's ${_fd_cell} cell in the plan to add ${_fd_row} (${_fd_row}: ${_fd_what})"
+  FILL_FORMS="${FILL_FORMS}"$'\n'"a read of a ruling: edit ID's ${_fd_cell} cell in the plan to add approval:DN (DN: the decision nobody has ruled)"
   FILL_FORMS="${FILL_FORMS}"$'\n'"an order: bash ${_fd_poker} order 'WORDS' (WORDS: what the user said)"
-  FILL_REASON="ready with room: ${FILL_MISSING}; dispatch them, or make each wait: a dependency (task-set ID reads+=RECORD), a read of a ruling (task-set ID reads+=approval:DN) or an order (order 'WORDS'), by bash ${_fd_poker}"
+  FILL_REASON="ready with room: ${FILL_MISSING}; dispatch them, or make each wait: a dependency (add ${_fd_row} to ID's ${_fd_cell} cell in the plan), a read of a ruling (add approval:DN to it) or an order (bash ${_fd_poker} order 'WORDS')"
   # THE LINE HAS width.sh's 100 COLUMNS, and refuse.sh writes it `bionic: stop refused — <fact>
   # (<fix>)`: 23 columns before the fact and 30 after it with this fix, so the fact keeps to 44 and
   # the line to 97. Every id when they fit; else the ids that fit with "+N more" for the rest, which
@@ -1911,7 +1891,6 @@ fi
 TELL_REASON="$FILL_REASON"
 [ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
 [ -n "$NOTICK_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${NOTICK_REASON}"
-[ -n "$LAUNCH_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${LAUNCH_REASON}"
 # The tells are judged TOGETHER, so a turn that left two of them is told both things once.
 # Blocking on one and staying silent about the other would hide the second behind the
 # one-shot: the next stop passes by design.
@@ -1926,18 +1905,12 @@ if [ -n "$TELL_REASON" ]; then
   elif [ -n "$FILL_REASON" ]; then
     # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap. Its detail is
     # the dispatch line and the three forms, each on a line of its own so it pastes whole; a marker
-    # turn's or a launch's paragraph rides below them, as it rode in the old paragraph.
+    # turn's paragraph rides below them, as it rode in the old paragraph.
     _fill_detail="$FILL_FORMS"
     [ -n "$NOTICK_REASON" ] && _fill_detail="${_fill_detail}"$'\n\n'"${NOTICK_REASON}"
-    [ -n "$LAUNCH_REASON" ] && _fill_detail="${_fill_detail}"$'\n\n'"${LAUNCH_REASON}"
     fold_block block stop "$FILL_FACT" "$FILL_FIX" "$_fill_detail"
   elif [ -n "$STANDDOWN_REASON" ]; then
     fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
-      "$TELL_REASON"
-  elif [ -z "$NOTICK_REASON" ]; then
-    # A LAUNCH THE PLAN CANNOT RECORD (wave-26 T32), alone. Beside another duty it rides in
-    # that duty's paragraph, as the marker turn's does.
-    fold_block block stop "a launch is not recorded in the plan" "run the commands it prints" \
       "$TELL_REASON"
   else
     # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
@@ -1953,8 +1926,8 @@ return "$_adv"
 
 # ─── stop_turn_facts and stop_fill_ledger (epic-23 wave-20, REQ-5 part 2 and REQ-6; D5, D6) ───
 #
-# ONE COMPUTATION OF A TURN'S FACTS, TWO READERS. The fill duty above judges a turn and the
-# fill ledger records it (ADR-036 decisions 3 and 4); if each computed its own facts, the
+# ONE COMPUTATION OF A TURN'S FACTS, TWO READERS. The fill duty above judges a turn and its
+# `stop` event records it; if each computed its own facts, the
 # verdict and the record could disagree, and the record is what a run's fill is measured by.
 # So `stop_turn_facts` computes them once per process into `_ST_*` globals, and both call it:
 # `hooks/stop.sh` runs `stop_fill_ledger` BEFORE its re-entry guard, then `bionic_fold` runs the
@@ -1965,7 +1938,7 @@ return "$_adv"
 #   _ST_PLAN        the run's plan — bound-open alone — or empty. A `fallback` plan is
 #                   announced and never acted on (wave-23-fixit-1810, REQ-1, D1): it is
 #                   somebody else's run, so an unbound session has no ledger to fill from,
-#                   records no fill-ledger line, and is never refused for its ready rows
+#                   records no stop event, and is never refused for its ready rows
 #   _ST_LIVE        1 when that plan's ledger is live (past Step 3), else 0
 #   _ST_TICK        1 when the turn's prompt leads with THIS session's Patrol marker
 #   _ST_TURN        the turn key: the prompt record's uuid, else its timestamp, else empty
@@ -2052,6 +2025,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     bound-open) _ST_PLAN="$BIONIC_RUN_PLAN" ;;
   esac
   [ -n "$_ST_PLAN" ] && [ -f "$_ST_PLAN" ] || _ST_PLAN=""
+  stop_facts_load
 
   _ST_STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$tr" 2>/dev/null | jq -Rr '
     . as $line
@@ -2164,7 +2138,8 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # as a landing past that proof and the wall would owe a review of nothing. So the head goes in
     # only when the digest's `at=` is newer than the newest review proof's `at=`; otherwise
     # there is none, as off a tick's turn, and the review waits for the next tick. Both stamps are
-    # the wall's already: the digest it reads above and the plan it was handed. No git is read.
+    # the wall's already: the digest it reads above and the run's facts. No git is read. A run whose facts
+    # this shell could not load gives no instant, so no head is handed in and the review waits, as off a tick.
     # A TIE HANDS IN NO HEAD (wave-26 T54; review 17 N4): a proof in the tick's own second cannot
     # be ordered against it, and the soft side is a review that waits one tick, not one owed for
     # nothing.
@@ -2181,14 +2156,8 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
       _ST_FACTS="$(tick_digest_field "$digest" facts_state)"
       if { [ -n "$_ST_LIVE_HEAD" ] || [ -n "$_ST_FACTS" ]; } && [ -n "$_ST_PLAN" ]; then
-        rvat="$(awk '
-          /^[ \t]*```/ { f = !f; next }
-          f { next }
-          /^##[ \t]/ { insdlc = ($0 ~ /^##[ \t]+SDLC State/); next }
-          insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
-            a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a }
-          END { print m }' "$_ST_PLAN" 2>/dev/null)"
-        [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ] && { _ST_LIVE_HEAD=""; _ST_FACTS=""; }
+        if ! rvat="$(fill_review_at "$_ST_PLAN")"; then _ST_LIVE_HEAD=""; _ST_FACTS=""
+        elif [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ]; then _ST_LIVE_HEAD=""; _ST_FACTS=""; fi
       fi
     fi
   fi
@@ -2241,7 +2210,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   #
   # A ROW THIS TURN LAUNCHED IS NEVER MISSED (wave-20 T11b; Step-6 review R4, T12 F7). A launch
   # joins the roster at PreToolUse, so it is already in `open` and has already taken its slot;
-  # its plan row stays ready until the launch recorder sets it `active` (A-T11.1). Counting it
+  # its plan row stays ready until the launch recorder appends its dispatch. Counting it
   # ready as well charged one launch twice, and the refusal named the rows the turn had just
   # sent. So the ledger's ready set stays the plan's, and what the turn missed is that set less
   # the rows this turn launched, matched by the dispatch name `fill_name` hands out.
@@ -2326,6 +2295,7 @@ stop_owed_send() {  # <event> -> always 0
   [ "${1:-}" = Stop ] || return 0
   declare -F owed_send >/dev/null 2>&1 || return 0
   local k
+  stop_facts_load
   if [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ] \
      && fill_plan_approved "$BIONIC_RUN_PLAN" >/dev/null 2>&1; then
     for k in approve:step0 approve:step1 approve:step2 approve:step3; do
@@ -2336,41 +2306,40 @@ stop_owed_send() {  # <event> -> always 0
   return 0
 }
 
-# THE FILL LEDGER'S RECORDER (wave-20 REQ-5, AC-5.5; Δ2; ADR-036 decision 4). One line per Stop
-# of an engaged run whose ledger is live, appended to `fill_ledger_path` for the run's plan:
+# THE TURN'S END IS THE RUN'S `stop` EVENT. One event per Stop of an
+# engaged run whose ledger is live, appended to the run's log through its one appender (lib/line.sh `line_event`),
+# and to no other home, so the reader answers it from the log alone:
 #
-#   fill-ledger/v1|at|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed|idle|room
+#   run/v1|ev=stop|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed|idle|room|at
 #
-# `idle` and `room` close the line: the ready rows nothing launched while a slot was
-# free, and the free slots; a reader of the older shape stops at `missed` and still parses.
-# `declined` IS KEPT, EMPTY: nothing answers a ready row in words now, and the field stays so a
-# reader of the shape by position, and fill-report's history column, read every line as before.
+# `idle` and `room` close the facts: the ready rows nothing launched while a slot was free, and the free slots.
+# `declined` IS KEPT, EMPTY: nothing answers a ready row in words now. The instant is the appender's, last, as on every
+# event.
 #
-# A RECORDER, NOT A WALL. It never refuses and is silent on every failure: the stop it rides
-# on is a turn somebody has to be able to end. It runs BEFORE `hooks/stop.sh`'s re-entry guard,
-# so the Stop that ends a refused turn — the one carrying the launches the model made after
-# the refusal — is recorded too; `fill-report` folds lines by `turn=`, so a refused turn's two
-# lines count once, as the later. That holds because the refusal the CLI feeds back ("Stop hook
-# feedback:") opens no turn in `stop_turn_facts`: both lines carry the prompt's key, and the
-# later one still holds the launches made before the refusal.
+# A RECORDER, NOT A WALL. It never refuses and is silent on every failure, a log it cannot write and an appender
+# that refuses the line among them: the stop it rides on is a turn somebody has to be able to end. It runs BEFORE
+# `hooks/stop.sh`'s re-entry guard, so the Stop that ends a refused turn — the one carrying the launches the model
+# made after the refusal — is recorded too; the idle fold reads events by `turn=`, so a refused turn's two events
+# count once, as the later. That holds because the refusal the CLI feeds back ("Stop hook feedback:") opens no turn
+# in `stop_turn_facts`: both carry the prompt's key, and the later one still holds the launches made before it.
 #
-# APPEND-ONLY, ONE printf PER STOP, so a crash leaves at most a line that did not happen and a
-# concurrent reader never sees a rewrite. A ledger path that is a symlink is not written through.
+# ONE APPEND PER STOP, the appender's single write, so a crash leaves at most an event that did not happen and a
+# concurrent reader never sees a rewrite. The appender refuses a value holding a bar or a line break, so every free
+# value is squashed of both first and no field can forge another or lose the event.
 stop_fill_ledger() {  # <event> -> always 0
   stop_owed_send "${1:-}"
   [ "${1:-}" = Stop ] || return 0
   stop_turn_facts || return 0
   [ "$_ST_LIVE" = 1 ] || return 0
-  local f d ready launched line idle
-  f="$(fill_ledger_path "$BIONIC_ROOT" "$_ST_PLAN" 2>/dev/null)" || return 0
-  [ -n "$f" ] || return 0
-  d="${f%/*}"
-  [ -L "$f" ] && return 0
-  mkdir -p "$d" 2>/dev/null || return 0
+  local ready launched idle turn current
+  if ! declare -F line_event >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$_STOP_LIB_DIR/line.sh" 2>/dev/null && declare -F line_event >/dev/null 2>&1 || return 0
+  fi
   ready="${_ST_READY// /,}"
   launched="$_ST_LAUNCHED"
   # THE ROWS THAT SAT IDLE: ready, not launched this turn, while a writer slot
-  # was free. `fill-report` charges the interval to the next line. The ids are the plan's own,
+  # was free. The idle fold charges the interval to the next event. The ids are the plan's own,
   # space-split here exactly as `stop_turn_facts` matched them.
   idle=""
   if [ "${_ST_FREE:-0}" -gt 0 ] 2>/dev/null; then
@@ -2382,14 +2351,10 @@ stop_fill_ledger() {  # <event> -> always 0
       idle="${idle}${idle:+,}${id}"
     done
   fi
-  # ONE STRING, BUILT BY EXPANSION, then one write. Every value is either a number this
-  # function computed or has had its `|` squashed above, so no field can forge another.
-  line="fill-ledger/v1|at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|session=${BIONIC_SID}|turn=${_ST_TURN//|/ }"
-  line="${line}|current=${_ST_CURRENT//|/ }|state=${_ST_STATE}|ceiling=${_ST_CEILING}|width=${_ST_WIDTH}"
-  line="${line}|open=${_ST_OPEN}|free=${_ST_FREE}|ready=${ready}|launched=${launched//|/_}"
-  line="${line}|declined=|missed=${_ST_MISSED}"
-  line="${line}|idle=${idle//|/_}|room=${_ST_FREE}"
-  printf '%s\n' "$line" >> "$f" 2>/dev/null
+  # Every value is a number this function computed or is squashed here of a bar and a line break.
+  turn="${_ST_TURN//[|$'\r\n']/ }"; current="${_ST_CURRENT//[|$'\r\n']/ }"
+  launched="${launched//[|$'\r\n']/_}"; idle="${idle//[|$'\r\n']/_}"; ready="${ready//[|$'\r\n']/_}"
+  line_event "$_ST_PLAN" stop "session=${BIONIC_SID//[|$'\r\n']/ }" "turn=${turn}" "current=${current}" "state=${_ST_STATE}" "ceiling=${_ST_CEILING}" "width=${_ST_WIDTH}" "open=${_ST_OPEN}" "free=${_ST_FREE}" "ready=${ready}" "launched=${launched}" "declined=" "missed=${_ST_MISSED}" "idle=${idle}" "room=${_ST_FREE}" >/dev/null 2>&1
   return 0
 }
 
@@ -2502,7 +2467,7 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
 # the whole gap. `Stop` is the only recurring orchestrator event there is: it fires
 # once per turn, whatever the turn contained, and it keeps firing on turns the skill
 # was not re-invoked on (hooks/landing-gate.sh depends on and documents those exact
-# properties). hooks/stop-guard.sh is `PreToolUse|TaskStop` — it fires when the
+# properties). The stop guard is hooks/stop.sh's `PreToolUse|TaskStop` arm — it fires when the
 # orchestrator stops an AGENT, which is neither recurring nor about the session's
 # clock; hooks/stop-check.sh is not registered on any channel at all. So the choice
 # was Stop or nothing.
@@ -2729,10 +2694,10 @@ STAMP_FILE="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
 #
 # THE INTERVAL IS THE POKER'S OWN, obtained by invoking its `interval` verb rather
 # than by re-reading `poker-interval:` here: one knob, one reader. A malformed
-# override makes the poker refuse, and the fallback is its own built-in default
-# asked for through `interval-default` — never a constant retyped here, which would
-# drift the first time either side moved and leave this hook measuring against a
-# threshold nobody configured.
+# override makes the poker refuse, and the fallback is lib/patrol.sh's
+# PATROL_INTERVAL_DEFAULT, the constant the poker takes its own default from — never a
+# number retyped here, which would drift the first time either side moved and leave
+# this hook measuring against a threshold nobody configured.
 #
 # NO NUMBER MEANS NO FINDING. Where hooks/dispatch-preflight.sh still has a
 # never-armed arm to run without a threshold, this hook's only question IS the
@@ -2747,7 +2712,7 @@ POKER="${HOOK_DIR}/session-poker.sh"
 INTERVAL=$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$POKER" interval 2>/dev/null )
 case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
 if [ -z "$INTERVAL" ] || [ "$INTERVAL" -le 0 ]; then
-  INTERVAL=$( bash "$POKER" interval-default 2>/dev/null )
+  INTERVAL="${PATROL_INTERVAL_DEFAULT:-}"
   case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
 fi
 [ -n "$INTERVAL" ] && [ "$INTERVAL" -gt 0 ] || return "$_adv"
@@ -2849,15 +2814,14 @@ esac
 # is the refusal's headline with no detail, and the headline is the whole reason. It names the three
 # acts in their order and nothing else. It carries no age, no idle gap and no path, so a repeat over
 # the same stale stamp is byte-identical to the first and the line can never grow. The explanation
-# (why the clock dies, the refused CronCreate, the deliberate stop) is printed only when asked for,
-# by `session-poker.sh patrol --explain`.
+# (why the clock dies, the refused CronCreate, the deliberate stop) is the dispatch rules'.
 #
 # THE CRON HALF IS FIRST because the order is a safety property: `arm` alone freshens the stamp
 # over an empty cron table and buys a Patrol that reads alive and never fires, which is worse than
 # the death because the death is at least detectable. This function therefore reads and names the
 # acts and never arms. CronCreate is the refusable half (the auto-mode classifier refuses it
 # non-deterministically), so "if absent" is in the line and the rule that a refused CronCreate is
-# never followed by `arm` is in the dispatch rules and the explanation.
+# never followed by `arm` is in the dispatch rules.
 #
 # THE CLOCK THAT FIRES AND NEVER TICKS. `patrol_verdict` reads a Patrol marker turn after the stamp
 # as a firing that ran no tick. The job exists and fires, so re-creating it as it is buys the same
@@ -2876,4 +2840,578 @@ esac
 # Both are live in this CLI, and gates that share no code path do not share a mechanism either.
 fold_block block stop "Patrol dead" "CronList; CronCreate if absent; arm" ""
 return 2
+}
+
+# ─── THE STOP GUARD: the judgement of a TaskStop, its words and its roster writes ─────────────
+#
+# hooks/stop.sh's TaskStop arm reads its payload, loads this library, resolves the context and calls
+# `stop_guard` with its own directory; the hook decides nothing and says nothing of its own. A
+# stop is irreversible, so the guard is closed and loud once the session is engaged: a target it
+# cannot establish is refused with the fact named, and the person's order is the one override.
+#
+#   stop_guard <hook-dir>                 judges the stop in BIONIC_INPUT; 0 admits, a refusal exits 2
+#   stop_guard_keys                       every refusal's key, one per line
+#   stop_guard_say <key> [facts...]       sets SG_FACT, SG_FIX and SG_DETAIL; 2 with all three empty
+#                                         for a key it does not know
+#   stop_guard_refuse <key> [facts...]    says the key and refuses on exit2; never returns
+#   stop_guard_unrostered_write <roster> <sid> <name> <why>   the closed row of an unrostered stop
+#   stop_guard_reason_write <roster> <agent-id> <why>         the agent's latest row again, reason=<why>
+#   stop_verdict_line <root> <sid> <sweeper> <name>           the landing verdict's line for one name
+#   stop_agent_armed                      whether an agent's stop is one this session's walls judge
+#
+# A PATH A FIX PRINTS COMES FROM THE HOOK'S DIRECTORY, passed in, so a fix names the command beside
+# the hook and never one beside this library. Nothing a say function prints is read from a file.
+
+SG_FACT=""; SG_FIX=""; SG_DETAIL=""
+
+stop_guard_keys() {
+  printf '%s\n' deadline no-target no-transcript state-link unrecorded no-row ambiguous alias no-id
+}
+
+# The frame every refusal about the target shares: <fact> <fix> <hook-dir> <typed target> <reason line>...
+# The fix it prints stays runnable as printed, so an empty target prints the placeholder.
+_sg_frame() {
+  local fact="$1" fix="$2" hook="$3" target="${4:-<agent-name-or-id>}" reasons="" line
+  shift 4
+  for line in "$@"; do reasons="${reasons}${line}
+"; done
+  SG_FACT="$fact"; SG_FIX="$fix"
+  SG_DETAIL="${reasons}A stop is irreversible, and a wave is active.
+
+This gate took its own look at the target. To read the whole evidence tier yourself:
+
+Fix: bash ${hook}/stop-check.sh ${target}
+     (pass each contracted deliverable path as a further argument)
+
+If a human ordered this stop, it executes — record the order and stop again:
+     bash ${hook}/stop-orders.sh order ${target}
+A stop the human performs themselves does not reach this gate at all."
+}
+
+stop_guard_say() {  # <key> [facts...] -> SG_FACT, SG_FIX, SG_DETAIL
+  local key="${1:-}"
+  shift
+  SG_FACT=""; SG_FIX=""; SG_DETAIL=""
+  case "$key" in
+    deadline)  # <hook-dir> <seconds>
+      SG_FACT="the stop guard did not finish in ${2:-} s"; SG_FIX="stop again"
+      SG_DETAIL="The stop guard had not judged this stop ${2:-} s after it began. The harness cancels a hook at its
+registration's timeout and admits the call, so the guard refuses first: a stop it cannot judge is not made.
+
+Nothing was stopped.
+
+Fix: stop again. If a human ordered this stop, record the order and it executes without the look:
+     bash ${1:-}/stop-orders.sh order <the agent>" ;;
+    no-target)  # <hook-dir> <typed target>
+      _sg_frame "this stop names no target" "name the agent to stop" "${1:-}" "${2:-}" \
+        "The stop names no target: tool_input.task_id is empty." ;;
+    no-transcript)  # <hook-dir> <typed target>
+      _sg_frame "this stop carries no transcript path" "run /bionic:doctor" "${1:-}" "${2:-}" \
+        "This stop request carries no usable transcript path, so its session's agents cannot be resolved." ;;
+    state-link)  # <hook-dir> <typed target>
+      _sg_frame "the state directory is a symlink" "remove that symlink" "${1:-}" "${2:-}" \
+        "This repo's .bionic state directory is a symlink; nothing here will read through it." ;;
+    unrecorded)  # <typed target> <roster> <state dir>
+      SG_FACT="the stop could not be recorded"; SG_FIX="make the roster writable"
+      SG_DETAIL="Target '${1:-}' is recorded as an unrostered stop, but the roster could not take the row for it:
+    ${2:-}
+The stop is the roster's to carry (the sweeper and the Patrol read the row), so it is not made while
+the row cannot be written. Nothing was stopped.
+
+Fix: make ${3:-} and the roster writable by this user, then stop again." ;;
+    no-row)  # <hook-dir> <typed target>
+      _sg_frame "this target is on no roster row of this session" "name a rostered agent or id" "${1:-}" "${2:-}" \
+        "Target '${2:-}' is on no roster row of this session and wears no agent-address or" \
+        "background-bash-task-id shape, so this gate cannot tell which Agent-tool dispatch," \
+        "if any, it names (REQ-5, D8)." ;;
+    ambiguous)  # <hook-dir> <typed target> <live rows> <name> <ids, one per line>
+      _sg_frame "that name has more than one live row" "name the full agent id" "${1:-}" "${2:-}" \
+        "Target '${2:-}' is ambiguous: ${3:-} rows of this session's roster are live for '${4:-}'." \
+        "The agent ids they carry, each of which names exactly one of them:" \
+        "$(printf '%s\n' "${5:-}" | sed 's/^/    /')" \
+        "A name is an identity here, and two open contracts are carrying this one. The" \
+        "@session- alias cannot separate them: it names the session that LAUNCHED an agent," \
+        "and this is that session's own roster. Stop the one you mean by its agent id above," \
+        "or land the row that is finished — its landing-swept marker frees the name." ;;
+    alias)  # <hook-dir> <typed target> <name> <accepted spellings, one per line>
+      _sg_frame "that alias is not accepted for this agent" "use the agent's own name" "${1:-}" "${2:-}" \
+        "Target '${2:-}' is not an accepted alias for '${3:-}'." \
+        "An alias suffix names the session that LAUNCHED the agent, spelled" \
+        "@session-<first eight of that session's id>, and it is checked against that" \
+        "session's own roster: the roster named here does not carry a row for '${3:-}'." \
+        "A suffix naming any other session is a guess wearing an identity's shape." \
+        "The spellings this gate accepts for it are:" \
+        "${4:-}" ;;
+    no-id)  # <hook-dir> <typed target> <name>
+      _sg_frame "the session roster carries no id for it" "stop it yourself or order it" "${1:-}" "${2:-}" \
+        "Target '${2:-}' is not on this session's register: the roster carries no agent id for '${3:-}'." \
+        "An observation is a look at a particular agent's working log, and the log is filed" \
+        "under its agent id — which a dispatch records on its roster row when the agent starts" \
+        '(status `identified`), and which nothing else in this repo knows. Without it there is' \
+        "no evidence channel for this target, so there is nothing that could discharge the stop." \
+        "If this agent was launched outside bionic's dispatch, stop it yourself or record an order." ;;
+    *) return 2 ;;
+  esac
+  return 0
+}
+
+stop_guard_refuse() {  # <key> [facts...] -> never returns; an unknown key refuses its own call
+  stop_guard_say "$@"
+  refuse exit2 stop "$SG_FACT" "$SG_FIX" "$SG_DETAIL"
+}
+
+# THE ORCHESTRATOR'S RECORDED STOP OF AN AGENT NO ROSTER SAW, spent by its own act: the stop is
+# written as a CLOSED row carrying `reason=`, so the name then has a row and a second stop of it
+# meets the ordinary refusal. Not `waiver=`, which the sweeper reads as a waived contract; not
+# `source=`, which says where a deliverable's path came from. A new roster gets its header, mode 600.
+stop_guard_unrostered_write() {  # <roster> <sid> <name> <why> -> 0 written; 1 not
+  local roster="$1" row
+  row=$(roster_row status=closed "session=$2" "name=$3" agent_id= \
+    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "reason=$4" plan=none) || return 1
+  [ -n "$row" ] || return 1
+  if [ ! -e "$roster" ]; then
+    { roster_header >> "$roster"; } 2>/dev/null && chmod 600 "$roster" 2>/dev/null
+  fi
+  { printf '%s\n' "$row" >> "$roster"; } 2>/dev/null
+}
+
+# THE VERDICT ON A STOP OF A LIVE AGENT WITH ITS CONTRACT UNDELIVERED, written on its roster row: the
+# agent's latest row copied whole (one printf of one line, no lock, no rewrite), any `reason=` it
+# carried dropped and the new one placed where `roster_row` writes it, just before `tool_use_id=`, so
+# every by-key reader of the latest row sees the contract and the verdict together.
+stop_guard_reason_write() {  # <roster> <agent-id> <why> -> 0 written; 1 not
+  local roster="$1" row
+  [ -f "$roster" ] && [ ! -L "$roster" ] && [ -w "$roster" ] || return 1
+  row="$(roster_row_for_id "$roster" "$2" 2>/dev/null)" || return 1
+  [ -n "$row" ] || return 1
+  row="$(printf '%s\n' "$row" | SG_WHY="$3" awk -F'|' '
+    { o = $1; put = 0
+      for (i = 2; i <= NF; i++) {
+        if (index($i, "reason=") == 1) continue
+        if (!put && index($i, "tool_use_id=") == 1) { o = o "|reason=" ENVIRON["SG_WHY"]; put = 1 }
+        o = o "|" $i
+      }
+      if (!put) o = o "|reason=" ENVIRON["SG_WHY"]
+      print o }')"
+  [ -n "$row" ] || return 1
+  { printf '%s\n' "$row" >> "$roster"; } 2>/dev/null
+}
+
+# THE LANDING'S VERDICT FOR ONE NAME, asked of the sweeper beside the hook, in the project's root and
+# under the session the roster is keyed by: the first verdict line of the call scoped to the name, or
+# nothing. The guard and the order verb ask it; the sweeper's verb owns the predicate and its ledger.
+stop_verdict_line() {  # <root> <sid> <sweeper> <name> -> the line, or nothing
+  local out
+  out=$( cd "$1" 2>/dev/null || exit 9
+         CLAUDE_CODE_SESSION_ID="$2" bash "$3" verdict "$4" 2>/dev/null )
+  printf '%s\n' "$out" | grep -F 'landing-verdict/v1|' | head -1
+}
+
+# AN AGENT'S STOP IS JUDGED ONLY IN A SESSION THAT ENGAGED BIONIC AND DISPATCHED: the roster is
+# written at the session's first dispatch, so an unarmed session pays one stat. A link anywhere on
+# the path to the roster is not followed: a repo pointing this at another tree's roster would be a
+# repo choosing which session it belongs to. Read after `bionic_context`.
+stop_agent_armed() {  # -> 0 armed; 1 not
+  [ -d "${BIONIC_ROOT:-}" ] || return 1
+  [ "${BIONIC_ENGAGED:-}" = 1 ] || return 1
+  [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || return 1
+  local roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  [ ! -L "$roster" ] && [ -f "$roster" ]
+}
+
+# ─── stop_guard: the judgement, in the order the stop's facts can be had ────────────────────
+#
+# FAIL DIRECTIONS. Open and silent before the engagement verdict: an unconfigured machine is not a
+# stop decision. Closed and loud after it: the ambiguous case is exactly what the wall exists for.
+#
+# ITS OWN DEADLINE. The harness cancels a hook at its registration's timeout and admits the call, so
+# a timer signals this shell at SG_DEADLINE_S, under the registration, and the handler refuses: a stop
+# the guard cannot judge is not made. A human order read before the alarm is honoured with its own
+# sentence. A trap runs between commands, so one foreground command that outlasts it is not cut.
+#
+# THE LOOK IS THE GUARD'S OWN. It reads the target's working log, its progress artifact and its
+# deliverables at the instant of the stop through `observe_agent` (lib/observe.sh), the function
+# hooks/stop-check.sh prints. A live target with its contract undelivered is allowed, and the verdict
+# is written on its roster row as `reason=`; idle, delivered and landed targets pass with the look.
+#
+# THE ROSTER DECIDES WHO THE TARGET IS: this session's roster is the identity register the dispatch
+# wall, the recorder and `adopt` write. A name is not an identity, so an ambiguous name is refused and
+# its agent ids are printed as the way out; a target this session has no standing over is refused,
+# except a background shell's id, which names no Agent-tool dispatch at all.
+SG_DEADLINE_S=7
+SG_DEADLINE_LIVE=0
+SG_DEADLINE_PID=""
+SG_ORDER_HONOURED=""
+SG_HOOK_DIR=""
+SG_ORDER_TTL_S=1800
+SG_ORDER_SCHEMA="stop-order/v1"
+SG_UNROSTERED_SCHEMA="stop-unrostered/v1"
+
+sg_deadline_hit() {
+  [ "$SG_DEADLINE_LIVE" = 1 ] || return 0
+  SG_DEADLINE_LIVE=0
+  if [ -n "$SG_ORDER_HONOURED" ]; then
+    echo "STOP ORDERED (by ${ORDER_BY:-human}) — executing. The contract verdict was not read in time." >&2
+    exit 0
+  fi
+  stop_guard_refuse deadline "$SG_HOOK_DIR" "$SG_DEADLINE_S"
+}
+# One field of the payload, as the guard has always read it: `// empty`, errors silent.
+_sg_jq() { printf '%s' "${BIONIC_INPUT:-}" | jq -r "$1 // empty" 2>/dev/null; }
+sg_deadline_stop() {
+  [ -z "$SG_DEADLINE_PID" ] || kill "$SG_DEADLINE_PID" 2>/dev/null
+  return 0
+}
+
+# The session's own subagent directory, `<transcript-dir>/<session-id>/subagents`: a session can only
+# stop its own tasks, and the recorder scopes its writes the same way.
+_sg_subagents_dir() {  # <transcript-path>
+  local tr="$1"
+  [ -n "$tr" ] || return 1
+  case "$tr" in *.jsonl) : ;; *) return 1 ;; esac
+  printf '%s/subagents\n' "${tr%.jsonl}"
+}
+
+# A spawned tree's .bionic links to the main checkout's so a wave shares one plan tree; that one link
+# is trusted when its target resolves under the parent of the git common dir, which a hostile repo
+# cannot point at another repository's tree.
+_sg_symlink_in_repo() {  # <repo> -> 0 iff $repo/.bionic resolves under this repo's own root
+  local repo="$1" target common root
+  target="$(cd "$repo/.bionic" 2>/dev/null && pwd -P)" || return 1
+  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  root="$(cd "${common%/.git}" 2>/dev/null && pwd -P)" || return 1
+  case "$target/" in "$root"/*) return 0 ;; *) return 1 ;; esac
+}
+
+# A repo controls its own .bionic contents, and a link at either level would let it choose which roster,
+# orders and contracts this guard reads: refused, the stop with it, except the in-repo tree link above.
+_sg_state_dir() {  # <repo> -> the state directory; nonzero if unsafe
+  local repo="$1"
+  if [ -L "$repo/.bionic" ]; then
+    _sg_symlink_in_repo "$repo" || return 1
+  fi
+  [ -L "$repo/.bionic/tmp" ] && return 1
+  printf '%s\n' "$repo/.bionic/tmp"
+}
+
+# ONE AWK PASS OVER THIS SESSION'S ROSTER, BY BOTH KEYS. The dispatch writes the contract and the
+# recorder writes the id one state later, so the last row of a name is the current statement about it
+# while the id may sit on an earlier one: by id, by name, and by name with an id are collected apart.
+# Only a `confirmed` or `identified` row lends an id; an `intended` row's id is a claim about a launch
+# nothing has observed. A roster that is a link or cannot be opened is not read: its unreadability is
+# carried in ROSTER_UNREADABLE instead, and lands on the closed side.
+_sg_roster_walk() {  # <key-name>
+  local key="$1" rows
+  ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
+  [ -f "$ROSTER_FILE" ] || return 0
+  [ -L "$ROSTER_FILE" ] && return 0
+  [ -r "$ROSTER_FILE" ] || return 0
+  rows="$(SG_WK="$key" SG_WV="roster-state/${ROSTER_VERSION}|" awk "$_ROSTER_OPEN_AWK"'
+    index($0, ENVIRON["SG_WV"]) != 1 { next }
+    {
+      k = ENVIRON["SG_WK"]
+      id = _roster_kv($0, "agent_id"); nm = _roster_kv($0, "name"); st = _roster_kv($0, "status")
+      if (st == "confirmed" || st == "identified") {
+        if (id != "" && id == k) by_id = $0
+        if (id != "" && nm != "" && nm == k) with_id = $0
+      }
+      if (nm != "" && nm == k) by_name = $0
+    }
+    END { print by_id; print by_name; print with_id }' "$ROSTER_FILE" 2>/dev/null)"
+  { IFS= read -r ROW_BY_ID; IFS= read -r ROW_BY_NAME; IFS= read -r ROW_WITH_ID; } <<< "$rows"
+  return 0
+}
+
+# The contract's verdict, read once: a name that cleans to nothing would scope the sweeper to every
+# row, so it is not asked.
+_sg_take_verdict() {
+  [ "$V_TAKEN" -eq 1 ] && return 0
+  V_TAKEN=1
+  [ -f "$SWEEPER" ] || return 0
+  [ -n "$AGENT_NAME" ] || return 0
+  case "$(printf '%s' "$AGENT_NAME" | tr -d '[:space:][:cntrl:]|')" in "") return 0 ;; esac
+  local line
+  line=$(stop_verdict_line "$BIONIC_ROOT" "$BIONIC_SID" "$SWEEPER" "$AGENT_NAME")
+  [ -n "$line" ] || return 0
+  V_STATE=$(line_field "$line" state)
+  V_DETAIL=$(line_field "$line" detail)
+  V_ACKED=$(line_field "$line" acked)
+  return 0
+}
+
+# THE ONE READER OF THE ORDERS FILE: the first line of <schema> whose target is one of the names given
+# and whose epoch is current, in ORDER_LINE; 1 when none. An instruction is current when it is given and
+# stops being current, so an order has a window; a future-dated record is a skewed clock or a hand edit,
+# and a minute of tolerance absorbs only the first.
+_sg_orders_current() {  # <schema> <name>... -> 0 and ORDER_LINE set · 1
+  local schema="$1" f="$ORDERS_FILE" line t e now delta n ok
+  shift
+  ORDER_LINE=""
+  [ -L "$f" ] && return 1
+  [ -f "$f" ] || return 1
+  now=$(date -u +%s)
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "${schema}|"*) : ;; *) continue ;; esac
+    t=$(line_field "$line" target)
+    [ -n "$t" ] || continue
+    ok=0
+    for n in "$@"; do [ -n "$n" ] && [ "$t" = "$n" ] && { ok=1; break; }; done
+    [ "$ok" -eq 1 ] || continue
+    e=$(line_field "$line" epoch)
+    case "$e" in ''|*[!0-9]*) continue ;; esac
+    delta=$((now - e))
+    if [ "$delta" -le "$SG_ORDER_TTL_S" ] && [ "$delta" -ge -60 ]; then
+      ORDER_LINE="$line"
+      return 0
+    fi
+  done < "$f"
+  return 1
+}
+# The person's order, matched on what was typed, the agent's name or its id; `by=` says on whose word.
+_sg_order_current() {
+  ORDER_BY=""
+  _sg_orders_current "$SG_ORDER_SCHEMA" "$RAW" "$AGENT_NAME" "$AGENT_ID" || return 1
+  ORDER_BY=$(line_field "$ORDER_LINE" by)
+  case "$ORDER_BY" in human|patrol) : ;; *) ORDER_BY=human ;; esac
+  return 0
+}
+# The orchestrator's unrostered record: honoured once, only for a name no roster of the project holds.
+_sg_unrostered_current() {
+  _sg_orders_current "$SG_UNROSTERED_SCHEMA" "$RAW" "$BASE" || return 1
+  UNROSTERED_WHY=$(line_field "$ORDER_LINE" why)
+  return 0
+}
+_sg_unrostered_anywhere() {  # -> 0 when no roster of the project has a row of the name
+  [ -z "$(roster_sessions_with_name "$STATE_DIR" "$BASE")" ]
+}
+
+# An agent address: `name@session-xxxx`, or the transcript form `a<hex>` / `a<name>-<16hex>`.
+_sg_address_shaped() {  # <typed> -> 0 if it wears an agent-address shape
+  local t="$1"
+  case "$t" in *@session-*) return 0 ;; esac
+  grep -qE '^a[0-9a-f]+$' <<< "$t" && return 0
+  grep -qE '^a.+-[0-9a-f]{16}$' <<< "$t" && return 0
+  return 1
+}
+
+# A background shell's id: one the payload's own transcript records as `"backgroundTaskId"`, else the
+# one spelling the harness has used, `[bt]` and eight lowercase alphanumerics. The leading letter keeps
+# the carve from widening to a bare name that happens to be short.
+_sg_bash_task_shaped() {  # <typed> -> 0 if it is a recorded background-shell id or wears the shape
+  if [ -n "${TRANSCRIPT:-}" ] && [ -f "$TRANSCRIPT" ] && [ ! -L "$TRANSCRIPT" ] \
+     && grep -qF -- "\"backgroundTaskId\":\"$1\"" "$TRANSCRIPT" 2>/dev/null; then
+    return 0
+  fi
+  grep -qE '^[bt][a-z0-9]{8}$' <<< "$1"
+}
+
+# Every roster in this root that carries the name, as the addresses the platform's stop primitive takes,
+# built from the roster's filename because that is the session that wrote the row.
+_sg_accepted_addresses() {  # -> "    <name>@session-xxxxxxxx" per launcher, newline separated
+  local sid out=""
+  while IFS='|' read -r sid _; do
+    [ -n "$sid" ] || continue
+    out="${out}    ${BASE}@session-$(printf '%s' "$sid" | cut -c1-8)
+"
+  done <<< "$(roster_sessions_with_name "$STATE_DIR" "$BASE")"
+  printf '%s' "$out"
+}
+
+# Standing is either fact, and neither needs a transcript: an agent-address shape, or a row of this
+# session's roster. An unreadable roster grants standing and leaves the id unestablished, which lands
+# on the closed side with the fact named.
+_sg_has_standing() {
+  _sg_address_shaped "$RAW" && return 0
+  [ -n "$ROW_BY_NAME" ] && return 0
+  [ -n "$ROSTER_UNREADABLE" ] && return 0
+  return 1
+}
+
+stop_guard() {  # <hook-dir> -> 0 admits; a refusal exits 2
+  SG_HOOK_DIR="$1"
+  [ -d "$BIONIC_ROOT" ] || return 0
+  [ "$BIONIC_ENGAGED" = 1 ] || return 0
+
+  trap sg_deadline_hit ALRM
+  trap sg_deadline_stop EXIT
+  SG_DEADLINE_LIVE=1
+  ( trap 'kill "$_sg_sp" 2>/dev/null; exit 0' TERM
+    sleep "$SG_DEADLINE_S" & _sg_sp=$!
+    wait "$_sg_sp" && kill -ALRM $$ 2>/dev/null
+  ) >/dev/null 2>&1 </dev/null &
+  SG_DEADLINE_PID=$!
+  disown "$SG_DEADLINE_PID" 2>/dev/null || :
+
+  RAW=$(_sg_jq '.tool_input.task_id')
+  [ -n "$RAW" ] || stop_guard_refuse no-target "$SG_HOOK_DIR" "$RAW"
+
+  TRANSCRIPT=$(_sg_jq '.transcript_path')
+  SUB=$(_sg_subagents_dir "$TRANSCRIPT") || stop_guard_refuse no-transcript "$SG_HOOK_DIR" "$RAW"
+
+  # The state directory first: resolution reads the roster, for the id and for an alias's launcher.
+  STATE_DIR=$(_sg_state_dir "$BIONIC_ROOT") || stop_guard_refuse state-link "$SG_HOOK_DIR" "$RAW"
+
+  # The typed reference: a bare name, that name with an `@session-<launcher>` suffix, or the id.
+  BASE="${RAW%@*}"; [ -n "$BASE" ] || BASE="$RAW"
+  ALIAS_SUFFIX=""
+  case "$RAW" in *@*) ALIAS_SUFFIX="${RAW##*@}" ;; esac
+
+  ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
+  ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
+  ROSTER_UNREADABLE=""
+  [ -L "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1
+  [ -e "$ROSTER_FILE" ] && [ ! -r "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1
+  _sg_roster_walk "$BASE"
+
+  # An id becomes the name its row carries, and the second walk is by that name. The row the id names
+  # is kept: it is that row, and not the last row of its name, that the look and the contract read.
+  TYPED_AS_ID=""
+  TYPED_ROW=""
+  if [ -n "$ROW_BY_ID" ]; then
+    TYPED_AS_ID=1
+    TYPED_ROW="$ROW_BY_ID"
+    BASE=$(line_field "$ROW_BY_ID" name)
+    _sg_roster_walk "$BASE"
+  fi
+
+  AGENT_NAME="$BASE"
+  ROSTER_ROW="$ROW_BY_NAME"
+  AGENT_ID=""
+  [ -n "$ROW_WITH_ID" ] && AGENT_ID=$(line_field "$ROW_WITH_ID" agent_id)
+  if [ -n "$TYPED_ROW" ]; then
+    ROSTER_ROW="$TYPED_ROW"
+    AGENT_ID=$(line_field "$TYPED_ROW" agent_id)
+  fi
+
+  # THE ORDER IS READ BEFORE STANDING, so a person's order for a name with no row is honoured: the
+  # refusal's own detail promises that an order executes. What an unmet contract earns is one line.
+  SWEEPER="${SG_HOOK_DIR}/session-sweeper.sh"
+  ORDERS_FILE="$STATE_DIR/stop-orders-${BIONIC_SID}.state"
+  V_TAKEN=0; V_STATE=""; V_DETAIL=""; V_ACKED=""
+  ORDER_BY=""; ORDER_LINE=""; UNROSTERED_WHY=""
+  if _sg_order_current; then
+    SG_ORDER_HONOURED=1
+    _sg_take_verdict
+    if [ -z "$V_STATE" ]; then
+      echo "STOP ORDERED (by ${ORDER_BY}) — executing. No contract row of this name is on the session roster." >&2
+    elif [ "$V_STATE" = "MET" ] || [ "$V_STATE" = "WAIVED" ]; then
+      echo "STOP ORDERED (by ${ORDER_BY}) — executing. Its contract stands ${V_STATE}: nothing is given up." >&2
+    else
+      echo "STOP ORDERED (by ${ORDER_BY}) — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
+    fi
+    return 0
+  fi
+
+  # THE ORCHESTRATOR'S UNROSTERED RECORD, only over a roster it can read and write. The deadline is
+  # spent before the write, so a late alarm cannot refuse a stop whose row is on disk.
+  if [ -z "$ROW_BY_NAME" ] && [ -z "$ROSTER_UNREADABLE" ] && [ -z "$TYPED_AS_ID" ] && _sg_unrostered_current && _sg_unrostered_anywhere; then
+    SG_DEADLINE_LIVE=0
+    stop_guard_unrostered_write "$ROSTER_FILE" "$BIONIC_SID" "$BASE" "$UNROSTERED_WHY" \
+      || stop_guard_refuse unrecorded "$RAW" "$ROSTER_FILE" "$STATE_DIR"
+    echo "STOP RECORDED (unrostered, by the orchestrator) — executing. Reason: ${UNROSTERED_WHY}" >&2
+    return 0
+  fi
+
+  if ! _sg_has_standing; then
+    if _sg_bash_task_shaped "$RAW"; then
+      echo "PASSTHROUGH: '${RAW}' wears a background-bash-task-id shape and carries no agent metadata — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
+      return 0
+    fi
+    stop_guard_refuse no-row "$SG_HOOK_DIR" "$RAW"
+  fi
+
+  # AMBIGUITY, COUNTED ON THE REGISTER: two rows of one name under open contracts with different ids
+  # (`live_ids_of_name`, lib/roster.sh). Not for an id, which names one row and is the way out.
+  AMBIG_IDS=""
+  [ -z "$TYPED_AS_ID" ] && AMBIG_IDS=$(live_ids_of_name "$BASE")
+  AMBIG_N=0
+  [ -n "$AMBIG_IDS" ] && AMBIG_N=$(printf '%s\n' "$AMBIG_IDS" | grep -c .)
+  if [ "$AMBIG_N" -gt 1 ]; then
+    stop_guard_refuse ambiguous "$SG_HOOK_DIR" "$RAW" "$AMBIG_N" "$BASE" "$AMBIG_IDS"
+  fi
+
+  # `name@session-<launcher>` IS AN ALIAS AND ONLY THAT: accepted when it is the row's recorded
+  # teammate address, or when the launcher's own roster (matched by the printed eight-character prefix)
+  # carries a row of the name.
+  if [ -n "$ALIAS_SUFFIX" ]; then
+    local teammate alias_ok=0 want af accepted
+    teammate=$(line_field "$ROSTER_ROW" teammate_id)
+    if [ -n "$teammate" ] && [ "$RAW" = "$teammate" ]; then
+      alias_ok=1
+    else
+      case "$ALIAS_SUFFIX" in
+        session-*)
+          want="${ALIAS_SUFFIX#session-}"
+          case "$want" in
+            ''|*[!A-Za-z0-9-]*) : ;;
+            *)
+              for af in "$STATE_DIR"/roster-"$want"*.state; do
+                [ -f "$af" ] || continue
+                [ -L "$af" ] && continue
+                grep -qF "|name=${BASE}|" "$af" || continue
+                alias_ok=1
+                break
+              done
+              ;;
+          esac
+          ;;
+      esac
+    fi
+    if [ "$alias_ok" -eq 0 ]; then
+      accepted=$(_sg_accepted_addresses)
+      [ -n "$accepted" ] || accepted="    (no roster in this repo carries the name '${BASE}')
+"
+      stop_guard_refuse alias "$SG_HOOK_DIR" "$RAW" "$BASE" "${accepted%
+}"
+    fi
+  fi
+
+  # WHAT DISCHARGES: an ack (the orchestrator verified completion), a waiver, or a MET over a row that
+  # declared a deliverable. A MET over a row that declared nothing is an absence of a contract, not a
+  # landing, and does not discharge.
+  _sg_take_verdict
+  [ "$V_ACKED" = "yes" ] && return 0
+  case "$V_STATE" in
+    WAIVED) return 0 ;;
+    MET)    [ -n "$(line_field "$ROSTER_ROW" deliverable)" ] && return 0 ;;
+  esac
+
+  # The look needs the agent id, and only a confirmed or identified row carries it.
+  [ -n "$AGENT_ID" ] || stop_guard_refuse no-id "$SG_HOOK_DIR" "$RAW" "$AGENT_NAME"
+
+  # THE LOOK, in process and by the agent id, so it lands on the row this guard resolved.
+  OBSERVE_ROOT="$BIONIC_ROOT"
+  OBSERVE_SESSION="$BIONIC_SID"
+  OBSERVE_TRANSCRIPT="$TRANSCRIPT"
+  OBSERVE_DOCS_ROOT="$(docs_root "$BIONIC_ROOT")"
+  OBSERVE_ROSTER="$ROSTER_FILE"
+  OBSERVE_PROGRESS_ARG=""
+  OBSERVE_CLAIMS_ARG=""
+  observe_agent "$AGENT_ID"
+  LOOK="$(observe_look_line)"
+
+  if [ "$OBS_CLASS" = "alive" ]; then
+    # Allowed, and the verdict is the guard's own, never a word the caller supplied. A roster that
+    # cannot take the row does not bring the refusal back: stderr says the verdict was not written.
+    SG_DEADLINE_LIVE=0
+    local why said
+    why="unmet: deliverable ${OBS_DELIV_STATE}${OBS_DELIV_PATHS:+ — ${OBS_DELIV_PATHS}}; progress ${OBS_PROGRESS_STATE}"
+    why="${why//|/ }"; why="${why//$'\n'/ }"; why="${why//$'\r'/ }"; why="${why//$'\t'/ }"
+    if [ -z "$ROSTER_UNREADABLE" ] && stop_guard_reason_write "$ROSTER_FILE" "$AGENT_ID" "$why"; then
+      said="its roster row records the verdict as reason=: ${why}"
+    else
+      said="the verdict could not be written to ${ROSTER_FILE}: ${why}"
+    fi
+    {
+      echo "STOP ALLOWED — '${RAW}' (${AGENT_ID}) is ALIVE and its contract is undelivered; ${said}."
+      echo "    working log:  ${OBS_LOG}"
+      echo "    last write:   $(fmt_age "$OBS_LOG_AGE") ago, inside the declared cadence of ${OBS_CADENCE_S}s (${OBS_CADENCE_SOURCE})"
+      echo "    progress:     ${OBS_PROGRESS_STATE}${OBS_PROGRESS:+ — ${OBS_PROGRESS}}"
+      echo "    deliverable:  ${OBS_DELIV_STATE}${OBS_DELIV_PATHS:+ — ${OBS_DELIV_PATHS}}"
+    } >&2
+    return 0
+  fi
+
+  echo "STOP PERMITTED — ${AGENT_NAME} is ${OBS_CLASS}: ${LOOK}" >&2
+  return 0
 }

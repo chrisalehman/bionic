@@ -1,12 +1,12 @@
 #!/bin/bash
 # tests/run.test.sh — the test runner obeys the user's order.
 #
-# §ORDER. The user gives an order in words through the poker's `order` verb, which writes an
-# `order:` line under the bound plan's SDLC State. While it stands, tests/run.sh asks the gate
+# §ORDER. The user gives an order in words through the poker's `order` verb, which appends an
+# order event to the bound run's log and leaves the plan as it was. While it stands, tests/run.sh asks the gate
 # for it and refuses to start a suite, printing the user's words, whoever runs it: the session
 # the run is bound to, and a shell with no session key at all. `order lift` ends it, and the
-# same suite then runs. This one test is the only check of the order: it is enforced at the
-# runner alone, so no other caller is driven.
+# same suite then runs; an order the log alone holds stops it the same. This one test is the only
+# check of the order: it is enforced at the runner alone, so no other caller is driven.
 #
 # THE WORLD. A scratch project carrying this tree's runner, its framework and its payload
 # libraries, one stub suite that counts its own runs in a file, and a plan bound to the session.
@@ -14,11 +14,11 @@
 # under this suite's own mktemp root, so no drive waits on, or writes, this machine's gate.
 #
 # FIXTURE FIDELITY. The runner, the framework, the libraries and the poker are this tree's own
-# files, copied or run in place; the plan is the shared fixture plan, bound through the real
-# bind writer. The stub suite is SYNTHESIZED: one green row and one line appended per run.
+# files, copied or run in place; the plan is the shared fixture plan's page at 15 and its run's
+# log, bound through the real bind writer. Stub suites, SYNTHESIZED: x, a green row and a line per run; f1-f4, a line and an exit.
 #
 # ANTI-VACUITY. Each "never ran" count reads the same run log as the lifted run's count of one,
-# and the plan's order: lines are read by one extractor that also finds the given line.
+# and the order is read by the reader, whose answer moves from given to none.
 #
 # Usage: bash tests/run.test.sh
 
@@ -62,6 +62,8 @@ printf 'ran\n' >> "$(dirname "$0")/../ran.log"
 expect_eq "x runs" "1" "1"
 finish
 SUITE
+rt_plant() { printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"; . "$(dirname "$0")/lib/assert.sh"\necho "%s" >&2\nexit %s\nfinish\n' "$2" "$3" > "$W/tests/$1.test.sh"; }
+RF='fork: Resource temporarily unavailable'; rt_plant f1 "tests/f1.test.sh: $RF" 1; rt_plant f2 'FAIL: red' 1; rt_plant f3 "tests/f3.test.sh: $RF" 0; rt_plant f4 "missing 'y' in: tests/f4.test.sh: $RF" 1
 ( cd "$W" && git init -q . && git config user.name "Dana Fixture" && git config user.email d@example.com \
   && printf '.bionic/\nran.log\n' > .gitignore && git add -A && git commit -qm world ) >/dev/null 2>&1
 P="$(plan_fixture "$W/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave \
@@ -78,9 +80,7 @@ rt_run() {  # [nokey] -> OUT, RC: the world's runner on its one suite; nokey dro
     OUT="$(cd "$W" && env "${RT_ENV[@]}" CLAUDE_CODE_SESSION_ID="$SID" bash tests/run.sh --only x.test.sh 2>&1)"; RC=$?
   fi
 }
-rt_orders() {  # -> the plan's order: lines under its SDLC State
-  awk '/^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next } s && /^order:/' "$P"
-}
+rt_order() { bash "$REPO/payload/scripts/reader.sh" "$P" order | sed -nE 's/^(order|said)=//p' | paste -sd'|' -; cksum < "$P"; }  # -> the standing order, then the plan's sum
 rt_runs() { if [ -f "$W/ran.log" ]; then wc -l < "$W/ran.log" | tr -d ' '; else printf '0'; fi; }
 
 # ============================================================
@@ -89,10 +89,11 @@ section "§ORDER: an order in words stops every suite at the runner, with the wo
 expect_eq "O0 the world's plan is the session's bound run" "plan=$P" "$(grep '^plan=' "$W/.bionic/tmp/engaged-$SID.state")"
 WORDS="no suites until I say"
 
+RT_SUM="$(cksum < "$P")"
 rt_poke order "$WORDS"
-expect_eq "O1 order '<words>' records the order (exit 0)" "0" "$RC"
-expect_regex "O1b …as an order: line under the plan's SDLC State, with the time and the words" \
-  "^order: given [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z \"$WORDS\"$" "$(rt_orders)"
+expect_eq "O1 order '<words>' records the order (exit 0), the reader's standing order with the words, the plan's sum unchanged" \
+  "0|given|$WORDS
+$RT_SUM" "$RC|$(rt_order)"
 
 rt_run
 expect_eq "O2 with the order open, the runner refuses (exit 1)" "1" "$RC"
@@ -104,12 +105,19 @@ expect_contains "O3b …with the same words" "$WORDS" "$OUT"
 expect_eq "O3c …and the suite never ran" "0" "$(rt_runs)"
 
 rt_poke order lift
-expect_eq "O4 order lift ends it (exit 0)" "0" "$RC"
-expect_regex "O4b …as an order: line with the time and the words it lifted" \
-  "^order: lifted [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z \"$WORDS\"$" "$(rt_orders | tail -n 1)"
+expect_eq "O4 order lift ends it (exit 0): no order stands, the plan's sum unchanged" "0|none
+$RT_SUM" "$RC|$(rt_order)"
 
 rt_run
 expect_eq "O5 lifted, the runner runs the suite (exit 0)" "0" "$RC"
 expect_eq "O5b …and the suite ran once" "1" "$(rt_runs)"
+rt_ev() { mkdir -p "$W/.bionic/docs/record/wave-01-fixture"; printf 'run/v1|ev=order|act=%s|said=held in the log|at=%s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$W/.bionic/docs/record/wave-01-fixture/run.log"; }
+rt_ev given; rt_run
+expect_eq "O6 an order the log alone holds stops the runner, with its words, and the suite never ran again" "1|held in the log|1" \
+  "$RC|$(printf '%s\n' "$OUT" | grep -o 'held in the log' | head -1)|$(rt_runs)"
+rt_ev lifted
+section "§FORK: a failed suite whose output holds the shell's own refusal of a process did not run: exit 75, its output shown"
+rt_fk() { OUT="$(cd "$W" && env "${RT_ENV[@]}" CLAUDE_CODE_SESSION_ID="$SID" bash tests/run.sh --only "$1.test.sh" 2>&1)"; FK="$FK$?:$(printf '%s\n' "$OUT" | awk -v l="$1.test.sh" '$1 == l { print $3 }') "; }; FK=""; rt_fk f1; F1="$OUT"; rt_fk f2; rt_fk f3; rt_fk f4
+expect_eq "F1 refused, exit 1: not run (75), its line shown · exit 1 without it: red · refused, exit 0: green · quoted: red" "75:REFUSED 1:FAIL 0:PASS 1:FAIL 1" "$FK$(printf '%s\n' "$F1" | grep -c "^tests/f1.test.sh: $RF\$")"
 
 finish

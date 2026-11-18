@@ -9,10 +9,16 @@
 #
 # §ONE   a red run at F, two landings greening its reds: the three surfaces print `red at <F8>, 2 landings before this
 #        head`, a close-out copy printing green splits them; then a green run at F with docs, release and code past it
+# §LOG   a review reading, a regression proof and an approval the run's log alone holds are read by the judge and the
+#        proof readers, which ask the reader; a proof written between two reads in one process is read by the second;
+#        an inherited suite is read from the log alone, two at one head as two; the base is the header's
+# §KEEP  the kept fold is served from the user's own mode-700 directory, never from one others can write or a link; a fold that failed is kept nowhere
+# §IFS   under a tab as the caller's only separator the fold's key still covers the log, and a rating and a verdict read
+#        as they do under the default
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh) at Step 8, its working branch checked
 # out beside it. `pah_world` lays the regression proof as `proof-add regression` writes it and each landing as the line
-# records it (ready, a green verdict per suite at the landed commit, published); the surfaces are the real verbs.
+# logs it (ready, a green verdict per suite at the landed commit, published); the surfaces are the real verbs.
 #
 # ANTI-VACUITY. Each surface's state is read through its own extractor, shown non-empty before the states are
 # compared; the split arm and the mutant each prove their copy ran before their absence is read.
@@ -26,6 +32,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/close-out.prelude.sh"
 
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
@@ -34,18 +41,19 @@ PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
 # pah_world <label> <owed suites, comma-joined, or empty> <landings> -> PAH_P, PAH_PLAN, PAH_F (the whole run's head)
 # and PAH_H (the working head): the close-out fixture at Step 8 with a whole run at F that left <owed> red, then
 # <landings> code landings, landing k greening the owed suites at positions k, k + <landings>, …; with landings the
-# integration branch takes the working branch, the readings move to H and the plan carries the word to merge at H.
+# integration branch takes the working branch, the readings move to H and the run carries the word to merge at H.
+# The page is at 15, where the proof, the readings' head and the word are the run's log's events, each by its writer.
 pah_world() {
-  local label="$1" owed="$2" n="${3:-0}" p plan w rec k i s su c
+  local label="$1" owed="$2" n="${3:-0}" p plan w k i s su c log
   p="$(mk_fixture "$label")" || return 1
   advance_to "$p" 8
-  plan="$p/$PLAN_REL"; w="$p-wave"; rec="$p/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+  plan="$p/$PLAN_REL"; w="$p-wave"
   PAH_F="$(fixture_git "$p" rev-parse wave/01-fixture)"
-  sed '/^proved: kind=regression /d' "$plan" > "$plan.n" && mv "$plan.n" "$plan"
-  bash -c '. "$1/proof.sh" || exit 1
-    proof_add_line "$2" "$(proof_floor_line "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/regression-run-$3.log" "$4")"' \
-    _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" > "$plan.n" && mv "$plan.n" "$plan"
-  mkdir -p "${rec%/*}"
+  log="$p/$LOG_REL"
+  sed '/|ev=proof|kind=regression|/d' "$log" > "$log.n" && mv "$log.n" "$log"
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    LOG_AT=2026-10-04T12:00:00Z proof_event "$2" kind=regression "head=$3" "evidence=record/wave-01-fixture/regression-run-$3.log" ${4:+"owed=$4"}' \
+    _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" || return 1
   k=1
   while [ "$k" -le "$n" ]; do
     su=""; i=0
@@ -57,24 +65,24 @@ pah_world() {
     fixture_git "$w" add "land-$k.txt" && fixture_git "$w" commit -qm "T$((k + 2)): a fix" || return 1
     c="$(fixture_git "$w" rev-parse HEAD)"
     {
-      printf 'line/v1|ev=ready|row=T%d|name=w-T%d|commit=%s|branch=wt/01-T%d|tree=%s|suites=%s|debt=-|carrier=1:x|at=2026-10-04T13:%02d:00Z\n' \
+      printf 'run/v1|ev=ready|row=T%d|name=w-T%d|commit=%s|branch=wt/01-T%d|tree=%s|suites=%s|debt=-|carrier=1:x|at=2026-10-04T13:%02d:00Z\n' \
         "$((k + 2))" "$((k + 2))" "$c" "$((k + 2))" "$w" "${su:-a.test.sh}" "$((k * 10))"
       for s in ${su//,/ }; do
-        printf 'line/v1|ev=verdict|row=T%d|commit=%s|suite=%s|result=green|log=/rec/T%d-%s.log|at=2026-10-04T13:%02d:30Z\n' \
+        printf 'run/v1|ev=verdict|row=T%d|commit=%s|suite=%s|result=green|log=/rec/T%d-%s.log|at=2026-10-04T13:%02d:30Z\n' \
           "$((k + 2))" "$c" "$s" "$((k + 2))" "$s" "$((k * 10))"
       done
-      printf 'line/v1|ev=published|row=T%d|commit=%s|kind=queue|by=-|why=-|at=2026-10-04T13:%02d:50Z\n' "$((k + 2))" "$c" "$((k * 10))"
-      printf 'landed: row=T%d branch=wt/01-T%d head=%s merge=%s at=2026-10-04T13:%02d:50Z\n' "$((k + 2))" "$((k + 2))" "$c" "$c" "$((k * 10))"
-    } >> "$rec"
+      printf 'run/v1|ev=published|row=T%d|commit=%s|kind=queue|by=-|why=-|at=2026-10-04T13:%02d:50Z\n' "$((k + 2))" "$c" "$((k * 10))"
+    } >> "$log"
     k=$((k + 1))
   done
   PAH_H="$(fixture_git "$p" rev-parse wave/01-fixture)"
   if [ "$n" -gt 0 ]; then
     fixture_git "$p" merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1 || return 1
     # The landings cover the head and no pass ran at it, so the merge close-out delivers is the person's word at H.
-    awk -v f="$PAH_F" -v h="$PAH_H" '/^proved: kind=review / { sub("head=" f, "head=" h) } { print }
-      /^current: / { print "approved: merge-unproved by fixture 2026-10-04T14:00:00Z head=" h " \"merge it\"" }' "$plan" > "$plan.n" \
-      && mv "$plan.n" "$plan"
+    sed "s/|ev=proof|kind=review|head=$PAH_F|/|ev=proof|kind=review|head=$PAH_H|/" "$log" > "$log.n" && mv "$log.n" "$log"
+    bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+      LOG_AT=2026-10-04T14:00:00Z proof_approval_event "$2" merge-unproved by=fixture "head=$3" "said=merge it"' \
+      _ "$PAH_LIB" "$plan" "$PAH_H" || return 1
   fi
   PAH_P="$p"; PAH_PLAN="$plan"
 }
@@ -189,7 +197,7 @@ expect_eq "ONE-13 (AC-1.1) two docs-only commits past a green whole run: the sta
 pah_poke "$P3" pah-past-card release-approval --preview "$P3_PLAN"; P3_CARD="$PAH_OUT"
 pah_poke "$P3" pah-past-card landing-report --scorecard "$P3_PLAN"; P3_SCORE="$PAH_OUT"
 run_close_as pah-past-close "$P3" run
-expect_eq "ONE-14 …close-out delivers at that head with no word from the person (exit 0, no merge-unproved line)" "0|0" "$CO_RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$P3_PLAN")"
+expect_eq "ONE-14 …close-out delivers at that head with no word from the person (exit 0, no merge-unproved approval)" "0|0" "$CO_RC|$(/usr/bin/grep -c '|ev=approval|key=merge-unproved|' "$P3/$LOG_REL")"
 [ "$CO_RC" = 0 ] || printf '      close-out said: %s\n' "$(printf '%s\n' "$CO_OUT" | tail -3)"
 expect_eq "ONE-15 …and the card, the scorecard and the continuation print that one state" "one: $P3_WANT" \
   "$(pah_one "$(pah_card_state "$P3_CARD")" "$(pah_score_state "$P3_SCORE")" "$(pah_cont_state "$P3/$CONT_REL")")"
@@ -199,7 +207,7 @@ expect_absent "ONE-16b …and asks no merge without a pass, on the card whose wh
 pah_world past-release "" 0
 P4_F="$PAH_F"; pah_past CHANGELOG.md,payload/.claude-plugin/plugin.json
 expect_eq "ONE-17 (AC-1.2) one release-set commit past F with no check recorded at it: red, the landing counted" "red at ${P4_F:0:8}, 1 landing before this head" "$(pah_whole)"
-bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line check "$3" 2026-10-04T15:00:00Z record/wave-01-fixture/release-check.log)"' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H" > "$PAH_PLAN.n" && mv "$PAH_PLAN.n" "$PAH_PLAN"
+bash -c '. "$1/run.sh" && . "$1/proof.sh" && LOG_AT=2026-10-04T15:00:00Z proof_event "$2" kind=check "head=$3" evidence=record/wave-01-fixture/release-check.log' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H"
 expect_eq "ONE-17a precondition: the release set's readers are the five suites that read it" "release-check.test.sh shell-lint.test.sh render.test.sh commands.test.sh words.test.sh" "$(bash -c '. "$1/proof.sh" && _proof_release_readers' _ "$PAH_LIB" 2>/dev/null | paste -sd' ' -)"
 pah_read() { bash -c '. "$1/line.sh" || exit 1; p="$2" c="$3"; shift 3; for s; do line_event "$p" verdict row=T8 "commit=$c" "suite=$s" result=green log=- admitted=- width=-; done' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H" "$@"; }  # <suite>... -> a green verdict each at PAH_H
 pah_read release-check.test.sh shell-lint.test.sh render.test.sh commands.test.sh
@@ -225,5 +233,113 @@ printf '%s\n' "_facts_basis() { printf 'cover %s owes\\n' \"\$1\"; return 1; }" 
 PAH_P="$P3"; PAH_PLAN="$P3_PLAN"
 expect_eq "ONE-20 precondition: the mutant runs, its walk reading each docs commit owes" "cover owes|cover owes" "$(pah_cover "$PAH_MUTLIB")"
 expect_eq "ONE-21 …and under it the docs head reads red, so the walk's basis is what turned it green" "red at ${P3_F:0:8}, 2 landings before this head" "$(pah_whole "$PAH_MUTLIB")"
+
+# ============================================================
+section "§LOG: the proof readers answer from the reader's facts, so a proof the run's log alone holds stands"
+# ============================================================
+# fails-when: facts_state, proof_last or proof_approved_head read the plan's text themselves, so a review
+# reading, a regression proof or an approval written only as a run/v1 event reads absent; or a fact read once is
+# served after the plan changed under the same process.
+PL="$(mk_fixture log)"; advance_to "$PL" 8
+PL_PLAN="$PL/$PLAN_REL"; PL_H="$(fixture_git "$PL" rev-parse wave/01-fixture)"; PL_REC="$PL/.bionic/docs/record/wave-01-fixture"
+for q in evidence adversarial structure; do
+  printf '# %s\n\nNo findings.\n' "$q" > "$PL_REC/critic-$q.md"
+  printf 'run/v1|ev=proof|kind=review|head=%s|evidence=record/wave-01-fixture/critic-%s.md|question=%s|reader=w-critic|result=pass|scope=piece|at=2026-10-04T12:00:00Z\n' \
+    "$PL_H" "$q" "$q" >> "$PL_REC/run.log"
+done
+pl_state() { bash -c '. "$1/roots.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$PAH_LIB" "$PL_PLAN" "$PL_H" 2>/dev/null | awk -F'\t' '$1 == "review" && $4 == "piece" { printf "%s%s=%s", (n++ ? " " : ""), $2, $5 }'; }
+expect_eq "LOG-1 precondition: the three readings in the run's log are each covered at the head" \
+  "evidence=covered adversarial=covered structure=covered" "$(pl_state)"
+printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/wave-01-fixture/regression-run.log|at=2026-10-04T12:30:00Z\n' "$PL_H" >> "$PL_REC/run.log"
+printf 'run/v1|ev=approval|key=merge-unproved|by=fixture|head=%s|said=merge it|at=2026-10-04T12:40:00Z\n' "$PL_H" >> "$PL_REC/run.log"
+expect_eq "LOG-2 precondition: the plan holds no adversarial reading and the log holds it as an event" "0|yes" \
+  "$(/usr/bin/grep -c 'question=adversarial' "$PL_PLAN")|$(awk 'index($0, "|ev=proof|") && index($0, "|question=adversarial|") { f = 1 } END { print (f ? "yes" : "no") }' "$PL_REC/run.log")"
+expect_eq "LOG-3 a review reading the log alone holds is covered, as the other two are" \
+  "evidence=covered adversarial=covered structure=covered" "$(pl_state)"
+expect_eq "LOG-4 …the regression proof and the person's word the log alone holds are read at their head" "$PL_H|$PL_H" \
+  "$(bash -c '. "$1/proof.sh" && printf "%s|%s" "$(proof_last "$2" regression)" "$(proof_approved_head "$2" merge-unproved)"' _ "$PAH_LIB" "$PL_PLAN")"
+# fails-when: the facts are kept for the process past a change, so a proof written between two reads is not seen.
+expect_eq "LOG-5 a proof written between two reads in one process is read by the second" "$PL_H|0000000000000000000000000000000000000001" \
+  "$(bash -c '. "$1/proof.sh" || exit 1; a="$(proof_last "$2" task)"; a="$(proof_last "$2" regression)"
+    printf "run/v1|ev=proof|kind=regression|head=%s|evidence=x|at=2026-10-04T13:00:00Z\n" 0000000000000000000000000000000000000001 >> "$3"
+    printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
+
+# fails-when: a suite proof-add inherited writes to the log is owed again; or two suites inherited at one head read as one.
+for s in b c; do printf 'run/v1|ev=proof|kind=inherited|head=%s|evidence=record/wave-01-fixture/i-%s.log|suite=%s.test.sh|base=%s|at=2026-10-04T13:2%s:00Z\n' "$PL_H" "$s" "$s" "$PL_H" "${#s}" >> "$PL_REC/run.log"; done
+expect_eq "LOG-6 two suites the log inherits at one head are two debts, each read once" \
+  "b.test.sh,c.test.sh|2" \
+  "$(bash -c '. "$1/proof.sh" && printf "%s|%s" "$(proof_inherited "$2")" "$(proof_inherited_lines "$2" | grep -c "^inherited: ")"' _ "$PAH_LIB" "$PL_PLAN")"
+# fails-when: the base is read from a base-sha: line in the page's body, and not from the header.
+PL_B="$(sed -n 's/^base-sha: //p' "$PL_PLAN")"; printf '\n## Notes\n\n  base-sha: %s\n' "$PL_H" >> "$PL_PLAN"
+expect_eq "LOG-7 the base is the header's, a commit other than the one a line of the body names" "$PL_B|$PL_H|yes" \
+  "$(bash -c '. "$1/proof.sh" && proof_plan_base "$2" "$3"' _ "$PAH_LIB" "$PL_PLAN" "$PL")|$(sed -n 's/^  base-sha: //p' "$PL_PLAN")|$([ -n "$PL_B" ] && [ "$PL_B" != "$PL_H" ] && echo yes)"
+
+section "§KEEP: the kept fold is served only from a directory this user alone can write, and its files are bounded"
+# fails-when: a fold planted under the right key is served from a directory others can write or through a link, the user's own fold is not served to a second process, or a file per plan is kept for ever, or a failed fold, or a kept file pruned between two reads, is kept as the run's facts; or a fold that failed reaches the judge or a reader of it as no proof, or a lookup that died as a whole run.
+pk() { TMPDIR="$PK/$1" bash -c '. "$1/proof.sh" && proof_approved_head "$2" release' _ "$PAH_LIB" "$PL_PLAN"; }  # <dir> -> a fresh process's `release` approval head, TMPDIR $PK/<dir>
+PK="$SANDBOX/keep"; PK_D="bionic-facts-$(id -u)"; mkdir -p "$PK/ok" "$PK/open/$PK_D" "$PK/away" "$PK/link" "$PK/full/$PK_D"; pk ok; PK_F="$(ls "$PK/ok/$PK_D")"; awk -v l="$(printf 'run/v1|ev=approval|key=release|by=intruder|head=%s|said=x|at=2026-10-04T14:00:00Z' "$PL_H")" '$0 == "\036" && !d { print l; d = 1 } { print }' "$PK/ok/$PK_D/$PK_F" > "$PK/ok.f" && cat "$PK/ok.f" > "$PK/ok/$PK_D/$PK_F"
+cp "$PK/ok/$PK_D/$PK_F" "$PK/open/$PK_D/"; chmod 777 "$PK/open/$PK_D"; cp -R "$PK/ok/$PK_D" "$PK/away/"; ln -s "$PK/away/$PK_D" "$PK/link/$PK_D"; for i in $(seq 40); do : > "$PK/full/$PK_D/$i"; done; touch -t 202601010000 "$PK/full/$PK_D"/*; chmod 700 "$PK/full/$PK_D"; pk full
+expect_eq "KEEP-1 the user's own kept fold (mode 700) is served to a second process, the approval planted in it read" "drwx------|$PL_H" "$(ls -ld "$PK/ok/$PK_D" | cut -c1-10)|$(pk ok)"
+expect_eq "KEEP-2 the same file is served neither from a directory others can write nor through a link to the user's own, each left as planted" "||1|1" "$(pk open)|$(pk link)|$(grep -c intruder "$PK/open/$PK_D/$PK_F")|$(grep -c intruder "$PK/away/$PK_D/$PK_F")"
+expect_eq "KEEP-3 a fold written beside forty older files leaves the sixteen newest, its own the newest" "16|$PK_F" "$(ls "$PK/full/$PK_D" | wc -l | tr -d ' ')|$(ls -t "$PK/full/$PK_D" | head -1)"
+pf() { rm -rf "$PK/f"; mkdir -p "$PK/f"; TMPDIR="$PK/f" bash -c '. "$1/proof.sh" && _proof_reader_load || exit 1; fn="$5" pp="$3" px="$4"; eval "$(declare -f $fn | sed 1s/$fn/pf_real/)"; eval "$fn() { printf \"\$pp\"; return \$px; }"; _proof_facts "$2" > "$TMPDIR/o" 2> "$TMPDIR/e"; rc=$?; eval "$fn() { pf_real \"\$@\"; }"
+  printf "%s|%s|%s|%s|%s|%s" $rc "$(wc -l < "$TMPDIR/o")" "${_PROOF_FACTS_KEY:+key}" "$(ls "$TMPDIR"/bionic-facts-* | wc -l)" "$(grep -cF "$2" "$TMPDIR/e")" "$(proof_last "$2" regression)" | tr -d " "' _ "$PAH_LIB" "${PF_PLAN:-$PL_PLAN}" "$2" "$3" "$1"; }  # <reader function stood in> <what it prints> <its exit> -> exit|lines served|key|files kept|stderr lines naming the plan|the next ask's newest regression head
+PL_R=0000000000000000000000000000000000000001; expect_eq "KEEP-4 a fold that fails, short or empty or with a stage of its pipeline killed, is an error naming the plan, is kept nowhere, and the next ask folds the whole" "2|0||0|1|$PL_R~2|0||0|1|$PL_R~2|0||0|1|$PL_R" "$(pf reader_facts 'run/v1|ev=x\n' 1)~$(pf reader_facts '' 1)~$(pf reader_events 'run/v1|ev=x\n' 128)"
+expect_eq "KEEP-5 an empty fold that succeeds is a run with no fact, and is kept" "0|0|key|1|0|" "$(pf reader_facts '' 0)"
+pk race; expect_eq "KEEP-6 a kept file pruned after its first read is served whole, never as an empty fold" "$PL_R" "$(TMPDIR="$PK/race" bash -c '. "$1/proof.sh" || exit 1; for c in head sed cat; do eval "$c() { command $c \"\$@\"; rm -f \"\$TMPDIR\"/bionic-facts-*/*; }"; done; proof_last "$2" regression' _ "$PAH_LIB" "$PL_PLAN")"
+pg() { rm -rf "$PK/g"; mkdir -p "$PK/g"; TMPDIR="$PK/g" bash -c '. "$1/roots.sh" && . "$1/proof.sh" && _proof_reader_load || exit 1; [ "$4" = whole ] || reader_facts() { return 1; }; p="$2" h="$3"; eval "$5"' _ "$PAH_LIB" "$PL_PLAN" "$PL_H" "$@" 2>/dev/null; }  # <whole|failing> <script over $p and $h> -> its output in a fresh process and TMPDIR, the reader whole or failing
+PG_J='o="$(facts_state "$p" "$h")"; printf "%s|%s" $? "$(printf "%s" "$o" | grep -c "^review")"'; expect_eq "KEEP-7 with the reader failing the judge exits 2 and prints no chain, where whole it prints every chain" "2|0~0|5" "$(pg failing "$PG_J")~$(pg whole "$PG_J")"
+PG_5='{ proof_approved_head "$p" merge-unproved; a=$?; _proof_floor_match "$p" "$p" "" "$h" 0; b=$?; proof_chain_head "$p" structure; c=$?; proof_last "$p" regression; d=$?; _facts_check_at "$p" "$h" "$h"; } >/dev/null; printf "%s|%s|%s|%s|%s" $a $b $c $d $?'; expect_eq "KEEP-8 …and each of the other five readers of the fold hands the failure back, exit 2, where whole it answers" "2|2|2|2|2~0|1|0|0|0" "$(pg failing "$PG_5")~$(pg whole "$PG_5")"
+expect_eq "KEEP-9 a lookup of the run log that dies is a failed fold, never a run with no log" "2|0||0|1|$PL_R" "$(pf reader_record '' 128)"
+
+section "§FOLD: a caller of the fold hears it fail: what writes from the facts writes nothing and exits 2, what shows them says they could not be read"
+# fails-when: a reader question asked in-process, close-out's continuation, the release card, a waiver, the bound line,
+# the tick's words, the hand-holds count or a checked ask reads a fold that failed as a run with no fact.
+# The stand-in is a copy of hooks/ and payload/scripts/ whose reader_facts exits 128, a refused fork's exit, inside any
+# function PAH_IN names, and folds whole elsewhere; each row reads the failing call beside the whole one.
+PF_ST="$SANDBOX/stand"; mkdir -p "$PF_ST/payload"; cp -R "$BIONIC_HOOKS_DIR" "$PF_ST/hooks"; cp -R "$REPO_ROOT/payload/scripts" "$PF_ST/payload/scripts"; ln -s ../hooks "$PF_ST/payload/hooks"
+printf '%s\n' 'eval "pf_whole_$(declare -f reader_facts)"; reader_facts() { case " ${FUNCNAME[*]} " in *" ${PAH_IN:-} "*) return 128 ;; esac; pf_whole_reader_facts "$@"; }' >> "$PF_ST/payload/scripts/lib/reader.sh"
+pfu() { printf '%s|%s' "$1" "$(printf '%s\n' "$2" | grep -c "$3")|$(printf '%s\n' "$2" | grep -c 'could not be read')"; }  # <exit> <output> <its fact's pattern> -> exit|fact lines|could-not-read lines
+PF_RS='. "$1/run.sh"; o="$(run_step "$2")"; printf "%s|%s" $? "$o" | tr "\n" " "'
+expect_eq "FOLD-1 a reader question run in-process (run_step) hands back the fold's failure; whole, its step and 0" "128|n=0 state=open~0|n=8 state=open" \
+  "$(PAH_IN=reader_facts bash -c "$PF_RS" _ "$PF_ST/payload/scripts/lib" "$PL_PLAN")~$(bash -c "$PF_RS" _ "$PF_ST/payload/scripts/lib" "$PL_PLAN")"
+pf_tmp() { mkdir -p "$SANDBOX/t-$1/bionic-facts-$(id -u)"; chmod 777 "$SANDBOX/t-$1/bionic-facts-$(id -u)"; printf '%s' "$SANDBOX/t-$1"; }  # <label> -> a TMPDIR where no fold is kept, so each read folds
+pf_close() { local p; p="$(mk_fixture "fold-$1")"; advance_to "$p" 8; debt_plant "$p"
+  SCRIPT="$PF_ST/payload/scripts/close-out.sh" TMPDIR="$(pf_tmp "$1")" PAH_IN="$2" run_close_as "pf-$1" "$p" run; pfu "$CO_RC" "$CO_OUT$(cat "$p/$CONT_REL" 2>/dev/null)" '^debt: tree_count '; }  # <label> <function the fold fails in> -> close-out's exit|debt lines|could-not-read lines
+expect_eq "FOLD-2 a fold that fails as close-out writes the continuation writes none and refuses, exit 2; whole, the debt carried" "2|0|1~0|1|0" "$(pf_close c act_continuation)~$(pf_close w none)"
+pah_world fold "" 0; ( in_fixture "$PAH_P" || exit 1; bound_marker "$PAH_P" pah-fold "$PAH_PLAN" ); fixture_git "$PAH_P" config user.name fixture
+PF_POKE() { TMPDIR="$(pf_tmp "p$RANDOM")" PAH_POKER="$PF_ST/hooks/session-poker.sh" PAH_IN="$1" pah_poke "$PAH_P" pah-fold "${@:2}"; pfu "$PAH_RC" "$PAH_OUT" "$PF_PAT"; }  # <function the fold fails in> <verb…> -> exit|lines of PF_PAT|could-not-read lines
+PF_PAT='whole suite: '; expect_eq "FOLD-3 the release card over a fold that fails is not drawn, exit 2; whole, drawn" "2|0|1~0|1|0" "$(PF_POKE poker_verb_release_approval release-approval --preview "$PAH_PLAN")~$(PF_POKE none release-approval --preview "$PAH_PLAN")"
+PF_PAT='^hand-holds: total='; expect_eq "FOLD-4 the hand-holds count over a fold that fails says it could not be read; whole, its total" "0|0|1~0|1|0" "$(PF_POKE reader_facts landing-report --hand-holds "$PAH_PLAN")~$(PF_POKE none landing-report --hand-holds "$PAH_PLAN")"
+# The person typed the waiver's words in this session: its transcript under a config of this check's own, at the fixture's
+# project name, and its load record there, the two witnesses the waive verb holds a waiver's words to (lib/said.sh).
+PF_TX="$SANDBOX/pf-cfg/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$REPO_ROOT/payload/scripts/lib" "$(cd "$PAH_P" && pwd -P)")"; mkdir -p "$PF_TX" "$PAH_P/.bionic/tmp"
+jq -c '.message.content = "waive it, the person said"' "$REPO_ROOT/tests/fixtures/transcript-move/typed.jsonl" > "$PF_TX/pah-fold.jsonl"; : > "$PAH_P/.bionic/tmp/loaded-pah-fold.state"
+PF_PAT='question=structure head='; expect_eq "FOLD-5 a waiver over a fold that fails is refused, nothing written; whole, its event is written to the run's log" "2|0|1~0|1|0" "$(CLAUDE_CONFIG_DIR="$SANDBOX/pf-cfg" PF_POKE reader_facts waive structure 'waive it, the person said')~$(CLAUDE_CONFIG_DIR="$SANDBOX/pf-cfg" PF_POKE none waive structure 'waive it, the person said')"
+PF_SS="$(sed -n '/^SS_FACTS_PLAN=/p;/^ss_ask() {/,/^}/p;/^print_bound_line() {/,/^}/p' "$BIONIC_HOOKS_DIR/session-start.sh")"
+PF_B='BIONIC_LIB="$1"; DOCS=""; HOOK_ROOT=x; eval "$2"; print_bound_line "bound-open $3"'
+PF_PAT='current: 8$'; expect_eq "FOLD-6 the bound line over a fold that fails says the facts could not be read where the step stands; whole, the step" "0|0|1~0|1|0" \
+  "$(pfu 0 "$(PAH_IN=reader_facts bash -c "$PF_B" _ "$PF_ST/payload/scripts/lib" "$PF_SS" "$PL_PLAN")" "$PF_PAT")~$(pfu 0 "$(bash -c "$PF_B" _ "$PF_ST/payload/scripts/lib" "$PF_SS" "$PL_PLAN")" "$PF_PAT")"
+PG_U='. "$1/units.sh"; _units_readings_state "$p"'; expect_eq "FOLD-7 the tick's words for the reviews over a fold that fails say it did not fold, not rigor and scale" \
+  "the run's facts could not be read: its facts did not fold; ask again~covered" "$(pg failing "$PG_U")~$(pg whole "$PG_U")"
+
+section "§IFS: the library splits its own lists, whatever separators its caller set"
+# fails-when: the fold's key splits its lists of libraries and homes on the caller's IFS, so under a tab it covers the
+# plan alone and a fold kept before the run's log gained a proof is served after it.
+expect_eq "IFS-1 under a tab as the caller's only separator, the second ask reads the proof the log gained after the first" \
+  "0000000000000000000000000000000000000001|0000000000000000000000000000000000000002" \
+  "$(bash -c '. "$1/proof.sh" || exit 1; IFS=$'"'"'\t'"'"'; a="$(proof_last "$2" regression)"
+    printf "run/v1|ev=proof|kind=regression|head=%s|evidence=x|at=2026-10-04T13:10:00Z\n" 0000000000000000000000000000000000000002 >> "$3"
+    printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
+# fails-when: a rating or a run's verdict is split on the caller's IFS, so under a tab the finding drops out unrated and
+# a green run's verdict is refused as cut off.
+IFS_P="$SANDBOX/ifs/docs/plans/e/ifs.plan.md"; mkdir -p "${IFS_P%/*}" "$SANDBOX/ifs/docs/record/ifs"; printf '# ifs\n' > "$IFS_P"
+printf 'run/v1|ev=finding|ref=record/r.md#1|severity=S2|reach=off|to=deferred|title=a title|at=2026-10-04T12:00:00Z\n' > "$SANDBOX/ifs/docs/record/ifs/run.log"
+printf 'head=%s dirty=0\nGating: 3 passed, 0 failed\n' "$PL_H" > "$SANDBOX/ifs-run.log"
+ifs_read() { bash -c '. "$1/proof.sh" || exit 1; IFS="$2"; printf "%s|%s" "$(proof_findings_owed "$3")" "$(proof_attested task "$4" "$5" "" "" "" "$6")"' \
+  _ "$PAH_LIB" "$1" "$IFS_P" "$SANDBOX/ifs-run.log" "$PL" "$PL_H"; }  # <IFS> -> the finding's rated line|the head the run attests
+expect_eq "IFS-2 precondition: under the default separators the deferred finding reads rated and the green run attests the head" \
+  "record/r.md#1 S2 off defer \"a title\"|$PL_H" "$(ifs_read $' \t\n')"
+expect_eq "IFS-3 under a tab as the only separator the rating and the verdict read as they do under the default" "$(ifs_read $' \t\n')" "$(ifs_read $'\t')"
 
 finish

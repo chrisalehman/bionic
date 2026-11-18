@@ -14,8 +14,8 @@
 # exactly the state's asks; a judgment written from the sheet, answering every open ask, renders through
 # `sitrep card` (rc 0, every line at most 100 columns); a judgment that drops one is refused (rc 1, stdout empty).
 #
-# FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts, a
-# plan in its Step-3 shape and the release check's closure. Every later state is a command's: the poker's verbs,
+# FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts and
+# the release check's closure, with no plan: its run starts at the configuration card. Every state is a command's: the poker's verbs,
 # the door's landing, the sweeper's ack, close-out. What `rehearse` writes by hand is what a run's people and agents
 # write by hand: the plan's prose, a review's record, a row's code, a criterion's evidence. Each command it runs is
 # logged beside the sandbox (`rehearsal.log`), and each section reads the commands its state turns on from that log.
@@ -50,8 +50,9 @@ expect_eq "FR-1 rehearse reaches the state and prints the sandbox's plan (exit 0
   "$RT_RC|$([ -f "$RT_PLAN" ] && echo yes)"
 if [ "$RT_RC" = 0 ]; then
   expect_eq "FR-1b …through the door's landing, a failing review registered by its verb, close-out refused, and the reply's release approval at the release head with no merge without a whole run (the landing past the pass moved no code)" \
-    "yes|yes|yes|yes|0" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'proof-add review')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'close-out.sh')" -ge 1 ] && echo yes)|$(/usr/bin/grep -q "^approved: release by .* head=$(git -C "$RT_ROOT" rev-parse refs/heads/wave/x) " "$RT_PLAN" && echo yes)|$(/usr/bin/grep -c "^approved: merge-unproved " "$RT_PLAN")"
-  rt_sheet_and_card FR "hold:merge waive:structure" "hold:merge>8/4 waive:structure>8/4" waive:structure
+    "yes|yes|yes|yes|0" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'proof-add review')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'close-out.sh')" -ge 1 ] && echo yes)|$([ "$(rt_approved_head release)" = "$(git -C "$RT_ROOT" rev-parse "refs/heads/$DOOR_BRANCH")" ] && echo yes)|$(rt_approved_head merge-unproved | /usr/bin/grep -c .)"
+  # The goal the rehearsal writes as not met owes its decision from the first tick that reads it, holding nothing.
+  rt_sheet_and_card FR "decide:goal:asks hold:merge waive:structure" "decide:goal:asks>nothing hold:merge>8/4 waive:structure>8/4" waive:structure
 fi
 
 # ============================================================

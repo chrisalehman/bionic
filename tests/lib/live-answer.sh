@@ -19,12 +19,6 @@
 # parser does NOT recognise as a ListAgents answer at all — kept as-is, because it is
 # the one corpus-sourced way to exercise NONE without inventing a body.
 #
-# WHAT THIS FILE REPLACES. Eight suites each hand-write a three-entry ListAgents
-# transcript with their own teammate-line spelling (research-code-map §2.a: four of the
-# eight cannot express `idle`, three cannot express STALE). None of them is touched here
-# — collapsing them onto this builder is S17's sweep. This file is the target they
-# collapse onto.
-#
 # EVERY BODY THIS FILE EMITS IS A CORPUS LINE, VERBATIM. The self line, the ref suffix
 # and every status word come from `live_answer_content`, never from a literal typed here.
 # Only the ENVELOPE around a body — the assistant tool_use entry, the user tool_result
@@ -33,7 +27,6 @@
 # timestamps that do not come from the corpus (the STALE wrapper's trailing prompt) are
 # mechanical scaffolding, not an invented answer.
 #
-#   live_answer_count                    -> the corpus's line count (26)
 #   live_answer_content   <n>            -> corpus line <n>'s answer body, verbatim
 #   live_answer_ts        <n>            -> corpus line <n>'s captured timestamp
 #   live_answer_tool_use_id <n>          -> corpus line <n>'s captured tool_use_id
@@ -47,14 +40,6 @@
 #       answer's own ts is the one way to make it STALE.
 #
 #   live_answer_running <out>   -> FRESH, one teammate, running (corpus line 0)
-#   live_answer_idle    <out>   -> FRESH, one teammate, idle    (corpus line 8)
-#   live_answer_stale   <out>   -> STALE: corpus line 0's real body, read after a later
-#                                  prompt
-#   live_answer_absent  <out>   -> ensures no file exists at <out> at all (NONE, exit 4,
-#                                  the "absent file" arm of the parser's own contract)
-#   live_answer_none    <out>   -> NONE, a real captured body the parser does not
-#                                  recognise (corpus line 1; exit 4, the "unrecognised
-#                                  body" arm)
 #
 # BASH 3.2, jq. Sourcing this file prints nothing and touches nothing beyond resolving
 # BIONIC_SCRIPTS_DIR — it must already be set (source lib/resolve-roots.sh first).
@@ -71,10 +56,6 @@ LIVE_ANSWER_NONE_LINE=1
 
 live_answer_corpus_path() {
   printf '%s/tests/fixtures/claude/listagents-answers.jsonl' "$BIONIC_SCRIPTS_DIR"
-}
-
-live_answer_count() {
-  wc -l < "$(live_answer_corpus_path)" | tr -d ' '
 }
 
 # The raw json line <n> (0-indexed) of the corpus, unparsed.
@@ -128,16 +109,6 @@ live_answer_build() {  # <out> <n> [prompt_ts]
 }
 
 live_answer_running() { live_answer_build "$1" "$LIVE_ANSWER_RUNNING_LINE"; }
-live_answer_idle()    { live_answer_build "$1" "$LIVE_ANSWER_IDLE_LINE"; }
-
-# Corpus line 0's own real answer is timestamped 2026-09-05T00:52:23.349Z. Any prompt
-# after that makes it STALE; the trailing prompt's own timestamp is envelope scaffolding,
-# not an invented answer (see header).
-live_answer_stale() { live_answer_build "$1" "$LIVE_ANSWER_RUNNING_LINE" "2026-09-05T01:00:00.000Z"; }
-
-live_answer_absent() { rm -f "$1"; }
-
-live_answer_none() { live_answer_build "$1" "$LIVE_ANSWER_NONE_LINE"; }
 
 # ---------------------------------------------------------------------------
 # COMPOSING AN ANSWER THAT NAMES THE SUITE'S OWN TEAMMATES (S17, spec AC-28)

@@ -11,14 +11,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
-. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/cross-gate-agreement.prelude.sh"
 
 # ============================================================
 section "A1 — N-way agreement on active-wave detection (AC-9, checklist A8/A9)"
 # ============================================================
-echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER") · $(basename "$PARTY_LG")"
+echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_ER") · $(basename "$PARTY_LG")"
 
 run_battery assert
 
@@ -47,7 +46,7 @@ section "B — the session-identity key: producer and BOTH consumers agree"
 # ============================================================
 #
 # Ownership table (spec §Design): preflight-probe WRITES the session identity;
-# dispatch-preflight and stop-guard READ it. The per-component suites each hold
+# dispatch-preflight and the stop gate READ it. The per-component suites each hold
 # their own half — the producer's suite reads back what it wrote, the start
 # gate's suite writes attestations as fixtures. Neither proves the two halves
 # spell or compare the key the same way. Here ONE value produced by the REAL
@@ -72,7 +71,7 @@ printf '{}\n' > "$ISUB/agent-aworker-1111111111111111.jsonl"
 # set, and a roster row carrying the agent id the working log is filed under.
 cg_live "$ITR" "worker"
 cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111" "" "identified"
-write_live_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
 
 # The producer, run for real, with the session key on the channel it actually
 # reads (CLAUDE_CODE_SESSION_ID — task 4/1's resolution) and a credential
@@ -92,10 +91,6 @@ expect_eq "the attestation exists where both consumers look" "yes" "$([ -f "$ATT
 expect_contains "the producer spells the identity key 'session_id='" "session_id=$SID_A" "$(cat "$ATT")"
 
 # Consumer 1 — the start gate: the produced value passes; one character off refuses.
-# "Passes in silence" used to need a genuinely LIVE session sweeper armed for this
-# session/repo, or the unarmed-sweeper nag fired legitimately and broke the claim. Both the
-# nag and the watcher it asked about were deleted in epic-16 wave-02, so silence is the
-# gate's own unaided answer here.
 OUT=$(mk_agent_payload "$SID_A" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
 expect_eq "start gate: the producer's own session passes" "0" "$ST"
 # "IN SILENCE" IS NOW "SILENT ABOUT THE ATTESTATION", and the change is a change of
@@ -107,9 +102,6 @@ expect_eq "start gate: the producer's own session passes" "0" "$ST"
 # out and asserted, so the remainder is held to the emptiness this section has always
 # claimed.
 DP_RESOLUTION=$(printf '%s\n' "$OUT" | grep -c 'run resolved by newest-plan fallback (session unbound) — /')
-# THE BUDGET BACKSTOP IS GONE (wave-28 T9; D15): this fixture's plan is live and carries no
-# `parallel-budget:` line, and no plan owes one, so the gate's whole output is held to the
-# emptiness this section has always claimed. Until wave-28 a WARN naming the key was lifted out.
 expect_eq "start gate: and passes in silence about the attestation (and the keyless plan)" "" "$OUT"
 # THE NEAR-MISS SESSION IS ENGAGED TOO (task-engaged-session). Both gates ask
 # `engaged_session` before anything else, keyed to the session in hand — so without a
@@ -127,12 +119,8 @@ expect_eq "start gate: a foreign session is refused" "2" "$ST"
 # Both sessions get a row so that the roster is not what differs between the two
 # stops below: the ONLY thing that differs is the session value carried by the
 # record and the payload, which is what this section is about.
-# THE ARTIFACT THE AGREEMENT RIDES ON CHANGED (epic-23 wave-15, REQ-2). It used to be the
-# observation record: the recorder stamped `session=` into it and the gate compared that
-# against its own payload. The record is gone — the gate observes its target directly — and
-# the state this family still keys by session is the ROSTER, written by the recorder's
-# confirmation arm and read by the gate for the agent id. Same fact, same two parties, the
-# artifact that survives.
+# The state this family keys by session is the ROSTER, written by the recorder's confirmation arm and read by
+# the gate for the agent id.
 cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111"
 SGROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
 expect_eq "the writer keyed its roster by this session" "yes" \
@@ -159,10 +147,9 @@ expect_eq "stop gate: a one-character-different session is refused (exact compar
 section "D — cross-script security regressions (AC-8, TDD §8)"
 # ============================================================
 #
-# Per-script coverage already exists for: the credential value never reaching
-# the attestation or the producer's own output (preflight-probe.test.sh S4), and
-# command text never reaching the observation state file (stop-guard.test.sh
-# §7). What no per-script suite can assert is the CROSS-SCRIPT property: after
+# Per-script coverage already exists for the credential value never reaching
+# the attestation or the producer's own output (preflight-probe.test.sh S4).
+# What no per-script suite can assert is the CROSS-SCRIPT property: after
 # driving all four with a secret-bearing command, NOTHING anywhere under the
 # sandbox — repo, state, temp, or $HOME (where the evidence gate's audit stream
 # lives) — contains that text.
@@ -180,7 +167,7 @@ printf '{"name":"worker"}' > "$SSUB/agent-aworker-2222222222222222.meta.json"
 printf '{}\n' > "$SSUB/agent-aworker-2222222222222222.jsonl"
 cg_live "$STR" "worker"
 cg_roster_row "$SREPO" "$SID_A" "worker" "aworker-2222222222222222" "" "identified"
-write_live_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
 
 # 1. the recorder, with the secret in the command line beside a real run
 SOUT=$( cd "$SREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" worker 2>/dev/null )
@@ -267,7 +254,7 @@ fi
 # actually creates the artefacts this assertion is here to bound. The value is a
 # syntactic placeholder; the probe tests PRESENCE, never validity.
 QREPO=$(new_repo "quiet")
-write_live_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
 before=$(find "$QREPO" | sort)
 # `.bionic/tmp` is no longer among the gate's creations: the fixture arms the Patrol, which
 # makes the directory before the gate runs (arm_patrol). What the gate adds is still exactly
@@ -305,7 +292,7 @@ section "E — classification + contract-source ride the machine line into the r
 RSLUG=$(printf '%s' "$SANDBOX/fx/resolver/repo" | sed 's/[^a-zA-Z0-9]/-/g')
 RPROJ="$CLAUDE_CONFIG_DIR/projects/$RSLUG"
 RREPO=$(new_repo "resolver")
-write_plan "$RREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+plan_fixture --current 4 "$RREPO/.bionic/docs/plans/epic-99/wave-01.plan.md" wave >/dev/null
 mkdir -p "$RPROJ/$SID_A/subagents" "$RPROJ/$SID_B/subagents"
 printf '{}\n' > "$RPROJ/$SID_A.jsonl"
 printf '{}\n' > "$RPROJ/$SID_B.jsonl"
@@ -391,9 +378,7 @@ expect_eq "the recorder is given nothing to forward, because no tier was shown" 
   "" "$E5_MLINE"
 
 # --- with no own session id at all there is no transcript, so no live set: the producer
-# refuses instead of labelling, and the recorder still copies exactly what it was given. The
-# `unknown` classification this pair used to assert was the label for "ownership could not be
-# established", and ownership is no longer a thing this command decides. ---
+# refuses instead of labelling, and the recorder still copies exactly what it was given. ---
 E4_OUT=$( cd "$RREPO" && env -u CLAUDE_CODE_SESSION_ID bash "$OBSERVE" worker 2>&1 )
 E4_MLINE=$(printf '%s\n' "$E4_OUT" | grep '^stop-check-observation/')
 # RE-POINTED (T22): with no session key there is no roster to read, so the refusal names

@@ -17,15 +17,9 @@
 #                                      ROSTER WALL below refuses a glob match
 #                                      that is not a suite, and an empty tests/
 #                                      is refused rather than reported green over
-#                                      nothing. (This replaced fifty-five
-#                                      hand-listed `run` lines, where a suite the
-#                                      list forgot silently never ran at all.)
+#                                      nothing.
 #
-# There is no conditional suite and no skip category. The last one was
-# tests/bootstrap-e2e-docker.sh, which ran the whole of claude-bootstrap.sh in a
-# container; the installer was deleted in epic-17 W5 (4/6) and the suite went
-# with it (W5 audit F-3) — it had been green only because the Docker daemon was
-# down, and would have gone red the moment a contributor ran it daemon-up.
+# There is no conditional suite and no skip category: a skip is green over nothing.
 #
 # ── TWO MODES, ONE ROSTER (epic-17 W7 S10, spec AC-16) ───────────────────────
 #
@@ -64,16 +58,7 @@
 # shared lock, no fixed port and no fixed /tmp name: every suite that touches disk
 # does so under its own `mktemp -d`, and the one place many of them read concurrently
 # (this checkout, via tests/lib/resolve-roots.sh) has no writer in the roster at all.
-# THE AUDIT IS TWO FILES, and a maintainer needs both: S8 read the roster as it
-# stood when it ran (`.bionic/docs/record/epic-17-w7/s8-isolation-audit.md`), and
-# S8b read the one the same wave added, env.test.sh, which appears nowhere in the
-# first file (`.bionic/docs/record/epic-17-w7/s8b-isolation-delta.md`). Neither file
-# covers the roster as it stands now: epic-18 wave-03 deleted nineteen of those
-# suites on the reliability ruling (commit 8582861), one of the nineteen
-# (fresh-home.test.sh) was later revived, rc-item.test.sh was added new, and
-# epic-19 wave-01 added doctor-patrol.test.sh (F3) and command-relay.test.sh
-# (F4), bionic 1.3.2 added git-argv, cmd-class and patrol-marker, and wave-01
-# verification-cannot-lie added four more. A maintainer re-derives the roster
+# A maintainer re-derives the roster
 # rather than trusting a number in a comment — `ls tests/*.test.sh` IS the
 # roster now, so the count is never anywhere else to go stale, and a suite
 # added or restored after S8b carries no isolation proof beyond its own file.
@@ -722,9 +707,7 @@ export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
 #   calls `finish`. Refusing a shadow is only half of "one framework, adopted by
 #   every suite": a suite spelling its helpers `t_ok`/`t_no` and its counters
 #   `P`/`F`, printing its own tally and exiting 0, shadows nothing and used to
-#   pass untouched. That every suite on the roster adopts was a MEASUREMENT taken
-#   by the migration tasks, not a mechanism, and `0 refused` read as proof of a
-#   wall that was not there.
+#   pass untouched.
 #
 # A refusal is a FAILED suite: it is named in the tally, it is named under
 # `Failed:`, and the run exits 1.
@@ -829,7 +812,7 @@ _verdict() {
   fi
   # ONE RUN, ONE VERDICT (wave-35 T2; D11, AC-2.1, AC-2.4): a suite's verdict is its exit code
   # from the one run it had. Nothing is VOID and nothing is re-run: a suite that passes or fails by
-  # the clock is a defect in the suite, not a reading for the runner to excuse.
+  # the clock is the suite's defect, save one red: the machine refused it a process (bionic_fork_refused).
   lost="$(_lost_command "$out")"
   if [ "$rc" = "0" ] && [ -z "$lost" ]; then
     echo "✓ PASS"; pass=$((pass+1)); return
@@ -839,6 +822,8 @@ _verdict() {
     # Exited 0, but the interpreter said a command it called does not exist.
     echo "✗ FAIL (exited 0; a command it called was not found)"
     failed="${failed}\n    - ${label} (exited 0, but: ${lost})"
+  elif _suite_load && bionic_fork_refused "$out"; then budget=$((budget+1))
+    echo "✗ REFUSED (the machine refused it a process; nothing was judged, run it again)"; failed="${failed}\n    - ${label} (refused a process by the machine, never judged)"
   elif [ -z "$rc" ]; then
     # No .rc file: the worker itself did not survive to write one.
     echo "✗ KILLED (no exit status recorded)"
