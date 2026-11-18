@@ -99,6 +99,38 @@ over the run's own record it prints 0.
   card, a comment of the field library, the units suite's labels, and the operational rules' line on what merges a
   landed tree. The landing numbers are not printed in this entry.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, piece: fail at 9da9d511 by w50-T35, 2026-11-11T01:58:51Z (`critic-adversarial-p1.md`)
+- structure review, piece: fail at 9da9d511 by w50-T35, 2026-11-11T01:58:54Z (`critic-structure-p1.md`)
+- evidence review, piece: fail at 9da9d511 by w50-T34, 2026-11-11T02:07:45Z (`auditor-evidence-p1.md`)
+- adversarial review, piece: fail at c8506be5 by w50-T47, 2026-11-12T12:57:39Z (`critic-adversarial-p2.md`)
+- structure review, piece: flag at c8506be5 by w50-T47, 2026-11-12T12:59:13Z (`critic-structure-p2.md`)
+- evidence review, piece: flag at c8506be5 by w50-T46, 2026-11-12T13:08:02Z (`auditor-evidence-p2.md`)
+- evidence review, piece: fail at 94ecc7f8 by w50-T63, 2026-11-15T08:35:24Z (`auditor-evidence-p3.md`)
+- evidence review, piece: fail at e7886805 by w50-T63-r2, 2026-11-15T09:20:28Z (`auditor-evidence-p3-r2.md`)
+- adversarial review, piece: fail at 546bc0eb by w50-T64, 2026-11-16T11:19:41Z (`critic-adversarial-p3.md`)
+- structure review, piece: flag at 546bc0eb by w50-T64, 2026-11-16T11:21:17Z (`critic-structure-p3.md`)
+- adversarial review, whole: flag at 546bc0eb by w50-T67, 2026-11-16T11:41:46Z (`critic-adversarial.md`)
+- structure review, whole: flag at 546bc0eb by w50-T67, 2026-11-16T11:42:58Z (`critic-structure.md`)
+- evidence review, piece: fail at 97e71dac by w50-T63-r3, 2026-11-16T13:42:03Z (`auditor-evidence-p3-r3.md`)
+- evidence review, whole: fail at 97e71dac by w50-T66, 2026-11-16T14:07:27Z (`auditor-evidence.md`)
+- adversarial review, piece: fail at 47159892 by w50-T64-r2, 2026-11-16T16:48:34Z (`critic-adversarial-p3-r2.md`)
+- structure review, piece: flag at 47159892 by w50-T64-r2, 2026-11-16T16:50:25Z (`critic-structure-p3-r2.md`)
+- adversarial review, piece: fail at 6480eb68 by w50-T64-r3, 2026-11-16T20:30:41Z (`critic-adversarial-p3-r3.md`)
+- structure review, piece: flag at 6480eb68 by w50-T64-r3, 2026-11-16T20:32:21Z (`critic-structure-p3-r3.md`)
+- adversarial review, piece: flag at d0a25622 by w50-T64-r4, 2026-11-16T21:52:54Z (`critic-adversarial-p3-r4.md`)
+- structure review, piece: flag at d0a25622 by w50-T64-r4, 2026-11-16T21:53:57Z (`critic-structure-p3-r4.md`)
+- evidence review, piece: pass at d0a25622 by w50-T63-r4, 2026-11-16T21:55:46Z (`auditor-evidence-p3-r4.md`)
+- adversarial review, whole: pass at d0a25622 by w50-T67-r2, 2026-11-16T21:56:37Z (`critic-adversarial-r2.md`)
+- structure review, whole: flag at d0a25622 by w50-T67-r2, 2026-11-16T21:57:50Z (`critic-structure-r2.md`)
+- evidence review, whole: fail at d0a25622 by w50-T66-r2, 2026-11-16T22:17:21Z (`auditor-evidence-r2.md`)
+- evidence review, whole: pass at e14f464c by w50-T66-r3, 2026-11-17T01:17:17Z (`auditor-evidence-r4.md`)
+- adversarial review: waived at e14f464c by Dana Fixture, 2026-11-18T00:14:08Z: "D61: 1 <- I formally waive this"
+- adversarial review: waived at 933579cc by Dana Fixture, 2026-11-18T00:42:26Z: "D61: 1 <- I formally waive this"
+
 ### Known limits
 
 - The commit gate judges a commit against files under `.bionic/` that any shell command can change, and six such changes to a bound run at 15 end or narrow the judging: after any of the first five each later commit is admitted with nothing judged, after the sixth it is judged only on what an earlier step owes, and no wall refuses the command that made the change. Driven at 53428ccdf on a run at step 6 whose commit is refused as written (`T68-r2-drives/roads.out`): the plan removed or renamed off `.plan.md` (the gate prints `bound plan closed` and `the plan this session is bound to is not on disk … Nothing is validated for this commit`); the session's engaged file removed (silent); the binding rewritten to `plan=none` or to no plan line (the gate prints `run resolved by newest-plan fallback (session unbound)`); the run's log removed, renamed or emptied (silent; the session still reads as bound to an open run); an abandon line or a step 9 appended to the log by hand (the gate prints `bound plan closed`); and, driven at 51f5e93a4 on that run (`T235-drives/steps.out`, `steps-full.out`), a step lower than the run's appended to the log by hand (silent; the session still reads as bound to an open run, at the lower step: a step 0 is admitted with nothing judged, and on a run that holds what steps 1 to 5 owe, each of those steps admits the commit that step 6 refused for its review). A step higher than the run's appended that is not 9 leaves the judging on: a step 7 or 8 is refused for the review as step 6 is. Putting the file back restores the judging (`roads-back.out`); once the engaged file is gone, `session-poker.sh bind` refuses with `NOT-ENGAGED` until the session invokes `/bionic:canonical-sdlc` (critic-adversarial-p3-r3.md findings 1 to 4).
