@@ -1313,7 +1313,7 @@ stop_wait_cell() {
 # THE PATROL-DUTIES WALL — task-dispatch-wall-channel-loss, T5.
 #
 # Stop. On every orchestrator turn end: refuse the stop once when a stand-down the tick
-# ordered since the previous turn end, or a fillable gap, is left unanswered. THE TASK-LIST DUTIES ARE GONE (wave-31 T32; D6, REQ-6 AC-6.5): a tick turn owes
+# ordered since the previous turn end, or a fillable gap, is left unanswered. THE TASK-LIST DUTIES ARE GONE: a tick turn owes
 # no task-list refresh and a dispatch turn no task entry set in progress, a process check the
 # turn's end demanded of the model with nothing behind it to do; the tick still prints
 # `poker: RECONCILE` as advice no wall reads. THAT IS THE TICK ARM'S HALF ONLY. The
@@ -1954,7 +1954,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # `duty=` and `reconcile=` lines fed the task-list duty, which went at wave-31 T32 (D6); what is
   # read here now is the head and the facts state below.
   #
-  # A DIGEST OLDER THAN THE PREVIOUS TURN END IS NO DIGEST (critic I3). The tick this turn answers ran
+  # A DIGEST OLDER THAN THE PREVIOUS TURN END IS NO DIGEST. The tick this turn answers ran
   # since that turn ended, the watcher's pass or one the turn ran itself; a tick that exits on a refusal
   # writes none, so the digest's `at=` must not be earlier than that end. A digest with no `at=` is no digest.
   digest="$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")"
@@ -2229,7 +2229,7 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
     }
     END { for (t in last) printf "%s %s\n", t, last[t] }' "$orders" 2>/dev/null)"
   [ -n "$targets" ] || return 0
-  # A HOLD WRITTEN AFTER A NAME'S LAST ORDER ANSWERS IT (wave-24 T8; D1, AC-4.12). `hold` appends
+  # A HOLD WRITTEN AFTER A NAME'S LAST ORDER ANSWERS IT. `hold` appends
   # the name's row with `held=<iso> <reason> fp=…`, and the latest row of a name is its row. The
   # tick orders no held name while the hold's fingerprint stands, so an order newer than the hold
   # says something about the agent has changed since, and that order stands.

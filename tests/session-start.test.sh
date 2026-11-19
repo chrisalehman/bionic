@@ -349,7 +349,7 @@ write_stamp "$P6" "$CUR_SID";  backdate "$P6/.bionic/tmp/patrol-$CUR_SID.state" 
 OUT=$(drive "$P6" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq  "6.1 exit 0" "0" "$(rc)"
 
-# THE SWEEP, PER SESSION (REQ-8). Both predecessors are DEAD (no live pid for
+# THE SWEEP, PER SESSION. Both predecessors are DEAD (no live pid for
 # either in this fixture's claude-home); the ten-minute-old one is past the 60s window and
 # goes, the five-second-old one is inside it and is deferred — ALONE, which is the whole of
 # what REQ-8 changed. Before it, one young file kept the other session's residue too.

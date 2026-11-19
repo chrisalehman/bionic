@@ -193,7 +193,7 @@ fi
 # reads.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/observe.sh"
-# THE PASTED POKER PATH (wave-24 T29; critic I2, A-T27.8). The STANDDOWN line and the
+# THE PASTED POKER PATH. The STANDDOWN line and the
 # refusals print this script's path for a reader to paste; it is ONE shell
 # word, so a plugin root with a space pastes whole. refuse.sh's `refuse_shell_word` owns the rule.
 # shellcheck source=/dev/null
@@ -235,7 +235,7 @@ POKER_INTERVAL_DEFAULT="${PATROL_INTERVAL_DEFAULT}s"
 # in-process constant from.
 SWEPT_SCHEMA="landing-swept/v1"
 
-# THE TICK DIGEST (wave-24 T7, REQ-4; D4; ADR-041). The digest file
+# THE TICK DIGEST. The digest file
 # holds what one tick carries to the next: a hash of what the tick decided (no timestamp enters
 # it), when that answer was first given, the decision band, and whether the turn's task list is behind
 # (`duty=owed|none`: advice since wave-31 T32, D6, which deleted the stop wall's task-list duty;
@@ -1322,7 +1322,7 @@ resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RU
 # run_dated_by <root> <sid> -> the path of the record whose mtime is the instant this session bound
 # its run, or rc 1. THE BINDING BESIDE THE SEAL FIRST: since the binding moved beside the seal, the
 # walls believe that record over the engaged file, and a hand cannot rewrite it under the git home
-# the way it can rewrite a file in .bionic/tmp, so a touch cannot turn a delivery undelivered or the
+# the way it can rewrite a file in the state directory, so a touch cannot turn a delivery undelivered or the
 # reverse. A session with no record there (a root with no git home) is dated by its engaged file,
 # which the same binding act writes.
 run_dated_by() {  # <root> <sid>

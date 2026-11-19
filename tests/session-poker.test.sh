@@ -3,8 +3,8 @@
 # needs a nudge.
 #
 # Governing design: .bionic/docs/specs/epic-16-landing-contract/
-# wave-02-fact-based-supervision.spec.md §Design ("Poker"). Serves AC-7 (tick/noop/
-# DISARM at an accelerated clock) and AC-6's arrival half (a dead agent is reported at the
+# wave-02-fact-based-supervision.spec.md §Design ("Poker"). Serves AC-7 (arm/tick/noop/
+# disarm at an accelerated clock) and AC-6's arrival half (a dead agent is reported at the
 # next wake with no watcher process ever having existed) — this suite proves the REPORTING
 # side of AC-6; the "no watcher process at any point" process-table bracket is AC-6's own
 # live T3 arc and is not hermetic.
@@ -441,7 +441,7 @@ mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
 R6C="$(make_repo s6-nokey)"
 OUT="$( cd "$R6C" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" tick 2>&1 )"; RC=$?
 expect_eq "a keyless tick refuses (exit 3)" "3" "$RC"
-# `.bionic/tmp` holds the engagement marker before the tick runs: no other file may appear.
+# The state directory holds the engagement marker before the tick runs: no other file may appear.
 R6C_WROTE="$(ls "$R6C/.bionic/tmp/" 2>/dev/null | /usr/bin/grep -v "^engaged-$SID.state$" || true)"
 if [ -n "$R6C_WROTE" ]; then
   no "…and writes nothing: a session-keyed file needs a session key" \

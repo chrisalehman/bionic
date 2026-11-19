@@ -21,7 +21,7 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
   tick_digest_path "$root" "$1"
 }
 
-# The digest file is rewritten whole, under the .bionic/tmp write guard. A tick's digest carries `at=`, the
+# The digest file is rewritten whole, under the state directory's write guard. A tick's digest carries `at=`, the
 # instant it was written: `since=` is the instant the facts last changed and an unchanged tick
 # keeps it, so only `at=` tells the stop collector the digest is this turn's (critic I3).
 # `gate_raised=` is the set of gate requests already raised (below). `change=` is the fingerprint of the plan's
@@ -864,7 +864,7 @@ tick_watch_facts() {  # <file>
     # above the sweeper. Chris, 2026-09-03: "all guardrails imposed by bionic should only
     # apply when exercising bionic. Nothing should apply until bionic is triggered" — and
     # the trigger is the canonical-sdlc skill, which writes
-    # `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A tick run in a
+    # the session's engagement marker at the instant it is invoked. A tick run in a
     # session that never invoked the skill must decide nothing about it rather than deciding wrongly.
     #
     # ONE LINE, EXIT 0, and not a refusal: the tick fired correctly and found nothing it
@@ -876,7 +876,7 @@ tick_watch_facts() {  # <file>
     fi
 
     # THE WALK, TAKEN BEFORE ANYTHING IS WRITTEN, and that ordering is load-bearing.
-    # The running tick's claim may create `<resolved root>/.bionic/tmp`, so a tick that resolved
+    # The running tick's claim may create the resolved root's state directory, so a tick that resolved
     # the WRONG root creates a `.bionic` there as its first act — and every walk taken after
     # that point reports the root it just manufactured as `chosen`. Read here, the walk still
     # describes the filesystem the tick actually arrived in, which is the only version of it
@@ -885,7 +885,7 @@ tick_watch_facts() {  # <file>
     TICK_ROOT_TAG="$(printf '%s\n' "$TICK_ROOT_WALK" | tail -1 | awk -F'\t' '{ print $2 }')"
 
     # ONE TICK OF A SESSION AT A TIME. The tick records its process while it runs (lib/patrol.sh `tick_run_claim`),
-    # after the walk, since the claim may create `.bionic/tmp`, and before anything is decided, since a tick that finds
+    # after the walk, since the claim may create the state directory, and before anything is decided, since a tick that finds
     # a live one of its session decides nothing: it says so in one line and exits 0, the quiet exit,
     # so the watch pass that ran it stays quiet too. A record that cannot be written leaves the tick as it ran
     # before the record existed: unrecorded, on stderr. The exit trap removes the record; tick_emit, which replaces

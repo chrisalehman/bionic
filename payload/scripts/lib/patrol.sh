@@ -1,6 +1,6 @@
 #!/bin/bash
 # patrol.sh — the supervision of each live session, read from disk: which sessions live, what state each keeps
-# under .bionic/tmp, what its roster holds against the dispatches its transcript shows, the tick's digest and
+# in the state directory, what its roster holds against the dispatches its transcript shows, the tick's digest and
 # running record, and the watcher's record and wake line.
 #
 # THE SESSIONS ARE READ FROM `${CLAUDE_CONFIG_DIR}/sessions/<pid>.json`, which names each live process with its
@@ -576,7 +576,7 @@ EOF
 # for the tick's own advice and read by no wall, since wave-31 T32). The path and the
 # reader live here, which both already source, so a renamed file cannot leave the stop wall
 # reading a path the tick no longer writes (Step-6 review finding 15; critic I3). Not
-# `patrol-digest-`: the `patrol` class glob would read it as a session named `digest-<sid>` (A-orch-9).
+# `patrol-digest-`: the `patrol` class glob would read it as a session named `digest-<sid>`.
 tick_digest_path() {  # <project root> <session-id> -> absolute path, or nothing
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   printf '%s/.bionic/tmp/tick-digest-%s.state' "$1" "$2"

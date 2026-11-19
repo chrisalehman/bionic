@@ -1061,8 +1061,8 @@ TASKS_LINE="mark every 4/*, 5–9 entry completed (TaskUpdate)"
 # THE CONTINUATION IS WRITTEN WHOLE (wave-33 T8; D8, AC-3.3). Every field this script can derive it
 # writes: the commit it closed at, the task count (the plan's build rows), the regression result (the
 # floor's proof line), the reviews (the review proof lines) and the ADRs (the spec's or the plan's `adrs:`).
-# The wave-32 close completed
-# fourteen marks by hand (A-orch-50); five remain, and they are the ones only a person decides: the
+# A close once completed
+# fourteen marks by hand; five remain, and they are the ones only a person decides: the
 # first decision put to the user, what was ruled at the close, the next wave's version and ideas file, and
 # its carry-overs. `co_owed_line` names each of them in the close-out output. A template that invented
 # plausible values for those would produce a continuation that read true and was not.

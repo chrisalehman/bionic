@@ -209,7 +209,7 @@ fi
 # ---------- THE MARKER ----------
 #
 # A symlink at the marker path is refused before it is followed — the guard idiom every
-# .bionic/tmp writer takes, and it matters more here: a planted link would let a
+# writer of the state directory takes, and it matters more here: a planted link would let a
 # hostile repo have this hook clobber a file outside the tree, on the one write bionic
 # performs at the invocation the user just typed.
 [ -L "$MARKER" ] && exit 0
