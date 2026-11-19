@@ -3047,7 +3047,7 @@ EOF
     out="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
       && err="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
       && facts="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" || {
-      die "REFUSED — no scratch file for the tick's print; the pass did not run."
+      die "REFUSED — no scratch file for the tick's print; the pass did not run. Once the temporary directory takes a file, run again: bash $HOOK_DIR/session-poker.sh tick --watch"
       exit "$WATCH_RC_REFUSED"
     }
     BIONIC_WATCH_FACTS="$facts" bash "$HOOK_DIR/${0##*/}" tick > "$out" 2> "$err"
@@ -3056,7 +3056,7 @@ EOF
     case "$rc" in
       0|1) ;;
       *) rm -f "$out" "$err" "$facts"
-         die "REFUSED — the tick refused (exit $rc); this pass decided nothing."
+         die "REFUSED — the tick refused (exit $rc); this pass decided nothing. Its refusal is printed above; mend what it names, then run again: bash $HOOK_DIR/session-poker.sh tick --watch"
          exit "$WATCH_RC_REFUSED" ;;
     esac
     line="$(watch_wake_line "$out")"

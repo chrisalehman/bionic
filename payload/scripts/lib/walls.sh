@@ -3336,7 +3336,17 @@ _eg_v15_step_asks() {
        for r in $(plan_read_rows "$PLAN" Tasks 2>/dev/null | awk -F'\t' '{ id = ""; k = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^id=/) id = substr($i, 4); if ($i ~ /^kind=/) k = substr($i, 6) } if (k == "integrate") print id }'); do
          miss="${miss:-1}"; v="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$r")"; [ "${v#*state=landed}" = "$v" ] || miss=0
        done
-       ! plan_parked_why "$PLAN" >/dev/null 2>&1 || miss=0
+       if plan_parked_why "$PLAN" >/dev/null 2>&1; then miss=0
+       elif [ "$miss" = 0 ]; then
+         # A landing stands for a merge only while the merge can be read: the one reader of it is asked, here with no
+         # fetch, over the integration branch as last fetched. A plan naming no integration branch has nothing to read
+         # it against, and close-out, the landing's writer, refuses such a plan before it lands a row.
+         v="$( { . "$BIONIC_LIB/plan.sh" && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1 \
+                 || { printf 'unread\t-\t-\tlib/line.sh, the merge'"'"'s reader, cannot be loaded'; exit 2; }
+               [ -n "$(plan_integration_branch "$PLAN")" ] || exit 0
+               line_merge_seen "$PLAN" "$BIONIC_ROOT")" \
+           || _eg_v15_ask "Step 8's merge: the integrate row's landing, with no merge read: $(printf '%s' "$v" | cut -f4)"
+       fi
        [ "${miss:-0}" = 0 ] || _eg_v15_ask "Step 8's merge: the integrate row's landing"
        v="$(_proof_ask "$PLAN" _eg_v15_trees "$PLAN")" || _eg_v15_unreadable
        for p in $v; do [ ! -e "$BIONIC_ROOT/$p" ] || _eg_v15_ask "Step 8's trees: $p still stands"; done

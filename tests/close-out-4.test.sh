@@ -477,7 +477,8 @@ section "§ONE-WRITER — wave-38 T37 (critic-adversarial #2, critic-structure #
 # write them into the one handoff document: close-out.sh's tail, and session-poker.sh `handoff` on the closed plan.
 # close-out's document has the verb's sections in the verb's order and keeps what a session composed before the
 # close. resume on close-out's parked document reads it parked. FIXTURE FIDELITY: §PARKED's closed parked plan
-# (PPK), and §ANY-BRANCH's task-scale plan whose pull request is owed (mk_task_pr_fixture), closed with
+# (PPK), and §ANY-BRANCH's task-scale plan (mk_task_pr_fixture), its branch merged into main as the pull request's
+# merge leaves it, since close-out closes only a run whose merge it reads; closed with
 # `archive-on-close: false` so the plan stays where the verb can bind it (an archived plan leaves the project root);
 # each as close-out left it, the session bound by the verb.
 # fails-when: close-out writes another shape or drops a composed section; the two doors' closed lines differ.
@@ -511,13 +512,14 @@ expect_nonempty "OW-2c precondition: close-out's copy reads" "$(ow_lines "$SANDB
 expect_eq "OW-2d the verb's closed lines are close-out's" "$(ow_lines "$SANDBOX/ow-copy-parked")" "$(ow_lines "$OW_FILE")"
 
 OWR="$(mk_task_pr_fixture ow-pr "fix/x")"
+git -C "$OWR" merge -q --no-ff -m "the pull request's merge" fix/x >/dev/null 2>&1
 printf 'archive-on-close: false\n' >> "$OWR/.bionic/config.yaml"
 OW_FINDING="- the late fix waits — file.txt"
 lands_bind "$OWR" "$OW_SID"
 lands_poker "$OWR" "$OW_SID" handoff <<< "Findings
 $OW_FINDING"
 run_close "$OWR" run
-expect_eq "OW-3 precondition: close-out closed the task-scale plan rc 0, unmerged and in place" "0|no|yes" \
+expect_eq "OW-3 precondition: close-out closed the task-scale plan rc 0, merged and in place" "0|yes|yes" \
   "$CO_RC|$(git -C "$OWR" merge-base --is-ancestor fix/x main && echo yes || echo no)|$([ -f "$OWR/$PLAN_REL" ] && echo yes || echo no)"
 expect_eq "OW-3b close-out keeps the Finding a session wrote before the close: yes" "yes" "$(grep -q -F -- "$OW_FINDING" "$(ow_file "$OWR")" 2>/dev/null && echo yes || echo no)"
 ow_doors pr "$OWR" "$OW_SID"
@@ -531,6 +533,7 @@ ow_sec_of() {  # <file> <words> -> the section heading that holds the first line
   awk -v s="$HANDOFF_SECTIONS" -v w="$2" 'BEGIN { n = split(s, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1 } ($0 in H) { cur = $0; next } index($0, w) { print cur; exit }' "$1"
 }
 OWO="$(mk_task_pr_fixture ow-old "fix/x")"
+git -C "$OWO" merge -q --no-ff -m "the pull request's merge" fix/x >/dev/null 2>&1
 printf 'archive-on-close: false\n' >> "$OWO/.bionic/config.yaml"
 OWO_FILE="$(handoff_default_of "$OWO/$PLAN_REL" "$OWO")"
 mkdir -p "${OWO_FILE%/*}"
