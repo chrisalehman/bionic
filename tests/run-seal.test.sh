@@ -32,6 +32,9 @@
 #             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
 #   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
 #             log and binding untouched: the commit's refusal is the one before, word for word.
+#   §SHUT     a Write, an Edit or a command that writes or deletes in the seal's home, deletes a directory
+#             holding it, or reaches it through a link, is refused in one line, engaged or not; a read, a
+#             command the reader cannot read, a sibling sharing the home's name and a verb's call are not.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.
@@ -472,6 +475,7 @@ R|cd .git && rm -rf bionic-seal
 R|find .git/bionic-seal -delete
 R|rm -rf .git
 R|cp notes .git/bionic-seal/
+R|rm -rf gl/bionic-seal
 A|cat .git/bionic-seal/*
 A|rm -rf .git/bionic-*
 A|printf x > .git/bionic-seal-notes
@@ -479,10 +483,11 @@ A|rm -rf .git/hooks
 A|bash hooks/session-poker.sh accept 'the .git/bionic-seal change is mine'
 R|Write|.git/bionic-seal/new.seal
 R|Edit|.git/bionic-seal/*.seal
+R|Write|gl/bionic-seal/new.seal
 A|Write|.git/bionic-seal-notes"
 shut() {  # <engaged|unengaged> -> each row judged in a gate world of that kind: refused by HL, or admitted
   local want call arg line rc
-  world; [ "$1" = engaged ] || { rm "$GM"; seal_binding_drop "$G" "$SID"; gate "git commit -m x"
+  world; ln -s .git "$G/gl"; [ "$1" = engaged ] || { rm "$GM"; seal_binding_drop "$G" "$SID"; gate "git commit -m x"
     expect_status "the unengaged world: its commit is not judged" 0 "$GRC"; }
   while IFS="|" read -r want call arg <&3; do
     case "$call" in
