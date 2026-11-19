@@ -32,6 +32,10 @@
 #             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
 #   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
 #             log and binding untouched: the commit's refusal is the one before, word for word.
+#   §HONEST   one row each: close-out's archive, the bind verb, a new session id engaging, the step verb's
+#             move down, a record written into the record folder, step 8's wipe of the state folder, and an
+#             honest append that met a held lock: the run verifies clean and no commit is refused for a
+#             change. A hand line beside the held append, or its bytes again once paid, is caught.
 #   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
 #             and one line names the word and the change. §ABANDON: abandon on typed words ends the run.
 #
@@ -332,7 +336,9 @@ expect_status "an after-arm whose seal meets a held lock still exits 0" 0 "$HOOK
 expect_contains "and says the plan is not sealed" "not sealed" "$HOOK_ERR"
 expect_eq "and the seal is as it was" "$S2" "$(seal_bytes)"
 rm -rf "$R/.git/bionic-seal/.reap"
-expect_eq "so the plan reads changed until it is sealed again" "changed what=plan how=changed" "$(seal_verify "$RP")"
+expect_eq "so its plan is owed beside the seal, and verifies clean" clean "$(seal_verify "$RP")"
+printf '| hand |\n' >> "$RP"
+expect_eq "and a hand edit after it is caught" "changed what=plan how=changed" "$(seal_verify "$RP")"
 
 # The commit gate (hooks/bash-walls.sh) over a fresh run at step 5 bound to SID, whose log owes a fact,
 # so every commit of it is refused for that (OWED) until a change to the run is refused for the change.
@@ -512,5 +518,40 @@ gate "git commit -m x"; expect_status "and its commit is admitted" 0 "$GRC"
 wl() { bash -c '. "$1/git-argv.sh" && . "$1/walls.sh" && _wall_poker_contract_verb "$2"; printf "%s|%s " "$?" "$_WALL_POKER_VERB"' \
   _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "bash hooks/session-poker.sh $1 'w'"; }
 expect_eq "the walls read both as verbs of the run's record, and not the sitrep" "0|accept 0|abandon 1| " "$(wl accept; wl abandon; wl sitrep)"
+
+section "HONEST"
+CO="$(bash -c '. "$(dirname "$0")/lib/resolve-roots.sh"; require_helpers() { :; }; . "$(dirname "$0")/lib/regression-fixture.sh"
+  . "$(dirname "$0")/lib/roster-row.sh"; . "$(dirname "$0")/close-out.prelude.sh"
+  PS="$(mk_fixture honest)"; advance_to "$PS" 8; rm -f "$PS/$EPIC_REL"; run_close "$PS" run
+  printf "%s|%s|%s" "$CO_RC" "$(. "$REPO_ROOT/payload/scripts/lib/seal.sh"; seal_verify "$PS/$PLAN_REL")" "$(gate_rc "$PS")"' \
+  "$BIONIC_SCRIPTS_DIR/tests/honest" 2>/dev/null)"
+expect_eq "close-out's archive: the close exits 0, no seal reads the archived plan gone, and a commit is admitted" "0|none|0" "$CO"
+hold() { mkdir -p "$G/.git/bionic-seal/.reap"; printf '%s\n' "$$" > "$G/.git/bionic-seal/.reap/pid"; }
+free() { rm -rf "$G/.git/bionic-seal/.reap"; }
+put() { RUN_LOG="$GL" bash -c '. "$1/log.sh" && log_append hand what=note "why=$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1"; }
+engage_as() { jq -nc --arg s "$1" --arg c "$G" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Skill",
+  tool_input:{skill:"bionic:canonical-sdlc"}}' | (cd "$G" && HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR= \
+  bash "$BIONIC_HOOKS_DIR/engage.sh" >/dev/null 2>&1); SID="$1"; }
+T1MD='cat > "${GL%/*}/T1.md" <<X
+# T1: the build
+X'
+SID0="$SID"; ADMIT=""
+while IFS="|" read -r label rc first act <&3; do
+  SID="$SID0"; world; eval "$act"; gate "git commit -m x"
+  expect_eq "$label: the run verifies clean" clean "$(seal_verify "$GP")"
+  expect_eq "$label: and the commit is judged by the step, not refused for a change" "$rc|${!first}" "$GRC|$GLINE"
+done 3<<'ROWS'
+the bind verb|2|OWED|poke bind "$GP"
+a new session id engaging, as after a clear|2|OWED|engage_as 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+the step verb's move down to 4|0|ADMIT|poke current 4
+step 8's wipe of the state folder|2|OWED|rm -rf "$G/.bionic/tmp/"*
+an honest append that met a held lock|2|OWED|hold; put "an honest line"; free; HL="$(/usr/bin/grep -c "why=an honest line|" "$GL")"
+a writer's record written into the record folder|2|OWED|gate "$T1MD"; HD="$GRC"; eval "$T1MD"
+ROWS
+SID="$SID0"
+expect_eq "the held append's line is in the log, and the record's heredoc was admitted and written" "1|0|# T1: the build" \
+  "${HL:-}|${HD:-}|$(head -1 "${GL%/*}/T1.md" 2>/dev/null)"
+gated "a hand line beside an honest append that met the lock" "$LA" 'hold; put "an honest line"; printf "run/v1|ev=step|n=9|at=z\n" >> "$GL"; free'
+gated "the honest line's bytes appended again by hand once paid" "$LA" 'hold; put "an honest line"; free; put "the next"; tail -2 "$GL" | head -1 >> "$GL"'
 
 finish

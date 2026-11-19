@@ -4,7 +4,7 @@
 # WHAT IT OWNS. One plain record per open run, kept where the project's own tools do not reach: the
 # plan's canonical path and digest, the log's path, length and digest, and a state, clean or changed.
 # A run whose files no longer match their seal is a CHANGED run, and the seal names what changed (the
-# plan or the log) and how (gone, changed, shortened or added to). Five functions:
+# plan or the log) and how (gone, changed, shortened or added to). Six functions:
 #
 #   seal_verify <plan>
 #       prints ONE line and exits by it:
@@ -58,6 +58,24 @@
 #       caught change seals the files as they then stand, so without this the bytes the person last
 #       vouched for, and the sessions they bound, would be lost at the first catch: a line added by
 #       hand would read as the run's own once a commit had been refused.
+#
+#   seal_owe <plan> <line>
+#       leaves a NOTE beside the seal that <line> is an honest line about to be appended without the
+#       lock: the appender's call when the lock could not be had, made before its line is written.
+#       0 left; 1 not written; 2 no home. It takes no lock: each note is its own file, made whole by
+#       one mv. `seal_write --vouch plan` leaves the plan's kind of note itself when it meets the lock.
+#
+# NOTES OWED BY HONEST WRITERS THAT MET THE LOCK. A writer that cannot have the lock in its wait (many
+# writers at once, a slow machine) still writes, since its act is not the seal's to refuse; without a
+# note the next check would read its line, or its plan, as changed around the tool, and every commit of
+# the run would be refused for an honest act. So a check reads the notes standing for the seal: lines
+# past the sealed length are no change when each is one a note holds, each note paying for one line,
+# and a plan is no change when a note holds its digest as it now stands. A line or a plan no note
+# accounts for is caught as before, beside honest ones too, and a note once paid by a seal is removed,
+# so the same bytes appended again by hand are caught. A note is
+# `<seal file>.owed.<pid>.<n>`, one line: `log|<the line>` or `plan|<cksum of the plan>`. Notes no
+# seal paid within a minute are dropped at the next seal, and every note goes with the seal. A note is
+# written where the seal is, by the library alone: whoever can write one could rewrite the seal itself.
 #
 #   AND THE BINDING, in the same home: which plan each session is bound to, written by
 #   lib/binding.sh `bind_plan` and believed by lib/run.sh `session_plan` (`seal_binding_*`, see
@@ -159,13 +177,16 @@ _seal_read() {  # <seal file> -> the _S_* fields; rc 1 when it is absent, out of
 # seal already holds is named only when they show none.
 _seal_check() {
   local v="${1:-}" cur len crc pre
-  _SEAL_LINE=clean
+  _SEAL_LINE=clean _SEAL_PAID=""
   [ "$v" != run ] || return 0
   if [ ! -f "$_S_PLAN" ]; then
     _SEAL_LINE="changed what=plan how=gone"; return 1
   fi
-  if [ "$v" != plan ] && [ "$(cksum < "$_S_PLAN")" != "$_S_PLAN_SUM" ]; then
-    _SEAL_LINE="changed what=plan how=changed"; return 1
+  if [ "$v" != plan ]; then
+    cur="$(cksum < "$_S_PLAN")"
+    if [ "$cur" != "$_S_PLAN_SUM" ] && ! _seal_owed plan "$cur"; then
+      _SEAL_LINE="changed what=plan how=changed"; return 1
+    fi
   fi
   if [ -f "$_S_LOG" ]; then
     cur="$(cksum < "$_S_LOG")"; crc="${cur%% *}"; len="${cur##* }"
@@ -181,14 +202,63 @@ _seal_check() {
   else
     pre="$_SEAL_EMPTY"
     [ "$_S_LOG_LEN" -eq 0 ] || pre="$(head -c "$_S_LOG_LEN" < "$_S_LOG" | cksum)"
-    if [ "${pre%% *}" = "$_S_LOG_SUM" ]; then _SEAL_LINE="changed what=log how=added"
-    else _SEAL_LINE="changed what=log how=changed"; fi
-    return 1
+    if [ "${pre%% *}" != "$_S_LOG_SUM" ]; then _SEAL_LINE="changed what=log how=changed"; return 1; fi
+    _seal_owed log || { _SEAL_LINE="changed what=log how=added"; return 1; }
   fi
   if [ "$_S_STATE" = changed ]; then
     _SEAL_LINE="changed what=$_S_WHAT how=$_S_HOW"; return 1
   fi
   return 0
+}
+
+# _seal_owed plan <cksum> | log — 0 when the notes standing for the seal just read account for the
+# difference: a note holding the plan's digest as it is now, or, for the lines past the sealed length,
+# one note each. The notes used are added to _SEAL_PAID. No note, no fork.
+_seal_owed() {
+  local kind="$1" want="${2:-}" lead="" used
+  set -- "$_SEAL_FILE".owed.*
+  [ -f "$1" ] || return 1
+  if [ "$kind" = plan ]; then
+    used="$(LC_ALL=C awk -v w="plan|$want" '$0 "" == w { print FILENAME; exit }' "$@" 2>/dev/null)"
+  else
+    # An appender writing after a log that ends mid-line opens its write with a line break.
+    [ "$_S_LOG_LEN" -eq 0 ] || [ -z "$(head -c "$_S_LOG_LEN" < "$_S_LOG" | tail -c 1)" ] || lead=1
+    used="$(tail -c +"$((_S_LOG_LEN + 1))" < "$_S_LOG" | LC_ALL=C awk -v k="$#" -v lead="$lead" '
+      FNR == 1 { f++ }
+      f <= k { if (substr($0, 1, 4) == "log|") { n++; note[n] = substr($0, 5); file[n] = FILENAME } next }
+      { t++ }
+      t == 1 && lead && $0 == "" { next }
+      { for (i = 1; i <= n; i++) if (!paid[i] && note[i] "" == $0 "") break
+        if (i > n) { bad = 1; exit 1 }
+        paid[i] = 1; out = out file[i] "\n" }
+      END { if (bad || out == "") exit 1; printf "%s", out }' "$@" - 2>/dev/null)" || return 1
+  fi
+  [ -n "$used" ] || return 1
+  _SEAL_PAID="$_SEAL_PAID$used
+"
+}
+
+_seal_note() {  # <note line> -> a note beside _SEAL_FILE, made whole by one mv
+  local tmp="$_SEAL_HOME/.new.$$.$RANDOM"
+  { printf '%s\n' "$1" > "$tmp" && mv -f "$tmp" "$_SEAL_FILE.owed.$$.$RANDOM"; } 2>/dev/null || { rm -f "$tmp"; return 1; }
+}
+
+seal_owe() {  # <plan> <line> -> 0 the note left, 1 not, 2 no home
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 64
+  case "$2" in *$'\n'*) return 64 ;; esac
+  _seal_place "$1" && mkdir -p "$_SEAL_HOME" 2>/dev/null || return 2
+  _seal_note "log|$2"
+}
+
+# _seal_settle [all] — after a seal is written, under the lock: the notes it paid go, every note
+# with `all` (the person's word covers the run as it stands), and any note no seal paid in a minute.
+_seal_settle() {
+  local f
+  set -- "$1" "$_SEAL_FILE".owed.*
+  [ -f "$2" ] || return 0
+  if [ "$1" = all ]; then shift; rm -f "$@"; return 0; fi
+  while IFS= read -r f; do [ -z "$f" ] || rm -f "$f"; done <<< "$_SEAL_PAID"
+  find "$_SEAL_HOME" -maxdepth 1 -name "${_SEAL_FILE##*/}.owed.*" -mmin +1 -exec rm -f {} + 2>/dev/null
 }
 
 seal_verify() {  # <plan> -> one line: clean | changed what= how= | none | nohome | busy
@@ -219,13 +289,18 @@ seal_write() {  # [--vouch plan|run] <plan> <log> [<command> [<arg>…]] -> 0 cl
   [ -n "$plan" ] && [ -n "$log" ] || return 64
   case "$plan$log" in *$'\n'*) return 64 ;; esac
   shift 2
-  SEAL_WAS="" SEAL_RC=0
+  SEAL_WAS="" SEAL_RC=0 _SEAL_PAID=""
   if ! _seal_place "$plan" || ! mkdir -p "$_SEAL_HOME" 2>/dev/null; then
     SEAL_WAS=nohome
     if [ "$#" -gt 0 ]; then "$@"; SEAL_RC=$?; fi
     return 2
   fi
-  _seal_lock || return 75
+  if ! _seal_lock; then
+    # The plan the write hook admitted is on disk now: its digest is owed, so that this honest
+    # write is not read as a plan changed around the tool.
+    [ "$vouch" != plan ] || [ ! -f "$_SEAL_PLAN" ] || _seal_note "plan|$(cksum < "$_SEAL_PLAN")"
+    return 75
+  fi
   # A gone plan is never vouched for: it can only be sealed as gone.
   [ -f "$_SEAL_PLAN" ] || vouch=""
   if _seal_read "$_SEAL_FILE"; then
@@ -259,6 +334,7 @@ seal_write() {  # [--vouch plan|run] <plan> <log> [<command> [<arg>…]] -> 0 cl
      || ! mv -f "$tmp" "$_SEAL_FILE" 2>/dev/null; then
     rm -f "$tmp"; _seal_unlock; return 2
   fi
+  _seal_settle "$([ "$vouch" = run ] && echo all)"
   _seal_unlock
   [ "$state" = clean ]
 }
@@ -268,7 +344,7 @@ seal_remove() {  # <plan> -> 0 removed or none stood, 2 no home, 75 the lock not
   _seal_place "$1" || return 2
   [ -f "$_SEAL_FILE" ] || return 0
   _seal_lock || return 75
-  rm -f "$_SEAL_FILE"
+  rm -f "$_SEAL_FILE" "$_SEAL_FILE".owed.*
   _seal_unlock
 }
 
