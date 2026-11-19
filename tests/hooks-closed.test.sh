@@ -48,9 +48,9 @@ ha() {
 }
 STUB="$( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/loader.sh" && bionic_loader_pin | sed -n '4p')"
 expect_contains "the stub's line that sources the loader is read" '. "$_bl_l"; bionic_load' "$STUB"
-expect_eq "each of the thirteen hooks holds it" 13 "$(cd "$BIONIC_HOOKS_DIR" && /usr/bin/grep -lxF -- "$STUB" bash-walls.sh \
+expect_eq "each of the fourteen hooks holds it" 14 "$(cd "$BIONIC_HOOKS_DIR" && /usr/bin/grep -lxF -- "$STUB" bash-walls.sh \
   canonical-sdlc-governing-skill.sh dispatch-preflight.sh engage.sh execution-recorder.sh permission-answer.sh preflight-probe.sh \
-  session-poker.sh session-start.sh session-sweeper.sh stop-check.sh stop-orders.sh stop.sh | wc -l | tr -d ' ')"
+  session-poker.sh session-start.sh session-sweeper.sh stop-check.sh stop-orders.sh stop.sh watch.sh | wc -l | tr -d ' ')"
 
 section "OPEN"
 while IFS='|' read -r h p a; do
@@ -68,6 +68,7 @@ session-start|{"session_id":"hc","cwd":"$S","hook_event_name":"SessionStart","so
 session-sweeper||verdict
 stop-check||no-such-agent
 stop-orders||stopped no-such-agent
+watch|{"session_id":"hc","cwd":"$S","hook_event_name":"Stop","stop_hook_active":false}|
 EOF
 
 section "REPAIR"

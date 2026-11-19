@@ -122,6 +122,12 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/watch.sh",
+            "asyncRewake": true,
+            "timeout": 86400
           }
         ]
       }
@@ -167,6 +173,12 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/watch.sh",
+            "asyncRewake": true,
+            "timeout": 86400
           }
         ]
       }

@@ -319,4 +319,48 @@ OUT510C="$(run_doctor)"
 expect_match "MAN-10b the same session run in place: doctor ran its PROJECT section" "*PROJECT*" "$OUT510C"
 expect_empty "MAN-10c …and the reader compares the checkout it loaded, which did not move" "$OUT510B"
 
+section "Section 6 §WATCH: the watcher wakes once on a restart the session needs, though nothing else moves"
+
+# The tick prints the restart line on every print, but an unchanged print wakes no pass, so the watcher (hooks/watch.sh)
+# asks the same reader itself and wakes once for each restart it has not told. The watcher is run as the platform runs
+# it: the event's JSON on stdin, the session's id in it, a pass every second.
+WATCH_HOOK="${REPO}/hooks/watch.sh"
+printf 'watch-interval: 1s\n' > "${PROJ}/.bionic/config.yaml"
+run_watch() {  # [env assignment...] -> WRC, WERR (stderr), WOUT; bounded at 60 s
+  local p i=0
+  jq -nc --arg s "$SID_LIVE" --arg c "$PROJ_REAL" '{session_id:$s,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' > "$TMP/watch.in"
+  ( cd "$PROJ" && exec env -u CLAUDE_CODE_SESSION_ID HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_CLAUDE_HOME="$CHOME" \
+      BIONIC_PLUGIN_ROOT="$PAYLOAD" "$@" bash "$WATCH_HOOK" < "$TMP/watch.in" ) > "$TMP/watch.out" 2> "$TMP/watch.err" &
+  p=$!
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
+  if kill -0 "$p" 2>/dev/null; then kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; WRC=124; else wait "$p" 2>/dev/null; WRC=$?; fi
+  WOUT="$(cat "$TMP/watch.out")"; WERR="$(cat "$TMP/watch.err")"
+}
+write_installed_plugins "$NEW"
+write_record "$SID_LIVE" "$OLD"
+expect_match "WAT-0 precondition: the reader names this session's restart" "*${SID_LIVE}*skills*" "$(run_lines)"
+TICK6="$(run_tick)"
+expect_match "WAT-0b …and the tick prints it, so the next print over the same run is unchanged" "*restart needed*" "$TICK6"
+run_watch
+expect_eq "WAT-1 a restart needed and nothing else moving: the watcher exits with the wake code" "2" "$WRC"
+expect_match "WAT-1a …its one line tells the model to have the person restart" "bionic watch: restart - *exit claude*" "$WERR"
+expect_eq "WAT-1b …one line, and nothing on stdout" "1|" "$(count_of "bionic watch" "$WERR")|$WOUT"
+run_watch BIONIC_WATCH_DEADLINE=3
+expect_eq "WAT-2 the next watcher over the same restart does not wake again: it ends at its limit, quietly" "0|" "$WRC|$WERR"
+# THE WATCHER'S OWN READ. The tick's print is unchanged now, so no pass names the restart again; a watcher whose record
+# no longer carries what was told (the record wiped, as a predecessor's sweep or close-out wipes one) wakes on it from
+# its own read of the restart, once.
+rm -f "${PROJ}/.bionic/tmp/watch-${SID_LIVE}.state"
+run_watch BIONIC_WATCH_DEADLINE=3
+expect_eq "WAT-2a the same restart, the record gone: the watcher wakes on its own read, the print unchanged" "2" "$WRC"
+expect_match "WAT-2b …with the restart line" "bionic watch: restart - *exit claude*" "$WERR"
+run_watch BIONIC_WATCH_DEADLINE=3
+expect_eq "WAT-2c …and the watcher after it ends quietly again" "0|" "$WRC|$WERR"
+printf 'command, released\n' > "$NEW/commands/x.md"
+expect_match "WAT-3 precondition: a second class moved, so the restart now names commands" "*${SID_LIVE}*commands*" "$(run_lines)"
+run_watch
+expect_eq "WAT-3a a restart that names more than the one told: the watcher wakes on it" "2" "$WRC"
+expect_match "WAT-3b …with the restart line" "bionic watch: restart - *" "$WERR"
+rm -f "${PROJ}/.bionic/config.yaml"
+
 finish
