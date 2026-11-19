@@ -211,6 +211,12 @@ run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=green|at=${t}:38Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=discarded|at=${t}:39Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=u.test.sh|result=discarded|at=${t}:40Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=u.test.sh|result=red|at=${t}:41Z
+run/v1|ev=tree|row=T4|path=/t4|branch=wt/T4|base=c4|at=${t}:42Z
+run/v1|ev=tree|row=T4|path=|branch=wt/T4|base=|why=removed|at=${t}:43Z
+run/v1|ev=tree|row=T2|path=/t2|branch=wt/T2|base=c2|at=${t}:44Z
+run/v1|ev=tree|row=T2|path=|branch=wt/T2|base=|why=removed|at=${t}:45Z
+run/v1|ev=tree|row=T2|path=/t2|branch=wt/T2|base=c2|at=${t}:46Z
+run/v1|ev=tree|row=T3|path=/t3u|branch=wt/T3|base=c0
 EOF
 printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' >> "$D/plans/epic-x/rest.plan.md"
 for r in T1 T2 T3 T4; do printf '| %s | 4 | build | t | — | 30 | R | f | out/%s.md |\n' $r $r >> "$D/plans/epic-x/rest.plan.md"; done
@@ -218,7 +224,7 @@ REST=("holds|holds|rc=0 step 4,T9" "reviews|question|rc=0 adversarial,structure,
   "ledger|verb|rc=0 put,ruled,put" "ledger D1|verb|rc=0 put,ruled" "findings|to|rc=0 carried,fix" "findings fix|ref|rc=0 F1"
   "debts|concept/id/ref|rc=0 F2,c1,d1" "stop|-|rc=0 room=3,session=s1,state=free,at=${t}:21Z,order=given,asks=3,ready="
   "order|-|rc=0 order=given,said=away,at=${t}:24Z" "hands|kind|rc=0 amend,hand" "handoff|-|rc=0 path=/h1,at=${t}:36Z"
-  "status T3|-|rc=0 state=returned,files=f,name=w3,suites=b.test.sh,tree=/t3,branch=wt/T3,base=c0"
+  "status T3|-|rc=0 state=returned,files=f,name=w3,suites=b.test.sh,tree=/t3u,branch=wt/T3,base=c0" "status T2|-|rc=0 state=landed,tree=/t2,branch=wt/T2,base=c2,commit=c2"
   "status T4|-|rc=0 state=pending" "status T1|-|rc=0 state=landed,commit=c1" "ready T4 T1|-|rc=0 " "ready T4 T3|-|rc=1 "
   "ready T3|-|rc=1 " "ready T1|-|rc=1 " "verdicts|result|rc=0 green,red" "verdicts T9|result|rc=0 ")
 pick() {  # <field[/field…]|-> -> each line's first named field, or the whole line, joined by commas
@@ -231,6 +237,9 @@ got="$(rest)"; for r in "${REST[@]}"; do expect_eq "${r%%|*} answers its fold" "
 awk -F'|' -v OFS='|' '{ f = $2; for (i = 2; i < NF; i++) $i = $(i + 1); $NF = f; print }' "$D/record/rest/run.log" | plan restmoved
 cp "$D/plans/epic-x/rest.plan.md" "$D/plans/epic-x/restmoved.plan.md"
 expect_eq "the twelve answer the same with each line's fields moved" "$got" "$(W=restmoved; rest)"
+# A removed tree (T4) holds no tree for the scheduler, one made again (T2) holds it, and an untimed line (T3) replaces none.
+expect_eq "the scheduler's trees: the latest timed tree line of each row" "T2=/t2 T3=/t3 T4=" "$( ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh"
+  _units_live "$D/plans/epic-x/rest.plan.md" ) | awk -F'\t' '$1 ~ /^T[234]$/ { print $1 "=" $4 }' | sort | paste -sd' ' -)"
 ask status 2>/dev/null; expect_status "status with no row exits 2" 2 "$?"
 ask ready 2>/dev/null; expect_status "ready with no row exits 2" 2 "$?"
 

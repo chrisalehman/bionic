@@ -903,6 +903,21 @@ expect_contains "(tv6) a name a row claims with no brief is refused, naming the 
   "FAIL reason=brief-unrendered row=T1 name=w45-T1-r2 — render the brief first" "$TROUT8"
 expect_eq "(tv7) …and nothing is made: no tree, no branch, no event" "0|0|1" \
   "$([ -e "$TR/.worktrees/45-T1-r2" ] && echo 1 || echo 0)|$(git -C "$TR" branch --list wt/45-T1-r2 | grep -c .)|$(tr_trees | grep -c .)"
+# Removing the tree is the row's tree event with an empty path, its run found from the tree's own record, no session's.
+tr_status() { bash "$REPO/payload/scripts/reader.sh" "$TRPLAN" status "$1" | grep '^tree='; }
+expect_eq "(tv8) before the removal the reader answers T2's tree" "tree=.worktrees/45-T6" "$(tr_status T2)"
+expect_match "(tv9) remove writes T2's tree event with an empty path" "REMOVED *|run/v1|ev=tree|row=T2|path=|branch=wt/45-T6|base=|by=w45-T6|why=removed|at=*" \
+  "$( cd "$TR" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" remove "$(ws_path "$TROUT6")" 2>/dev/null )|$(tr_trees | tail -n1)"
+expect_eq "(tv10) …and the reader answers no tree for the row" "" "$(tr_status T2)"
+
+section "§REFUSALS: a tree is refused for an integrate row, naming the kind; nothing is made"
+# fails-when: create makes a tree, a branch or a tree event for a brief whose row is the integrate row.
+printf '| T3 | 8 | integrate | merge | — | 10 | REQ-1 | — | — |\n' >> "$TRPLAN"
+printf '<!-- brief: rendered from row T3 for w45-T8; sum %064d; render it again to change it, never edit it -->\nRow: T3\n' 0 > "$TRREC/briefs/w45-T8.md"
+TRN="$(tr_trees | grep -c .)"; TROUT9="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T8 --for w45-T8)"
+expect_contains "(rf1) the integrate row's tree is refused, naming the kind and the row's route" \
+  "FAIL reason=integrate-row row=T3 kind=integrate name=w45-T8 — " "$TROUT9"
+expect_eq "(rf2) …exit 2, and no tree, no branch, no event" "rc=2|0|0|$TRN" "$(printf '%s\n' "$TROUT9" | tail -n1)|$([ -e "$TR/.worktrees/45-T8" ] && echo 1 || echo 0)|$(git -C "$TR" branch --list wt/45-T8 | grep -c .)|$(tr_trees | grep -c .)"
 
 
 finish
