@@ -957,6 +957,26 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     TICK_ROOT_WALK="$(project_root_candidates "$PWD")"
     TICK_ROOT_TAG="$(printf '%s\n' "$TICK_ROOT_WALK" | tail -1 | awk -F'\t' '{ print $2 }')"
 
+    # ONE TICK OF A SESSION AT A TIME. The tick records its process while it runs (lib/patrol.sh `tick_run_claim`),
+    # after the walk, since the claim may create `.bionic/tmp`, and before the stamp, since a tick that finds a live
+    # one of its session decides nothing and so attests nothing: it says so in one line and exits 0, the quiet exit,
+    # so the watch pass that ran it stays quiet too. A record that cannot be written leaves the tick as it ran
+    # before the record existed: unrecorded, on stderr. The exit trap removes the record; tick_emit, which replaces
+    # that trap below, removes it as its last act.
+    TICK_RUN_ROOT=""
+    _tr_stamp="$(patrol_stamp_file "$SESSION_ID")" || _tr_stamp=""
+    if [ -n "$_tr_stamp" ] && tmp_dir_ok "${_tr_stamp%/*}"; then
+      TICK_RUN_ROOT="${_tr_stamp%/.bionic/tmp/*}"
+      _tr_held="$(tick_run_claim "$TICK_RUN_ROOT" "$SESSION_ID" "$$")"
+      case $? in
+        0) trap 'tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"' EXIT ;;
+        1) say "TICK-RUNNING — pid ${_tr_held%% *}, started ${_tr_held#* }, is this session's tick; this one exits"
+           exit 0 ;;
+        *) TICK_RUN_ROOT=""
+           die "WARN — the running tick's record could not be written; this tick runs unrecorded." ;;
+      esac
+    fi
+
     # STAMP FIRST, BEFORE ANYTHING IS READ OR DECIDED. Every line below this one can end in
     # a refusal, and each of those refusals is a HEALTHY Patrol firing into a state it has
     # nothing to say about. What the stamp attests is the firing, so it is taken here — the
@@ -1022,7 +1042,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     fi
     tick_emit() {
       local rc=$?
-      [ -n "$TICK_BUF" ] || exit "$rc"
+      [ -n "$TICK_BUF" ] || { [ -z "$TICK_RUN_ROOT" ] || tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"; exit "$rc"; }
       exec 1>&3 3>&-
       [ -z "${TICK_RESTART:-}" ] || say "$TICK_RESTART"
       if [ -n "$TICK_DIGEST" ] && [ -n "$TICK_REARM" ]; then
@@ -1051,6 +1071,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
         write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
+      [ -z "$TICK_RUN_ROOT" ] || tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"
       exit "$rc"
     }
     if [ -n "$TICK_BUF" ]; then

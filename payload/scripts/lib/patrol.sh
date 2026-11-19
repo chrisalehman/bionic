@@ -181,6 +181,9 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #                                              (wave-27 T68)
 #   owed         scripts/lib/owed.sh           what the person owes the run, one line per item;
 #                                              close-out's wipe spares a live session's (wave-33 T12)
+#   tick-run     hooks/poker/tick.sh           the running tick's process, while it runs (`tick_running`
+#                                              below); not `tick-<sid>`, whose class glob would read every
+#                                              `tick-digest-` file as a session named `digest-<sid>`
 #
 # THE OWNER IS THE NAME UP TO ITS FIRST DOT, FOR EVERY CLASS (wave-27 T68; review pass 47 S1,
 # A-orch-137). A session id holds no dot (lib/context.sh admits `[A-Za-z0-9_-]` only) and an
@@ -195,7 +198,7 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 # so no id derived here can address one. A non-session file added later is safe on
 # arrival for the same reason. (`stop-check.state` was a third of these until
 # epic-23 wave-15 deleted the observation record itself — ADR-028.)
-PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock owed"
+PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock owed tick-run"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
 # EVERY SESSION ID WITH STATE HERE, each once, in class-then-name order. Symlinks
@@ -947,6 +950,82 @@ tick_digest_path() {  # <project root> <session-id> -> absolute path, or nothing
 tick_digest_field() {  # <digest file> <key>
   [ -f "$1" ] && [ ! -L "$1" ] || return 0
   sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
+}
+
+# ─── A TICK OF THIS SESSION IS RUNNING: ITS RECORD AND THE ONE QUESTION ───────────────────────
+#
+# `<root>/.bionic/tmp/tick-run-<sid>.state`, two lines: `pid=<pid>` and `start=<start>`, the start as lib/alive.sh's
+# `alive_since` reads it. The tick claims it before it stamps and removes it as it exits (hooks/poker/tick.sh), and
+# both the tick and the stop wall ask `tick_running`, so a second tick and the turn end read one answer. The answer
+# is lib/alive.sh's one rule, never the file's age or existence: a tick killed before it could remove its record
+# leaves one naming a dead process, or a pid the OS has since handed on, and that record holds nothing off.
+#
+# A RECORD WITH NO START IS NOT A TICK'S. alive_run reads an empty start as `kill -0` alone, which any reused pid
+# passes; the tick always records a start, so a record without one is read as no running tick.
+#
+# THE CLAIM IS A HARD LINK OF A WHOLE FILE, so a reader never sees a half-written record and two ticks starting
+# together cannot both create it. Taking over a dead record is a rename over it, which two ticks starting together
+# over the same dead record can both do; then both run, as every tick did before the record existed.
+tick_run_path() {  # <project root> <session-id> -> absolute path, or nothing
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  printf '%s/.bionic/tmp/tick-run-%s.state' "$1" "$2"
+}
+
+_tick_run_read() {  # <record> — sets _TR_PID and _TR_START; rc 1 when it is no record or names no pid
+  local l
+  _TR_PID=''; _TR_START=''
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  while IFS= read -r l; do
+    case "$l" in pid=*) _TR_PID="${l#pid=}" ;; start=*) _TR_START="${l#start=}" ;; esac
+  done < "$1"
+  case "$_TR_PID" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+# tick_running <root> <sid> -> rc 0 with `<pid> <start>` on stdout while a live process holds the record; rc 1
+# otherwise, and when lib/alive.sh is not loaded, so a reader that cannot ask the rule judges as it did before.
+tick_running() {
+  local f
+  f="$(tick_run_path "${1:-}" "${2:-}")" || return 1
+  _tick_run_read "$f" && [ -n "$_TR_START" ] || return 1
+  declare -F alive_run >/dev/null 2>&1 || return 1
+  alive_run "$_TR_PID" "$_TR_START" || return 1
+  printf '%s %s\n' "$_TR_PID" "$_TR_START"
+}
+
+# tick_run_claim <root> <sid> <pid> -> rc 0 the record names <pid>; rc 1 a live tick of the session holds it, its
+# `<pid> <start>` on stdout; rc 2 it could not be written (a link where it goes, a process with no start to read, a
+# directory that refuses the write). The caller has already judged the directory safe to write in.
+tick_run_claim() {
+  local f d start tmp held
+  f="$(tick_run_path "${1:-}" "${2:-}")" || return 2
+  case "${3:-}" in ''|*[!0-9]*) return 2 ;; esac
+  [ -L "$f" ] && return 2
+  declare -F alive_since >/dev/null 2>&1 || return 2
+  start="$(alive_since "$3")"
+  [ -n "$start" ] || return 2
+  d="${f%/*}"
+  [ -d "$d" ] || mkdir -p "$d" 2>/dev/null || return 2
+  tmp="$d/.tick-run-$2.$3"
+  printf 'pid=%s\nstart=%s\n' "$3" "$start" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 2; }
+  if ln "$tmp" "$f" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  if held="$(tick_running "$1" "$2")"; then
+    rm -f "$tmp"
+    [ "${held%% *}" = "$3" ] && return 0
+    printf '%s\n' "$held"
+    return 1
+  fi
+  [ -L "$f" ] && { rm -f "$tmp"; return 2; }
+  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 2; }
+  return 0
+}
+
+# tick_run_release <root> <sid> <pid> — removes the record when it names <pid>; one another tick took is left.
+tick_run_release() {
+  local f
+  f="$(tick_run_path "${1:-}" "${2:-}")" || return 0
+  _tick_run_read "$f" || return 0
+  [ "$_TR_PID" = "${3:-}" ] && rm -f "$f" 2>/dev/null
+  return 0
 }
 
 # ─── THE WATCHER'S PASS: ITS EXITS, ITS LINE AND ITS INTERVAL ────────────────────────────────

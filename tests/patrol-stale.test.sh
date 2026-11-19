@@ -120,6 +120,7 @@ OW_CLASSES="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$PATROL_SH")"
 expect_nonempty "OW0 PATROL_STATE_CLASSES is read off patrol.sh (the extractor works)" "$OW_CLASSES"
 expect_contains "OW1 start-clock is one of the classes" " start-clock " " $OW_CLASSES "
 expect_contains "OW1b owed is one of the classes (the person's ledger, T11/T12: a live neighbour's open items are spared by close-out's wipe)" " owed " " $OW_CLASSES "
+expect_contains "OW1c tick-run is one of the classes (a running tick's record: close-out's wipe spares a live session's)" " tick-run " " $OW_CLASSES "
 OW_CO_FN="$(sed -n '/^_co_tmp_owner() {/,/^}/p' "$CO_SH")"
 expect_nonempty "OW2 close-out's owner reader is read off close-out.sh (the extractor works)" "$OW_CO_FN"
 OW_BAD_P=""; OW_BAD_C=""; OW_SEEN=0
