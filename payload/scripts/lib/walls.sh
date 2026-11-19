@@ -6364,8 +6364,13 @@ Nothing that gates or reviews this run reads the store. Reading it stays open."
 #   BIONIC_SEAL_PLAN   that plan, as the session's binding names it
 #   BIONIC_SEAL_LOG    the log the seal names, which outlives a plan that is gone
 # Any line but `changed …` and `busy` is nothing to judge here.
+#
+# THE ASK. A change is an ask of the person until they rule, so the refusal stages one, `seal:changed`, in
+# BIONIC_WALL_OWED as the gate stages its own, and the collector opens it on the run's register: the log the
+# seal names, which lib/owed.sh `owed_register` finds through the seal when the plan is gone. One key a
+# run: a second change while it is open is the same need, and a change after the ruling is a new round.
 wall_run_seal() {  # <event> -> 0 nothing · 2 block
-  local _w _h _fact
+  local _w _h _fact _r
   case "${BIONIC_SEAL_LINE:-}" in
     busy)
       fold_block exit2 commit "the run's seal could not be read" "run the commit again" \
@@ -6382,6 +6387,8 @@ Plan:  ${BIONIC_SEAL_PLAN:-}"
     added) _fact="the run's $_w was added to outside the tool" ;;
     *)     _fact="the run's $_w was $_h outside the tool" ;;
   esac
+  _r="session-poker.sh accept '<their words>' or session-poker.sh abandon '<their words>'"
+  BIONIC_WALL_OWED="seal:changed"$'\t'"changed run: $_w $_h"$'\t'"$_fact: the person rules, by $_r"
   fold_block exit2 commit "$_fact" "only the person can rule" \
 "The run this session is bound to no longer matches its seal: $_fact.
 Plan:  ${BIONIC_SEAL_PLAN:-}
@@ -6389,6 +6396,9 @@ Log:   ${BIONIC_SEAL_LOG:-}
 Seal:  $BIONIC_SEAL_LINE
 Its plan and its log hold only what the tool wrote; a line written by hand, or a file moved, cut
 or removed, is not the run's own work, so no commit of this run is admitted until the person
-rules on the change. Tell them what changed and wait for their word."
+rules on the change. Tell them what changed and wait for their word, one of two replies:
+  session-poker.sh accept '<their words>'    the run as it now stands is theirs, sealed again
+  session-poker.sh abandon '<their words>'   the run ends here
+Until then the change is the ask seal:changed on the run's register, in the log above."
   return 2
 }

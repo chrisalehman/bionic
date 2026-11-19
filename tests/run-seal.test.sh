@@ -28,6 +28,8 @@
 #   §LOG      the log removed, renamed, emptied, cut, or a close, step, cancel, proof, approval or
 #             waiver appended by hand: refused, naming the log gone, shortened or added to.
 #   §TOOLS    the same roads by Write and Edit through the write hook, then the commit.
+#   §CHANGED  a caught change: the refusal names the log and both replies, the ask it opens is in the log
+#             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
 #   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
 #             log and binding untouched: the commit's refusal is the one before, word for word.
 #
@@ -359,6 +361,7 @@ PC="$REF the run's plan was changed outside the tool (only the person can rule)"
 LG="$REF the run's log is gone (only the person can rule)"
 LS="$REF the run's log was shortened outside the tool (only the person can rule)"
 LA="$REF the run's log was added to outside the tool (only the person can rule)"
+LC="$REF the run's log was changed outside the tool (only the person can rule)"
 
 # A file-writing tool's call in the gate world, driven through the write hook's before and after arms (drive,
 # above), with the tool's own effect made by the shell between them; a call the before-arm denies goes no further.
@@ -408,6 +411,7 @@ gated "the log removed" "$LG" 'rm "$GL"'
 gated "the log renamed" "$LG" 'mv "$GL" "$GL.old"'
 gated "the log emptied" "$LS" ': > "$GL"'
 gated "its last line cut" "$LS" 'sed -i.bak "\$d" "$GL"'
+gated "a line of it rewritten in place" "$LC" 'sed -i.bak "1s/n=1/n=7/" "$GL"'
 for l in 'ev=abandon' 'ev=step|n=9|delivered=x' 'ev=step|n=10' 'ev=step|n=3' 'ev=cancel|of=step' \
          'ev=proof|kind=review|result=pass|head=x' 'ev=approval|key=step5|by=x|said=y' 'ev=waiver|key=x|by=y'; do
   gated "a hand-appended ${l%%|*} line (${l#ev=})" "$LA" "printf 'run/v1|$l|at=z\n' >> \"\$GL\""
@@ -421,6 +425,27 @@ gated "an Edit adding a step to the log" "$LA" 'tool Edit "$GL" "$(tail -1 "$GL"
 run/v1|ev=step|n=9|delivered=x|at=z"'
 expect_status "and the write hook admitted that Edit" 0 "$TOOL_PRE"
 
+section "CHANGED"
+sitrep_asks() { (cd "$G" && HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+  bash "$BIONIC_HOOKS_DIR/session-poker.sh" sitrep 2>/dev/null) | /usr/bin/grep '^ask: '; }
+SA='^ask: key=seal:changed holds=every commit title=changed run: .* blocks=yes waits=user$'
+while IFS="|" read -r label first change <&3; do
+  gated "$label" "${!first}" "$change"
+  E="$(cat "$SB/gate.err")"
+  expect_contains "$label: the refusal names the log" "Log:   $GL" "$E"
+  expect_contains "$label: and the reply that accepts" "session-poker.sh accept '<their words>'" "$E"
+  expect_contains "$label: and the reply that abandons" "session-poker.sh abandon '<their words>'" "$E"
+  expect_regex "$label: the ask is in the log the seal names" '^run/v1\|ev=ask\|key=seal:changed\|' "$(cat "$GL" 2>/dev/null)"
+  expect_regex "$label: the sitrep lists it" "$SA" "$(sitrep_asks)"
+done 3<<'ROWS'
+the log removed|LG|rm "$GL"
+the plan removed|PG|rm "$GP"
+the plan edited|PC|printf "| T9 | x |\n" >> "$GP"
+a line of the log rewritten|LC|sed -i.bak "1s/n=1/n=7/" "$GL"
+ROWS
+rm "$GP"
+expect_regex "the ask of the changed log is listed still, with the plan then removed" "$SA" "$(sitrep_asks)"
+gated "the plan removed, its commit refused, then put back" "$PC" 'cp "$GP" "$SB/keep"; rm "$GP"; gate "git commit -m x"; cp "$SB/keep" "$GP"'
 section "KEPT"
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh"
 export TMPDIR="$SB/kept"
