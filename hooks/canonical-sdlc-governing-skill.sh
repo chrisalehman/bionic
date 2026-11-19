@@ -266,6 +266,24 @@ if [ "$EVENT" != "PostToolUse" ] && [ "$BIONIC_ENGAGED" = 1 ]; then
   esac
 fi
 
+# ---------- THE SEAL'S HOME ----------
+#
+# The Write/Edit half of the shell wall's refusal (hooks/bash-walls.sh), in the same words, for every
+# session, engaged or not: `<common git dir>/bionic-seal/` holds what vouches for each run, and only the
+# tool's own writers change it, from library code no tool call carries. Screened on the home's name
+# before any fork; the path is folded, then resolved where it lies (lib/grant.sh), and compared with the
+# home git names for the session's root.
+if [ "$EVENT" != "PostToolUse" ]; then
+  case "$FILE_PATH" in
+    *"$SEAL_HOME_NAME"*)
+      # shellcheck source=/dev/null
+      if seal_binding_warm "$BIONIC_ROOT" 2>/dev/null && . "$BIONIC_LIB/grant.sh" 2>/dev/null \
+         && write_gate_in_seal_home "$_SB_COMMON/$SEAL_HOME_NAME" W "$(grant_resolve "$(fold_dots "$FILE_PATH")")"; then
+        write_gate_refuse seal-home "" "$FILE_PATH" "$TOOL" "$FILE_PATH" "$_SB_COMMON/$SEAL_HOME_NAME"
+      fi ;;
+  esac
+fi
+
 PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
   # project_root always answers, so this is unreachable in practice. Kept as a
