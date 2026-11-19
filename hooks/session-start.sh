@@ -819,6 +819,28 @@ $OSID
   exec 8<&- 9<&-
 fi
 
+# ---------------------------------------------------------------- predecessor watches
+#
+# THE WATCH RECORD, READ BESIDE THE STAMP. hooks/watch.sh keeps `watch-<sid>.state` for each session it watches, and
+# `watch_state` (lib/patrol.sh) reads it by the one alive rule: a predecessor still watching runs passes over a
+# conversation that is gone until it sees the clear, one that stopped died without a word, and one resting ended on
+# purpose. This session's own record is not listed: its watcher starts beside this hook.
+WATCHES=""
+for WF in "$TMP"/watch-*.state; do
+  [ -f "$WF" ] && [ ! -L "$WF" ] || continue
+  OSID="${WF##*/}"; OSID="${OSID#watch-}"; OSID="${OSID%.state}"
+  [ -n "$OSID" ] || continue
+  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
+  WS="$(watch_state "$BIONIC_ROOT" "$OSID" 2>/dev/null)" || continue
+  case "$WS" in
+    watching\ *) WS="watching (pid $(printf '%s' "${WS#watching }" | cut -d' ' -f1))" ;;
+    stopped\ *)  WS="stopped without a word (pid ${WS#stopped })" ;;
+    resting\ *)  WS="resting (${WS#resting })" ;;
+  esac
+  WATCHES="${WATCHES}  ${OSID:0:8} — watch ${WS}
+"
+done
+
 # ---------------------------------------------------------------- legacy symlinks
 #
 # NARROWED (AC-11/AC-7.1, A-orch-24, wave-13-fixit-180). D7 brought `.bionic`
@@ -969,7 +991,7 @@ ss_arm_line() {
 # carries the session, and this is the one surface that names the root to arm it from. A sweep
 # failure is worth one line on any start (AC-R2.4): it is the one write this hook can make, and
 # a write that fails silently is worse than the noise of saying so.
-if [ -z "$ROSTERS" ] && [ -z "$STAMPS" ] && [ -z "$LINKS" ] && [ "$AGREE" = "agree" ]; then
+if [ -z "$ROSTERS" ] && [ -z "$STAMPS" ] && [ -z "$WATCHES" ] && [ -z "$LINKS" ] && [ "$AGREE" = "agree" ]; then
   [ "$BIONIC_ENGAGED" = 1 ] && ss_arm_line
   [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
   exit 0
@@ -987,6 +1009,9 @@ if [ -n "$ROSTERS" ]; then
 fi
 if [ -n "$STAMPS" ]; then
   printf 'predecessor stamps:\n%s' "$STAMPS"
+fi
+if [ -n "$WATCHES" ]; then
+  printf 'predecessor watches:\n%s' "$WATCHES"
 fi
 if [ -n "$LINKS" ]; then
   printf 'legacy .bionic symlinks:\n%s' "$LINKS"

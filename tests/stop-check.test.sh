@@ -776,6 +776,8 @@ printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8
 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$OWN8" > "$R8/.bionic/tmp/patrol-${OWN8}.state"
 chmod 600 "$R8/.bionic/tmp/patrol-${OWN8}.state"
+# …and a watch that rested on purpose, which the start gate admits as it admits a live one.
+printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$R8/.bionic/tmp/watch-${OWN8}.state"
 # …and this session's engagement marker, the fourth writer precondition (task-engaged-session):
 # the start gate asks `engaged_session` before it asks anything else, and this case needs it
 # to actually JOURNAL a row. A fixture of the writer's preconditions, never of the value

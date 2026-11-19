@@ -453,6 +453,13 @@ make_repo_seed() {
 }
 make_repo_seed
 
+# watch_rested <repo> <sid> -> the session's watch record, resting because the run waits on the person: the shape
+# hooks/watch.sh leaves (payload/scripts/lib/patrol.sh, THE WATCH RECORD).
+watch_rested() {
+  mkdir -p "$1/.bionic/tmp"
+  printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$1/.bionic/tmp/watch-$2.state"
+}
+
 # make_repo <name> <active-wave:yes|no> -> echoes the repo path
 make_repo() {
   local name="$1" wave="$2"
@@ -482,6 +489,9 @@ make_repo() {
       printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" > "$repo/.bionic/tmp/patrol-$_psid.state"
       chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+      # …AND A WATCH, rested on purpose: the dispatch wall admits a watch that is alive or that rested
+      # (hooks/watch.sh writes this record), so §WATCH alone drives the watch's other states.
+      watch_rested "$repo" "$_psid"
       # A LIVE WAVE HAS AN ENGAGED SESSION (task-engaged-session). The gate asks
       # `engaged_session` before it asks anything else, so a fixture without this marker is
       # silent for a reason that has nothing to do with the wall under test — every

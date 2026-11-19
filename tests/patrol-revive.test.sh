@@ -811,6 +811,65 @@ else
   no "TS-7c the control: resume over a wave-scale run armed no stamp" "$(ls "$TS_RW/.bionic/tmp")"
 fi
 
+section "§WATCH-LOST — a watcher killed mid-run: the next turn end says so in one line, once, and starts another (AC-12.2)"
+
+# THE CONTRACT. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory; a watcher killed from outside leaves
+# it saying watching over a dead process. The turn end runs hooks/stop.sh and hooks/watch.sh together,
+# in no fixed order. The new watcher's claim keeps the dead one's pid as `lost=`, so whichever hook
+# reads first, the stop wall prints one advisory line naming the dead watcher, and no later turn end
+# prints it again. It is a line, not a block: the turn end starts the new watcher itself, so there is
+# nothing for the model to do.
+# FIXTURE FIDELITY: make_env's engaged project, the real hooks/stop.sh process and the real
+# hooks/watch.sh, run on a Stop input as the platform hands it, its day cut to one pass by
+# BIONIC_WATCH_DEADLINE so it ends by itself. The dead watcher is a finished subshell's pid.
+# ANTI-VACUITY: the one-line rows count the line on the same stream where the control finds none
+# over a live watcher; the once-only rows run the turn end that printed it a second time.
+# fails-when: the turn end after a watcher's death prints nothing, prints it on a later turn end
+# again, refuses the turn, or leaves the record naming the dead watcher.
+WL_HOOK="${BIONIC_HOOKS_DIR}/watch.sh"
+wl_record() { printf '%s/.bionic/tmp/watch-%s.state' "$1" "$SID"; }
+wl_lines() { printf '%s\n' "$HOOK_ERR_USER" | /usr/bin/grep -c 'bionic watch: stopped' ; }
+wl_watch() {  # <project> -> the real watcher on a Stop input, one pass, in that project
+  jq -nc --arg c "$1" --arg s "$SID" '{session_id:$s,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
+    | ( cd "$1" && env BIONIC_WATCH_DEADLINE=1 CLAUDE_CONFIG_DIR="$1/no-config" bash "$WL_HOOK" ) >/dev/null 2>&1
+}
+wl_dead() {  # <project> -> a record that says watching over a process that has exited
+  ( exit 0 ) & WL_PID=$!; wait "$WL_PID" 2>/dev/null
+  printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$WL_PID" "Thu Jan  1 00:00:00 2026" "$(pr_iso 120)" > "$(wl_record "$1")"
+}
+sleep 600 & WL_LIVE=$!
+WL_START="$(bash -c '. "$1/alive.sh" && alive_since "$2"' _ "$PR_LIB_DIR_EARLY" "$WL_LIVE")"
+[ -f "$WL_HOOK" ] && [ -n "$WL_START" ] && ok "WL0 the watcher hook is there and the live fixture has a start" \
+  || no "WL0 the watcher hook or the live fixture's start is missing" "hook=$WL_HOOK start=<$WL_START>"
+
+WL=$(make_env 1m)
+printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$WL_LIVE" "$WL_START" "$(pr_iso 120)" > "$(wl_record "$WL")"
+fire "$WL"
+expect_eq "WL1 the control: over a live watcher the turn end says nothing of the watch" "0" "$(wl_lines)"
+
+# The stop wall reads first: the record still says watching over the dead process.
+WL=$(make_env 1m); wl_dead "$WL"
+fire "$WL"; WL_OUT="$HOOK_OUT"; WL_RC=$HOOK_RC
+expect_eq "WL2 the stop wall first: one line says the watch stopped" "1" "$(wl_lines)"
+expect_contains "WL2a …naming the watcher that died" "pid $WL_PID" "$HOOK_ERR_USER"
+expect_eq "WL2b …and it is no block: the turn ends" "0|" "$WL_RC|$(printf '%s' "$WL_OUT" | jq -r '.decision // empty' 2>/dev/null)"
+wl_watch "$WL"
+WL_STATE="$(bash -c '. "$1/patrol.sh" && watch_state "$2" "$3"' _ "$PR_LIB_DIR_EARLY" "$WL" "$SID")"
+case "$WL_STATE" in stopped*|'') no "WL3 …and the turn end's watcher took the record over" "state=<$WL_STATE>" ;;
+  *) ok "WL3 …and the turn end's watcher took the record over ($WL_STATE)" ;; esac
+fire "$WL"
+expect_eq "WL4 the next turn end does not say it again" "0" "$(wl_lines)"
+
+# The watcher claims first: the record already names the new watcher when the stop wall reads.
+WL=$(make_env 1m); wl_dead "$WL"; wl_watch "$WL"
+expect_contains "WL5 the watcher first: its claim keeps the dead watcher's pid" "lost=$WL_PID" "$(cat "$(wl_record "$WL")")"
+fire "$WL"
+expect_eq "WL6 …and the stop wall still says it, in one line" "1" "$(wl_lines)"
+expect_contains "WL6a …naming the watcher that died" "pid $WL_PID" "$HOOK_ERR_USER"
+fire "$WL"
+expect_eq "WL7 …and the next turn end does not say it again" "0" "$(wl_lines)"
+kill "$WL_LIVE" 2>/dev/null
+
 # ---------- the header's own honesty about its backstop ----------
 #
 # The retired sentence claimed the CLI overrides this hook "after 8 consecutive blocks".

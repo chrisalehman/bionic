@@ -2603,7 +2603,7 @@ stop_patrol_revive() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
   local HOOK_DIR _RUN_PLAN STAMP_FILE POKER INTERVAL WINDOW MTIME AGE
   local _rival_now _rival_sf _rival_sid _rival_mt _rival_age
-  local TRANSCRIPT VERDICT VLINE GAP WHY
+  local TRANSCRIPT VERDICT VLINE GAP WHY _lost
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
 
@@ -2680,6 +2680,23 @@ if ! declare -F scale_patrol >/dev/null 2>&1; then
 fi
 if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$_RUN_PLAN")" = no ]; then
   return "$_adv"
+fi
+
+# ---------- a watcher that died without a word ----------
+#
+# ONE LINE, ONCE, AND NO BLOCK. hooks/watch.sh starts a new watcher at this same turn end, so there is nothing for the
+# model to do: the line tells the person the watch was lost and is starting again. The two hooks run together in no
+# fixed order, so the dead watcher is read from the record whichever came first: a record still saying watching over
+# the dead process, or the new watcher's claim, which keeps the dead pid as `lost=`. `said=` on the record is what
+# keeps a later turn end from saying it again.
+if ! declare -F watch_lost >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/patrol.sh" 2>/dev/null || :
+fi
+if declare -F watch_lost >/dev/null 2>&1 && _lost="$(watch_lost "$BIONIC_ROOT" "$BIONIC_SID")"; then
+  fold_advise "bionic watch: stopped — the watcher (pid ${_lost}) died without a word; this turn's end starts another"
+  _adv=1
+  watch_lost_said "$BIONIC_ROOT" "$BIONIC_SID" "$_lost" >/dev/null 2>&1 || :
 fi
 
 # ---------- was a Patrol ever armed on this session ----------

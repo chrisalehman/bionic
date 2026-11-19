@@ -919,4 +919,46 @@ expect_regex "81: the Patrol library dates 12a's roster — the window is a real
 
 fi
 
+
+section "Section 18: the watch, one row per engaged session of this project"
+
+# THE CONTRACT. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory and doctor reads it through `watch_verdict`, the
+# reading the dispatch wall refuses on: a live watcher and a rested watch are rows; a watcher that died without a word,
+# and a session that has ended a turn since it engaged with no watch at all, are each a fix line.
+# FIXTURE FIDELITY: a live session in a fixture claude-home whose cwd is a fixture repo carrying the engagement marker
+# and a watch record in the shape hooks/watch.sh writes; the turn end is the transcript's `stop_hook_summary` record.
+# ANTI-VACUITY: the same session, unengaged, gets no watch row, beside the rows that find one.
+# fails-when: a dead watcher or a session never watched reads clean, or a live or rested watch earns a fix.
+SID18="cccccccc-1818-2222-3333-444455556666"; SHORT18="${SID18%%-*}"
+spawn_live_pid; PID18="$LIVE_PID"
+spawn_live_pid; W18_LIVE="$LIVE_PID"
+W18_START="$(bash -c '. "$1/alive.sh" && alive_since "$2"' _ "${PAYLOAD}/scripts/lib" "$W18_LIVE")"
+( exit 0 ) & W18_DEAD=$!; wait "$W18_DEAD" 2>/dev/null
+REPO18="$(make_repo_without_roster)"
+HOME18="$(make_claude_home "$SID18" "$PID18" "$REPO18")"
+TR18="$(transcript_of "$HOME18" "$SID18")"
+w18_iso() { date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ; }
+printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"go"}}\n{"type":"system","subtype":"stop_hook_summary","timestamp":"%s"}\n' \
+  "$(w18_iso 900)" "$(w18_iso 300)" >> "$TR18"
+W18_REC="$REPO18/.bionic/tmp/watch-$SID18.state"
+
+printf 'state=watching\npid=%s\nstart=%s\n' "$W18_LIVE" "$W18_START" > "$W18_REC"
+OUT18="$(run_doctor "$HOME18" "$REPO18")"
+expect_no_match "S18.1 the control: a session bionic never engaged gets no watch row" "*session ${SHORT18} · watch:*" "$(patrol_block "$OUT18")"
+printf 'plan=none\nengaged_at=%s\n' "$(w18_iso 600)" > "$REPO18/.bionic/tmp/engaged-$SID18.state"
+OUT18="$(run_doctor_only "$HOME18" "$REPO18")"
+expect_match "S18.2 an engaged session's live watcher is a row" "*session ${SHORT18} · watch: watching (pid ${W18_LIVE})*" "$(patrol_block "$OUT18")"
+expect_no_match "S18.2a …and no fix" "*session ${SHORT18}: * watch*" "$OUT18"
+printf 'state=resting\nwhy=person\n' > "$W18_REC"
+OUT18="$(run_doctor_only "$HOME18" "$REPO18")"
+expect_match "S18.3 a rested watch is a row saying why" "*session ${SHORT18} · watch: resting (person)*" "$(patrol_block "$OUT18")"
+printf 'state=watching\npid=%s\nstart=%s\n' "$W18_DEAD" "$W18_START" > "$W18_REC"
+OUT18="$(run_doctor_only "$HOME18" "$REPO18")"
+expect_match "S18.4 a watcher that died without a word is a fix naming it" \
+  "*session ${SHORT18}: the watch died (pid ${W18_DEAD}) → end a turn; its end starts another*" "$OUT18"
+rm -f "$W18_REC"
+OUT18="$(run_doctor_only "$HOME18" "$REPO18")"
+expect_match "S18.5 no watch record after a turn end since engagement is a fix" \
+  "*session ${SHORT18}: no watch has started → exit claude and start it again*" "$OUT18"
+
 finish

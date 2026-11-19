@@ -690,6 +690,82 @@ expect_absent "PL.1c …and no state section" "SDLC State" "$GATE_VERR"
 printf 'run/v1|ev=approval|key=step3|by=u|said=approved|at=2026-11-01T00:00:02Z\n' >> "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_eq "PL.2 …and admitted once its log alone holds the approval" "allow" "$GATE_VERDICT"
 
+section "§WATCH — the wall reads the watch record: a watch alive or rested admits; none, or a dead watcher, refuses"
+# THE CONTRACT. hooks/watch.sh keeps the session's watch record,
+# `watch-<sid>.state` in the project's tmp directory. A record that says watching over a live process admits, and so does
+# one that rested on purpose, since the turn's end starts the watch again. A record that says watching
+# over a dead process is a watcher that died without a word: refused, naming it. No record is a session
+# whose turn-end hook never started a watch: refused as never watched, except in the turn that engaged
+# the session, when no turn has ended since engagement and this turn's end starts the first watch.
+# FIXTURE FIDELITY: make_repo plants a rested record (watch_rested); each row here replaces it. The
+# turn end is the platform's own transcript record, `type: system` with `subtype: stop_hook_summary`,
+# in the shape read off this machine's session transcripts; engagement is the marker's `engaged_at`.
+# ANTI-VACUITY: each refusal has an admitting row in the same fixture shape, and the never-watched
+# refusal is paired with the engaging turn that differs from it only by where the turn end falls.
+# fails-when: a dispatch is admitted with no watch record in a session that has ended a turn since it
+# engaged, or with a record naming a dead watcher; or refused over a live or a rested watch.
+wa_record() { printf '%s/.bionic/tmp/watch-%s.state' "$1" "$2"; }
+wa_engaged() {  # <repo> <sid> <seconds ago> -> the marker's engagement instant moved back
+  local f="$1/.bionic/tmp/engaged-$2.state"
+  sed "s/^engaged_at=.*/engaged_at=$(s21_iso "$3")/" "$f" > "$f.t" && cat "$f.t" > "$f" && rm -f "$f.t"
+}
+wa_tr() {  # <name> <turn end, seconds ago, or -> -> a transcript: a prompt 900s ago, a turn end, a prompt 5s ago
+  local p="$SANDBOX/.wa-$1.jsonl"
+  { printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"go"}}\n' "$(s21_iso 900)"
+    [ "$2" = - ] || printf '{"type":"system","subtype":"stop_hook_summary","hookCount":2,"preventedContinuation":false,"timestamp":"%s"}\n' "$(s21_iso "$2")"
+    printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"carry on"}}\n' "$(s21_iso 5)"
+  } > "$p"
+  printf '%s' "$p"
+}
+wa_gate() {  # <repo> <transcript> -> the gate run on a dispatch carrying that transcript, named for it so no name is in flight
+  local n="${2##*/.wa-}"; n="wch-${n%.jsonl}"
+  run_gate "$(mk_agent_payload "$SID_A" "$1" "$BRIEF_FULL" "$n" "claude-sonnet-5" "$2" "implementor")"
+}
+sleep 600 & WA_LIVE=$!
+WA_START="$(bash -c '. "$1/alive.sh" && alive_since "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$WA_LIVE")"
+( exit 0 ) & WA_DEAD=$!; wait "$WA_DEAD" 2>/dev/null
+expect_nonempty "WA0 the live fixture watcher has a start the alive rule can compare (the extractor works)" "$WA_START"
+
+REPO=$(make_repo wch1 yes); write_attestation "$REPO" "$SID_A"; rm -f "$(wa_record "$REPO" "$SID_A")"
+wa_engaged "$REPO" "$SID_A" 600; wa_gate "$REPO" "$(wa_tr ended 300)"
+expect_eq "WA1 no watch record, and a turn has ended since the session engaged: refused" "deny" "$GATE_VERDICT"
+expect_contains "WA1a …as never watched" "this session was never watched" "$GATE_VERR"
+expect_contains "WA1b …naming the watcher a hand can start until the session restarts" "hooks/watch.sh" "$GATE_VERR"
+REPO=$(make_repo wch2 yes); write_attestation "$REPO" "$SID_A"; rm -f "$(wa_record "$REPO" "$SID_A")"
+wa_engaged "$REPO" "$SID_A" 600; wa_gate "$REPO" "$(wa_tr before 700)"
+expect_eq "WA2 no watch record, and the only turn end came before the session engaged (the engaging turn): admitted" \
+  "allow" "$GATE_VERDICT"
+expect_contains "WA2a …saying this turn's end starts the watch" "this turn's end starts the first watch" "$GATE_ERR"
+wa_gate "$REPO" "$SANDBOX/.wa-absent.jsonl"
+expect_eq "WA2b …and refused when no transcript can say the turn has not ended" "deny" "$GATE_VERDICT"
+
+REPO=$(make_repo wch3 yes); write_attestation "$REPO" "$SID_A"
+printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$WA_DEAD" "$WA_START" "$(s21_iso 60)" > "$(wa_record "$REPO" "$SID_A")"
+wa_gate "$REPO" "$(wa_tr dead 300)"
+expect_eq "WA3 a record that says watching over a dead process: refused" "deny" "$GATE_VERDICT"
+expect_contains "WA3a …as stopped" "the watch stopped without a word" "$GATE_VERR"
+expect_contains "WA3b …naming the watcher that died" "pid $WA_DEAD" "$GATE_VERR"
+printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$WA_LIVE" "$WA_START" "$(s21_iso 60)" > "$(wa_record "$REPO" "$SID_A")"
+wa_gate "$REPO" "$(wa_tr live 300)"
+expect_eq "WA4 the same record over a live watcher: admitted" "allow" "$GATE_VERDICT"
+expect_absent "WA4a …with no word about the watch" "watch" "$GATE_VERR"
+
+for WA_WHY in person woke limit refused cleared; do
+  printf 'state=resting\nwhy=%s\nat=%s\n' "$WA_WHY" "$(s21_iso 60)" > "$(wa_record "$REPO" "$SID_A")"
+  wa_gate "$REPO" "$(wa_tr "rest-$WA_WHY" 300)"; WA_REST="${WA_REST:-}${WA_WHY}=${GATE_VERDICT} "
+done
+expect_eq "WA5 a watch that rested on purpose admits, whatever it rested for (AC-10.3: the person's reply needs no hand act)" \
+  "person=allow woke=allow limit=allow refused=allow cleared=allow " "$WA_REST"
+
+REPO=$(make_repo wch6 yes); write_attestation "$REPO" "$SID_A"; rm -f "$(wa_record "$REPO" "$SID_A")"
+p="$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+sed "s/^scale: wave$/scale: task/" "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+seal_fixture "$p" "$REPO/.bionic/docs/record/wave-01-test/run.log"
+wa_engaged "$REPO" "$SID_A" 600; wa_gate "$REPO" "$(wa_tr task 300)"
+expect_absent "WA6 a scale with no Patrol owes no watch: a task-scale dispatch is not refused for one" \
+  "was never watched" "$GATE_VERR"
+kill "$WA_LIVE" 2>/dev/null
+
 section "§WORDS — every refusal of the wall is said by key from lib/dispatch.sh, in the words the wall gave"
 # The library sourced in a shell of its own: each key said once with sample facts, its user line compared with the
 # words the hook printed before they moved; an unknown key answers 2 with no words.
@@ -697,6 +773,7 @@ WORDS_GOT="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 3
 w() { local k="$1" rc=0; shift; dispatch_say "$k" "$@" || rc=$?; printf "%s|%s (%s)|%s\n" "$k" "$DISPATCH_FACT" "$DISPATCH_FIX" "$rc"; }
 w deadline 22 /r; w attest-none "bash /h/p.sh"; w attest-failed out "bash /h/p.sh"; w plan-unreadable /p.md
 w patrol-never /h/sp.sh /s; w patrol-silent 9 3 /h/sp.sh /s; w patrol-stopped /h/sp.sh 9 8 7 6 default /s
+w watch-never /h /r; w watch-stopped 4242 /w
 w reviewer-retired bionic:reviewer; w facts-unread w /p.md; w fill-missing w /p.md /lib "a b"; w unapproved w /p.md 3 "a b"
 w unbound w adv "a b"; w name-ambiguous x-T1 "$(printf "T1\nA-T1")" /p.md; w approval-waits T9 release w-T9 /p.md /h
 w approval-unread T9 release w-T9 /p.md; w waits-unread T9 w-T9 /p.md; w nested-writer w id ch ty "a b"; w worktree /c /t /m
@@ -714,6 +791,8 @@ plan-unreadable|the bound plan cannot be read (restore read access to the plan)|
 patrol-never|no Patrol stamp exists for this session (CronCreate the Patrol job)|0
 patrol-silent|the Patrol fires but never ticks (run the tick; replace the job)|0
 patrol-stopped|the Patrol was armed and stopped firing (re-arm the Patrol, both halves)|0
+watch-never|this session was never watched (restart claude, or start the watcher)|0
+watch-stopped|the watch stopped without a word (end this turn; it starts another)|0
 reviewer-retired|bionic:reviewer is retired (1.14.0) (dispatch bionic:critic)|0
 facts-unread|the run's facts could not be read (dispatch again)|0
 fill-missing|the approval check lib/fill.sh cannot be loaded (reinstall the plugin)|0

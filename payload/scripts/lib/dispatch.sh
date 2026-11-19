@@ -63,6 +63,7 @@ Then retry the dispatch."
 
 dispatch_keys() {
   printf '%s\n' deadline attest-none attest-failed plan-unreadable patrol-never patrol-silent patrol-stopped \
+    watch-never watch-stopped \
     reviewer-retired facts-unread fill-missing unapproved unbound name-ambiguous approval-waits approval-unread \
     waits-unread nested-writer worktree budget in-flight deliverable-outside proto-row proto-tree proto-path \
     no-deliverable no-suites row-unknown row-mismatch lands-none live-writer brief-unreadable brief-unnamed \
@@ -155,6 +156,29 @@ ${3-}s in one stretch with no tick in it — past the ${4-}s fire window,
 which is ${q} plus the scheduler's jitter:
     ${7-}
 " ;;
+    watch-never)  # <hook dir> <project root>
+      _dispatch_words "this session was never watched" "restart claude, or start the watcher" \
+"This session engaged a run and has ended a turn since, and no watch record stands for it.
+The turn-end hook starts the watcher at each turn's end (${1-}/watch.sh, registered in
+hooks/hooks.json); a session that took its hooks before that registration never runs it.
+
+A dispatch with no watch behind it is an agent nobody is waiting on.
+
+Fix: the person exits claude and starts it again, so the session takes the hook. Until then,
+start the watcher by hand from the Bash tool, with run_in_background:
+    cd $(refuse_shell_word "${2-.}") || exit 1; printf '{\"session_id\":\"%s\",\"cwd\":\"%s\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}' \"\$CLAUDE_CODE_SESSION_ID\" \"\$PWD\" | bash $(refuse_shell_word "${1-}/watch.sh")
+
+Then retry the dispatch." ;;
+    watch-stopped)  # <pid> <watch record>
+      _dispatch_words "the watch stopped without a word" "end this turn; it starts another" \
+"The watch record says pid ${1-} is watching this session, and that process is gone:
+    ${2-}
+It was killed, or ended at its time limit, and wrote nothing as it went.
+
+A dispatch with no watch behind it is an agent nobody is waiting on.
+
+Fix: end this turn. Its end starts a new watcher, which wakes this session when the run has
+work for it; dispatch then." ;;
     reviewer-retired)  # <subagent type>
       _dispatch_words "bionic:reviewer is retired (1.14.0)" "dispatch bionic:critic" \
 "The structure reviewer is not a role any more, so a brief cannot name it:
