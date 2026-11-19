@@ -1740,9 +1740,9 @@ version-compare.test.sh | §Section 2 | duplicate | payload/scripts/lib/detect.s
 
 ## watch.test.sh
 
-watch.test.sh | §QUIET | keep | payload/scripts/lib/patrol.sh watch_wake_line: the `unchanged since` guard deleted, so a print the tick already told wakes again (Q2, Q3); hooks/poker/tick.sh poker_verb_watch_pass: the tick no longer run, so the stamp stays planted (Q1.b-Q3.c) | none (searched 'tick --watch' and 'watch_wake_line' in tests/)
-watch.test.sh | §WAKE | keep | payload/scripts/lib/patrol.sh watch_wake_line: FILL, STANDDOWN or NOTIFY left out of the woken kinds, so a ready row, a reported agent or one quiet past its cadence passes with no wake (W1-W3); hooks/session-poker.sh poker_watch_interval_seconds: the ceiling deleted, so 21m is taken (W4.b, W5.a) | none (searched 'watch-interval' and 'tick --watch' in tests/)
-watch.test.sh | §PROMPT | keep | payload/scripts/lib/patrol.sh watch_wake_line: the cut to WATCH_LINE_MAX or the ASCII fold deleted, so the line over every kind is longer than 120 or carries a multibyte name (P1.b, P1.c) | none (searched 'WATCH_LINE_MAX' in tests/)
+watch.test.sh | §QUIET | keep | hooks/poker/tick.sh poker_verb_watch_pass: the tick no longer run by the pass, so the planted stamp stays, no digest is left and the moved world never wakes (Q1.b-Q5) | none (searched 'tick --watch' and 'watch_wake_line' in tests/)
+watch.test.sh | §WAKE | keep | payload/scripts/lib/patrol.sh watch_wake_line: FILL with IDLE, STANDDOWN or NOTIFY left out of the woken kinds, so the line over a ready row, a reported agent or one quiet past its cadence no longer names the row, the agent or the act (W1-W3); hooks/session-poker.sh poker_watch_interval_seconds: the ceiling deleted, so 21m is taken (W4.b, W5.a) | none (searched 'watch-interval' and 'tick --watch' in tests/)
+watch.test.sh | §PROMPT | keep | payload/scripts/lib/patrol.sh watch_wake_line: the cut to WATCH_LINE_MAX deleted, so the line over every kind runs past 120 (P1.b); the `unchanged since` guard deleted, so a print the tick already told composes a line (P2) | none (searched 'WATCH_LINE_MAX' and 'unchanged since' in tests/)
 watch.test.sh | §GATE | keep | payload/scripts/lib/patrol.sh watch_wake_line: GATE left out of the woken kinds, so a denied reserved request passes quiet with its ask open and no line (G1) | notify.test.sh §SOURCES (the tick's own GATE line and ask, not the pass's wake)
 
 ## width.test.sh
