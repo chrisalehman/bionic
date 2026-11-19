@@ -32,8 +32,10 @@
 #                      of the first review's finding is added (the later rows' deps naming it), cut, launched and
 #                      landed through ready, settling both, the release check runs at its head, the release approval
 #                      card is rendered there and the user's reply approves it, the integrate row renders the release entry's
-#                      reviews part on the working branch and opens the pull request through gh, the person merges
-#                      it, the integrate row delivers its record, close-out runs, and the Patrol is disarmed.
+#                      reviews part on the working branch and publishes it (`session-poker.sh publish`: the push to
+#                      the bare remote and the request through the stand-in gh), the person merges it by a merge
+#                      commit and pulls main, the integrate row delivers its record, close-out runs, and the Patrol is
+#                      disarmed.
 #     failed-review    the release-waiting run, the user's reply (all recommended: the release landing past the
 #                      pass is a release commit with its check passing, so the head reads green and the card asks no
 #                      merge without a pass; the reply records the release approval), Step 8, a whole structure
@@ -73,9 +75,10 @@
 # tests/lib/roster-row.sh), as the dispatch wall writes it when the reviewer is launched; `stop-orders.sh stopped`
 # closes it once the session's panel reads the reviewer gone (_rh_stopped).
 #
-# A STAND-IN `gh` (delivered alone). The pull request is an outward act, so the integrate row's `gh` is a stand-in, the
-# only `gh` on the PATH of the commands that call it: it logs each call's arguments to <dir>/bin/gh.log, answers `pr
-# create` with a placeholder address, and for `pr merge` moves the base to the head, as the merge and the pull would.
+# A STAND-IN HOST AND A BARE REMOTE (delivered alone). The pull request is an outward act, so the replay's remote is a
+# bare repository beside the sandbox (`rh_remote`) and its `gh` a stand-in (`rh_host`), the only `gh` on the PATH of the
+# commands that call it. The integrate row publishes through `session-poker.sh publish`, which pushes to that remote and
+# opens the request through the stand-in; the person merges it there by a merge commit, and pulls main.
 #
 # FROM THE COMMAND LINE nothing is removed: <dir>, outside the plugin tree (`door_run` strips that tree's paths from every
 # command's environment), keeps the sandbox, its gate store, its config and the log. Read it as its session: from
@@ -379,22 +382,89 @@ _rh_tick_land() {
   return 1
 }
 
-# _rh_gh <dir> -> the stand-in gh in <dir>/bin, and RH_GHPATH: that directory, then every PATH entry holding no gh
-_rh_gh() {
-  local p d
+# rh_remote <project> <dir> [<branch>] -> a bare repository at <dir> holding <project>'s <branch> (main when none is
+# named) and nothing else, named `origin` in <project>: the remote a publish pushes to. It is filled by a fetch run in
+# the bare repository, so no push is made to build it, and it never holds the working branch until something pushes it.
+rh_remote() {
+  local b="${3:-main}"
+  git init --quiet --bare "$2" && git -C "$2" symbolic-ref HEAD "refs/heads/$b" \
+    && git -C "$2" fetch --quiet "$1" "refs/heads/$b:refs/heads/$b" && git -C "$1" remote add origin "$2"
+}
+
+# rh_host <dir> [pull] -> the stand-in for the host's command line tool at <dir>/bin/gh, and RH_GHPATH: that
+# directory, then every PATH entry holding no gh, so the stand-in is the only gh a command run on that PATH meets.
+#
+# What the stand-in answers, each call's arguments first appended to <dir>/bin/gh.log:
+#   pr create --base <b> --head <h> [...]   opens request <n> (1, 2, ...) OPEN and prints https://example.invalid/pull/<n>
+#   pr view <n|address|head> [--json <f,...>] [--jq <expr>]
+#                                           the request's JSON, the fields named (number, state, url, baseRefName,
+#                                           headRefName, mergeCommit: {"oid": <40-hex>} or null), --jq through jq -r
+#   pr merge <sel> --merge                  merges <h> into <b> on the remote by a merge commit, parents <b> then <h>
+#   pr merge <sel> --squash                 one commit on <b> holding <h>'s change, its one parent the old <b>
+#   pr close <sel>                          CLOSED, the remote unchanged
+# A merge sets MERGED and the new tip of <b> as the request's merge commit. The remote is the `origin` of the
+# repository the call runs in; the merge is made in a scratch clone of it and nothing in the calling repository moves,
+# unless `pull` was given here: then the calling repository's <b> is moved to the remote's after the merge, the
+# person's own pull. With <dir>/bin/gh.fail present, every call prints that file on stderr and exits 1, the host down.
+# The requests are <dir>/bin/gh.prs, one `<n>|<state>|<b>|<h>|<address>|<merge commit or ->` line each.
+rh_host() {
+  local d
   mkdir -p "$1/bin" || return 1
+  rm -f "$1/bin/gh.pull"; [ "${2:-}" != pull ] || : > "$1/bin/gh.pull" || return 1
   cat > "$1/bin/gh" <<'GH'
 #!/bin/bash
-# A stand-in for gh: each call's arguments go to gh.log beside it. `pr create` prints a placeholder address; `pr
-# merge` moves the created pull request's base to its head in the repository it is run from.
-printf '%s\n' "$*" >> "$(dirname "$0")/gh.log"
-case "${1:-} ${2:-}" in
-  "pr create") echo "https://example.invalid/pull/1" ;;
+me="$(cd "$(dirname "$0")" && pwd -P)"; db="$me/gh.prs"
+printf '%s\n' "$*" >> "$me/gh.log"
+[ ! -f "$me/gh.fail" ] || { cat "$me/gh.fail" >&2; exit 1; }
+touch "$db"
+want() {  # <selector> -> the request's line: by number, by address, else the newest naming the selector as its head
+  awk -F'|' -v s="$1" '$1 == s || $5 == s { l = $0 } $4 == s && l == "" { h = $0 } END { if (l == "") l = h; if (l != "") print l; else exit 1 }' "$db"
+}
+put() {  # <n> <state> <merge> -> the request's line rewritten
+  awk -F'|' -v OFS='|' -v n="$1" -v s="$2" -v m="$3" '$1 == n { $2 = s; $6 = m } { print }' "$db" > "$db.n" && mv "$db.n" "$db"
+}
+verb="${1:-} ${2:-}"; shift 2 2>/dev/null
+case "$verb" in
+  "pr create")
+    b=""; h=""
+    while [ $# -gt 0 ]; do case "$1" in --base) b="$2"; shift ;; --head) h="$2"; shift ;; esac; shift; done
+    [ -n "$b" ] && [ -n "$h" ] || { echo "stand-in: pr create needs --base and --head" >&2; exit 1; }
+    n=$(( $(wc -l < "$db") + 1 ))
+    printf '%s|OPEN|%s|%s|https://example.invalid/pull/%s|-\n' "$n" "$b" "$h" "$n" >> "$db"
+    echo "https://example.invalid/pull/$n" ;;
+  "pr view")
+    l="$(want "${1:-}")" || { echo "no pull requests found for ${1:-}" >&2; exit 1; }; shift
+    f=""; q=""
+    while [ $# -gt 0 ]; do case "$1" in --json) f="$2"; shift ;; --jq|-q) q="$2"; shift ;; esac; shift; done
+    IFS='|' read -r n s b h u m <<< "$l"
+    o="$(jq -cn --argjson n "$n" --arg s "$s" --arg b "$b" --arg h "$h" --arg u "$u" --arg m "$m" \
+      '{number: $n, state: $s, url: $u, baseRefName: $b, headRefName: $h, mergeCommit: (if $m == "-" then null else {oid: $m} end)}')"
+    [ -z "$f" ] || o="$(printf '%s' "$o" | jq -c --arg f "$f" '. as $o | [$f | split(",")[] | {(.): $o[.]}] | add')"
+    if [ -n "$q" ]; then printf '%s' "$o" | jq -r "$q"; elif [ -n "$f" ]; then printf '%s\n' "$o"; else printf '%s\t%s\n' "$s" "$u"; fi ;;
   "pr merge")
-    l="$(/usr/bin/grep '^pr create ' "$(dirname "$0")/gh.log" | tail -1)"
-    b="${l#* --base }"; b="${b%% *}"; h="${l#* --head }"; h="${h%% *}"
-    git fetch --quiet . "refs/heads/$h:refs/heads/$b" || exit 1
-    echo "merged $h into $b" ;;
+    l="$(want "${1:-}")" || { echo "no pull requests found for ${1:-}" >&2; exit 1; }; shift
+    how=""; for a in "$@"; do case "$a" in --merge|--squash) how="${a#--}" ;; esac; done
+    [ -n "$how" ] || { echo "stand-in: pr merge takes --merge or --squash" >&2; exit 1; }
+    IFS='|' read -r n s b h u m <<< "$l"
+    [ "$s" = OPEN ] || { echo "stand-in: pull request #$n is $s" >&2; exit 1; }
+    r="$(git remote get-url origin)" || exit 1
+    w="$(mktemp -d "${TMPDIR:-/tmp}/gh-merge.XXXXXX")" || exit 1
+    g() { git -C "$w" -c user.name=host -c user.email=host@example.invalid -c commit.gpgsign=false "$@"; }
+    git clone --quiet --branch "$b" "$r" "$w" && g fetch --quiet origin "refs/heads/$h" || { rm -rf "$w"; exit 1; }
+    case "$how" in
+      merge) g merge --quiet --no-ff -m "Merge pull request #$n from $h" FETCH_HEAD ;;
+      squash) g merge --quiet --squash FETCH_HEAD >/dev/null && g commit --quiet -m "$h (#$n)" ;;
+    esac && g push --quiet origin "HEAD:refs/heads/$b" || { rm -rf "$w"; exit 1; }
+    m="$(git -C "$w" rev-parse HEAD)"; rm -rf "$w"
+    put "$n" MERGED "$m"
+    [ ! -f "$me/gh.pull" ] || git fetch --quiet origin "refs/heads/$b:refs/heads/$b" || exit 1
+    echo "merged pull request #$n ($how) into $b at $m" ;;
+  "pr close")
+    l="$(want "${1:-}")" || { echo "no pull requests found for ${1:-}" >&2; exit 1; }
+    IFS='|' read -r n s b h u m <<< "$l"
+    put "$n" CLOSED -
+    echo "closed pull request #$n" ;;
+  *) echo "stand-in: no answer for $verb" >&2; exit 1 ;;
 esac
 GH
   chmod +x "$1/bin/gh" || return 1
@@ -438,12 +508,14 @@ _rh_replay() {
   _rh_reply "the user's reply to the card at the fix's head" || return 1
   # The part goes on the branch before the pull request opens, so the merge carries it to main.
   _rh_poker "the integrate row renders the entry's reviews part" reviews-part T4 || return 1
-  _rh_gh "$dir" || { echo "rehearse $RH_STATE: the stand-in gh could not be written in $dir/bin" >&2; return 1; }
+  # The host: a bare remote holding main as it stands, and the stand-in gh, which pulls main for the person on a merge.
+  { [ -d "$dir/remote.git" ] || rh_remote "$RH_ROOT" "$dir/remote.git"; } && rh_host "$dir" pull \
+    || { echo "rehearse $RH_STATE: the bare remote or the stand-in gh could not be made under $dir" >&2; return 1; }
   _rh_do "the gh on the integrate row's PATH" env PATH="$RH_GHPATH" bash -c 'type -a gh' || return 1
-  _rh_do "the integrate row opens the pull request" env PATH="$RH_GHPATH" gh pr create --base main --head "$DOOR_BRANCH" --fill || return 1
+  _rh_do "the integrate row publishes the pull request" env PATH="$RH_GHPATH" bash "$RH_ROOT/hooks/session-poker.sh" publish || return 1
   h="$DOOR_OUT"
-  printf '# T4: the pull request\n\n    gh pr create --base main --head %s --fill\n\n%s\n' "$DOOR_BRANCH" "$h" > "$RH_REC/T4-pr.md" || return 1
-  _rh_hand record "T4's report record/wave-x/T4-pr.md: the pull request's command and its address"
+  printf '# T4: the pull request\n\n    session-poker.sh publish\n\n%s\n' "$h" > "$RH_REC/T4-pr.md" || return 1
+  _rh_hand record "T4's report record/wave-x/T4-pr.md: the publish verb's command and what it printed"
   _rh_do "the person merges the pull request" env PATH="$RH_GHPATH" gh pr merge "$DOOR_BRANCH" --merge || return 1
   # The integrate row is the merge's: close-out lands it at the integration head, the act below.
   _rh_do "close-out, the tail" env HOME="$dir/home" BIONIC_CLAUDE_HOME="$dir/home/.claude" \

@@ -792,6 +792,115 @@ poker_verb_reviews_part() {
   exit 0
 }
 
+# ---------------------------------------------------------------- the run's pull request
+#
+# PUBLISH IS ONE COMMAND: `publish` pushes the bound run's working branch to `origin` and opens the pull request
+# against its integration branch through the host's command line tool, gh, then records the request in the run's log
+# as a published event of its own part, `part=pr url=<address> branch=<working> commit=<head pushed> base=<integration>
+# by=publish`, the fact `reader <plan> pr` answers.
+#
+# THE CONSENT IS THE RELEASE APPROVAL AT THE WORKING HEAD, checked before anything leaves the machine. No wall sees a
+# push or a gh call made inside this script, and the reserved table reads only a typed command, so this check is the
+# whole of the consent: the newest approval of release names the working head, or a head past which only prose landed,
+# by the two functions the step-8 advance asks (lib/proof.sh `proof_approved_head`, judge.sh `cur8_release_holds`).
+# Refused, exit 1, nothing pushed or called.
+#
+# ONCE A HEAD. A request the log holds at this head, branch and base is published already: exit 0, no push, no call.
+# At a new head the branch is pushed and the request the log holds for the branch and base is kept, since a host's
+# request follows its branch: a new event at the new head, the same address, and no second create.
+#
+# A FAILED OUTWARD ACT IS THE PERSON'S TO SEE: no origin, no gh, a push refused or a request refused, each exits 4 with
+# the cause, records no request, and opens the ask `pr:<working branch>` on the run's register with the cause as its
+# prompt; it waits on the user (lib/owed.sh `ask_waits_on`'s default arm). A later publish that succeeds closes it.
+# Nothing here forces a push, sets an upstream, or touches the local integration branch.
+PUBLISH_EXIT_OUTWARD=4
+publish_ask_key() { printf 'pr:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }   # <working branch>
+publish_failed() {  # <working branch> <head> <what failed> <cause> -> the ask opened, the failure said, exit 4
+  local key cause
+  key="$(publish_ask_key "$1")"
+  cause="$(printf '%s' "$4" | tr '\n\r\t|' '    ' | sed 's/  */ /g; s/^ //; s/ $//')"
+  proof_owed open "$key" "publish: the pull request" "publish of $1 at ${2:0:12} failed: $3: ${cause:-no cause given}"
+  die "FAILED — $3: ${cause:-no cause given}. No pull request was recorded; the ask $key waits on the user. Run again once it is mended: bash $HOOK_DIR/session-poker.sh publish"
+  exit "$PUBLISH_EXIT_OUTWARD"
+}
+poker_verb_publish() {
+  local wb base head ah pr pr_url="" pr_commit="" pr_branch="" pr_base="" rc out err url
+  plan_verb_open publish
+  if ! _line_load_proof || ! declare -F proof_approved_head >/dev/null 2>&1 || ! _proof_reader_load \
+     || ! declare -F reader_q_pr >/dev/null 2>&1; then
+    die "REFUSED — the proof record (lib/proof.sh) or the reader (lib/reader.sh) cannot be loaded from $BIONIC_LIB; nothing was pushed."
+    exit 2
+  fi
+  wb="$(plan_working_branch "$PV_PLAN")"; base="$(plan_integration_branch "$PV_PLAN")"
+  if [ -z "$wb" ] || [ -z "$base" ]; then
+    local missing=working-branch
+    [ -z "$wb" ] || missing=integration-branch
+    die "REFUSED — the plan's header names no $missing:, and publish opens the working branch's request against the integration branch; add it to the header. Nothing was pushed."
+    exit 2
+  fi
+  head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
+  if [ -z "$head" ]; then
+    die "REFUSED — the working branch $wb names no commit in $PV_REPO; nothing was pushed."
+    exit 2
+  fi
+  # The consent, first: nothing below it runs without the approval at this head.
+  ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)"; rc=$?
+  if [ "$rc" -eq 2 ]; then
+    die "REFUSED — the run's facts could not be read, so the release approval is not known; nothing was pushed. Run publish again."
+    exit 2
+  fi
+  if [ -z "$ah" ]; then
+    die "REFUSED — publish leaves the machine at the head the user approved for release, and no approved: release line names a head; the user's word for the working head ${head:0:12} is approve release '<reply>'. Nothing was pushed and no pull request was opened."
+    exit 1
+  fi
+  if ! cur8_release_holds "$ah" "$head"; then
+    die "REFUSED — publish leaves the machine at the head the user approved for release: the working head ${head:0:12} is not the approved head ${ah:0:12}, and a commit past it is code or a release-set file. Have the user approve this head (approve release '<reply>'). Nothing was pushed and no pull request was opened."
+    exit 1
+  fi
+  pr="$(_proof_ask "$PV_PLAN" reader_q_pr "$PV_PLAN")"; rc=$?
+  if [ "$rc" -gt 1 ]; then
+    die "REFUSED — the run's facts could not be read, so whether its request is open is not known; nothing was pushed. Run publish again."
+    exit 2
+  fi
+  if [ "$rc" -eq 0 ]; then
+    pr_url="$(printf '%s\n' "$pr" | sed -n 's/^url=//p')"; pr_commit="$(printf '%s\n' "$pr" | sed -n 's/^commit=//p')"
+    pr_branch="$(printf '%s\n' "$pr" | sed -n 's/^branch=//p')"; pr_base="$(printf '%s\n' "$pr" | sed -n 's/^base=//p')"
+    [ "$pr_branch" = "$wb" ] && [ "$pr_base" = "$base" ] && [ -n "$pr_url" ] || pr_url=""
+  fi
+  if [ -n "$pr_url" ] && [ "$pr_commit" = "$head" ]; then
+    say "publish — the pull request $pr_url already carries $wb at ${head:0:12} against $base; nothing was pushed or opened."
+    exit 0
+  fi
+  git -C "$PV_REPO" remote get-url origin >/dev/null 2>&1 \
+    || publish_failed "$wb" "$head" "no remote named origin in $PV_REPO" "add the project's remote as origin"
+  err="$(GIT_TERMINAL_PROMPT=0 git -C "$PV_REPO" push --quiet origin "$head:refs/heads/$wb" 2>&1 >/dev/null)" \
+    || publish_failed "$wb" "$head" "the push of $wb to origin" "$err"
+  url="$pr_url"
+  if [ -z "$url" ]; then
+    command -v gh >/dev/null 2>&1 || publish_failed "$wb" "$head" "the pull request against $base" "gh, the host's command line tool, is not on the PATH"
+    err="$(mktemp "${TMPDIR:-/tmp}/publish.XXXXXX")" || publish_failed "$wb" "$head" "the pull request against $base" "no temporary file for gh's errors"
+    out="$(cd "$PV_REPO" && GH_PROMPT_DISABLED=1 gh pr create --base "$base" --head "$wb" --fill < /dev/null 2> "$err")"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+      out="$(cat "$err")"; rm -f "$err"
+      publish_failed "$wb" "$head" "the pull request against $base (gh exited $rc)" "$out"
+    fi
+    rm -f "$err"
+    url="$(printf '%s\n' "$out" | /usr/bin/grep -E '^https?://' | tail -1)"
+    [ -n "$url" ] || publish_failed "$wb" "$head" "the pull request against $base" "gh answered no address: $out"
+  fi
+  if ! line_published_event "$PV_PLAN" part=pr "url=$url" "branch=$wb" "commit=$head" "base=$base" by=publish; then
+    die "REFUSED — $wb at ${head:0:12} is on origin and its pull request is $url, and the run's log could not be written: append ev=published|part=pr|url=$url|branch=$wb|commit=$head|base=$base|by=publish to $(line_log "$PV_PLAN" 2>/dev/null || printf 'the log')."
+    exit 1
+  fi
+  proof_owed close "$(publish_ask_key "$wb")" publish
+  if [ -n "$pr_url" ]; then
+    say "publish — $wb at ${head:0:12} pushed to origin; the pull request $url carries it against $base."
+  else
+    say "publish — $wb at ${head:0:12} pushed to origin; pull request $url opened against $base."
+  fi
+  exit 0
+}
+
 # ---------------------------------------------------------------- the release entry's Known limits, from the deferrals
 #
 # THE ENTRY'S KNOWN LIMITS ARE THE RUN'S DEFERRALS. `known-limits-part <row>` renders the release entry's

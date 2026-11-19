@@ -58,7 +58,9 @@ reader_identity step n
 reader_identity approval key
 reader_identity proof kind head question
 reader_identity ask key round
-reader_identity published row commit
+# A part of the release is told from a row's landing and from another part by `part=`: the reviews part's commit is the
+# head a publish pushes, so the two name one commit and are still two facts.
+reader_identity published row commit part
 
 # THE RECORD'S NAME is one rule, and every library that names a run's record asks it (lib/proof.sh `proof_plan_slug`,
 # the name thirty-odd call sites ask, among them): the plan's file name less .plan.md, but an epic's plan,
@@ -466,6 +468,16 @@ reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no
     ev() == "dispatch" && line_kv("row") == r { held = 1 }
     END { if ((r in _landed) || held || dropped(r)) exit 1
       n = split(deps, d, " "); for (i = 1; i <= n; i++) if (!(d[i] in _landed) && !dropped(d[i])) exit 1 }'
+}
+
+# THE RUN'S PULL REQUEST is a published fact of its own part, `part=pr`, written by the publish verb with the request's
+# address, the branch it carries, the head pushed and the base it is against. A later publish at another head is another
+# fact; the newest stands. Its state, open, merged or closed, is the host's, and no line of the log holds it.
+reader_question pr value reader_q_pr
+reader_q_pr() {  # <plan> -> the newest request's fields as key=value lines, `ev=` and `part=` dropped; nothing, 1, for none
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+    ev() == "published" && line_kv("part") == "pr" { l = $0 }
+    END { if (l == "") exit 1; n = split(l, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|part)=/) print p[i] }'
 }
 
 reader_question handoff value reader_q_handoff

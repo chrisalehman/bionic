@@ -4497,7 +4497,8 @@ return 0
 # `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
 # writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
 # user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
-# row's own writer); and `decisions` (a decision put or ruled writes the run's design ledger and
+# row's own writer); `publish` (the push and the pull request, whose only consent is the release approval it checks, so
+# no writer's call of it reaches the network); and `decisions` (a decision put or ruled writes the run's design ledger and
 # its register, and the read goes with the verb; a writer reads neither). `ruling-ack` and
 # `rulings` are the writer's own reads and are NOT on the list. 1 otherwise. Every name on the
 # list is a verb the poker dispatches: a verb it no longer has fails there on its own, so its name
@@ -4572,7 +4573,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
