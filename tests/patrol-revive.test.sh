@@ -307,8 +307,8 @@ expect_quiet() {  # <label>
 }
 
 # A refusal here is the duty on stdout with rc 0: one fixed line the window shows, and the whole
-# notice behind the duty verb. That line IS the notice AC-F6 asks for: there is no second output
-# surface here.
+# notice behind the duty verb. That line is the whole notice: there is no second output surface
+# here.
 expect_block() {  # <label>
   local d; d=$(decision_of)
   if [ "$HOOK_RC" -ne 0 ]; then
