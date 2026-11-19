@@ -189,7 +189,7 @@ done
 RD="$R/payload/scripts"
 
 section "COVER"
-QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready handoff sessions verdicts header row criterion cell"
+QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready pr handoff sessions verdicts header row criterion cell"
 expect_eq "the bed asks each question of the closed list, and the list has no other" "$(printf '%s\n' $QS | sort | tr '\n' ' ')" \
   "$(ask /dev/null - 2>&1 | awk 'NR > 1 { print $1 }' | sort | tr '\n' ' ')"
 for e in $WORLDS; do n=${e%%:*}; p=${e##*:}; h="$(sed -n 's/^proof\.\([0-9a-f]*\)\..*/\1/p' "$X/$n.facts" | head -1)"; r=""; c=0
@@ -289,10 +289,12 @@ expect_eq "…and not the one after it" "0" "$(printf '%s\n' "$NN" | grep -c '^T
 # The release card follows the log: an approval of the release appended to it alone ends the release's decision.
 expect_contains "the release card at 31da41f7 puts the release" "card.decision.approve:release=" "${PG:-}"
 printf 'run/v1|ev=approval|key=release|by=fixture|head=%s|said=approve|at=%s\n' "${PH:-}" "${PA:-}" >> "${PP%/plans/*}/record/$(basename "${PP:-x}" .plan.md)/run.log"
+seal_fixture "${PP:-/nonexistent}"
 G="$(render "${PD:-/nonexistent}" "${PP:-/nonexistent}")"
 expect_contains "…and with the approval appended, it still renders its carries" "card.carried." "$G"
 expect_absent "…but no longer puts the release" "card.decision.approve:release=" "$G"
 printf 'run/v1|ev=cancel|of=approval|key=release|at=%s\n' "${PA:-}" >> "${PP%/plans/*}/record/$(basename "${PP:-x}" .plan.md)/run.log"
+seal_fixture "${PP:-/nonexistent}"
 expect_contains "…and with that approval cancelled in the log, it puts the release again" "card.decision.approve:release=" \
   "$(render "${PD:-/nonexistent}" "${PP:-/nonexistent}")"
 section "OPEN"
@@ -323,12 +325,13 @@ C0="$(closecheck)"
 expect_eq "the reopened run reads at step 8, and its own log carries no debt" "step: current: 8|debt: touched 0 · burned 0" \
   "$(printf '%s\n' "$C0" | grep -m1 '^step: ')|$(printf '%s\n' "$C0" | grep -m1 '^debt: ')"
 printf 'run/v1|ev=debt|concept=follow_x|kind=duplicate|sites=lib/f.sh:1|raised-by=record/x.md|touches=3|at=\n' >> "$CR/run.log"
+seal_fixture "$CP" "$CR/run.log"
 C1="$(closecheck)"
 expect_eq "a debt the log alone holds is counted on the card's debt line" "debt: touched 3 · burned 0" "$(printf '%s\n' "$C1" | grep -m1 '^debt: ')"
 expect_contains "…and the continuation would carry it under ## Deferrals" " follow_x" "$(printf '%s\n' "$C1" | grep -m1 '^continuation: ')"
 expect_contains "the log without it carries the run's own deferrals there" "under ## Deferrals: record/" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
 expect_absent "…and not that debt" " follow_x" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
-printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; expect_contains "the run taken back to Step 7 reads there on close-out's step line" "the run is at Step 7 —" "$(closecheck | grep -m1 '^step: ')"
+printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; seal_fixture "$CP" "$CR/run.log"; expect_contains "the run taken back to Step 7 reads there on close-out's step line" "the run is at Step 7 —" "$(closecheck | grep -m1 '^step: ')"
 
 section "AGREE"
 nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }

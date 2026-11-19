@@ -46,6 +46,7 @@
 set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/seal-fixture.sh"
 READER="${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh"
 D="$(mktemp -d)/docs"; H="$(printf 'a%.0s' {1..40})"; G="$(printf 'b%.0s' {1..40})"
 plan() {  # <wave> -> a plan whose run log is fed from stdin
@@ -606,6 +607,9 @@ LT="$(git -C "$LR2" worktree list --porcelain | sed -n 's/^worktree //p' | /usr/
 LP="$LR2/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${LP%/*}"
 printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/20-demo\n---\n# plan\n' > "$LP"
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LP" > "$LR2/.bionic/tmp/engaged-$SID.state"
+# The run is sealed where it is planted, so the landing's line is the log's only hand event: an unsealed open run
+# would be sealed as found at that first append, with a hand line of its own.
+seal_fixture "$LP"
 ( cd "$LR2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SPW" land "$LT" --by-hand --reason 'no Lands-on could be read' ) >/dev/null 2>&1; LH_RC=$?
 expect_eq "a by-hand landing is one published landing of the hand kind with its reason, answered by hands (exit)" \
   "0|hand|no Lands-on could be read" "$LH_RC|$(bash "$READER" "$LP" hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(kind|why)=/) printf "|%s", substr($i, index($i, "=") + 1) }' | cut -c2-)"

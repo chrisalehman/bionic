@@ -538,6 +538,7 @@ P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
 s57t_task_plan() {  # <plan> <base-sha value> -> the plan, on the run's branch, its row's tree in the log
   plan_fixture "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | .worktrees/01-task | — | active |" > /dev/null || return 1
   sed -e 's|^working-branch: .*|working-branch: task/01-fixture|' -e "s|^base-sha: .*|base-sha: $2|" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+  seal_fixture "$1"
 }
 s57t_task_plan "$P57T" "$S57T_B"
 expect_eq "57t0a precondition: the fixture is a task-scale plan at step 4 whose base is the init commit" \
