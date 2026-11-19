@@ -35,6 +35,7 @@
 set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/seal-fixture.sh"
 HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 PLAN_READ="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh"
 [ -r "$HOOK" ] && bash -n "$HOOK" || { echo "plan-page: the write hook is missing or does not parse: $HOOK"; exit 1; }
@@ -153,6 +154,7 @@ H="$(git -C "$R" rev-parse HEAD)"; GL="$R/.bionic/docs/record/wave-01-x/run.log"
 mkdir -p "${GL%/*}"; printf 'proof\n' > "$R/.bionic/docs/record/generic-evidence.md"
 gate_as() {  # <session> <a pending step, or nothing> [the tree it commits in] -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
   local in
+  seal_fixture "$(sed -n 's/^plan=//p' "$R/.bionic/tmp/engaged-$1.state" 2>/dev/null)"
   in="$(jq -n --arg s "$1" --arg c "${3:-$R}" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m x"}}')"
   GATE_SAID="$(cd "${3:-$R}" && HOME="$HOME_DIR" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$1" BIONIC_DRY_STEP="$2" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" <<< "$in" 2>&1 >/dev/null)"
   GATE_EXIT=$?
