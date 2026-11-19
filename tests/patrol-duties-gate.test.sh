@@ -217,6 +217,7 @@ stdin_for() {  # <project> <transcript-path> [event] [stop_hook_active]
 # operator's real session id, find no marker under it, and pass every case in silence. The
 # same mirroring the suites of hooks/stop.sh and dispatch-preflight already do.
 fire() {  # <project> [event] [stop_hook_active]
+  FIRE_D="$1"
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" <<< "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-Stop}" "${3:-false}")" 2>"${PE1_ERRFILE:-/dev/null}")
   # THE USER STREAM, kept for the AC-E1.3 section at the end (task 13). The JSON reason
   # on stdout is what every arm above reads; this is the one line a reader is shown.
@@ -227,12 +228,28 @@ fire() {  # <project> [event] [stop_hook_active]
 # The raw driver takes the id OUT OF THE PAYLOAD it was handed, so a case that ships a
 # deliberately odd session key still drives the gate with that key on both channels.
 fire_raw() {  # <project> <stdin-json>
+  FIRE_D="$1"
   local _sid; _sid=$(printf '%s' "$2" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_RC=$?
 }
 
-reason_of() { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
-decision_of() { printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+# WHOSE FIX DECIDES THE CHANNEL. Every duty this gate owes is the agent's to answer, so it is refused on the duty
+# channel: the fixed line in a Stop context, and the whole refusal in the session's duty file, which is what the
+# model reads through `session-poker.sh duty`. A block's reason is read as before, for a refusal that is the person's.
+FIRE_D=""
+DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
+duty_ctx() { printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+reason_of() {
+  case "$(decision_of)" in
+    block) printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
+    duty)  if [ "$(duty_ctx)" = "$DUTY_LINE" ]; then cat "$FIRE_D/.bionic/tmp/duty-$SID.state" 2>/dev/null; else duty_ctx; fi ;;
+  esac
+}
+decision_of() {  # -> block, duty, or nothing: the channel the turn end was refused on
+  local d; d=$(printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null)
+  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
+  [ -z "$(duty_ctx)" ] || printf 'duty'
+}
 
 expect_allow() {  # <label>
   if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
@@ -242,8 +259,8 @@ expect_allow() {  # <label>
   fi
 }
 
-# A block is the JSON decision payload on stdout, with rc 0 — the form Design
-# (T5) names. Every block assertion also states what the reason must NOT say:
+# A refusal of this gate is the duty on stdout, with rc 0: the agent's fix, so the agent's channel. Every
+# refusal assertion also states what the reason must NOT say:
 # a reason that lists both duties whichever one is missing tells the reader
 # nothing, and is the failure this gate's whole value rests on avoiding.
 expect_block() {  # <label> <must-contain> [must-not-contain]
@@ -251,8 +268,8 @@ expect_block() {  # <label> <must-contain> [must-not-contain]
   if [ "$HOOK_RC" -ne 0 ]; then
     no "$1" "rc=$HOOK_RC (a JSON block exits 0); stdout=<$HOOK_OUT>"; return
   fi
-  if [ "$d" != "block" ]; then
-    no "$1" "decision=<$d> expected block; stdout=<$HOOK_OUT>"; return
+  if [ "$d" != "duty" ]; then
+    no "$1" "decision=<$d> expected duty; stdout=<$HOOK_OUT>"; return
   fi
   case "$r" in
     *"$2"*) ;;

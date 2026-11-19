@@ -259,6 +259,7 @@ stdin_for() {  # <cwd> [session] [event] [stop_hook_active]
 PR_ERRFILE="$(mktemp)"
 HOOK_ERR_USER=""
 fire() {  # <cwd> [session] [event] [stop_hook_active]
+  FIRE_D="$1"; FIRE_SID="${2:-$SID}"
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="${2:-$SID}" bash "$HOOK" \
     <<< "$(stdin_for "$1" "${2:-$SID}" "${3:-Stop}" "${4:-false}")" 2>"$PR_ERRFILE")
   HOOK_RC=$?
@@ -272,8 +273,30 @@ fire_raw() {  # <stdin-json>
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$1" 2>/dev/null); HOOK_RC=$?
 }
 
-reason_of()   { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
-decision_of() { printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+# WHOSE FIX DECIDES THE CHANNEL. A dead or silent Patrol is the agent's to mend, so it is refused on the duty
+# channel: the fixed line in a Stop context, and the whole refusal in the session's duty file under the project
+# root, which the model reads through `session-poker.sh duty`. A cwd in a worktree keeps it at the main tree's root.
+FIRE_D=""; FIRE_SID="$SID"
+DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
+duty_ctx() { printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+duty_text() {
+  local r f
+  for r in "$FIRE_D" "$(git -C "$FIRE_D" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"; do
+    f="$r/.bionic/tmp/duty-$FIRE_SID.state"
+    [ -n "$r" ] && [ -f "$f" ] && { cat "$f"; return 0; }
+  done
+}
+reason_of() {
+  case "$(decision_of)" in
+    block) printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
+    duty)  if [ "$(duty_ctx)" = "$DUTY_LINE" ]; then duty_text; else duty_ctx; fi ;;
+  esac
+}
+decision_of() {  # -> block, duty, or nothing: the channel the turn end was refused on
+  local d; d=$(printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null)
+  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
+  [ -z "$(duty_ctx)" ] || printf 'duty'
+}
 
 expect_quiet() {  # <label>
   if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
@@ -283,17 +306,16 @@ expect_quiet() {  # <label>
   fi
 }
 
-# A block is the JSON decision payload on stdout with rc 0 — the channel
-# hooks/patrol-duties-gate.sh uses, and the one whose `reason` the CLI renders
-# into the operator's terminal. That rendering IS the notice AC-F6 asks for:
-# there is no second output surface here.
+# A refusal here is the duty on stdout with rc 0: one fixed line the window shows, and the whole
+# notice behind the duty verb. That line IS the notice AC-F6 asks for: there is no second output
+# surface here.
 expect_block() {  # <label>
   local d; d=$(decision_of)
   if [ "$HOOK_RC" -ne 0 ]; then
     no "$1" "rc=$HOOK_RC (a JSON block exits 0); stdout=<$HOOK_OUT>"; return
   fi
-  if [ "$d" != "block" ]; then
-    no "$1" "decision=<$d> expected block; stdout=<$HOOK_OUT>"; return
+  if [ "$d" != "duty" ]; then
+    no "$1" "decision=<$d> expected duty; stdout=<$HOOK_OUT>"; return
   fi
   ok "$1"
 }
@@ -631,7 +653,7 @@ D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 
 G7_BLOCKS=0
 for _t in 1 2 3 4 5; do
   fire "$D"
-  [ "$(decision_of)" = "block" ] && G7_BLOCKS=$((G7_BLOCKS + 1))
+  [ "$(decision_of)" = "duty" ] && G7_BLOCKS=$((G7_BLOCKS + 1))
 done
 if [ "$G7_BLOCKS" -eq 5 ]; then
   ok "30: a stale stamp blocks EVERY turn — five turns, five blocks (the notice is per-turn)"
