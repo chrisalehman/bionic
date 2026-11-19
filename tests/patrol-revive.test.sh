@@ -41,6 +41,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 # The one bound-marker builder (wave-23-fixit-1810 T1), for engage_marker below.
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 # THE MERGED ENTRY POINT (epic-23 wave-11, T12). This monitor is a FUNCTION now —
 # `stop_patrol_revive` in payload/scripts/lib/stop.sh — and the process that runs it is
@@ -273,30 +274,12 @@ fire_raw() {  # <stdin-json>
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$1" 2>/dev/null); HOOK_RC=$?
 }
 
-# WHOSE FIX DECIDES THE CHANNEL. A dead or silent Patrol is the agent's to mend, so it is refused on the duty
-# channel: the fixed line in a Stop context, and the whole refusal in the session's duty file under the project
-# root, which the model reads through `session-poker.sh duty`. A cwd in a worktree keeps it at the main tree's root.
+# A dead or silent Patrol is the agent's to mend: read on the duty channel (tests/lib/duty-read.sh). From a
+# worktree cwd the duty file is under the main tree's root.
 FIRE_D=""; FIRE_SID="$SID"
-DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
-duty_ctx() { printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
-duty_text() {
-  local r f
-  for r in "$FIRE_D" "$(git -C "$FIRE_D" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"; do
-    f="$r/.bionic/tmp/duty-$FIRE_SID.state"
-    [ -n "$r" ] && [ -f "$f" ] && { cat "$f"; return 0; }
-  done
-}
-reason_of() {
-  case "$(decision_of)" in
-    block) printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
-    duty)  if [ "$(duty_ctx)" = "$DUTY_LINE" ]; then duty_text; else duty_ctx; fi ;;
-  esac
-}
-decision_of() {  # -> block, duty, or nothing: the channel the turn end was refused on
-  local d; d=$(printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null)
-  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
-  [ -z "$(duty_ctx)" ] || printf 'duty'
-}
+fire_root() { local m; m="$(git -C "$FIRE_D" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"; printf '%s' "${m:-$FIRE_D}"; }
+reason_of() { duty_reason "$HOOK_OUT" "$(duty_path "$(fire_root)" "$FIRE_SID")"; }
+decision_of() { duty_channel "$HOOK_OUT"; }
 
 expect_quiet() {  # <label>
   if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then

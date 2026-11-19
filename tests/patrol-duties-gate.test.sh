@@ -49,6 +49,7 @@ set -uo pipefail
 # running this plan" binds to it, because an unbound session's newest-plan fallback is
 # announced and never acted on.
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 # THE MERGED ENTRY POINT (epic-23 wave-11, T12). This gate is a FUNCTION now —
 # `stop_patrol_duties` in payload/scripts/lib/stop.sh — and the process that runs it is
@@ -233,23 +234,10 @@ fire_raw() {  # <project> <stdin-json>
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_RC=$?
 }
 
-# WHOSE FIX DECIDES THE CHANNEL. Every duty this gate owes is the agent's to answer, so it is refused on the duty
-# channel: the fixed line in a Stop context, and the whole refusal in the session's duty file, which is what the
-# model reads through `session-poker.sh duty`. A block's reason is read as before, for a refusal that is the person's.
+# Every duty this gate owes is the agent's, so it is read on the duty channel (tests/lib/duty-read.sh).
 FIRE_D=""
-DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
-duty_ctx() { printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
-reason_of() {
-  case "$(decision_of)" in
-    block) printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
-    duty)  if [ "$(duty_ctx)" = "$DUTY_LINE" ]; then cat "$FIRE_D/.bionic/tmp/duty-$SID.state" 2>/dev/null; else duty_ctx; fi ;;
-  esac
-}
-decision_of() {  # -> block, duty, or nothing: the channel the turn end was refused on
-  local d; d=$(printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null)
-  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
-  [ -z "$(duty_ctx)" ] || printf 'duty'
-}
+reason_of() { duty_reason "$HOOK_OUT" "$(duty_path "$FIRE_D" "$SID")"; }
+decision_of() { duty_channel "$HOOK_OUT"; }
 
 expect_allow() {  # <label>
   if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then

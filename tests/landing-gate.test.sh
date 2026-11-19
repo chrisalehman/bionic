@@ -37,6 +37,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 # The one bound-marker builder (wave-23-fixit-1810 T1): new_roster binds its session.
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 
@@ -393,21 +394,12 @@ run_gate() {  # <gate path> <payload json>
                                  -e '^patrol-revive: ' "$SANDBOX/gate.err" || true)"
 }
 
-# WHOSE FIX DECIDES THE CHANNEL. The sweep's refusal at the orchestrator's turn end is the orchestrator's to mend,
-# so it rides the duty channel: exit 0, the fixed line in a Stop context, the whole refusal in the session's duty
-# file. A SubagentStop landing verdict keeps exit 2. `lg_verdict` names what the gate did, so a row that passes is
-# told apart from one that refused quietly: `pass`, `duty`, `exit2`, or the status it exited with.
-LG_DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
+# The Stop sweep's refusal is a duty (exit 0); `lg_verdict` tells a pass from a quiet refusal: pass, duty, exit2.
 lg_verdict() {
-  local c
-  c="$(printf '%s' "$OUT_STDOUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
-  case "$RC" in
-    2) printf 'exit2' ;;
-    0) if [ "$c" = "$LG_DUTY_LINE" ]; then printf 'duty'; elif [ -z "$OUT_STDOUT" ]; then printf 'pass'; else printf 'rc=0 %s' "$OUT_STDOUT"; fi ;;
-    *) printf 'rc=%s' "$RC" ;;
+  case "$RC|$(duty_ctx "$OUT_STDOUT")" in
+    2\|*) printf 'exit2' ;; "0|$DUTY_LINE") printf 'duty' ;; 0\|) [ -n "$OUT_STDOUT" ] && printf 'rc=0 %s' "$OUT_STDOUT" || printf 'pass' ;; *) printf 'rc=%s' "$RC" ;;
   esac
 }
-lg_duty_text() { cat "$1/.bionic/tmp/duty-${2:-$SID}.state" 2>/dev/null; }  # <repo> [sid] -> the duty verb's text
 
 # ================================================================= Section 1
 section "Section 1: a LANDED row with an unmet contract refuses the turn's end"
@@ -422,7 +414,7 @@ add_row "$R1" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never
 run_gate "$GATE" "$(stop_payload "$R1" "$SID" false)"
 expect_eq "1a: a landed UNMET contract refuses the stop, the orchestrator's duty" "duty" "$(lg_verdict)"
 expect_contains "1a: the whole refusal is kept for the duty verb, the row and what it lacks" \
-  "LANDING CONTRACT UNMET — w1-s5: missing=" "$(lg_duty_text "$R1")"
+  "LANDING CONTRACT UNMET — w1-s5: missing=" "$(cat "$(duty_path "$R1" "$SID")")"
 
 # IDEMPOTENT. Stop fires once per orchestrator TURN and a landed row stays landed forever,
 # so a gate that re-verdicted would refuse every turn end for the rest of the session over

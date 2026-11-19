@@ -64,6 +64,7 @@ set -uo pipefail
 # The one bound-marker builder (wave-23-fixit-1810 T1): mkfix binds its session, and §UB
 # plants the unbound one beside it.
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 HOOK="${BIONIC_STOP_UNDER_TEST:-${BIONIC_HOOKS_DIR}/stop.sh}"
 
@@ -186,25 +187,10 @@ fire() {  # <project> <event> <stop_hook_active> [extra JSON object]
   STOP_ERR=$(cat "$STOP_ERRFILE" 2>/dev/null)
 }
 
-# WHOSE FIX DECIDES THE CHANNEL. A refusal the person must act on is a JSON block; one the agent acts on is a
-# duty: the fixed line in a Stop context, the whole refusal in the session's duty file. Every row below reads
-# the refusal through these, so a row that asserted a refused turn still asserts it, on the channel it rides.
+# Every row reads the refusal on the channel it rides, through tests/lib/duty-read.sh.
 STOP_D=""; STOP_SID="$SID"
-DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
-duty_file() { printf '%s/.bionic/tmp/duty-%s.state' "${1:-$STOP_D}" "${2:-$STOP_SID}"; }
-verdict_of() {  # -> block, duty, or nothing: the channel the turn end was refused on
-  local d
-  d="$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
-  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
-  [ -z "$(printf '%s' "$STOP_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" ] || printf 'duty'
-}
-duty_ctx() { printf '%s' "$STOP_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
-reason_of() {  # -> the whole refusal the agent receives: a block's reason, or the duty the duty verb prints
-  case "$(verdict_of)" in
-    block) printf '%s' "$STOP_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
-    duty)  if [ "$(duty_ctx)" = "$DUTY_LINE" ]; then cat "$(duty_file)" 2>/dev/null; else duty_ctx; fi ;;
-  esac
-}
+verdict_of() { duty_channel "$STOP_OUT"; }
+reason_of() { duty_reason "$STOP_OUT" "$(duty_path "$STOP_D" "$STOP_SID")"; }
 headline_of() { reason_of | /usr/bin/grep -m1 '^bionic: ' || true; }
 
 # offset_in_reason <needle> — where the needle sits in the composed reason, or -1.
@@ -222,7 +208,7 @@ refusal_lines() {
 }
 
 require_helpers roster_header roster_row_fixture mkfix unmet_row stale_stamp usage_tx fire reason_of \
-                offset_in_reason refusal_lines verdict_of duty_ctx duty_file headline_of
+                offset_in_reason refusal_lines verdict_of duty_ctx duty_path headline_of
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "1: TWO verdicts block on one Stop — both reasons, blocks first"
@@ -399,10 +385,9 @@ s7_fire "$S7_D" "$S7_TX"
 expect_contains "7d: an undispatched ready row refuses the real tick's turn" \
   "ready with room:" "$(reason_of)"
 expect_contains "7e: …naming the task the tick asked for" "T13" "$(reason_of)"
-# THE DUTY STILL BINDS, ONCE (fails-when: the turn with a ready row and room is not refused to the agent, the
-# refusal shows the person anything but the fixed line, or the next end of the same turn is refused again).
+# THE DUTY STILL BINDS, ONCE: refused to the agent, the person shown the fixed line alone, the re-entry passing.
 expect_eq "7h: the refusal is the agent's: the window is handed the fixed line alone, exit 0, nothing on the person's stream" \
-  "$DUTY_LINE|0|" "$(duty_ctx)|$STOP_RC|$STOP_ERR"
+  "$DUTY_LINE|0|" "$(duty_ctx "$STOP_OUT")|$STOP_RC|$STOP_ERR"
 S7_ACTIVE=true; s7_fire "$S7_D" "$S7_TX"; S7_ACTIVE=false
 expect_eq "7i: …and it binds once: the next end of that turn, stop_hook_active true, passes in silence" "0||" \
   "$STOP_RC|$STOP_OUT|$STOP_ERR"
@@ -608,16 +593,14 @@ S9_D0="$(s9_fixture)"
 S9_TX0="$(mktemp)"; s9_transcript "$S9_TX0"
 s7_fire "$S9_D0" "$S9_TX0"
 expect_contains "9h: a turn that launched nothing names both ready rows" "ready with room: T13 T14 (" "$(s9_headline)"
-# THE QUIET CHANNEL'S SHAPE, AND THE VERB THAT PRINTS THE REST (fails-when: the hook's stdout is anything but one Stop
-# context holding the fixed line; a decision rides it; the person's stream carries a word; the fixed line outgrows the
-# window's 80 columns; the duty verb prints anything but the whole refusal the hook kept; the reason reaches the window).
+# THE QUIET CHANNEL'S SHAPE, AND THE VERB THAT PRINTS THE REST.
 expect_eq "9u: the hook's output is one Stop context holding the fixed line, no decision, exit 0, nothing for the person" \
   "Stop|$DUTY_LINE|hookSpecificOutput|0|" \
   "$(printf '%s' "$STOP_OUT" | jq -r '[.hookSpecificOutput.hookEventName, .hookSpecificOutput.additionalContext, (keys | join(","))] | join("|")' 2>/dev/null)|$STOP_RC|$STOP_ERR"
 expect_true "9v: …the fixed line keeps to 61 columns, so the window's line under the platform's label keeps to 80" \
-  test "$(printf '%s' "$(duty_ctx)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 61
+  test "$(printf '%s' "$(duty_ctx "$STOP_OUT")" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 61
 S9_DUTY="$(cd "$S9_D0" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$S7_POKER" duty 2>&1)"; S9_DUTY_RC=$?
-expect_eq "9w: session-poker.sh duty prints the whole refusal the hook kept, exit 0" "0|$(cat "$(duty_file "$S9_D0")")" "$S9_DUTY_RC|$S9_DUTY"
+expect_eq "9w: session-poker.sh duty prints the whole refusal the hook kept, exit 0" "0|$(cat "$(duty_path "$S9_D0" "$SID")")" "$S9_DUTY_RC|$S9_DUTY"
 expect_contains "9x: …its headline" "bionic: stop refused — ready with room: T13 T14 (dispatch, or make each wait)" "$S9_DUTY"
 expect_contains "9y: …and the dispatch line" "dispatch T13,T14, or make each wait by one of three forms:" "$S9_DUTY"
 expect_absent "9z: …which the window is never handed" "dispatch T13,T14" "$STOP_OUT$STOP_ERR"
@@ -673,9 +656,6 @@ unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "PERSON: a refusal only the person can act on reaches the person, alone and beside a duty at the same turn end"
-# fails-when: the unreadable plan's refusal is not a block, or its line is not on the person's stream, alone or beside
-# the landing duty; beside it the duty's line or detail leaves the model's reason; the person's stream carries a
-# second refusal line; the same landing fixture with the plan readable is anything but a duty.
 if [ "$(id -u)" -ne 0 ]; then
   PS_LINE="bionic: stop refused — the bound plan cannot be read (restore read access to the plan)"
   D=$(mkfix); chmod 000 "$D/.bionic/docs/plans/wave-01.plan.md"; fire "$D"; chmod 644 "$D/.bionic/docs/plans/wave-01.plan.md"

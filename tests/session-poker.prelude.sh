@@ -550,23 +550,11 @@ EOF
 )"
   S31_RC=$?
 }
-# WHOSE FIX DECIDES THE CHANNEL. A refusal whose fix is the agent's rides the duty channel: the fixed line in a Stop
-# context, the whole refusal in the session's duty file; one whose fix is the person's is a JSON block. These read the
-# refusal on whichever it rides: `s31_decision` names the channel (block or duty), or nothing for a turn that ends.
+# The refusal on the channel it rides (tests/lib/duty-read.sh): block, duty, or nothing for a turn that ends.
+. "${BASH_SOURCE[0]%/*}/lib/duty-read.sh"
 S31_D=""
-S31_DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
-s31_ctx() { printf '%s' "$S31_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
-s31_decision() {
-  local d; d="$(printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null)"
-  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
-  [ -z "$(s31_ctx)" ] || printf 'duty'
-}
-s31_reason() {
-  case "$(s31_decision)" in
-    block) printf '%s' "$S31_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
-    duty)  if [ "$(s31_ctx)" = "$S31_DUTY_LINE" ]; then cat "$S31_D/.bionic/tmp/duty-$SID.state" 2>/dev/null; else s31_ctx; fi ;;
-  esac
-}
+s31_decision() { duty_channel "$S31_OUT"; }
+s31_reason() { duty_reason "$S31_OUT" "$(duty_path "$S31_D" "$SID")"; }
 
 # ── hoisted from Section 34: s34_plan — Sections 37, 42, 49, 51 and §ROW-LABEL build the gate-admitted plan with it. ──
 s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the session is bound to it

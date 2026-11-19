@@ -424,22 +424,8 @@ s41_stop() {  # <repo> <transcript> -> sets S41_STOP_OUT
       '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
     | env CLAUDE_CODE_SESSION_ID="$SID" bash "$S41_STOP" 2>/dev/null)"
 }
-# WHOSE FIX DECIDES THE CHANNEL. An unanswered stand-down is the agent's to answer, so the wall refuses it on the
-# duty channel: the fixed line in a Stop context, the whole refusal in the session's duty file. These two read the
-# refusal on whichever channel it rides: `s41_refused` names the channel, or nothing for a turn that ends.
-S41_DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
-s41_ctx() { printf '%s' "$S41_STOP_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
-s41_refused() {
-  local d; d="$(s41_refused)"
-  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
-  [ -z "$(s41_ctx)" ] || printf 'duty'
-}
-s41_reason() {
-  case "$(s41_refused)" in
-    block) printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
-    duty)  if [ "$(s41_ctx)" = "$S41_DUTY_LINE" ]; then cat "$S41_STOP_D/.bionic/tmp/duty-$SID.state" 2>/dev/null; else s41_ctx; fi ;;
-  esac
-}
+s41_refused() { duty_channel "$S41_STOP_OUT"; }  # the prelude's tests/lib/duty-read.sh
+s41_reason() { duty_reason "$S41_STOP_OUT" "$(duty_path "$S41_STOP_D" "$SID")"; }
 s41_stop "$R41B" "$(s41_turn "$R41B" "$S41B_OUT")"
 expect_contains "41b5 the CONTROL: the real stop wall refuses an unanswered stand-down on this drive" \
   "stand-down unanswered" "$(s41_reason)"

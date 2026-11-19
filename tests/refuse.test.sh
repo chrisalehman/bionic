@@ -862,12 +862,6 @@ expect_absent "T47-i4 MUTANT …but the whole fact is nowhere on the wire (the f
 # ============================================================
 section "§DUTY — whose fix a refusal is: the agent's goes out as one fixed line, the whole reason kept for the duty verb"
 # ============================================================
-# fails-when: a mode's whose cell is not the table's (exit2 and block the person's, deny and duty the agent's); a
-# duty paints anything on the person's stream, carries a decision, exits non-zero, or puts more than the one fixed
-# line in its context; the duty file does not hold the whole refusal, line and detail, byte for byte; a duty with
-# nowhere to keep its reason drops it instead of handing the model the whole of it; a link at the file's path is
-# written through.
-#
 # THE WINDOW'S LINE. The platform paints a Stop hook's context as one grey line, `Stop hook says: <text>`, and the
 # whole window line keeps to 80 columns only when the text keeps to 61.
 for _m in exit2 block; do expect_eq "D1 $_m: its refusals are the person's to fix" "person" "$(cell "$_m" whose)"; done

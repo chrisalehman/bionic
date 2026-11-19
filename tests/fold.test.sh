@@ -219,10 +219,7 @@ expect_contains "9b: …and so does the block blocker's" "REASON-ALPHA" "$(reaso
 expect_true "9c: …in the order the functions were named" \
   test "$(index_of REASON-EXIT2)" -lt "$(index_of REASON-ALPHA)"
 
-# THE PERSON'S CHANNEL WINS (fails-when: a refusal whose fix is the person's loses its headline or its channel to an
-# agent's duty folded beside it, in either order; the duty's reason leaves the model's copy; two duties do not compose
-# onto the duty channel whole; an exit2 beside a duty stops exiting 2). Whose fix a mode carries is its `whose` cell
-# in refuse.sh's table, read here through the composed wire, never by asking the cell.
+# THE PERSON'S CHANNEL WINS, in either order: refuse.sh's `whose` cell, read through the composed wire.
 FD_ROOT="$(cd "$(mktemp -d)" && pwd -P)"; mkdir -p "$FD_ROOT/.bionic/tmp"
 FD_FILE="$FD_ROOT/.bionic/tmp/duty-fs.state"
 FD_ENV="BIONIC_ROOT='$FD_ROOT'; BIONIC_SID=fs"
@@ -273,8 +270,6 @@ expect_contains "9o: …and the duty's line still reaches the one wire both read
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "SAY: a line for the person on the quiet channel rides only a turn that blocked nothing"
-# fails-when: a staged line is not the one systemMessage object on stdout; it lands on stderr; it survives a block;
-# it is shown though the function that staged it returned 0; an advisory beside it is lost or moves to stdout.
 STUB_SAY='sayS() {
   fold_say "SAY-LINE for the person"
   return 1
