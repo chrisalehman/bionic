@@ -443,6 +443,17 @@ for c in workspaces gate; do
     test -f "$(f_of "$R5F" "$c" "$SID_LIVE")"
 done
 
+# THE tick-run CLASS. A running tick records its process in `tick-run-<sid>.state` (hooks/poker/tick.sh); a dead
+# session's copy is residue the sweep removes, and a live session's is kept, so close-out's wipe spares it too.
+R5T="$(make_repo r5t)"
+live_home 5t "$SID_LIVE"; H5T="$CLAUDE_HOME"
+plant_session "$R5T" "$SID_LIVE" tick-run
+plant_session "$R5T" "$SID_DEAD" tick-run
+poke "$R5T" "$H5T" "$SID_SELF" sweep
+expect_contains "5.20t a sweep over a tick-run-only session counts it dead" "|dead=1|" "$OUT"
+expect_false "5.20u a dead session's tick-run record is swept" test -e "$(f_of "$R5T" tick-run "$SID_DEAD")"
+expect_true "5.20v …and a live session's is kept" test -f "$(f_of "$R5T" tick-run "$SID_LIVE")"
+
 # THE start-clock CLASS (wave-27 T68; review pass 47 S1, A-orch-137). hooks/execution-recorder.sh
 # writes one clock file per start, `start-clock-<sid>.<agent id>.state`; a dead session's go with
 # its other state, a live one's are kept, and a clock-named thing that is not a file the hook

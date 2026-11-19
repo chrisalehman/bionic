@@ -38,6 +38,8 @@
 #            arming check, each a stop-library function called in a shell of its own
 #   §EVENTS  the orchestrator's stop of an agent (TaskStop's PreToolUse) and an agent's own stop
 #            (SubagentStop), each driven through this hook by its payload
+#   §RUNNING a tick of this session is running: its record is judged by the one alive rule, a second
+#            tick exits at once, and the turn end owes no tick while one runs
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the
@@ -1368,6 +1370,104 @@ for f in main-thread foreign-roster unengaged roster-link tmp-link bionic-link; 
   fire "$D" SubagentStop false "$ag"
   expect_eq "AGENT $f: the same stop is not this tool's to judge, exit 0 and silent" "0|" "$STOP_RC|$STOP_OUT$STOP_ERR"
 done
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "RUNNING: a tick of this session is running: its record is judged by the one alive rule, a second tick exits at once, and the turn end owes no tick while one runs"
+
+# THE RECORD. A tick writes `.bionic/tmp/tick-run-<sid>.state` (pid= and start=, the start as `ps -o lstart=` prints
+# it in the C locale and UTC) while it runs and removes it when it ends. A record whose process is gone, or whose pid
+# now runs another process, reads dead, so a killed tick leaves nothing that holds the next one off.
+RN_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+RN_HOME="$(cd "$(mktemp -d)" && pwd -P)"
+rn_since() { local s; s="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null)"; set -- $s; printf '%s' "$*"; }
+sleep 3600 & RN_LIVE=$!
+trap 'kill "$RN_LIVE" 2>/dev/null' EXIT
+( exit 0 ) & RN_DEAD=$!; wait "$RN_DEAD" 2>/dev/null
+RN_LIVE_START="$(rn_since "$RN_LIVE")"
+expect_nonempty "RUN0 meta: the live fixture process has a start to record" "$RN_LIVE_START"
+rn_record() {  # <project> <pid> <start>
+  printf 'pid=%s\nstart=%s\n' "$2" "$3" > "$1/.bionic/tmp/tick-run-$SID.state"
+}
+# A MARKER TURN UNDER A FRESH `arm` STAMP: the turn began with this session's Patrol marker and no tick stamped since.
+# The stamp's mtime is now, so the dead-clock arm stays silent and the no-tick duty is the only thing judged.
+RN_TX="$(mktemp)"
+{ jq -nc --arg t "$(date -u -v-100S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-100 seconds' +%Y-%m-%dT%H:%M:%SZ)" \
+    '{type:"assistant",timestamp:$t,message:{role:"assistant",content:[{type:"text",text:"working"}]}}'
+  jq -nc --arg t "$(date -u -v-5S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-5 seconds' +%Y-%m-%dT%H:%M:%SZ)" \
+    '{type:"user",timestamp:$t,message:{role:"user",content:"bionic-patrol session=aaaaaaaa v=8 — Patrol tick."}}'
+} > "$RN_TX"
+rn_world() {
+  D=$(mkfix)
+  { roster_header; } > "$D/.bionic/tmp/roster-$SID.state"
+  printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID" > "$D/.bionic/tmp/patrol-$SID.state"
+}
+rn_fire() { fire "$D" Stop false "$(jq -nc --arg t "$RN_TX" '{transcript_path:$t}')"; }
+
+rn_world; rn_fire
+expect_eq "RUN1 the control: with no tick record the marker turn that ran no tick is refused" "block" \
+  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_contains "RUN1b …for the tick" "Patrol tick not run" "$(reason_of)"
+
+rn_world; rn_record "$D" "$RN_LIVE" "$RN_LIVE_START"; rn_fire
+expect_eq "RUN2 with a live tick record for the session the same turn end is not refused" "0|" \
+  "$STOP_RC|$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+
+rn_world; rn_record "$D" "$RN_DEAD" "$RN_LIVE_START"; rn_fire
+expect_contains "RUN3 a record whose process is dead holds nothing off: the duty stands" "Patrol tick not run" "$(reason_of)"
+rn_world; rn_record "$D" "$RN_LIVE" "Thu Jan 1 00:00:00 1970"; rn_fire
+expect_contains "RUN3b …and so does a record whose pid now runs another process" "Patrol tick not run" "$(reason_of)"
+rn_world; printf 'pid=%s\nstart=%s\n' "$RN_LIVE" "$RN_LIVE_START" > "$D/.bionic/tmp/tick-run-1f4a7c02-3bd9-4e15-8a66-90c1de77b204.state"; rn_fire
+expect_contains "RUN3c …and another session's live tick is not this session's" "Patrol tick not run" "$(reason_of)"
+
+# THE SECOND TICK. With a live record for the session a tick exits at once, says so in one line, and writes nothing:
+# the stamp keeps its `arm` line and the record its holder.
+rn_tick() { RN_OUT="$(cd "$D" && env HOME="$RN_HOME" PATH="$D/stub:$PATH" CLAUDE_CODE_SESSION_ID="$SID" bash "$RN_POKER" tick "$@" 2>"$D/tick.err")"; RN_RC=$?; }
+RN_ARM="patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=$SID|verb=arm"
+rn_world; rn_record "$D" "$RN_LIVE" "$RN_LIVE_START"; rn_tick
+expect_eq "RUN4 a second tick of the session exits at once, 0, in one line" "0|1" \
+  "$RN_RC|$(printf '%s\n' "$RN_OUT" | /usr/bin/grep -c .)"
+expect_contains "RUN4b …naming the running tick by its pid" "poker: TICK-RUNNING — pid $RN_LIVE" "$RN_OUT"
+expect_eq "RUN4c …and the stamp is not rewritten" "$RN_ARM" "$(cat "$D/.bionic/tmp/patrol-$SID.state")"
+expect_eq "RUN4d …nor the running tick's record" "pid=$RN_LIVE|start=$RN_LIVE_START" \
+  "$(tr '\n' '|' < "$D/.bionic/tmp/tick-run-$SID.state" | sed 's/|$//')"
+rn_tick --watch
+expect_eq "RUN4e the watch pass over a running tick is quiet (WATCH_RC_QUIET) and stamps nothing" "0|$RN_ARM" \
+  "$RN_RC|$(cat "$D/.bionic/tmp/patrol-$SID.state")"
+
+# THE TICK THAT RUNS. With no record, or a dead one, the tick runs whole: it stamps, decides, and its record is gone
+# when it ends. While it runs, a `git` it calls finds the record naming a live process at its recorded start; the
+# stub keeps the last record it saw, so a dead record the tick found and took over is not the one read back.
+rn_stub() {
+  mkdir -p "$D/stub"
+  cat > "$D/stub/git" <<'STUB'
+#!/bin/bash
+r="$RN_REC"
+if [ -f "$r" ]; then
+  p="$(sed -n 's/^pid=//p' "$r")"; s="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$p" 2>/dev/null)"; set -- $s
+  { printf 'pid=%s\n' "$p"; printf 'start=%s\n' "$(sed -n 's/^start=//p' "$r")"; printf 'ps=%s\n' "$*"; } > "$r.seen"
+fi
+exec /usr/bin/git "$@"
+STUB
+  chmod +x "$D/stub/git"
+}
+rn_world; rn_stub; export RN_REC="$D/.bionic/tmp/tick-run-$SID.state"; rn_tick
+expect_contains "RUN5 meta: with no record the tick runs whole to its decision line" "|decision=" "$RN_OUT"
+expect_contains "RUN5b …and stamps" "|verb=tick" "$(cat "$D/.bionic/tmp/patrol-$SID.state")"
+expect_nonempty "RUN5c meta: the stub git ran while the record was on disk" "$(cat "$RN_REC.seen" 2>/dev/null)"
+RN_SEEN_START="$(sed -n 's/^start=//p' "$RN_REC.seen" 2>/dev/null)"
+expect_eq "RUN5d …and the record named a live process at its recorded start" "$RN_SEEN_START" \
+  "$(sed -n 's/^ps=//p' "$RN_REC.seen" 2>/dev/null)"
+expect_nonempty "RUN5e …a start, not an empty one" "$RN_SEEN_START"
+expect_false "RUN5f the tick's record is removed when it ends" test -e "$RN_REC"
+rn_world; rn_stub; RN_REC="$D/.bionic/tmp/tick-run-$SID.state"; rn_record "$D" "$RN_DEAD" "$RN_LIVE_START"; rn_tick
+expect_contains "RUN6 a dead record does not stop the tick: it runs whole" "|decision=" "$RN_OUT"
+expect_ne "RUN6b …taking the record over while it runs" "$RN_DEAD" "$(sed -n 's/^pid=//p' "$RN_REC.seen" 2>/dev/null)"
+expect_nonempty "RUN6c meta: …read off the record the stub saw" "$(sed -n 's/^pid=//p' "$RN_REC.seen" 2>/dev/null)"
+expect_eq "RUN6c2 …a live process at its recorded start" "$(sed -n 's/^start=//p' "$RN_REC.seen" 2>/dev/null)" \
+  "$(sed -n 's/^ps=//p' "$RN_REC.seen" 2>/dev/null)"
+expect_false "RUN6d …and removing it when it ends" test -e "$RN_REC"
+unset RN_REC
+{ kill "$RN_LIVE"; wait "$RN_LIVE"; } 2>/dev/null; trap - EXIT
 
 # ─────────────────────────────────────────────────────────────────────────────
 finish
