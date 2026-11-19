@@ -170,6 +170,33 @@ wait
 expect_eq "eight appends racing each other all landed" 11 "$(wc -l < "$L" | tr -d ' ')"
 expect_eq "and the run verifies clean" clean "$(seal_verify "$P")"
 
+section "CLOSE"
+# The archive moves a closed run's plan. A seal lifted BEFORE the move leaves nothing to read as a change; a seal left
+# standing reads the move as a plan gone. The removal itself holds the lock, and a lock not had keeps the seal.
+ARC="$M/.bionic/docs/plans/e/arch"; mkdir -p "$ARC"
+base; mv "$P" "$ARC/w.plan.md"
+expect_eq "a plan moved off a standing seal reads gone, the false alarm the removal comes before" "changed what=plan how=gone" "$(seal_verify "$P")"
+mv "$ARC/w.plan.md" "$P"
+base; seal_remove "$P"; rc=$?; mv "$P" "$ARC/w.plan.md"
+expect_status "a seal removed, then the plan moved: the removal exits 0" 0 "$rc"
+expect_eq "and the run reads none, not changed" none "$(seal_verify "$P")"
+expect_eq "with no seal file left in the home" "" "$(ls "$HOME_DIR"/*.seal 2>/dev/null)"
+mv "$ARC/w.plan.md" "$P"
+base; mv "$P" "$ARC/w.plan.md"; seal_remove "$P"; rc=$?
+expect_status "a seal whose plan is already moved is removed by its old path (its directory is there)" 0 "$rc"
+expect_eq "and no seal file is left" "" "$(ls "$HOME_DIR"/*.seal 2>/dev/null)"
+mv "$ARC/w.plan.md" "$P"
+base
+mkdir "$HOME_DIR/.reap"; printf '%s\n' "$$" > "$HOME_DIR/.reap/pid"
+seal_remove "$P"; rc=$?
+expect_status "a removal that meets a held lock exits 75" 75 "$rc"
+expect_eq "and the seal is still there" 1 "$(ls "$HOME_DIR"/*.seal 2>/dev/null | wc -l | tr -d ' ')"
+sh -c 'exit 0' & dead=$!; wait "$dead"
+printf '%s\n' "$dead" > "$HOME_DIR/.reap/pid"
+seal_remove "$P"; rc=$?
+expect_status "the same removal once the holder is dead exits 0" 0 "$rc"
+expect_eq "and the seal is gone" 0 "$(ls "$HOME_DIR"/*.seal 2>/dev/null | wc -l | tr -d ' ')"
+
 section "PLAN"
 # The write hook seals the plan in its after-arm, and only there. Each tool call is driven as Claude Code
 # makes it: the before-arm's payload, then the tool's own effect on disk (done here by the shell, as the
