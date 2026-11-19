@@ -1871,11 +1871,14 @@ bionic_context 2>/dev/null || exit 0
 # EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
 # foreign or unshaped session key, no key at all. The marker is the one artifact whose
 # PRESENCE opens a wall, so the fail direction is inverted here on purpose, and it is
-# inverted against this file's own fail-CLOSED posture on the library: the arming
-# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
-# which never consented is the defect this guard exists to remove.
+# inverted against this file's own fail-CLOSED posture on the library: a wall that binds a
+# session which never consented is the defect this guard exists to remove. Consent is the
+# binding, though, not the marker (D3): hooks/bash-walls.sh hands this gate the plan the
+# session's binding record holds it to (BIONIC_BOUND_PLAN), and a session holding one is
+# judged whatever became of its marker, which any tool can remove or replace with a link.
+# The context resolved again above reads the marker alone, so the handed plan is asked too.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-[ "$BIONIC_ENGAGED" = 1 ] || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || [ -n "${BIONIC_BOUND_PLAN:-}" ] || exit 0
 
 # ---------- JURISDICTION (wave-19 REQ-9, D10; ADR-031 amended): whose repository is this? ----------
 #
@@ -6324,5 +6327,49 @@ keeps what it learns where the run can see it: a judgment call goes in
 record/<wave>/assumptions.md, and a correction that should outlive the run goes to the user
 as a rule proposal (record/<wave>/user-rules-proposed.md), for the rules file that owns it.
 Nothing that gates or reviews this run reads the store. Reading it stays open."
+  return 2
+}
+
+# ─── wall_run_seal — a run changed around the tool admits no commit ─────────
+#
+# A run's plan and log are vouched for by their seal (lib/seal.sh). When they no longer match it,
+# the run on disk is not the run the tool kept: a step, a proof or an approval written by hand, or
+# a plan or log moved, cut or removed, would otherwise be judged as the run's own work, or end the
+# judging altogether. So the commit is refused, naming what changed and how, until the person rules
+# on the change. A seal that could not be read in time is refused too, and the commit can be run
+# again: the lock is held for milliseconds, and a reading skipped is a change admitted.
+#
+# A PREDICATE OVER THREE FACTS IT IS HANDED. hooks/bash-walls.sh, the collector, gathers them for a
+# commit, as its first act after the context and before anything costly:
+#   BIONIC_SEAL_LINE   the line lib/seal.sh `seal_verify` gave for the bound plan
+#   BIONIC_SEAL_PLAN   that plan, as the session's binding names it
+#   BIONIC_SEAL_LOG    the log the seal names, which outlives a plan that is gone
+# Any line but `changed …` and `busy` is nothing to judge here.
+wall_run_seal() {  # <event> -> 0 nothing · 2 block
+  local _w _h _fact
+  case "${BIONIC_SEAL_LINE:-}" in
+    busy)
+      fold_block exit2 commit "the run's seal could not be read" "run the commit again" \
+"The seal of the run this session is bound to was held by another writer for longer than the
+check waits, so the run could not be compared with it, and a run not compared is not judged.
+Plan:  ${BIONIC_SEAL_PLAN:-}"
+      return 2 ;;
+    changed*) ;;
+    *) return 0 ;;
+  esac
+  _w="${BIONIC_SEAL_LINE#*what=}"; _w="${_w%% *}"; _h="${BIONIC_SEAL_LINE##*how=}"
+  case "$_h" in
+    gone)  _fact="the run's $_w is gone" ;;
+    added) _fact="the run's $_w was added to outside the tool" ;;
+    *)     _fact="the run's $_w was $_h outside the tool" ;;
+  esac
+  fold_block exit2 commit "$_fact" "only the person can rule" \
+"The run this session is bound to no longer matches its seal: $_fact.
+Plan:  ${BIONIC_SEAL_PLAN:-}
+Log:   ${BIONIC_SEAL_LOG:-}
+Seal:  $BIONIC_SEAL_LINE
+Its plan and its log hold only what the tool wrote; a line written by hand, or a file moved, cut
+or removed, is not the run's own work, so no commit of this run is admitted until the person
+rules on the change. Tell them what changed and wait for their word."
   return 2
 }
