@@ -330,7 +330,8 @@ function dropped(r) { return (r in _dropped) && !(r in _landed) }
 # their own program, as they put the drop rule. Per row, in fact order: `_row_state` the latest of dispatched, candidate,
 # ready, returned, stalled and landed; `_row_held` the latest of a timed launch (active) and a landing, the scheduler's
 # own; `_row_name` the timed launch's name; `_row_dispatch` the last dispatch line; `_row_commit` the landing's commit;
-# `_row_tree` the last tree line, and `_row_tree_held` the last one with an instant, the scheduler's own.
+# `_row_tree` the last tree line, `_row_tree_nr` its place among the facts, and `_row_tree_held` the last one with an
+# instant, the scheduler's own.
 _READER_ROW_AWK='
 { _r = line_kv("row"); _e = (_r == "") ? "" : ev() }
 _r != "" && !(_r in _row_seen) { _row_seen[_r] = 1; _row_order[++_rows] = _r }
@@ -342,8 +343,18 @@ _e == "dispatch" { _row_state[_r] = "dispatched"; _row_held[_r] = "active"; _row
 _e == "published" { _row_state[_r] = _row_held[_r] = "landed"; _row_commit[_r] = line_kv("commit") }
 _e == "candidate" || _e == "ready" || _e == "returned" || _e == "stalled" { _row_state[_r] = _e }
 # an untimed tree line: the same act wrote one per tree cell, so it records the tree and holds none for the scheduler
-_e == "tree" { _row_tree[_r] = $0; if (line_kv("at") != "") _row_tree_held[_r] = $0 }
+_e == "tree" { _row_tree[_r] = $0; _row_tree_nr[_r] = NR; if (line_kv("at") != "") _row_tree_held[_r] = $0 }
 '
+
+# A ROW'S TREE IS ASKED HERE by every site outside the reader that needs one, so a tree is the same row's tree to the
+# commit gate, to its step 8 and to the close: the row fold's latest tree line of each row, in the order those lines
+# were set, which is the order two rows naming one tree are named in.
+reader_trees() {  # <plan> -> each row's latest tree fact, in fact order; 2 when the facts cannot be read
+  local f
+  f="$(reader_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK$_READER_ROW_AWK"'
+    END { for (r in _row_tree) at[_row_tree_nr[r]] = r; for (i = 1; i <= NR; i++) if (i in at) print _row_tree[at[i]] }'
+}
 
 _reader_of() {  # <plan> <type> [<field> <value>] -> the standing facts of <type>, of <field>=<value> when a value is given
   reader_facts "$1" | awk -F'|' -v t="$2" -v k="${3:-}" -v v="${4:-}" "$_READER_AWK"'
