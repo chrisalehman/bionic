@@ -1849,7 +1849,8 @@ RR_AGAINST_EOF
     # THE REVIEWS: each question's newest reading, by the role the rigor deals it, covered or failing as the judge
     # reads it at the head (lib/proof.sh `facts_reviews`, the one reading the situation report's count shares): a
     # failed reading its fix landings answered reads covered, naming them, and failing stays only while it is
-    # uncovered. A plan the judge cannot deal has no coverage to read, so its lines say the recorded result.
+    # uncovered. Only a newest reading that passed draws the pass mark. A plan the judge cannot deal has no coverage
+    # to read, so its lines say the recorded result.
     RR_REVIEWS=""
     RR_COV="$(facts_reviews "$PV_PLAN" "$RR_HEAD" --landings 2>/dev/null)"
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_header rigor; RR_RIGOR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^rigor=//p')"
@@ -1870,7 +1871,10 @@ RR_AGAINST_EOF
       esac
       case "${cst:-}:$r" in
         failing:*) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
-        covered:*) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm${clands:+, covered at this head by $clands}"$'\n' ;;
+        # THE PASS MARK IS THE NEWEST READING'S PASS: the cover holds the range, never the result, so a covered reading
+        # that flagged or failed says its result beside the cover and draws no pass mark.
+        covered:pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm${clands:+, covered at this head by $clands}"$'\n' ;;
+        covered:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, result ${r:-none}, covered at this head${clands:+ by $clands}"$'\n' ;;
         uncovered:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, not covered at this head"$'\n' ;;
         absent:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, a review still owed at this head"$'\n' ;;
         :pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm"$'\n' ;;
