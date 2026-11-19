@@ -106,8 +106,8 @@ fi
 # what makes this process refuse rather than run three verdicts and drop the fourth.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fill.sh"
-# THE PATROL VERDICT. The death notice asks `patrol_verdict`,
-# which lives in patrol.sh. Wanted and sourced here for fill.sh's reason above: a partial
+# THE WATCH RECORD AND THE TICK'S DIGEST. The turn-end wall reads both,
+# and both live in patrol.sh. Wanted and sourced here for fill.sh's reason above: a partial
 # library makes this process refuse.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"
