@@ -1673,9 +1673,27 @@ sitrep_status() {
   local on ev
   [ -z "${SG_UNREAD:-}" ] || { printf "the run's status could not be read: its facts did not fold; ask again\n"; return 2; }
   read -r on ev <<SITREP_COUNT
-$(printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF && $1 != "" { if (index($5, "event ") == 1) e++; else n++ } END { print n + 0, e + 0 }')
+$(sitrep_owed_counts)
 SITREP_COUNT
   printf '%s · owed: %s on you · %s on events · close %s\n' "$SG_TASKCOUNT" "$on" "$ev" "$SG_LINE_CLOSE"
+}
+
+# sitrep_owed_counts -> `<on you> <on events>` from sitrep_gather's asks: the one count the status line prints and the
+# tick's rest reads, so the two never say different things about who owes the run.
+sitrep_owed_counts() {
+  printf '%s\n' "${SG_ASKS:-}" | awk -F'\t' 'NF && $1 != "" { if (index($5, "event ") == 1) e++; else n++ } END { print n + 0, e + 0 }'
+}
+
+# sitrep_waits_only_on_you -> rc 0 when sitrep_gather's asks were read, at least one is open and every one waits on the
+# user: the status line reads `owed: <n> on you · 0 on events` with <n> at least 1. rc 1 otherwise, a gather that never
+# ran or did not fold among them, since asks that were not read cannot say the person owes them all.
+sitrep_waits_only_on_you() {
+  local on ev
+  [ "${SG_UNREAD+set}" = set ] && [ -z "$SG_UNREAD" ] || return 1
+  read -r on ev <<SITREP_COUNT
+$(sitrep_owed_counts)
+SITREP_COUNT
+  [ "${on:-0}" -ge 1 ] && [ "${ev:-0}" -eq 0 ]
 }
 
 # sitrep_blocked_on_you -> yes when some ask of sitrep_gather's facts blocks the user, else no: the sheet's own
