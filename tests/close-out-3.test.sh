@@ -84,6 +84,8 @@ hh_plant() {
                   print "approved: regression-2 by Someone 2026-10-06T14:00:00Z \"quoted in a fence\""
                   print "waived: question=adversarial head=0123456789abcdef by Someone 2026-10-06T14:00:00Z \"fenced\""; print "\140\140\140"; print ""; print; next }
     { print }' "$plan" > "$w" && mv "$w" "$plan"
+  # The lines and the prose above are the world as planted, written after mk_fixture sealed it.
+  seal_fixture "$plan" "$rec/run.log"
 }
 PH="$(mk_fixture handholds)"; advance_to "$PH" 8
 hh_plant "$PH"
@@ -100,6 +102,7 @@ expect_eq "HH-3 the default landing-report prints no hand-holds line (its output
 PHP="$(mk_fixture handholds-prose)"; advance_to "$PHP" 8
 awk '/^## Tasks/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed; a second floor"; print ""; print; next } { print }' \
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
+seal_fixture "$PHP/$PLAN_REL" "$PHP/$LOG_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
   "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
@@ -121,6 +124,7 @@ PHS="$(mk_fixture handholds-stoprun)"; advance_to "$PHS" 8
   printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$HH_C"
   printf 'run/v1|ev=hand|what=stop-run|request=2156|who=fixture:w-T1|kind=whole|key=tests/run.sh|by=fixture|why=parked behind a dead holder|at=2026-10-06T10:50:00Z\n'
 } >> "$PHS/$LOG_REL"
+seal_fixture "$PHS/$PLAN_REL" "$PHS/$LOG_REL"
 expect_eq "HH-13a precondition: the run's log holds one stop-run and one published line of kind queue" "1/1" \
   "$(/usr/bin/grep -c '^run/v1|ev=hand|what=stop-run|' "$PHS/$LOG_REL" | tr -d ' ')/$(/usr/bin/grep -c '^run/v1|ev=published|.*|kind=queue|' "$PHS/$LOG_REL" | tr -d ' ')"
 run_close "$PHS" check
@@ -180,6 +184,7 @@ section "§FLOOR-DECLARED (wave-28 T75; REQ-17 AC-17.1, D36): close-out proceeds
 PFL="$(mk_fixture floor-declared)"
 FL_SID="closeout-floor-1"
 sed '/|ev=proof|kind=regression|/d' "$PFL/$LOG_REL" > "$PFL/$LOG_REL.n" && mv "$PFL/$LOG_REL.n" "$PFL/$LOG_REL"
+seal_fixture "$PFL/$PLAN_REL" "$PFL/$LOG_REL"
 printf 'regression-command: true\n' >> "$PFL/.bionic/config.yaml"
 ( in_fixture "$PFL" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFL" "$FL_SID" "$PFL/$PLAN_REL" )
 fl_poke() {  # <verb> [<arg>...] -> FL_RC, FL_OUT: the real poker verb, in the fixture, as this session
@@ -214,6 +219,7 @@ expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc
 PFN="$(mk_fixture floor-any)"
 FN_SID="closeout-floor-2"
 sed '/|ev=proof|kind=regression|/d' "$PFN/$LOG_REL" > "$PFN/$LOG_REL.n" && mv "$PFN/$LOG_REL.n" "$PFN/$LOG_REL"
+seal_fixture "$PFN/$PLAN_REL" "$PFN/$LOG_REL"
 ( in_fixture "$PFN" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFN" "$FN_SID" "$PFN/$PLAN_REL" )
 FN_H="$(fixture_git "$PFN" rev-parse wave/01-fixture)"
 mkdir -p "$PFN/.bionic/docs/record/wave-01-fixture"
@@ -340,6 +346,7 @@ PDL="$(mk_fixture debtlines1)"; advance_to "$PDL" 8
 debt_plant "$PDL"
 DL_LED="$PDL/.bionic/docs/record/wave-01-fixture/run.log"
 printf '%s\n' "$DL_BAD" >> "$DL_LED"
+seal_fixture "$PDL/$PLAN_REL" "$DL_LED"
 run_close "$PDL" check
 expect_eq "DEBT-LINES-1 check exits 0 over a debt with an unparseable line" "0" "$CO_RC"
 cp "$PDL/$PLAN_REL" "$SANDBOX/dl-plan-before"
@@ -348,6 +355,7 @@ expect_eq "DEBT-LINES-2 AC-7.8 run refuses a debt with a space in its source fie
 expect_false "DEBT-LINES-2c …and no continuation was written" test -e "$PDL/$CONT_REL"
 expect_true "DEBT-LINES-2d …the plan byte-identical, nothing done" cmp -s "$SANDBOX/dl-plan-before" "$PDL/$PLAN_REL"
 awk -v bad="$DL_BAD" -v good="$DL_GOOD" '$0 == bad { $0 = good } { print }' "$DL_LED" > "$DL_LED.new" && mv "$DL_LED.new" "$DL_LED"
+seal_fixture "$PDL/$PLAN_REL" "$DL_LED"
 run_close "$PDL" run
 expect_eq "DEBT-LINES-3b the corrected debt closes (exit 0)" "0" "$CO_RC"
 DL_CARRY="debt: hole_x hole \"lib/e.sh:5\" touches=0 raised-by=record/wave-01-fixture/assumptions.md#A-orch-46 from=$CARRY_W"
