@@ -228,6 +228,9 @@ expect_regex "the bind's event is in the log" '^run/v1\|ev=bind\|' "$(/usr/bin/g
 expect_eq "and is sealed by the appender with the run, which verifies clean" clean "$(seal_verify "$NP")"
 seal_remove "$NP"; unbind
 
+# The fixture seals the run it plants; the seal is lifted so that the admit's own write, if any, is what reads.
+seal_remove "$RP"
+expect_eq "the planted run's seal is lifted" none "$(seal_verify "$RP")"
 WI=$(jq -n --arg p "$RP" --arg c "$BODY" '{file_path:$p, content:$c}')
 drive PreToolUse Write "$WI"
 expect_status "the before-arm admits a Write over the plan" 0 "$HOOK_RC"
