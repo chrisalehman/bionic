@@ -49,7 +49,7 @@
 # `cmd=` can never carry a `|rc=…` into a reader that splits on `|`. The dirty count skips
 # the one line `?? .bionic` when the tree's `.bionic` is a symlink (spawn-worktree's link). In a linked worktree the git dir is the tree's own
 # (`.git/worktrees/<name>`), so a stamp never lands in another checkout. Outside a git
-# tree, or in one with no commit, there is no stamp and no error. worktree_land reads it.
+# tree, or in one with no commit, there is no stamp and no error.
 #
 # EVERY END STAMPS (wave-26 T61, critic 3 S5), except a usage error (exit 2), which never got as far
 # as reading the tree. A command the gate did not admit in time (75) and a shim signalled while

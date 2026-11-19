@@ -1120,6 +1120,7 @@ sitrep_holds() {
   case "$key" in
     decide:D[0-9]*) ids="$(decision_waiters "$plan" "${key#decide:}" "$root")" ;;
     approve:step[0-9]|approve:step[0-9][0-9]) printf 'step %s\n' "$(( ${key#approve:step} + 1 ))"; return 0 ;;
+    seal:*) printf 'every commit\n'; return 0 ;;
     approve:*) ids="$(sitrep_approval_rows "$plan" "$rows" "${key#approve:}")" ;;
     waive:*|finding:*|row:*|hold:*)
       ids="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k) }
@@ -2527,6 +2528,17 @@ sitrep_tick_line() {
     exit 0
   }
 
+  # A RUN WHOSE PLAN IS GONE has no sheet to gather, but a seal that still stands for it names its log, and what
+  # the person owes it is read there: the sheet is its head, the plan's path and the asks (lib/owed.sh finds the log
+  # through the seal). rc 1, nothing printed, when no seal stands, and the verb refuses as for no run.
+  sitrep_gone() {  # <plan> <root>
+    { declare -F proof_plan_slug >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } 2>/dev/null || return 1
+    SG_ASKS="$(sitrep_asks "$1" "$2" "" "" "$(sitrep_now)")"
+    [ -n "$SG_ASKS" ] || return 1
+    printf '%s\nrun.plan-gone: %s\n' "$SITREP_SHEET_HEAD" "$1"
+    sitrep_ask_lines
+  }
+
   # THE SITUATION REPORT. Its reasoning is above the verbs, beside `sitrep_gather`: the sheet, or with --line the
   # Patrol's status, or with `card` the card payload/scripts/card.sh draws from the judgment on stdin and the sheet
   # `sitrep` last saved for the plan (THE SHEET THE JUDGMENT IS WRITTEN FROM), its asks read fresh.
@@ -2560,6 +2572,7 @@ sitrep_tick_line() {
       fi
       resolve_run "$REPO_REAL" "$SESSION_ID"
       SR_PLAN="$POKER_RUN_PLAN"
+      if [ -n "$SR_PLAN" ] && [ ! -f "$SR_PLAN" ] && [ "$SR_LINE$SR_CARD" = nono ] && sitrep_gone "$SR_PLAN" "$REPO_REAL"; then exit 0; fi
       if [ -z "$SR_PLAN" ] || [ ! -f "$SR_PLAN" ]; then
         die "REFUSED — this session has no run to report on; bind its plan first, or name it: sitrep <plan>."
         exit 2

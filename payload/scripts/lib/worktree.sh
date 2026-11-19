@@ -3,12 +3,10 @@
 # ledger C1 "worktree lease", C2 ".bionic symlink retired").
 #
 # WHAT THIS FILE OWNS. A spawned worktree is a leased slot, bound to the ledger
-# row that dispatched its writer. The lease ends when the row is
-# fact-discharged, and ending it is ONE act: merge the branch into the plan's
-# working branch, remove the tree, prune. TWO callers end a lease —
-# `spawn-worktree.sh land` and `hooks/stop-orders.sh standdown` — and both call
-# `worktree_land_for_session`, the one path from a session to a land (wave-20
-# T8, REQ-1, D1). The Patrol tick is a READER here and never a caller of the
+# row that dispatched its writer. A row lands through the landing line
+# (lib/line.sh: `ready` and the hand landing), which judges the tree with this
+# file's checks (`_wt_land_checks`, `_wt_busy_suite`) and removes it after the
+# publish (`_wt_hand_remove`, `worktree_remove_landed`). The Patrol tick is a READER here and never a caller of the
 # act: its lease-overrun line (`worktree_lease_overruns`) reports a tree that
 # outlived its row, and it lands nothing and removes nothing. The behaviour
 # lives here so each caller is a call site rather than another definition of
@@ -329,55 +327,22 @@ NESTED
 }
 
 # ---------------------------------------------------------------------------
-# The land verb.
+# The tree's checks a landing shares.
 #
-# ONE ACT (C1). Merge the tree's branch --no-ff into <onto>, IN THE CHECKOUT
-# THAT HOLDS <onto>, remove the tree, prune. A land that did two of the three is
-# a lease half-ended, and the third would be somebody's later chore.
+# A row lands through the landing line (lib/line.sh: `ready`, and the hand landing), which judges the
+# tree here (`_wt_land_checks`) before anything is changed, so a refused landing leaves the repository
+# as it found it. The target is named by the caller, read off the session's bound plan and never off
+# the main checkout; the checkout holding it is found in `git worktree list --porcelain`
+# (`worktree_checkout_of`).
 #
-# THE TARGET IS NAMED, NEVER READ OFF THE MAIN CHECKOUT (wave-20 T8, REQ-1, D1).
-# Until 1.8.7 the merge went into whatever branch the main checkout sat on. A
-# wave's integration branch lives in its own checkout under `.worktrees/`, and a
-# human may have the main checkout on a feature branch of their own: the land
-# merged a task into that feature branch and left the wave branch unmerged
-# (report #9). <onto> is required; `worktree_land_for_session`, below, reads it
-# off the session's bound plan, and that is the path every caller takes. The
-# checkout holding <onto> is found in `git worktree list --porcelain`
-# (`worktree_checkout_of`), and the merge runs there with `git -C`.
-#
-# EVERY REFUSAL BEFORE THE MERGE. The order is cheapest-and-most-local first,
-# and every one of them is checked before anything is changed, so a refused land
-# leaves the repository exactly as it found it — the tree's `.bionic` record link
-# included (wave-26 D19). The link is dropped only just before `git worktree
-# remove`, the one act that needs it gone, and put back if git refuses that.
-# Two refusals can only be known after the merge, `onto-moved` and `branch-moved`
-# (review 7 F8, F9); each undoes the merge first, so it leaves the same state. The
-# exception is a refusal that says `undo=failed` (review 11 S1): the undo declined, because
-# a commit sits on the merge or a change in the checkout touches a file the merge brought,
-# so the merge stands on <onto>, the tree is kept, and the line prints the one fix that
-# removes nothing but the merge.
-#
-# THE LANDING RULE (wave-26 D7, as ruled in A-orch-26). A tree lands on its own
-# green run. It must first contain what landed since it branched only where that
-# landed work touches a file the tree also changed: `not-current` names those
-# files (`_wt_not_current`). `stale-proof` unless, for every suite stamped at the
-# tree's head in its stamp file (`<git-dir>/bionic-stamps`, written by the booking
-# shim), the newest stamp of that suite is green on a clean tree (T61; see
-# `_wt_stale_proof`). No stamp file at all means no suite-class command ever ran
-# in the tree, and is not refused. The head of <onto> is read
-# again just before the merge, and a moved head is judged again (review 2 F7).
-#
-# TWO BOUNDS ON THE POWER (security review F1). This function merges into a
-# branch and deletes a worktree; both of those are irreversible enough that
+# TWO BOUNDS ON THE POWER (security review F1). A landing moves a branch and
+# removes a worktree; both of those are irreversible enough that
 # WHICH branch and WHICH tree cannot be left to the caller's word for it.
 #
-#   PROTECTED BRANCH. The branch merged into — <onto> — is never `main`/`master`.
+#   PROTECTED BRANCH. The branch landed onto — <onto> — is never `main`/`master`.
 #   hooks/protect-main.sh is the wall that keeps unreviewed work off those
-#   branches, and it reads `git push` argv — a local `git merge --no-ff` is
-#   invisible to it. Without this refusal a land onto `main` — before T8, any
-#   land from a main checkout left where every checkout starts — was an
-#   unwalled write to the protected branch, with the unmerged tree deleted in
-#   the same call. The list is `git_branch_protected`'s, not a second copy of it.
+#   branches, and it reads `git push` argv, which a local landing never is.
+#   The list is `git_branch_protected`'s, not a second copy of it.
 #
 #   INSIDE THE FARM. The tree landed sits under `<main-root>/.worktrees/`,
 #   the only place this lease ever hands one out. `.git`-is-a-file proves the
@@ -445,6 +410,7 @@ EOF
   printf '%s' "$abs"
 }
 
+# NO CALLER in the product: nothing calls this since every landing goes through lib/line.sh; it stays until its removal is decided.
 # THE STALE-PROOF READ (wave-26 D7; T61, critic F1). Reads EVERY line of the tree's stamp file,
 # `stamp/v1|head=<40-hex>|dirty=<count>|rc=<n>|at=<ISO-UTC>[|suites=<names>]|cmd=<...>`, appended
 # by the booking shim to `<the tree's git dir>/bionic-stamps`, one line per suite-class command.
@@ -547,6 +513,7 @@ _wt_stale_proof() {  # <worktree abs> <head> [<declared suite>] -> why=... | the
   return 0
 }
 
+# NO CALLER: nothing calls this since every landing goes through lib/line.sh; it stays until its removal is decided.
 # THE NOT-CURRENT READ (wave-26 D7, as ruled in A-orch-26). Where landed work the tree lacks
 # touches a file the tree also changed, the merge would combine two changes to one file that
 # no green run has seen together. Prints `files=<the overlap>` and returns 0 when the tree must
@@ -799,6 +766,7 @@ _wt_refuse_bionic() {  # <tree abs> <branch> <onto> <commit | dropped:<head>> <p
   _wt_refuse "bionic-committed path=${path} commit=${commit:0:12} branch=${2} onto=${3} fix='git -C $(_wt_shquote "$1") ${fix}, say ready again' — a committed .bionic, merged, replaces the project's .bionic directory; nothing is merged, the tree is kept"
 }
 
+# NO CALLER: nothing calls these six, to `_wt_land_checks`, since every landing goes through lib/line.sh; they stay until their removal is decided.
 _wt_refuse_not_current() {  # <branch> <onto> <onto head> <files=...>
   _wt_refuse "not-current branch=${1} onto=${2} onto_head=${3:-<none>} ${4} — merge ${2} into the tree, re-run its suites, land again"
 }
@@ -916,8 +884,7 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
   fi
 }
 
-# THE TREE'S OWN CHECKS, in land's order (wave-28 T3 factored them out of `worktree_land`, which
-# the hand landing shares): a linked tree inside the farm, a branch to land onto that exists and is not
+# THE TREE'S OWN CHECKS, which `ready` and the hand landing share, in this order: a linked tree inside the farm, a branch to land onto that exists and is not
 # protected, a plan not past judgment, the tree on a branch, clean, and ahead. With <need checkout> 1 the
 # branch must be held by one checkout (land merges there); with 0 a branch no checkout holds is the
 # line's `update-ref` case. Sets _WT_ABS, _WT_ROOT, _WT_BRANCH and _WT_CO ("" when none holds it).
@@ -1118,7 +1085,7 @@ worktree_check_run() {  # <root> <plan> <judge> <base> <head> [<tree>] [<branch>
   return 0
 }
 
-# THE DOOR'S RUN OF THE DECLARED CHECK, for `line_publish` and `worktree_land`: the one runner over <base>..<head>,
+# THE DOOR'S RUN OF THE DECLARED CHECK, for `line_publish`: the one runner over <base>..<head>,
 # judged by the release base of <plan>; <writer tree> is the piece whose cleanliness the check must leave as it found
 # it. A landing that changes the check's own files is judged like any other: the judge is a commit no landing writes,
 # so a fix to the check lands, and what it changes is said on the plan line by the hand scan and on the release card.
@@ -1144,252 +1111,6 @@ _wt_release_check() {  # <root> <plan> <base> <head> <writer tree> <branch> <ont
     case " $left" in *" piece_paths="*) said="${said:+${said}; }changed the piece's checkout ${wt_abs} (git -C ${wt_abs} status)" ;; esac
     _wt_refuse "check-dirtied why=release-check checkout=${WT_CHECK_DIR} ${left} branch=${branch} ${judged} — the project's declared release-check (${WT_CHECK_CMD}) ${said}, and nothing is merged; put back what it changed, make the check change nothing, land again"; return 2
   fi
-  return 0
-}
-
-worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evidence>] -> LANDED | REFUSED
-  local target="${1:-}" onto="${2:-}" wt_abs root branch co ahead busy merge_sha rc
-  local dirt onto_head head why link_to overlap now parent tip moved fix undo_on arrived
-  local pre pre_ref was said held now_ref check_cmd check_out check_was left nl='
-'
-  local plan="${3:-}" judged proofs proofs_row
-  local lands_red="${4:-}" red_ev="${5:-}" landed_red="" ev_heads judged_cur landed_at="" red_said debt_id=""
-
-  _wt_land_checks "$target" "$onto" "$plan" 1 || return 2
-  wt_abs="$_WT_ABS"; root="$_WT_ROOT"; branch="$_WT_BRANCH"; co="$_WT_CO"
-
-  # NOT CURRENT: what landed since the tree branched must be in it wherever it
-  # touches a file the tree also changed, so no file the merge combines is untested.
-  onto_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${onto}" 2>/dev/null)"
-  head="$(git -C "$wt_abs" rev-parse --verify --quiet HEAD 2>/dev/null)"
-  overlap="$(_wt_not_current "$root" "$onto_head" "$head")" && {
-    _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
-  }
-
-  # THE RECORD LINK NEVER LANDS (wave-27 T79): a range that commits `.bionic` is refused here,
-  # before any merge, the tree and its stamps kept (see _wt_bionic_committed).
-  why="$(_wt_bionic_committed "$root" "$onto_head" "$head")" && {
-    why="${why%/}"
-    _wt_refuse_bionic "$wt_abs" "$branch" "$onto" "${why%% *}" "${why#* }" "$(_wt_bionic_kind "$root" "$onto_head")"
-    return 2
-  }
-
-  # THE RUNNER IS NEVER A DECLARED RED (wave-27 T67; review pass 46 B4): a declaration is honoured
-  # only for one suite FILE, `<name>.test.sh`; a red stamp of `run.sh`, which speaks for every suite,
-  # is refused as any red is, whatever a launch row says.
-  case "${lands_red%% until *}" in ?*.test.sh) : ;; *) lands_red="" ;; esac
-  why="$(_wt_stale_proof "$wt_abs" "$head" "${lands_red%% until *}")" && {
-    _wt_refuse "stale-proof ${why}"; return 2
-  }
-  judged="$why"
-
-  # A DECLARED RED (wave-27 T31; REQ-14, D23). The row's launch line carried `lands_red=<suite>
-  # until <token>` and `red_evidence=<path>` (worktree_land_for_session reads them), and the proof
-  # above accepted a red newest run of exactly that suite with every other suite green. It lands
-  # only beside its evidence: the file exists and holds a line `head: <the tree's head>`, so the
-  # red it explains is this head's. A relative path is read from the project root, a `record/…`
-  # one from the docs root, as proof-add reads one.
-  case "$judged" in
-    landed-red=*)
-      landed_red="${judged%%"$nl"*}"; landed_red="${landed_red#landed-red=}"
-      case "$judged" in *"$nl"*) judged="${judged#*"$nl"}" ;; *) judged="" ;; esac
-      case "$red_ev" in
-        /*) : ;;
-        record/*) red_ev="$(docs_root "$root")/${red_ev}" ;;
-        *) red_ev="${root}/${red_ev#./}" ;;
-      esac
-      if [ ! -f "$red_ev" ]; then
-        _wt_refuse "stale-proof why=red-evidence suite=${landed_red} head=${head} evidence=${red_ev} — the declared red of ${landed_red} lands only beside its evidence, and that file is missing; write it with a line head: ${head}, land again"; return 2
-      fi
-      ev_heads="$(awk '/^head:[ \t]*[0-9a-f]+[ \t]*$/ { sub(/^head:[ \t]*/, ""); sub(/[ \t]*$/, ""); print }' "$red_ev" 2>/dev/null)"
-      if case "${nl}${ev_heads}${nl}" in *"${nl}${head}${nl}"*) false ;; *) true ;; esac; then
-        _wt_refuse "stale-proof why=red-evidence suite=${landed_red} head=${head} evidence=${red_ev} found=$(printf '%s' "${ev_heads:-none}" | tr '\n' ',') — the declared red of ${landed_red} lands only beside evidence naming this head, and ${red_ev} names none that is; write head: ${head} in it, land again"; return 2
-      fi ;;
-  esac
-
-  # THE TARGET CHECKOUT IS CLEAN IN WHAT GIT TRACKS. A merge into a checkout
-  # holding staged or modified tracked files mixes somebody's unfinished work
-  # into the merge — or fails half-way on it. Untracked files are not read: the
-  # `.bionic` alias and `.worktrees/` live there by design.
-  if [ -n "$(git -C "$co" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-    _wt_refuse "onto-checkout-dirty checkout=${co} branch=${onto}"; return 2
-  fi
-
-  busy="$(_wt_busy_suite "$root" "$co")" && {
-    _wt_refuse "suite-running ${busy}"; return 2
-  }
-
-  # THE PROJECT'S DECLARED CHECK. When the project's config names `release-check: <command>`, the
-  # command runs over this landing's range before anything is touched, as the release base holds it
-  # (`worktree_check_run`), so a piece cannot rewrite the check that judges it; the task's commits are
-  # read from the shared object store. BIONIC_CHECK_BASE is the working branch's head and
-  # BIONIC_CHECK_HEAD the task's head. A non-zero exit refuses the landing and shows the command's
-  # output on stderr. With no key nothing runs and nothing prints.
-  _wt_release_check "$root" "$plan" "$onto_head" "$head" "$wt_abs" "$branch" "$onto" || return 2
-
-  # THE RUN'S LOG IS PROVED WRITABLE BEFORE THE MERGE. With a bound plan, the run's
-  # `run.log`, beside the landing record that nothing writes any more, is proved writable here, and created by
-  # nothing but the append; a log that cannot be written is refused with nothing changed: a path that
-  # is a symlink, a FIFO, a device or a directory is refused unopened (`_wt_proofs_prove`).
-  # The row is the plan's `## Tasks` row whose `worktree` cell names this tree. A declared red's debt goes there;
-  # the landing's own `published` event is the landing line's to write (lib/line.sh `line_published_event`), never this.
-  proofs="none"; proofs_row=""
-  if [ -n "$plan" ]; then
-    proofs="$(_wt_proofs_path "$root" "$plan")" && proofs="${proofs%/*}/run.log" && _wt_proofs_prove "$proofs" || {
-      _wt_refuse "record-unwritable why=proofs-unwritable path=${proofs:-<none>} branch=${branch} — the landing record cannot be written, so nothing is merged; make it writable, land again"; return 2
-    }
-    proofs_row="$(_wt_proofs_row "$root" "$plan" "$wt_abs")"
-  fi
-
-  # THE HEAD IS READ AGAIN JUST BEFORE THE MERGE (review 2 F7). Another land onto
-  # <onto> may have gone through since the read above; if the head moved, the
-  # not-current decision is taken again against the head the merge will meet.
-  # A move after this read is caught once the merge is made, below.
-  now="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${onto}" 2>/dev/null)"
-  if [ "$now" != "$onto_head" ]; then
-    onto_head="$now"
-    overlap="$(_wt_not_current "$root" "$onto_head" "$head")" && {
-      _wt_refuse_not_current "$branch" "$onto" "$onto_head" "$overlap"; return 2
-    }
-  fi
-
-  # WHAT THE CHECKOUT HOLDS AS `git merge` RUNS (review 16 B1, S1): the commit and the ref its HEAD
-  # names, in one read just before the merge. The land's merge is looked for on that ref past that
-  # commit (_wt_own_merge), and is undone there, whatever the checkout does after.
-  pre="$(git -C "$co" rev-parse HEAD --symbolic-full-name HEAD 2>/dev/null)"
-  pre_ref="${pre#*"$nl"}"; pre="${pre%%"$nl"*}"
-  case "${pre}:${pre_ref}" in
-    *[!0-9a-f]*:*|:*) was="" ;;
-    *:HEAD) was="<detached>" ;;
-    *:refs/heads/?*) was="${pre_ref#refs/heads/}" ;;
-    *) was="" ;;
-  esac
-  [ -n "$was" ] || { _wt_refuse "onto-checkout-unreadable checkout=${co} branch=${onto}"; return 2; }
-
-  # THE DEBT IS WRITTEN BEFORE THE MERGE (wave-27 T67; review pass 46 B3; A-orch-120). A declared red
-  # is owed because `land` wrote it: one `debt:` line appended to the landing record, holding
-  # the landing's row, branch, head, suite, token and time, the `landed-red-at=` the LANDED line
-  # prints. A line that cannot be written, or a landing with no bound plan and so no record, is
-  # refused here with nothing merged: a declared red never lands without its debt written. A merge
-  # that then fails, or is undone, is followed by a `void:` line naming the debt's id (below).
-  debt_id=""
-  if [ -n "$landed_red" ]; then
-    landed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    if [ "$proofs" = none ]; then
-      _wt_refuse "debt-unwritten why=no-bound-plan suite=${landed_red} branch=${branch} — a declared red lands only with its debt written to the run's landing record, and this landing has no bound plan, so nothing is merged; land from the session bound to the run"; return 2
-    fi
-    debt_id="$$.${RANDOM}${RANDOM}"
-    if ! _wt_debt_write "$proofs" "$debt_id" "$proofs_row" "$branch" "$head" "$landed_red" "${lands_red#* until }"; then
-      _wt_refuse "debt-unwritten why=proofs-unwritable suite=${landed_red} path=${proofs} branch=${branch} — the declared red's debt cannot be written to the landing record (${_WT_PROOFS_SAW:-the append failed}), so nothing is merged; make it writable, land again"; return 2
-    fi
-  fi
-
-  # --no-ff ALWAYS: a fast-forward would erase the fact that this was a task,
-  # and the merge commit is what the ledger row points at. The head merged is
-  # the one judged above, not whatever the branch holds by now. `git merge` says
-  # so when it had nothing to do (the C locale fixes the words): then it made no
-  # commit, and none is looked for.
-  if ! said="$(LC_ALL=C git -C "$co" merge --no-ff -m "merge ${branch} (land)" "$head" 2>/dev/null)"; then
-    git -C "$co" merge --abort >/dev/null 2>&1
-    if [ -n "$debt_id" ] && ! _wt_debt_void "$proofs" "$debt_id" "$branch" merge-failed; then
-      _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co} debt=unvoided path=${proofs} — the merge failed after the debt for ${landed_red} was written and not voided (its void's append answered proofs=unwritten: ${_WT_PROOFS_SAW:-the append failed}), so the run owes it: a green run of ${landed_red} after now covers it like any other; land again once the merge can be made"; return 2
-    fi
-    _wt_refuse "merge-failed branch=${branch} onto=${onto} checkout=${co}"; return 2
-  fi
-  merge_sha=""
-  case "$said" in "Already up"*) : ;; *) merge_sha="$(_wt_own_merge "$co" "$pre_ref" "$pre" "$head")" ;; esac
-  parent="${merge_sha#* }"; merge_sha="${merge_sha%% *}"
-
-  # NO MERGE THIS LAND CAN PROVE ITS OWN (review 16 B1). `git merge` had nothing to do, or merged
-  # somewhere other than the ref the checkout named just before it. Either way a merge of <head>
-  # that now stands anywhere is not provably this land's, so nothing is undone, and the line says
-  # what the checkout held and what it holds now.
-  if [ -z "$merge_sha" ]; then
-    case "$said" in "Already up"*)
-      if [ "$was" = "$onto" ]; then fix="land again"; else fix="check out ${onto} in ${co}, land again"; fi
-      _wt_refuse "merge-unproven branch=${branch} onto=${onto} checkout=${co} was_on=${was} was_at=${pre} — ${co}'s HEAD already held ${head} when git merge ran, so it made no merge, and nothing is undone; ${fix}"; return 2 ;;
-    esac
-    if [ "$was" = "<detached>" ]; then held="${co}'s HEAD"; else held="$was"; fi
-    now="$(git -C "$co" rev-parse HEAD --symbolic-full-name HEAD 2>/dev/null)"
-    now_ref="${now#*"$nl"}"; now="${now%%"$nl"*}"
-    case "${now}:${now_ref}" in
-      *[!0-9a-f]*:*|:*) now="<unreadable>"; now_ref="<unreadable>" ;;
-      *:refs/heads/?*) now_ref="${now_ref#refs/heads/}" ;;
-      *) now_ref="<detached>" ;;
-    esac
-    if [ "$now_ref" = "$onto" ]; then fix="land again"; else fix="check out ${onto} in ${co}, land again"; fi
-    _wt_refuse "merge-unproven branch=${branch} onto=${onto} checkout=${co} was_on=${was} was_at=${pre} now_on=${now_ref} now_at=${now} — ${held} holds no merge of ${head} made past ${pre}, where ${co} stood just before git merge, so no merge git made is provably this land's, and nothing is undone; if ${now} holds ${head}, that merge is unjudged: take it out by hand, then ${fix}"; return 2
-  fi
-
-  # A DETACHED CHECKOUT (review 16 S1): the merge is on a HEAD no branch holds, so there is no
-  # branch to move back and nothing is undone; once the checkout is on <onto> the merge is no
-  # branch's commit.
-  if [ "$was" = "<detached>" ]; then
-    _wt_refuse "onto-detached branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} — the merge is on ${co}'s detached HEAD and no branch holds it, so nothing is undone; check out ${onto} in ${co} (the merge then belongs to no branch), land again"; return 2
-  fi
-
-  # THE MERGE WENT WHERE THE CHECKOUT WAS (review 15 F3). `git merge` merges onto the checkout's
-  # HEAD, so a checkout switched to another branch after the clean check takes the merge there,
-  # and it is undone there.
-  undo_on="$was"
-
-  # THE MERGE IS CHECKED AGAINST WHAT WAS JUDGED (review 7 F8, F9). `git merge` reads the
-  # head of <onto> for itself, after the read above, and merges onto whatever it finds: a land
-  # onto the same branch that completed in between is merged onto unjudged, with rc 0. So the
-  # merge commit's first parent must be the onto head that was judged. And the tree's branch
-  # must still hold the head that was merged: a commit its writer added since would be left
-  # unlanded on a branch whose tree is about to go. Either way this land's merge is undone,
-  # which moves <onto> back to the head another writer gave it, and the tree is kept.
-  tip="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${branch}" 2>/dev/null)"
-  moved=""
-  if [ "$undo_on" != "$onto" ]; then
-    moved="onto-switched branch=${branch} onto=${onto} checkout=${co} merged_into=${undo_on}"
-    fix="check out ${onto} in ${co}, land again"
-  elif [ "$parent" != "$onto_head" ]; then
-    moved="onto-moved branch=${branch} onto=${onto} judged=${onto_head} merged_onto=${parent:-<none>}"
-    fix="land again to judge the head ${onto} holds now"
-  elif [ "$tip" != "$head" ]; then
-    moved="branch-moved branch=${branch} judged=${head} branch_head=${tip:-<none>}"
-    fix="re-run the tree's suites at its head, land again"
-  fi
-  if [ -n "$moved" ]; then
-    arrived="$(_wt_undo_merge "$co" "$undo_on" "$merge_sha" "$parent" "$head")"; rc=$?
-    case $rc in
-      0)
-        # The merge is undone, so the red never reached <onto>: its debt is voided, and a void that
-        # cannot be written leaves it standing (it over-owes), which the line says.
-        if [ -n "$debt_id" ] && ! _wt_debt_void "$proofs" "$debt_id" "$branch" merge-undone; then
-          moved="${moved} debt=unvoided"
-          fix="${fix} (the debt for ${landed_red} was written and not voided: a green run of it after now covers it)"
-        fi
-        if [ "$undo_on" != "$onto" ]; then
-          _wt_refuse "${moved} merge=${merge_sha} — the merge is undone on ${undo_on} and the tree kept; ${fix}"; return 2
-        fi
-        _wt_refuse "${moved} — the merge is undone and the tree kept; ${fix}"; return 2 ;;
-      3|4)
-        _wt_refuse "${moved} merge=${merge_sha} undo=failed arrived=${arrived} — $(_wt_undo_arrival_fix "$co" "$undo_on" "$merge_sha" "$parent" "$arrived" "$rc"), then ${fix}"; return 2 ;;
-    esac
-    _wt_refuse "${moved} merge=${merge_sha:-<none>} undo=failed — $(_wt_undo_failed_fix "$co" "$undo_on" "$merge_sha" "$parent"), then ${fix}"; return 2
-  fi
-
-  # ONE INSTANT FOR THE LANDING: for a declared red, the `landed-red-at=` its debt line carries, taken when the
-  # debt was written.
-  landed_at="${landed_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-  red_said=""; [ -z "$landed_red" ] || red_said=" landed-red=${landed_red} landed-red-at=${landed_at}"
-
-  # No --force here either. If git refuses now, the merge has landed and the
-  # tree has not gone; the line says both so the operator is not left guessing
-  # which half happened. The record link goes only now — git would refuse the
-  # removal over an unignored one — and comes back if the removal is refused.
-  link_to="$(readlink "${wt_abs}/.bionic" 2>/dev/null)"
-  _wt_drop_legacy_link "$wt_abs" || :
-  if ! git -C "$root" worktree remove "$wt_abs" >/dev/null 2>&1; then
-    [ -n "$link_to" ] && [ ! -e "${wt_abs}/.bionic" ] && ln -s "$link_to" "${wt_abs}/.bionic" 2>/dev/null
-    _wt_refuse "worktree-remove-refused path=${wt_abs} merged=${merge_sha}"; return 2
-  fi
-  git -C "$root" worktree prune >/dev/null 2>&1
-
-  _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} removed=${wt_abs}${red_said} proofs=${proofs}"
   return 0
 }
 
@@ -1558,7 +1279,7 @@ _wt_proofs_write() {  # <file> <text> -> 0 appended, 1 not (the proofs=unwritten
 }
 
 # THE DEBT'S ONE WRITER (wave-27 T67; review pass 46 B3; A-orch-120). A declared red is owed because
-# `land`, or `line_publish` (lib/line.sh), wrote it to the run's log, never because a line was
+# `line_publish` (lib/line.sh) wrote it to the run's log, never because a line was
 # copied into the plan: the judge (lib/proof.sh `proof_debts`) reads these events, and an older run's `debt:` and
 # `void:` lines of its landing record, and nothing else.
 #   run/v1|ev=admitted|id=<id>|row=<row|—>|branch=<b>|head=<40-hex>|suite=<suite>|token=<token>|at=<ISO-UTC>
@@ -1609,41 +1330,6 @@ _wt_check_left() {  # <target checkout> <its HEAD before the check> <tree abs> -
 _wt_dirty_paths() {  # <porcelain lines>
   printf '%s\n' "$1" | awk 'NF { n++; if (n <= 5) out = out (n > 1 ? "," : "") substr($0, 4) }
     END { printf "%s", out; if (n > 5) printf ",+%d more", n - 5 }'
-}
-
-# THE ONE PATH FROM A SESSION TO A LAND (wave-20 T8, REQ-1, D1). `spawn-worktree.sh
-# land` and `hooks/stop-orders.sh standdown` both call this and nothing else, so
-# "where does this tree land" has one answer: the session's bound plan's
-# `working-branch:`, read by `session_working_branch` (lib/run.sh). Every
-# answer that is not a branch is a refusal naming its reason — no session id,
-# `no-bound-plan` (the unbound `fallback` and `none` alike: the root's newest
-# run is not this session's target), `bound-unreadable`, `no-working-branch` —
-# and nothing is touched on any of them.
-#
-# run.sh IS LOADED LAZILY, from this file's own directory, the way
-# `_wt_branch_protected` loads git-argv.sh: neither caller's library list has
-# to change, and a caller that already sourced it pays nothing. A run.sh that
-# cannot be loaded is a refusal, never a land onto a guessed branch.
-worktree_land_for_session() {  # <worktree path> <root> <sid> -> LANDED | REFUSED
-  local target="${1:-}" root="${2:-}" sid="${3:-}" lib onto plan decl
-  [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
-  if ! declare -f session_working_branch >/dev/null 2>&1; then
-    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/run.sh"
-    # shellcheck source=/dev/null
-    [ -r "$lib" ] && . "$lib" 2>/dev/null
-    declare -f session_working_branch >/dev/null 2>&1 \
-      || { _wt_refuse "run-library-unloadable path=${lib}"; return 2; }
-  fi
-  onto="$(session_working_branch "$root" "$sid")" || { _wt_refuse "${onto:-no-bound-plan}"; return 2; }
-  # The plan that branch was read from: the marker's `plan=`, the one session_working_branch's
-  # verdict answered with (wave-27 T44). The landing record is written under its name.
-  plan="$(session_plan "$root" "$sid")" || plan=""
-  # THE DECLARED DEBT THE ROW CARRIED FROM ITS LAUNCH (wave-27 T31; D23), or nothing.
-  local lands_red="" red_ev=""
-  if decl="$(_wt_declared_debt "$root" "$sid" "$target")"; then
-    lands_red="${decl%%	*}"; red_ev="${decl#*	}"
-  fi
-  worktree_land "$target" "$onto" "$plan" "$lands_red" "$red_ev"
 }
 
 # ---------------------------------------------------------------------------
@@ -1768,6 +1454,7 @@ _wt_plan_current() {
   printf '%s' "$_FILL_CURRENT_VALUE"
 }
 
+# NO CALLER: nothing calls this since every landing goes through lib/line.sh; it stays until its removal is decided.
 # _wt_declared_debt <root> <sid> <tree> -> `<lands_red><TAB><red_evidence>` from the LAUNCH line of
 # the agent the tree was made for, rc 1 with nothing when there is none (wave-27 T31; REQ-14, D23).
 # The agent is the name the workspace record holds for the tree (`spawn-worktree.sh create --for`),

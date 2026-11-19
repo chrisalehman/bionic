@@ -12,11 +12,26 @@
 #             seen standing, and one out of shape is seen as none.
 #   §LOCK     a held lock turns a call away in well under a hook's ten seconds with nothing run; a dead
 #             holder's lock is taken over; honest appends racing each other leave the run clean.
+#   §CLOSE    a plan moved off a standing seal reads gone; a seal removed before the move leaves none,
+#             by the old path too; a removal under a held lock exits 75 and keeps the seal.
 #   §PLAN     the write hook seals the plan in its after-arm: an admitted Write, then an admitted Edit,
 #             each driven through the before and after arms, leave it clean, and the binding Write's own
 #             bind event is sealed by the appender; an Edit seals and does not
 #             bind; an Edit denied at the before-arm, or admitted there with its tool never run, leaves the
-#             seal as it was; an after-arm whose seal cannot be had still exits 0 and says so.
+#             seal as it was; an after-arm whose seal cannot be had still exits 0 and says so. Then the
+#             commit gate over a bound run: a plan changed by the shell is refused as changed, the
+#             hook's own admitted Write and Edit and its denied Edit are not, and a seal held past
+#             the wait refuses the commit to be run again.
+#   §BOUND    the bound plan removed, renamed or moved: the commit is refused, the plan named gone.
+#   §MARKER   the engaged file removed or made a link lifts no wall (a commit, a push to main), and
+#             rewritten to no plan, no plan line or a decoy moves no judging off the bound run.
+#   §LOG      the log removed, renamed, emptied, cut, or a close, step, cancel, proof, approval or
+#             waiver appended by hand: refused, naming the log gone, shortened or added to.
+#   §TOOLS    the same roads by Write and Edit through the write hook, then the commit.
+#   §CHANGED  a caught change: the refusal names the log and both replies, the ask it opens is in the log
+#             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
+#   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
+#             log and binding untouched: the commit's refusal is the one before, word for word.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.
@@ -316,5 +331,135 @@ expect_contains "and says the plan is not sealed" "not sealed" "$HOOK_ERR"
 expect_eq "and the seal is as it was" "$S2" "$(seal_bytes)"
 rm -rf "$R/.git/bionic-seal/.reap"
 expect_eq "so the plan reads changed until it is sealed again" "changed what=plan how=changed" "$(seal_verify "$RP")"
+
+# The commit gate (hooks/bash-walls.sh) over a fresh run at step 5 bound to SID, whose log owes a fact,
+# so every commit of it is refused for that (OWED) until a change to the run is refused for the change.
+. "$(dirname "$0")/lib/bound-marker.sh"
+G="$SB/gate"
+world() {
+  rm -rf "$G"; mkdir -p "$G/.bionic/tmp"; git -C "$G" init -q
+  git -C "$G" -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m seed; git -C "$G" checkout -q -b feature/x
+  GP="$(plan_fixture --current 5 "$G/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)"; GL="$(plan_fixture_log "$GP")"
+  : > "$G/.bionic/tmp/engaged-$SID.state"; bound_marker "$G" "$SID" "$GP"; GM="$G/.bionic/tmp/engaged-$SID.state"
+}
+gate() {  # <command> -> GRC, GLINE: the hook's exit and the first line it printed
+  GRC=0; jq -n --arg s "$SID" --arg c "$G" --arg x "$1" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse",
+    tool_name:"Bash", tool_input:{command:$x}}' | HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+    BIONIC_PLUGINS_DIR="$SB/np" bash "$BIONIC_HOOKS_DIR/bash-walls.sh" > /dev/null 2> "$SB/gate.err" || GRC=$?
+  GLINE="$(head -1 "$SB/gate.err")"
+}
+gated() {  # <label> <expected first line> <change> [<command>] -- a fresh world, the change, then the command
+  world; eval "$3"; gate "${4:-git commit -m x}"
+  expect_status "$1: refused" 2 "$GRC"
+  expect_eq "$1: by that line" "$2" "$GLINE"
+}
+REF="bionic: commit refused —"
+OWED="$REF a fact this step owes is missing (record each fact named)"
+PUSH="bionic: push refused — main is a protected branch here (push from your own terminal)"
+PG="$REF the run's plan is gone (only the person can rule)"
+PC="$REF the run's plan was changed outside the tool (only the person can rule)"
+LG="$REF the run's log is gone (only the person can rule)"
+LS="$REF the run's log was shortened outside the tool (only the person can rule)"
+LA="$REF the run's log was added to outside the tool (only the person can rule)"
+LC="$REF the run's log was changed outside the tool (only the person can rule)"
+
+# A file-writing tool's call in the gate world, driven through the write hook's before and after arms (drive,
+# above), with the tool's own effect made by the shell between them; a call the before-arm denies goes no further.
+tool() {  # <Write|Edit> <file> <content | old> [<new>] -> the tool call, admitted and made, in the gate world
+  local in
+  if [ "$1" = Write ]; then in="$(jq -n --arg p "$2" --arg c "$3" '{file_path:$p, content:$c}')"
+  else in="$(jq -n --arg p "$2" --arg o "$3" --arg n "$4" '{file_path:$p, old_string:$o, new_string:$n, replace_all:false}')"; fi
+  R="$G" drive PreToolUse "$1" "$in"; TOOL_PRE="$HOOK_RC"; [ "$HOOK_RC" = 0 ] || return 0
+  # bash 3.2 keeps the quotes of a quoted replacement in the text, so the new string goes in unquoted.
+  if [ "$1" = Write ]; then printf '%s\n' "$3" > "$2"; else local b n="$4"; b="$(cat "$2")"; printf '%s\n' "${b/"$3"/$n}" > "$2"; fi
+  R="$G" drive PostToolUse "$1" "$in" '{"type":"update"}'
+}
+gated "the plan edited by sed -i" "$PC" 'sed -i.bak "s/fixture plan/a plan/" "$GP"'
+gated "a line redirected onto the plan" "$PC" 'printf "| T9 | x |\n" >> "$GP"'
+gated "an admitted Write, then an admitted Edit of the plan" "$OWED" \
+  'tool Write "$GP" "$(cat "$GP")
+"; tool Edit "$GP" "One plan a fixture writes" "One plan the tool wrote"'
+expect_status "and the write hook admitted the Edit" 0 "$TOOL_PRE"
+gated "an Edit of the plan denied at the before-arm" "$OWED" 'tool Edit "$GP" "governing-skill: canonical-sdlc" ""'
+expect_status "and the write hook denied it" 2 "$TOOL_PRE"
+world; mkdir -p "$G/.git/bionic-seal/.reap"; printf '%s\n' "$$" > "$G/.git/bionic-seal/.reap/pid"
+t0=$SECONDS; gate "git commit -m x"
+expect_eq "a seal held past the wait refuses the commit, to be run again (in $((SECONDS - t0)) s)" \
+  "$REF the run's seal could not be read (run the commit again)" "$GLINE"
+
+section "BOUND"
+gated "the run as sealed" "$OWED" ':'
+gated "the plan removed" "$PG" 'rm "$GP"'
+gated "the plan renamed off .plan.md" "$PG" 'mv "$GP" "${GP%.plan.md}.md"'
+gated "the plan moved to another folder" "$PG" 'mkdir -p "$G/.bionic/docs/plans/epic-y"; mv "$GP" "$G/.bionic/docs/plans/epic-y/"'
+
+section "MARKER"
+gated "the engaged file removed: a commit" "$OWED" 'rm "$GM"'
+gated "and a push to main" "$PUSH" 'rm "$GM"' 'git push origin main'
+gated "the engaged file replaced by a link: a commit" "$OWED" 'rm "$GM"; ln -s "$SB/outside" "$GM"'
+gated "and a push to main" "$PUSH" 'rm "$GM"; ln -s "$SB/outside" "$GM"' 'git push origin main'
+gated "the engaged file removed and a step added to the log" "$LA" 'rm "$GM"; printf "run/v1|ev=step|n=9|at=z\n" >> "$GL"'
+gated "the engaged file rewritten to no plan" "$OWED" 'printf "plan=none\n" > "$GM"'
+gated "to no plan line" "$OWED" 'printf "engaged_at=x\n" > "$GM"'
+DECOY='DP="$(plan_fixture --current 4 "$G/.bionic/docs/plans/epic-y/wave-y.plan.md" wave)"'
+world; eval "$DECOY"; bound_marker "$G" "$SID" "$DP"; gate "git commit -m x"
+expect_status "control: a session bound to the decoy at step 4 has its commit admitted" 0 "$GRC"
+gated "to a decoy plan at step 4" "$OWED" "$DECOY"'; printf "plan=%s\n" "$DP" > "$GM"'
+
+section "LOG"
+gated "the log removed" "$LG" 'rm "$GL"'
+gated "the log renamed" "$LG" 'mv "$GL" "$GL.old"'
+gated "the log emptied" "$LS" ': > "$GL"'
+gated "its last line cut" "$LS" 'sed -i.bak "\$d" "$GL"'
+gated "a line of it rewritten in place" "$LC" 'sed -i.bak "1s/n=1/n=7/" "$GL"'
+for l in 'ev=abandon' 'ev=step|n=9|delivered=x' 'ev=step|n=10' 'ev=step|n=3' 'ev=cancel|of=step' \
+         'ev=proof|kind=review|result=pass|head=x' 'ev=approval|key=step5|by=x|said=y' 'ev=waiver|key=x|by=y'; do
+  gated "a hand-appended ${l%%|*} line (${l#ev=})" "$LA" "printf 'run/v1|$l|at=z\n' >> \"\$GL\""
+done
+
+section "TOOLS"
+gated "a Write of the engaged file to no plan" "$OWED" 'tool Write "$GM" "plan=none"'
+gated "an Edit of it to a decoy" "$OWED" "$DECOY"'; tool Edit "$GM" "$GP" "$DP"'
+gated "a Write of the log cut short" "$LS" 'tool Write "$GL" "$(head -2 "$GL")"'
+gated "an Edit adding a step to the log" "$LA" 'tool Edit "$GL" "$(tail -1 "$GL")" "$(tail -1 "$GL")
+run/v1|ev=step|n=9|delivered=x|at=z"'
+expect_status "and the write hook admitted that Edit" 0 "$TOOL_PRE"
+
+section "CHANGED"
+sitrep_asks() { (cd "$G" && HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+  bash "$BIONIC_HOOKS_DIR/session-poker.sh" sitrep 2>/dev/null) | /usr/bin/grep '^ask: '; }
+SA='^ask: key=seal:changed holds=every commit title=changed run: .* blocks=yes waits=user$'
+while IFS="|" read -r label first change <&3; do
+  gated "$label" "${!first}" "$change"
+  E="$(cat "$SB/gate.err")"
+  expect_contains "$label: the refusal names the log" "Log:   $GL" "$E"
+  expect_contains "$label: and the reply that accepts" "session-poker.sh accept '<their words>'" "$E"
+  expect_contains "$label: and the reply that abandons" "session-poker.sh abandon '<their words>'" "$E"
+  expect_regex "$label: the ask is in the log the seal names" '^run/v1\|ev=ask\|key=seal:changed\|' "$(cat "$GL" 2>/dev/null)"
+  expect_regex "$label: the sitrep lists it" "$SA" "$(sitrep_asks)"
+done 3<<'ROWS'
+the log removed|LG|rm "$GL"
+the plan removed|PG|rm "$GP"
+the plan edited|PC|printf "| T9 | x |\n" >> "$GP"
+a line of the log rewritten|LC|sed -i.bak "1s/n=1/n=7/" "$GL"
+ROWS
+rm "$GP"
+expect_regex "the ask of the changed log is listed still, with the plan then removed" "$SA" "$(sitrep_asks)"
+gated "the plan removed, its commit refused, then put back" "$PC" 'cp "$GP" "$SB/keep"; rm "$GP"; gate "git commit -m x"; cp "$SB/keep" "$GP"'
+section "KEPT"
+. "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh"
+export TMPDIR="$SB/kept"
+kept() {  # <place|facts> -> each kept file of that kind made to read step 9, delivered, its key kept; then what it serves
+  local f b; for f in "$TMPDIR/bionic-$1-"*/*; do
+    b="$(sed '2,$ { s/^n=5$/n=9/; s/|n=5|/|n=9|/; s/^state=open$/state=delivered/; }' "$f")" && printf '%s\n' "$b" > "$f"; done
+  if [ "$1" = place ]; then proof_step_held "$GP"; else _proof_ask "$GP" reader_q_step "$GP"; fi
+}
+for k in place facts 'place facts'; do
+  rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world; gate "git commit -m x"; gate "git commit -m x"; E0="$(cat "$SB/gate.err")"
+  expect_eq "the run as sealed, its kept $k written by the gate: refused" "$OWED" "$GLINE"
+  for f in $k; do expect_contains "the kept $f rewritten by hand serves delivered" state=delivered "$(kept "$f")"; done
+  gate "git commit -m x"
+  expect_eq "with the kept $k read delivered, the refusal is the one before, word for word" "$E0" "$(cat "$SB/gate.err")"
+done
 
 finish
