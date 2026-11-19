@@ -521,8 +521,9 @@ _rh_replay() {
   printf '# T4: the pull request\n\n    session-poker.sh publish\n\n%s\n' "$h" > "$RH_REC/T4-pr.md" || return 1
   _rh_hand record "T4's report record/wave-x/T4-pr.md: the publish verb's command and what it printed"
   _rh_do "the person merges the pull request" env PATH="$RH_GHPATH" gh pr merge "$DOOR_BRANCH" --merge || return 1
-  # The integrate row is the merge's: close-out lands it at the integration head, the act below.
-  _rh_do "close-out, the tail" env HOME="$dir/home" BIONIC_CLAUDE_HOME="$dir/home/.claude" \
+  # The integrate row is the merge's: close-out reads it on the remote after its own fetch and lands the row at the merge
+  # commit, the act below. The stand-in is the only gh on its PATH, so its read of the host never meets a real one.
+  _rh_do "close-out, the tail" env HOME="$dir/home" BIONIC_CLAUDE_HOME="$dir/home/.claude" PATH="$RH_GHPATH" \
     bash "$RH_ROOT/payload/scripts/close-out.sh" "$RH_PLAN" run || return 1
   # close-out archives a delivered run's plans under the home's archive, keeping their path below the project.
   f="$(find "$dir/home" -path "*/$DOOR_PLAN_REL" -type f 2>/dev/null | head -1)"

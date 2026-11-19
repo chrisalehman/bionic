@@ -66,6 +66,8 @@
 #   §CENSUS-GONE         a cull gone with its code needs a listed name; a culled duplicate's catchers are shown and stand.
 #   §ADR                 an ADR whose `status:` word differs from its `## Status` word is refused by file.
 #   §HEADER              a suite header that lists a section its body lacks, or omits one its body has, is refused.
+#   §INTEGRATION-REF     no product line merges into the integration branch or moves its ref; a fetch fills a
+#                        remote-tracking ref alone.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
@@ -2090,5 +2092,51 @@ for f in "$TESTS_DIR"/*.test.sh; do [ -z "$(header_entries "$f")" ] || HD_LISTED
 expect_true "the real sweep judges suites: ${HD_LISTED} headers list their sections" [ "$HD_LISTED" -gt 0 ]
 expect_eq "every suite header of the real tests tree lists only sections its body calls, and every body section it lists: no refusal" "" \
   "$(header_refusals "$TESTS_DIR")"
+
+
+# ============================================================
+section "INTEGRATION-REF: no product line merges into the integration branch or moves its ref"
+# ============================================================
+# The merge is the person's, made on the host, and read remotely: no product line may merge into the local integration
+# branch, move its ref, or fetch into a local branch. A line that merges or moves a ref is read for a name the
+# integration branch is held under (the reader `plan_integration_branch`, and the names its callers bind it to); a fetch
+# is read for each refspec, whose destination must be under refs/remotes/. Comment lines are prose.
+# fails-when: a product line merges into the integration branch, moves its ref, or fetches into a local branch, and the
+# sweep passes.
+IR_MOVE='(^|[^A-Za-z0-9_-])git([[:space:]].*)?[[:space:]](merge|update-ref|reset|rebase|pull|cherry-pick|(branch[[:space:]]+(-f|--force|-M|-C))|((checkout|switch)[[:space:]]+-[BC]))([[:space:]]|"|$)'
+IR_FETCH='(^|[^A-Za-z0-9_-])git([[:space:]].*)?[[:space:]]fetch([[:space:]]|$)'
+IR_NAMES='INTEGRATION|integration_branch|[$][{]?ib([^A-Za-z0-9_]|$)'
+ir_lines() {  # <pattern> <dir>... -> <file>:<line>:<text> of each code line in the dirs' *.sh files matching the pattern
+  local pat="$1"; shift
+  /usr/bin/grep -rnE --include='*.sh' "$pat" "$@" 2>/dev/null | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'
+}
+ir_refusals() {  # <dir>... -> each line that moves the integration branch or fetches into a local ref, named
+  ir_lines "$IR_MOVE" "$@" | /usr/bin/grep -E "$IR_NAMES" | sed 's/^/moves the integration branch: /'
+  ir_lines "$IR_FETCH" "$@" | while IFS= read -r l; do
+    printf '%s\n' "${l#*:*:}" | tr ' \t' '\n\n' | tr -d "\"'" | /usr/bin/grep ':' | /usr/bin/grep -v '^[0-9]*>&' \
+      | sed 's/^+//; s/.*://' | /usr/bin/grep -qv '^refs/remotes/' && printf 'fetches into a local ref: %s\n' "$l"
+  done
+}
+IR="$TMP/ir"; mkdir -p "$IR/ok" "$IR/bad"
+printf '%s\n' '#!/bin/bash' 'git -C "$root" fetch --quiet origin "+refs/heads/$ib:refs/remotes/origin/$ib"' \
+  'git -C "$co" merge --ff-only -q "$tip"' '# git -C "$ROOT" merge "$INTEGRATION" is prose here' \
+  'git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION"' > "$IR/ok/ok.sh"
+printf '%s\n' '#!/bin/bash' 'git -C "$ROOT" fetch --quiet origin "$INTEGRATION:$INTEGRATION"' > "$IR/bad/fetch.sh"
+printf '%s\n' '#!/bin/bash' 'git -C "$ROOT" checkout -q "$INTEGRATION" && git -C "$ROOT" merge --no-ff "$WORKING"' > "$IR/bad/merge.sh"
+printf '%s\n' '#!/bin/bash' '  git -C "$root" update-ref "refs/heads/$ib" "$tip"' > "$IR/bad/ref.sh"
+for f in "$IR"/ok/*.sh "$IR"/bad/*.sh; do expect_true "the planted ${f#"$IR"/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+expect_eq "control: a fetch into origin's tracking ref, a fast-forward of a branch the line names, a comment, a merge-base: refused for nothing" "" \
+  "$(ir_refusals "$IR/ok")"
+expect_eq "a fetch into the local integration branch, a merge into it and a move of its ref are each refused by file and line" \
+  "fetches into a local ref: $IR/bad/fetch.sh:2:|moves the integration branch: $IR/bad/merge.sh:2:|moves the integration branch: $IR/bad/ref.sh:2:" \
+  "$(ir_refusals "$IR/bad" | sed -E 's/^(.*\.sh:[0-9]+:).*/\1/' | LC_ALL=C sort | paste -sd'|' -)"
+IR_MOVES="$(ir_lines "$IR_MOVE" "$REPO/hooks" "$REPO/payload/scripts" | wc -l | tr -d ' ')"
+IR_FETCHES="$(ir_lines "$IR_FETCH" "$REPO/hooks" "$REPO/payload/scripts" | wc -l | tr -d ' ')"
+expect_true "the real sweep reads lines to judge: ${IR_MOVES} merge or move ref lines, ${IR_FETCHES} fetch lines in hooks/ and payload/scripts" \
+  test "${IR_MOVES:-0}" -gt 0 -a "${IR_FETCHES:-0}" -gt 0
+expect_contains "…among them the merge's one reader's fetch, into origin's tracking ref" "refs/remotes/origin/" \
+  "$(ir_lines "$IR_FETCH" "$REPO/payload/scripts/lib/line.sh")"
+expect_eq "no product line in hooks/ or payload/scripts merges into the integration branch, moves its ref, or fetches into a local ref" "" \
+  "$(ir_refusals "$REPO/hooks" "$REPO/payload/scripts")"
 
 finish

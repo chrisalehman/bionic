@@ -104,21 +104,28 @@ run_close "$PAB" run
 expect_eq "AB4: run on fixit/x closes with rc 0" "0" "$CO_RC"
 expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
 
-# The integrate act is the scale's cell: at task scale, `pr`, so an unmerged fix/x closes, merging nothing, and the
-# `gh pr create` command is printed and recorded, never run.
+# At task scale too the merge is read, never assumed: an unmerged fix/x holds the run, close-out merges nothing and
+# lands no row, and check says the merge would refuse. The fixture has no remote, so the integration branch read is the
+# local main, and the run's log records no pull request.
+# fails-when: run closes, or a row is landed as merged, while fix/x is not reachable from main; or close-out moves main.
 # mk_task_pr_fixture: hoisted to tests/close-out.prelude.sh (a later part reads it)
 PPR="$(mk_task_pr_fixture ppr "fix/x")"
 PPR_MAIN="$(git -C "$PPR" rev-parse main)"
-expect_eq "PR0: the fixture's fix/x is not reachable from main (so the PR act is what passes)" "no" \
+expect_eq "PR0: the fixture's fix/x is not reachable from main (so the hold is what is read)" "no" \
   "$(git -C "$PPR" merge-base --is-ancestor fix/x main && echo yes || echo no)"
 run_close "$PPR" check
-expect_eq "PR1: check on an unmerged task-scale fix/x is not refused" "0" "$CO_RC"
+expect_eq "PR1: check on an unmerged task-scale fix/x says the merge would refuse, naming no request" "0|yes" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q '^merge: WOULD REFUSE — fix/x @ [0-9a-f]* is not reachable from main (no pull request of fix/x against main is recorded)' && echo yes)"
 run_close "$PPR" run
-expect_eq "PR3: run closes with rc 0" "0" "$CO_RC"
-expect_eq "PR4: …prints the command" "yes" "$(contains "$CO_OUT" "gh pr create --base main --head fix/x")"
-expect_eq "PR5: …records it in the continuation" "yes" \
-  "$(grep -qF 'gh pr create --base main --head fix/x' "$PPR/$CONT_REL" 2>/dev/null && echo yes || echo no)"
+expect_eq "PR3: run holds (exit 2), saying fix/x is not reachable from main" "2|yes" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q 'fix/x @ [0-9a-f]* is not reachable from main' && echo yes)"
+expect_eq "PR4: …and writes no continuation, the run's step still 8" "no|n=8" \
+  "$([ -f "$PPR/$CONT_REL" ] && echo yes || echo no)|$(co_step_answer "$PPR" | sed -n 1p)"
 expect_eq "PR6: …and merges nothing: main is where it was" "$PPR_MAIN" "$(git -C "$PPR" rev-parse main)"
+git -C "$PPR" merge -q --no-ff -m "the pull request's merge" fix/x >/dev/null 2>&1
+run_close "$PPR" run
+expect_eq "PR7: once main holds fix/x the same run closes, its merge line the readback, its continuation written" "0|yes|yes" \
+  "$CO_RC|$(contains "$CO_OUT" "merge: fix/x @ ")|$([ -f "$PPR/$CONT_REL" ] && echo yes || echo no)"
 
 # ============================================================
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"

@@ -389,13 +389,11 @@ if PARKED_WHY="$(plan_parked_why "$PLAN")"; then PARKED=yes; fi
 CO_SCALE="$(plan_frontmatter_get "$PLAN" scale)"
 scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
 
-# THE INTEGRATE ACT IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). `merge` (wave, epic): the working
-# branch must be reachable from the integration branch before the tail runs, as before. `pr` (task):
-# close-out merges nothing; an unmerged working branch is not refused, and the act prints the one
-# `gh pr create` command for it against the integration branch and records it in the continuation.
-# It never runs it: opening a pull request is an outward act, the person's.
+# THE MERGE IS READ, NEVER ASSUMED, AT EVERY SCALE. close-out merges nothing: the merge act is a readback of
+# lib/line.sh `line_merge_seen`, which reads the integration branch on the remote and the host's word on the run's pull
+# request, and the tail runs only once that says merged. A working branch nothing merged holds the run, whatever the
+# scale's integrate cell; the cell says only how the closed form names a branch still waiting on its pull request.
 CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=merge
-CO_PR_CMD="gh pr create --base $INTEGRATION --head $WORKING --fill"
 # co_pr_owed -> 0 when the act is `pr` and the working branch exists and is not yet reachable from the integration
 # branch; a branch that is gone was merged and deleted, so nothing is owed
 co_pr_owed() {
@@ -403,24 +401,9 @@ co_pr_owed() {
   git -C "$ROOT" rev-parse --verify -q "refs/heads/$WORKING" >/dev/null 2>&1 || return 1
   ! git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null
 }
-# co_pr_line <working short sha> <integration short sha> -> the merge line of the `pr` act
-co_pr_line() {
-  printf 'pr — %s (not run; %s @ %s is not merged into %s @ %s)' "$CO_PR_CMD" "$WORKING" "${1:-?}" "$INTEGRATION" "${2:-?}"
-}
-# co_into -> how the working branch reaches the integration branch: `merged`, or `to be pulled` while the PR is owed
-co_into() { if co_pr_owed; then printf 'to be pulled'; else printf 'merged'; fi; }
-# co_pr_section -> the continuation's record of the act: the integrate row's acts, in the order it does them. The reviews
-# part comes first because the push and the pull request carry the branch's tip, and a part rendered after them is on no
-# branch the pull request names. A plan with no integrate row has no part to render and records the push and the pull
-# request alone.
-co_pr_section() {
-  local row
-  row="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$3 == "integrate" { print $1; exit }')"
-  printf '## Pull request\n\nclose-out merged nothing (the %s scale integrates by pull request). Run these in this order:\n\n' "$CO_SCALE"
-  [ -z "$row" ] || printf '    bash %s reviews-part %s\n' "$(co_poker)" "$row"
-  printf '    git push -u origin %s\n    %s\n' "$WORKING" "$CO_PR_CMD"
-}
-
+# co_into -> how the working branch reaches the integration branch: `merged`, or `to be pulled` while the PR is owed; a
+# close that read the merge says merged, since the local integration branch is not where a remote merge shows
+co_into() { if [ -z "${CO_MERGE_COMMIT:-}" ] && co_pr_owed; then printf 'to be pulled'; else printf 'merged'; fi; }
 # THE CLOSED FORM'S RESUME POINT AND BRANCH LINE (wave-38 T15, AC-4.3; the one writer since wave-38 T37, D23): a
 # delivered run has nothing to resume; a parked one resumes from its branch, which is kept; a pull request owed is "to be
 # pulled". close-out writes both into the closed handoff, and session-poker.sh `handoff` on a closed plan prints what
@@ -501,22 +484,54 @@ MERGE_LINE=""
 co_parked_merge_line() {
   printf 'parked on %s @ %s — not merged into %s (%s)' "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$INTEGRATION" "$PARKED_WHY"
 }
+# co_merge_read -> the merge as lib/line.sh `line_merge_seen` reads it, after its own fetch: CO_MERGE_RC (0 merged, 1 not
+# merged, 3 the request closed unmerged, 2 unread), CO_MERGE_COMMIT (the commit a landing names, empty unless merged),
+# CO_MERGE_REF (the integration branch read), CO_MERGE_WHY and CO_MERGE_WS (the working head, short)
+CO_MERGE_RC=2; CO_MERGE_COMMIT=""; CO_MERGE_REF=""; CO_MERGE_WHY=""; CO_MERGE_WS=""
+co_merge_read() {
+  local out c
+  CO_MERGE_COMMIT=""; CO_MERGE_WS="$(git -C "$ROOT" rev-parse --short "refs/heads/$WORKING" 2>/dev/null)"
+  if co_line_load && declare -F line_merge_seen >/dev/null 2>&1; then
+    out="$(line_merge_seen "$PLAN" "$ROOT" --fetch)"; CO_MERGE_RC=$?
+  else
+    out="$(printf 'unread\t-\t%s\t%s/line.sh, the merge'"'"'s reader, cannot be loaded' "$INTEGRATION" "$CO_LIB")"; CO_MERGE_RC=2
+  fi
+  c="$(printf '%s' "$out" | cut -f2)"
+  CO_MERGE_REF="$(printf '%s' "$out" | cut -f3)"; CO_MERGE_WHY="$(printf '%s' "$out" | cut -f4-)"
+  [ "$CO_MERGE_RC" -ne 0 ] || CO_MERGE_COMMIT="$c"
+  [ -n "$CO_MERGE_REF" ] && [ "$CO_MERGE_REF" != - ] || CO_MERGE_REF="$INTEGRATION"
+  return 0
+}
+# co_merge_verdict -> the merge line: what merged it, or `WOULD REFUSE — ` and why nothing has; rc 0 merged, 1 not
+co_merge_verdict() {
+  local short
+  short="$(git -C "$ROOT" rev-parse --short "$CO_MERGE_COMMIT" 2>/dev/null || printf '%s' "${CO_MERGE_COMMIT:0:7}")"
+  case "$CO_MERGE_RC|$CO_MERGE_WHY" in
+    0\|reached) printf '%s @ %s reachable from %s @ %s' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_REF" "$short" ;;
+    0\|host\ *) printf '%s @ %s merged into %s by the pull request %s as %s' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_REF" "${CO_MERGE_WHY#host }" "$short" ;;
+    1\|*) printf 'WOULD REFUSE — %s @ %s is not reachable from %s (%s)' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_REF" "$CO_MERGE_WHY"; return 1 ;;
+    3\|*) printf 'WOULD REFUSE — %s @ %s is not merged: %s; reopen it, or park the run with a ## Wake Note' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_WHY"; return 1 ;;
+    *) printf 'WOULD REFUSE — whether %s @ %s is merged cannot be read: %s' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_WHY"; return 1 ;;
+  esac
+}
+# co_merge_holds -> the few words a merge not seen holds the run for, the ask's title
+co_merge_holds() {
+  case "$CO_MERGE_RC" in
+    1) printf 'the working branch is not merged' ;;
+    3) printf 'the pull request was closed unmerged' ;;
+    *) printf 'the merge cannot be read' ;;
+  esac
+}
 act_merge() {
-  local ws is
-  ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
-  is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  [ -n "$ws" ] || _co_refuse "the plan's working-branch '$WORKING' is not a branch in $ROOT"
-  [ -n "$is" ] || _co_refuse "the plan's integration-branch '$INTEGRATION' is not a branch in $ROOT"
-  if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
-    MERGE_LINE="$WORKING @ $ws reachable from $INTEGRATION @ $is"
+  local verdict
+  git -C "$ROOT" rev-parse --verify -q "refs/heads/$WORKING" >/dev/null 2>&1 \
+    || _co_refuse "the plan's working-branch '$WORKING' is not a branch in $ROOT"
+  co_merge_read
+  if verdict="$(co_merge_verdict)"; then
+    MERGE_LINE="$verdict"
     return 0
   fi
-  if co_pr_owed; then
-    MERGE_LINE="$(co_pr_line "$ws" "$is")"
-    return 0
-  fi
-  _co_held "the working branch is not merged" \
-    "$WORKING @ $ws is not reachable from $INTEGRATION @ $is — merge the working branch before the tail runs"
+  _co_held "$(co_merge_holds)" "${verdict#WOULD REFUSE — } — the tail runs once the merge is seen"
 }
 
 # ─── Act 1b: the rows the merge lands (wave-36 T14; D13, AC-7.7; C70) ─────────
@@ -525,8 +540,8 @@ act_merge() {
 # rows still `pending dispatch`, and the act that wiped the engaged marker had also taken the only way to write them.
 # The rows the merge lands are the plan's open (pending or active) `## Tasks` rows of kind `integrate` (the merge
 # itself) and `close` (the row units.sh's `merge` read binds to that merge); a build row still open is not landed
-# here, because nothing showed its work on the branch. Each is landed by one `published` event at the integration
-# head, of the close kind and by close-out, through the line's writer (lib/line.sh `line_published_event`); no cell is written.
+# here, because nothing showed its work on the branch. Each is landed by one `published` event at the merge commit the
+# merge act read (the integration tip that reaches the working head, or the host's merge commit), of the close kind and by close-out, through the line's writer (lib/line.sh `line_published_event`); no cell is written.
 # The session must be bound to this plan, and `run` refuses before its first act when it is not. Act 3 keeps the
 # engaged marker for every verb a refusal later in the tail leaves to the person; the marker goes last.
 LANDS_LINE=""
@@ -559,8 +574,8 @@ act_lands() {  # <rows> -> each landed by one published event at the integration
     LANDS_LINE="none — no open integrate or close row"
     return 0
   fi
-  ih="$(git -C "$ROOT" rev-parse --verify -q "${INTEGRATION}^{commit}" 2>/dev/null)" \
-    || _co_refuse "the integration branch '$INTEGRATION' names no commit to land rows $rows at"
+  ih="$CO_MERGE_COMMIT"
+  [ -n "$ih" ] || _co_refuse "no merge was read, so rows $rows have no commit to land at"
   co_line_load || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
   for id in $rows; do
     line_published_event "$PLAN" "row=$id" "commit=$ih" kind=close by=close-out why=merged >/dev/null \
@@ -569,7 +584,7 @@ act_lands() {  # <rows> -> each landed by one published event at the integration
   # The readback: the act's own result, asked of the units helper rather than assumed from the writes.
   left="$(co_lands_rows)"
   [ -z "$left" ] || _co_refuse "rows $left still read open after their landing was written — the run's log is not as written"
-  LANDS_LINE="$rows at $INTEGRATION @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)"
+  LANDS_LINE="$rows at $CO_MERGE_REF @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)"
 }
 
 # ─── Act 2: worktree branches ────────────────────────────────────────────────
@@ -1441,7 +1456,8 @@ co_patrol_sentence() {
 
 continuation_template() {
   local sha tasks regress reviews patrol inherited acts head resume ws line at ev whole_text
-  sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  # The integration branch at the merge this close read; the local branch only when no merge was read (a parked run).
+  sha="$(git -C "$ROOT" rev-parse --short "${CO_MERGE_COMMIT:-$INTEGRATION}" 2>/dev/null)"
   acts="$(co_hand_acts_section)"
   inherited="$(co_inherited_section)" \
     || _co_refuse "the run's facts cannot be read, so the inherited debt it carries is not known; run close-out again"
@@ -1504,7 +1520,7 @@ $acts
 $(co_governed_section)
 ${inherited:+
 $inherited
-}$(! co_pr_owed || { printf '\n'; co_pr_section; })
+}
 $(co_scorecard_section)
 
 ## Resume instruction
@@ -1563,11 +1579,6 @@ act_continuation_write() {
     fi
     co_cont_sections write
     [ -z "$CO_SEC_MSG" ] || CONT_LINE="$CONT_LINE; added $CO_SEC_MSG"
-    if co_pr_owed && ! co_cont_has_heading "## Pull request"; then
-      { printf '\n'; co_pr_section; } >> "$CONT" 2>/dev/null \
-        || _co_refuse "could not append the pull request command to the continuation at $CONT"
-      CONT_LINE="$CONT_LINE; added the ## Pull request section"
-    fi
     return 0
   fi
   git -C "$ROOT" rev-parse --short "$INTEGRATION" >/dev/null 2>&1 \
@@ -1710,8 +1721,9 @@ co_close_facts() {
   local ih id
   printf '8|cleanup=done|tmp-wiped=%s entries under %s (not yet wiped)|tasks-completed=%s' "$(tmp_count)" "$TMP_DIR" "$TASKS_LINE"
   [ "$PARKED" = no ] || return 0
-  ih="$(git -C "$ROOT" rev-parse --verify -q "${INTEGRATION}^{commit}" 2>/dev/null)"
-  for id in $(co_lands_rows); do printf '\npublished|row=%s|commit=%s|kind=close|by=close-out|why=merged' "$id" "$ih"; done
+  # A row is landed only on a merge read: with none, the judgment folds no landing, as the run would write none.
+  ih="$CO_MERGE_COMMIT"
+  [ -z "$ih" ] || for id in $(co_lands_rows); do printf '\npublished|row=%s|commit=%s|kind=close|by=close-out|why=merged' "$id" "$ih"; done
   co_facts tree | awk -F'|' "$_READER_AWK"'ev() == "tree" { p = line_kv("path"); sub(/\/$/, "", p); if (p != "" && p != "—") print line_kv("row") "\t" p }' \
     | while IFS=$'\t' read -r id p; do
         git -C "$ROOT" show-ref --verify --quiet "refs/heads/wt/${p##*/}" && printf '\ntree|row=%s|path=' "$id"
@@ -2162,18 +2174,14 @@ do_check() {
     co_would "facts: WOULD REFUSE — $FACTS_WHY" "$FACTS_SAYS"
     [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
   fi
-  ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
-  is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if [ "$PARKED" = yes ]; then
     verdict="parked ($PARKED_WHY)"
-  elif git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
-    verdict="$WORKING @ ${ws:-?} reachable from $INTEGRATION @ ${is:-?}"
-  elif co_pr_owed; then
-    verdict="$(co_pr_line "$ws" "$is")"
   else
-    verdict="WOULD REFUSE — $WORKING @ ${ws:-?} is not reachable from $INTEGRATION @ ${is:-?}"
+    co_merge_read
+    verdict="$(co_merge_verdict)"
   fi
-  case "$verdict" in "WOULD REFUSE"*) co_would "merge: $verdict" "the working branch is not merged" ;; *) say "merge: $verdict" ;; esac
+  case "$verdict" in "WOULD REFUSE"*) co_would "merge: $verdict" "$(co_merge_holds)" ;; *) say "merge: $verdict" ;; esac
+  is="$(git -C "$ROOT" rev-parse --short "$CO_MERGE_COMMIT" 2>/dev/null)"
   CO_LANDS="$(co_lands_rows)"
   if [ "$PARKED" = yes ]; then
     say "rows-landed: none — parked, no merge lands a row"
@@ -2181,8 +2189,10 @@ do_check() {
     say "rows-landed: none — no open integrate or close row"
   elif [ -n "$(co_lands_refusal "$CO_LANDS")" ]; then
     co_would "rows-landed: WOULD REFUSE — $(co_lands_refusal "$CO_LANDS")" "this session is not bound to the run"
+  elif [ -z "$CO_MERGE_COMMIT" ]; then
+    say "rows-landed: none — run lands $CO_LANDS only once the merge is seen"
   else
-    say "rows-landed: run would land $CO_LANDS at $INTEGRATION @ ${is:-?}"
+    say "rows-landed: run would land $CO_LANDS at $CO_MERGE_REF @ ${is:-?}"
   fi
 
   # THE CENSUS NAMES ITS SOURCE, NOT JUST ITS RESULT (D5). `wt_branches` reads the

@@ -169,42 +169,9 @@ expect_absent "REF-5b A-orch-16 close-out reads the branch through the one reade
   "names no working-branch" "$CO_OUT"
 
 # ============================================================
-section "§ORDER — the integrate row publishes the reviews part before the push and the pull request (REQ-15 AC-15.2; the integrate row's own part)"
+section "§ORDER — close-out publishes the reviews part before its merge readback, so the readback reads the branch the part is on"
 # ============================================================
-# At pr dealing close-out merges nothing and opens nothing: it records, in the continuation's `## Pull request`, the
-# acts the integrate row does, in the order it does them: `reviews-part <row>`, then the push, then `gh pr create`. The part
-# is first because the push and the pull request carry the branch's tip, and a part rendered after them is on no branch
-# the pull request names.
-# FIXTURE FIDELITY: mk_task_pr_fixture's task-scale plan (integrate cell `pr`), gaining the integrate row a task plan
-# carries at Step 8 (landed, so the rows-landed act has nothing to bind a session for) and the release approval it is
-# asked; the continuation is the one the run writes.
-# fails-when: the continuation names the push or `gh pr create` before `reviews-part <row>`, omits the verb, names another
-#   row, or the section stops naming `gh pr create`.
-ord_pos() {  # <file> <needle> -> the 1-based line number of the needle's first line in the `## Pull request` section, or empty
-  awk -v n="$2" '/^## / { s = ($0 == "## Pull request"); next } s && index($0, n) { print NR; exit }' "$1"
-}
-PPO="$(mk_task_pr_fixture order-pr "fix/x")"
-awk '{ print } /^\| T1 \|/ { print "| T3 | 8 | integrate | open the pull request | — | 10 | AC-1 | none | — |" }' "$PPO/$PLAN_REL" > "$PPO/$PLAN_REL.o" \
-  && mv "$PPO/$PLAN_REL.o" "$PPO/$PLAN_REL" && printf 'run/v1|ev=%s|at=2026-10-04T12:30:00Z\n' "dispatch|row=T3|name=orchestrator" "published|row=T3" >> "$PPO/$LOG_REL" \
-  && release_approved "$PPO"
-expect_contains "ORDER-0 precondition: the plan carries the integrate row the section names" "| T3 | 8 | integrate |" "$(cat "$PPO/$PLAN_REL")"
-run_close "$PPO" run
-expect_eq "ORDER-1 the task-scale run closes" "0" "$CO_RC"
-OR_PART="$(ord_pos "$PPO/$CONT_REL" 'session-poker.sh reviews-part T3')"
-OR_PUSH="$(ord_pos "$PPO/$CONT_REL" 'git push')"
-OR_PR="$(ord_pos "$PPO/$CONT_REL" 'gh pr create --base main --head fix/x')"
-expect_nonempty "ORDER-1b precondition: the section names the part, the push and the pull request (positions $OR_PART $OR_PUSH $OR_PR)" "$OR_PART$OR_PUSH$OR_PR"
-expect_eq "ORDER-2 the continuation records reviews-part <integrate row> first, then the push, then gh pr create" "yes" \
-  "$([ -n "$OR_PART" ] && [ -n "$OR_PUSH" ] && [ -n "$OR_PR" ] && [ "$OR_PART" -lt "$OR_PUSH" ] && [ "$OR_PUSH" -lt "$OR_PR" ] && echo yes || echo no)"
-expect_contains "ORDER-3 the push names the working branch" "git push -u origin fix/x" "$(cat "$PPO/$CONT_REL")"
-# the plan with no integrate row names no verb to run, and still records the push before the pull request
-PPN="$(mk_task_pr_fixture order-pr-norow "fix/x")"
-run_close "$PPN" run
-expect_absent "ORDER-4 a plan with no integrate row names no reviews-part" "reviews-part" "$(cat "$PPN/$CONT_REL")"
-expect_eq "ORDER-4b …and still records the push before gh pr create" "yes" \
-  "$(a="$(ord_pos "$PPN/$CONT_REL" 'git push')"; b="$(ord_pos "$PPN/$CONT_REL" 'gh pr create')"; [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && echo yes || echo no)"
-
-# AT MERGE DEALING close-out merges nothing either: its merge act is a readback that the working branch is reachable from the
+# close-out merges nothing: its merge act is a readback that the working branch is reachable from the
 # integration branch, and the person's merge came first. When close-out itself renders the part (no integrate row did), it
 # publishes it BEFORE that readback, so the readback reads the branch the part is on, and holds until that tip is merged.
 # FIXTURE FIDELITY: mk_fixture's wave-scale plan (integrate cell `merge`) at Step 8 with the release entry committed on the

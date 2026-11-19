@@ -1930,9 +1930,8 @@ EOF
       exit 0
     else
       if [ "$BIND_RC" -ge 2 ] && [ "${BIND_REFUSAL:-}" = record-failed ]; then
-        die "REFUSED — the binding record could not be written"
+        die "REFUSED — the binding record could not be written; once the git directory of the repository is writable, run again: bash $HOOK_DIR/session-poker.sh bind $BIND_PATH"
         die "The marker names $BIND_PATH, and the record beside the seal could not be written."
-        die "Bind again once the git directory of the repository is writable."
         exit 2
       fi
       if [ "$BIND_RC" -ge 2 ]; then
