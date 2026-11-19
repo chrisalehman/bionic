@@ -1093,8 +1093,8 @@ fc_owed_later T1
 fc_page --preview
 expect_contains "OL-4 control: the same row whose task is the Step-4 row is put under Decisions" "AC-1.3" "$(fc_under Decisions)"
 expect_absent "OL-4b …and the line names nothing owed by the close" "owed by the close" "$(fc_acc)"
-# fails-when: the bottom line reads "Every criterion is proved or waived by you." while the reader answers AC-1.3, owed by
-# the close, pending, or it does not name AC-1.3 as owed, beside a criterion not proved or beside one waived.
+# fails-when: the bottom line reads "Every criterion is proved or waived by you." while the reader answers the row owed
+# by the close as pending, or it does not name that row as owed, beside a criterion not proved or beside one waived.
 fc_owed_later T4
 fc_page --preview; FC_OL_BL="$(fc_under 'Bottom line' | fc_flat)"
 expect_contains "OL-5 beside a criterion not proved, the bottom line names the row owed by the close" "1 criterion owed by the close: AC-1.3." "$FC_OL_BL"
