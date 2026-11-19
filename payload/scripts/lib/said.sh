@@ -208,7 +208,7 @@ _said_sessions() {
     if [ -n "$me" ] && ! grep -qxF -- "$me" <<<"$rec"; then printf '%s\n' "$me"; fi
   } | while IFS= read -r sid; do
     [ -n "$sid" ] || continue
-    case "$sid" in *" (no binding act)") printf '%s\n' "$sid"; continue ;; esac
+    case "$sid" in *" (no binding act)"|*" (not bound as the run was sealed)") printf '%s\n' "$sid"; continue ;; esac
     case "$sid" in *[!A-Za-z0-9_-]*) printf '%s (not a session id)\n' "${sid//[!A-Za-z0-9_-]/?}"; continue ;; esac
     if ! _said_loaded "$sid" "$root" >/dev/null; then printf '%s (no loaded-%s.state)\n' "$sid" "$sid"; continue; fi
     if ! _said_transcript "$sid" "$root" >/dev/null; then
