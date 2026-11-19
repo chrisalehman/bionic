@@ -160,6 +160,17 @@ expect_no_match "GH3: …not the bare feed kind" "* · git · *" "$OUT_GH"
 expect_match "GH4: the checkout word names the feed" "*· github feed" "$OUT_GH"
 expect_no_match "GH5: …and a GitHub source is never an OTHER checkout" "*OTHER checkout*" "$OUT_GH"
 
+section "§OPENING: the opening's first line is the line the version command prints"
+
+# The opening has no second source for the version: the same environment, the same registry, and the
+# two prints agree on their first line. A non-empty version line is proved first, so an empty pair
+# cannot pass for equal.
+OP_VERSION="$(cd "$REPO" && HOME="$TMP" BIONIC_CLAUDE_HOME="$HOME_THIS" CLAUDE_PLUGIN_ROOT="$PAYLOAD" bash "${PAYLOAD}/scripts/version.sh" 2>/dev/null </dev/null)"
+OP_OPENING="$(cd "$REPO" && HOME="$TMP" BIONIC_CLAUDE_HOME="$HOME_THIS" CLAUDE_PLUGIN_ROOT="$PAYLOAD" bash "${PAYLOAD}/scripts/card.sh" opening double 2>/dev/null </dev/null)"
+expect_match "OP1: the version command's line reads" "bionic *" "$OP_VERSION"
+expect_eq "OP2: the first line the opening prints is the line the version command prints" \
+  "$OP_VERSION" "$(printf '%s\n' "$OP_OPENING" | sed -n 1p)"
+
 section "§DECISION: /bionic:decision is the decision skill, typed with no argument (wave-33 AC-11.3)"
 
 # WHY A SKILL AND NOT A COMMAND FILE. A plugin skill named `decision` is itself /bionic:decision,

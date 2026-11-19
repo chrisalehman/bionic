@@ -342,7 +342,7 @@ expect_eq "T6e3 …and as many rows are listed" "$HF_OPEN_N" "$(hf_sec "$HF_F" S
 expect_contains "T6f …the building row with its agent, worktree and the sheet's word for it" "  - T2 · w-T2 · 01-T2 · running" "$(hf_sec "$HF_F" State)"
 expect_contains "T6g …a pending row with a worktree" "  - T6 · — · .worktrees/01-T6 · pending" "$(hf_sec "$HF_F" State)"
 expect_regex "T6h …and a pending row with none: the sheet lists it, so the head does (T6g read the same section)" '^  - T5 · [^·]+ · — · pending' "$(hf_sec "$HF_F" State)"
-expect_eq "T6i patrol: not armed (no stamp for this session)" "patrol: not armed" "$(hf_label "$HF_F" patrol)"
+expect_eq "T6i watch: none yet (no watch record for this session)" "watch: none yet; this turn's end starts it" "$(hf_label "$HF_F" watch)"
 HF_FD="$(hf_sec "$HF_F" Findings)"
 expect_contains "T7 a Finding with its source keeps it" "- The walk is _proof_walk — payload/scripts/lib/proof.sh:1248" "$HF_FD"
 expect_absent "T7d …never twice (T7c read the same section)" "unverified — unverified" "$HF_FD"
@@ -476,16 +476,15 @@ poke "$HF_R" handoff
 expect_eq "OW1 handoff on a parked plan exits 0" "0" "$RC"
 expect_eq "OW1d …in the document's order" "$HF_HEADS" "$(hf_heads "$HF_F")"
 expect_absent "OW1e …never DELIVERED (OW1b read the same file)" "NONE — DELIVERED" "$(cat "$HF_F")"
-hf_resume_new_session() {  # -> this session engaged and unbound, with no stamp, armed marker or digest
+hf_resume_new_session() {  # -> this session engaged and unbound, with no digest
   engage "$HF_R"
-  rm -f "$(stamp_of "$HF_R")" "$(armed_of "$HF_R")" "$(digest_of "$HF_R")"
+  rm -f "$(digest_of "$HF_R")"
 }
 hf_resume_new_session
 poke "$HF_R" resume "$HF_DOOR"
 expect_eq "OW2 resume on the parked document exits 0" "0" "$RC"
 expect_contains "OW2b …and prints its resume point verbatim" "$(hf_label "$HF_F" 'resume point')" "$OUT"
 expect_absent "OW2d …and never that there is nothing to resume (OW2c read the same output)" "nothing to resume" "$OUT"
-expect_false "OW2f …and arms nothing" test -e "$(stamp_of "$HF_R")"
 hf_world closed-pr no
 sed 's/^scale: wave$/scale: task/' "$HF_P" > "$HF_P.s" && mv "$HF_P.s" "$HF_P"
 s42_snap "$HF_R" "$HF_P"
@@ -532,7 +531,7 @@ expect_contains "R4 an old-shape handoff (an ISO written: line, no instant:) sti
   "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es)" "$OUT"
 
 # ============================================================
-section "§RESUME: /bionic:canonical-sdlc <file> runs session-poker.sh resume <file>: bind, arm (at a scale with a Patrol), adopt, the task list, the recap, the step file, the patrol, the tick; a no-run document binds nothing; no resume command ships"
+section "§RESUME: /bionic:canonical-sdlc <file> runs session-poker.sh resume <file>: bind, adopt, the task list, the recap, the step file, the tick (at a scale with a Patrol); a no-run document binds nothing; no resume command ships"
 # ============================================================
 # The door is a verb the governing skill runs first when it is invoked with a handoff file's path; a /clear leaves a
 # new session that is engaged but unbound and unarmed. FIXTURE FIDELITY: §STATE's world; the document written by the
@@ -571,9 +570,6 @@ roster_row_fixture session="$HF_PRED" status=identified name=w-pred agent_id=a-w
 ( . "${S46_LIB%/*}/owed.sh" && OWED_ROOT="$HF_R" OWED_SID="$HF_PRED" OWED_PLAN="$HF_P" \
     owed_open approve:release "Approve release" "poker: approve release — reply with your words" )
 hf_resume_new_session
-expect_false "RS0d precondition: …and unarmed (no stamp)" test -e "$(stamp_of "$HF_R")"
-poke "$HF_R" prompt; HF_PROMPT="$OUT"
-expect_nonempty "RS0e precondition: the prompt verb prints this session's Patrol prompt" "$HF_PROMPT"
 poke "$HF_R" resume "$HF_DOOR"
 HF_RS_TERM="$OUT"
 expect_eq "RS1 resume <file> exits 0" "0" "$RC"
@@ -586,8 +582,9 @@ HF_RS="$(cat "$HF_RECAP")"
 hf_labels() {  # <text> -> the labels of its unindented lines, comma-joined
   printf '%s\n' "$1" | awk '!/^  / && NF { l = $0; sub(/:.*$/, "", l); sub(/ \(.*$/, "", l); printf "%s%s", (n++ ? "," : ""), l } END { print "" }'
 }
-expect_eq "RS1c the terminal is the short page: bound, step, running, landed since, owed now, patrol, the recap" \
-  "poker,step,running,landed since the handoff,owed now,patrol,recap" "$(hf_labels "$HF_RS_TERM")"
+expect_eq "RS1c the terminal is the short page: each step as it starts, then bound, step, running, landed since, owed now, watch, the recap" \
+  "bind,adopt,task list,recap,step file,tick|poker,step,running,landed since the handoff,owed now,watch,recap" \
+  "$(printf '%s\n' "$HF_RS_TERM" | sed -n 's/^poker: resume — step: //p' | paste -sd, -)|$(hf_labels "$(printf '%s\n' "$HF_RS_TERM" | /usr/bin/grep -v '^poker: resume — step: ')")"
 expect_eq "RS1d …the step" "step: 4 Implement" "$(printf '%s\n' "$HF_RS_TERM" | grep '^step: ')"
 expect_regex "RS1e …each open agent with what it does and for how long" '^  - w-pred · implementor · for [0-9]+ min$' \
   "$(printf '%s\n' "$HF_RS_TERM" | grep '^  - ')"
@@ -595,8 +592,6 @@ expect_eq "RS1f …what landed after the handoff was written, in the order it la
   "$(printf '%s\n' "$HF_RS_TERM" | grep '^landed since')"
 expect_absent "RS1h …the adopt verdicts and the task list stay in the recap (RS4 and RS5 read them there)" "task-list: " "$HF_RS_TERM"
 expect_contains "RS2b …saying so (bind's own line)" "poker: bound " "$HF_RS"
-expect_true "RS3 it arms at the wave scale: the Patrol stamp exists" test -f "$(stamp_of "$HF_R")"
-expect_contains "RS3b …saying so (arm's own line)" "poker: armed — " "$HF_RS"
 expect_contains "RS4 it adopts: the predecessor's planted row is listed" "|name=w-pred|" "$HF_RS"
 expect_contains "RS4b …and written onto this session's roster as an adoption" "|adopted_from=$HF_PRED|" \
   "$(grep -F '|name=w-pred|' "$(roster_of "$HF_R")" 2>/dev/null | tail -1)"
@@ -609,14 +604,10 @@ HF_STEP_FILE="$(cd "$(dirname "$POKER")/.." && pwd -P)/skills/canonical-sdlc/ste
 expect_eq "RS9 step-file: the current step's file, in the plugin that runs" "step-file: $HF_STEP_FILE" \
   "$(printf '%s\n' "$HF_RS" | grep '^step-file: ')"
 expect_true "RS9b …a file that exists" test -f "$HF_STEP_FILE"
-expect_eq "RS10 patrol: the CronCreate prompt, byte-equal to the prompt verb's" "patrol: $HF_PROMPT" \
-  "$(printf '%s\n' "$HF_RS" | grep '^patrol: ')"
-expect_regex "RS10b patrol-interval: the interval, and the ritual's order (CronList, the stray jobs deleted, CronCreate)" \
-  '^patrol-interval: every [0-9]+s.*CronList.*bionic-patrol session=.*CronCreate' "$(printf '%s\n' "$HF_RS" | grep '^patrol-interval: ')"
 expect_regex "RS11 it ticks: the tick's decision line, for this session" \
   "^poker-tick/v1\|at=[^|]*\|session=$SID\|decision=" "$(printf '%s\n' "$HF_RS" | grep '^poker-tick/v1|')"
-HF_ORDER="$(hf_first "$HF_RS" "poker: bound " "poker: armed" "poker: w-pred (" "task-list: " "settled: " "open: " "owned-by-user: " \
-  "working branch: " "plan: " "tree: " "step-file: " "patrol-interval: " "patrol: " "poker-tick/v1|")"
+HF_ORDER="$(hf_first "$HF_RS" "poker: bound " "poker: w-pred (" "task-list: " "settled: " "open: " "owned-by-user: " \
+  "working branch: " "plan: " "tree: " "step-file: " "poker-tick/v1|")"
 expect_eq "RS12 every step is present and in the ritual's order" "yes" \
   "$(printf '%s\n' "$HF_ORDER" | awk '{ ok = "yes"; for (i = 1; i <= NF; i++) { if ($i == "-" || (i > 1 && $i + 0 <= p)) ok = "no: field " i " of " $0; p = $i + 0 } print ok }')"
 # Typing the resume is the consent: a session with no engagement marker is engaged by the door itself.
@@ -624,23 +615,17 @@ hf_resume_new_session
 rm -f "$(marker_of "$HF_R")"
 poke "$HF_R" resume "$HF_DOOR"
 
-# A task-scale run has no Patrol: resume binds and adopts, and arms nothing, and removes the stamp engagement left.
+# A task-scale run has no Patrol: resume binds and adopts, and ticks nothing.
 hf_world resume-task no
 sed 's/^scale: wave$/scale: task/' "$HF_P" > "$HF_P.s" && mv "$HF_P.s" "$HF_P"
 s42_snap "$HF_R" "$HF_P"
 hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "RT0 precondition: the task-scale document is written" "0" "$RC"
 hf_resume_new_session
-poke "$HF_R" arm
-expect_true "RT0b precondition: the stamp an unbound engagement arms is there" test -f "$(stamp_of "$HF_R")"
 poke "$HF_R" resume "$HF_DOOR"
 expect_eq "RT1 resume on a task-scale run exits 0" "0" "$RC"
 HF_RT_TERM="$OUT"; OUT="$(cat "$(hf_recap "$HF_RT_TERM")" 2>/dev/null)"
 expect_contains "RT1b …it binds" "poker: bound " "$OUT"
-expect_eq "RT2b …the task-scale resume prints none" "0" "$(printf '%s\n' "$OUT" | grep -c 'CronCreate recurring')"
-expect_eq "RT2c …nor a patrol: prompt line (RS10's extractor)" "" "$(printf '%s\n' "$OUT" | grep '^patrol: ')"
-expect_false "RT3b …and the stamp is gone" test -e "$(stamp_of "$HF_R")"
-expect_absent "RT3c …nor does it arm (RS3b's line)" "poker: armed — " "$OUT"
 expect_eq "RT4 …and nothing ticks: no Patrol, no tick (RS11's extractor)" "" "$(printf '%s\n' "$OUT" | grep '^poker-tick/v1|')"
 
 # A no-run document: resume binds nothing and points at Next 1.

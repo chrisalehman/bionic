@@ -8,8 +8,8 @@
 #
 #   stop_context_spend   the instrument — one audit line per SDLC step boundary
 #   stop_landing_gate    the sweep and the teammate landing verdict
-#   stop_patrol_duties   the tick's three duties, and the resume ritual
-#   stop_patrol_revive   the Patrol stamp's self-heal
+#   stop_patrol_duties   the fill gap and the stand-down the tick ordered
+#   stop_patrol_revive   the watcher that died without a word, said once
 #
 # NO BEHAVIOUR MOVED (R2). Each function is the corresponding hook's body after
 # its preamble, carried over verbatim — its own arms, its own reads, its own
@@ -182,8 +182,8 @@ stop_facts_load() {  # -> always 0
   fill_facts_load "$BIONIC_RUN_PLAN" >/dev/null 2>&1 || :
 }
 
-# THE PATROL VERDICT: patrol.sh owns it, and the death notice below asks it.
-if ! declare -F patrol_verdict >/dev/null 2>&1; then
+# THE TICK'S DIGEST AND THE WATCH RECORD: patrol.sh owns both readers.
+if ! declare -F tick_digest_path >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_STOP_LIB_DIR/patrol.sh"
 fi
@@ -1279,9 +1279,14 @@ $CANDIDATES
 EOF
 
 [ -n "$REFUSALS" ] || return "$_adv"
+# WHOSE FIX, BY EVENT. On SubagentStop the refusal goes to the writer whose contract it is, on the only channel that
+# event has. On Stop it is the orchestrator's sweep, and the fix is the orchestrator's: a duty, one quiet line in the
+# window and the whole list behind `session-poker.sh duty`.
+local LG_CHANNEL=exit2
+[ "$_ev" = Stop ] && LG_CHANNEL=duty
 case "$REFUSE_KIND" in
-  undeclared) fold_block exit2 stop "this branch touched undeclared files" "declare them, or revert them" "$REFUSALS" ;;
-  *)          fold_block exit2 stop "a dispatched agent's contract is unmet" "write the named artifacts" "$REFUSALS" ;;
+  undeclared) fold_block "$LG_CHANNEL" stop "this branch touched undeclared files" "declare them, or revert them" "$REFUSALS" ;;
+  *)          fold_block "$LG_CHANNEL" stop "a dispatched agent's contract is unmet" "write the named artifacts" "$REFUSALS" ;;
 esac
 return 2
 }
@@ -1307,9 +1312,8 @@ stop_wait_cell() {
 #
 # THE PATROL-DUTIES WALL — task-dispatch-wall-channel-loss, T5.
 #
-# Stop. On every orchestrator turn end: if the turn was started by a PATROL TICK,
-# refuse the stop once when the marker turn ran no tick, or left a stand-down or a launch
-# unanswered. THE TASK-LIST DUTIES ARE GONE (wave-31 T32; D6, REQ-6 AC-6.5): a tick turn owes
+# Stop. On every orchestrator turn end: refuse the stop once when a stand-down the tick
+# ordered since the previous turn end, or a fillable gap, is left unanswered. THE TASK-LIST DUTIES ARE GONE: a tick turn owes
 # no task-list refresh and a dispatch turn no task entry set in progress, a process check the
 # turn's end demanded of the model with nothing behind it to do; the tick still prints
 # `poker: RECONCILE` as advice no wall reads. THAT IS THE TICK ARM'S HALF ONLY. The
@@ -1340,19 +1344,10 @@ stop_wait_cell() {
 # orchestrator turn and keeps firing on turns nothing was re-invoked. What scopes it is
 # an ON-DISK fact: `session_run` (which was `active_run` until wave-session-bound-run made
 # run identity per-session) under the payload's project root. A run is active while
-# its plan says so, and that is the same fact that says a Patrol should be ticking.
+# its plan says so.
 #
-# WHAT A "PATROL TICK" IS, STRUCTURALLY. The tick prompt is composed per session
-# by a model and its wording is therefore not a fact anything may key on. What IS
-# a fact is the command SKILL.md's Dispatch section makes the first of the
-# prompt's reads: `session-poker.sh tick`. That literal in the turn's opening
-# user message is the marker — the same structural-not-textual identification
-# payload/scripts/lib/patrol.sh uses to recognise a Patrol cron job (T2 judgment
-# call (b)), reached independently and agreeing.
-#
-# WHAT COUNTS, AND WHEN. Only AFTER the tick's own prompt: duties performed in
-# some earlier turn are stale by exactly the interval the tick exists to cover.
-# Only on the MAIN THREAD: a tool_use inside an agent context (`isSidechain`, or
+# WHAT COUNTS, AND WHEN. Only in this turn: an answer given in an earlier turn answered
+# that turn's orders. Only on the MAIN THREAD: a tool_use inside an agent context (`isSidechain`, or
 # a non-empty agent key) belongs to a subagent, and a subagent's ListAgents did
 # not refresh the orchestrator's panel — the mirror image of the exclusion
 # hooks/session-poker.sh:399-406 makes for the same reason.
@@ -1365,50 +1360,20 @@ stop_wait_cell() {
 # NotebookEdit/Bash tool_use whose input names the active plan file discharges
 # the same duty.
 #
-# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan task STOPGATES). A `/clear`
-# rewrites the session id in place but does not kill a predecessor's cron job — it
-# survives and keeps firing into the new conversation (probe A-probe-4). The new
-# transcript's very first turn is the literal `<command-name>/clear</command-name>`
-# (record/wave-1.4.0-probe.md); a resume is announced the same way, by the literal
-# substring `source: resume` this gate's SessionStart sibling
-# (hooks/session-start.sh) prints into the title line of its own report, which the
-# model reads as context. Either is "a transcript record whose content contains" the
-# marker — read as RAW TEXT, not one JSON shape, so this arm does not care whether
-# the marker lands on a user prompt, a system entry, or anything else. It does care
-# WHO WROTE THE ROW: a `tool_result` is how the content of every file the agent reads
-# enters the transcript, and a file is not the CLI announcing a resume, so the marker
-# is read off the orchestrator's own rows only (review F2, see $auth below).
-#
-# THE RULE: since the MOST RECENT such marker, a `CronCreate` tool_use must be
-# preceded by a `CronList` tool_use, or the turn refuses — creating a job before
-# listing and deleting the stray one leaves two clocks on one project (S5, the
-# resume ritual). The scan resets at every marker, so only the ritual for the
-# LATEST clear/resume is judged; a Cron call before the marker is not "since" it.
-# Agent-context tool_uses are excluded, the same exclusion the tick-duties arm
-# already makes, for the same reason. BLOCKS ONCE: this reuses the exact
-# `stop_hook_active` mechanism above, unchanged — no new bookkeeping for it.
-#
 # FAIL DIRECTIONS (pinned by tests/patrol-duties-gate.test.sh):
 #   - jq absent                                          -> pass, silent
 #   - not a Stop payload (SubagentStop included)          -> pass, silent
 #   - stop_hook_active true                               -> pass, silent (blocks ONCE)
 #   - no cwd, or it is not a directory                    -> pass, silent
 #   - no transcript_path, or no file there, or a symlink  -> pass, silent
-#   - a marker older than the scan window (2000 records)  -> pass, silent (fail-open, below)
 #   - no user prompt in the transcript at all             -> pass, silent
-#   - the last user prompt is not a Patrol tick           -> pass, silent
-#   - a tick turn with no TaskList, or a dispatch turn with no task entry -> pass, silent (T32)
-#   - a live ledger with no free slot or no ready row      -> pass, silent (wave-20 Δ7: the
-#                                                           ready set and occupancy computed)
+#   - a live ledger with no free slot or no ready row      -> pass, silent (the ready set and
+#                                                           occupancy computed)
 #   - the machine reads HOLD or EMERGENCY                 -> pass, silent (measured here)
 #   - a row that waits: an open row's record, an unruled decision or an order -> not ready, pass
 #   - a free slot and a ready row after the launches      -> REFUSE, naming the ready rows
 #   - a printed FILL or withheld line, anywhere           -> ignored (advice, not evidence)
-#   - a marker read out of a TOOL RESULT                  -> ignored (not the orchestrator's)
-#   - a Patrol marker turn with no verb=tick stamp since  -> REFUSE, naming the tick (REQ-6)
-#   - no clear/resume marker anywhere in the transcript   -> pass, silent (ritual arm inert)
-#   - CronList precedes any CronCreate since the marker   -> pass, silent (ritual arm inert)
-#   - a CronCreate since the marker with no prior CronList-> REFUSE, naming the ritual
+#   - a stand-down the tick ordered since the previous turn end, unanswered -> REFUSE, naming it
 #
 # TWO ACCEPTED LIMITS, both a false BLOCK rather than a false silence, and both
 # cheap because the refusal is once-only (stop again and the turn ends). First,
@@ -1446,10 +1411,9 @@ stop_wait_cell() {
 stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
   local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME STREAM
-  local RITUAL RITUAL_REASON TICK_MARK FILL_MISSING FILL_REASON FILL_FORMS _fill_detail
-  local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID _fd_cell _fd_row _fd_what
+  local FILL_MISSING FILL_REASON FILL_FORMS _fill_detail
+  local FILL_SRC FILL_FACT FILL_FIX _FF_SHOWN _FF_MORE _FF_ID _fd_cell _fd_row _fd_what
   local -a _FF_IDS
-  local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
@@ -1557,66 +1521,6 @@ stop_turn_facts || return "$_adv"
 STREAM="$_ST_STREAM"
 [ -n "$STREAM" ] || return "$_adv"
 
-# ---------- THE RESUME/CLEAR RITUAL (AC-3), judged FIRST ----------
-#
-# Folded over the same stream, resetting at every marker so only the ritual for
-# the LATEST clear/resume is judged — a Cron call before the marker is not "since"
-# it. TOOL rows here are already main-thread-only (the select() above excludes
-# sidechain and agentId-carrying entries), the same exclusion the tick-duties fold
-# below relies on.
-#
-# A CronList AFTER THE CREATE DISCHARGES IT. The offending CronCreate never leaves the transcript,
-# so a fold that only ever set `violated` latched: every later turn's first Stop was refused again
-# and "this gate blocks once" held within one turn (stop_hook_active) but not across turns. The
-# look the gate exists to force is the look at the job table, so a CronList since the marker
-# clears the violation whichever side of the CronCreate it falls on. A later marker still starts
-# a fresh window, and a CronCreate with no CronList since the marker still blocks, once.
-RITUAL=$(printf '%s\n' "$STREAM" | awk -F'\t' '
-  BEGIN { marker = 0; listed = 0; violated = 0 }
-  $1 == "MARK" { marker = 1; listed = 0; violated = 0; next }
-  $1 == "TOOL" {
-    if (!marker) next
-    if ($2 == "CronList") { listed = 1; violated = 0; next }
-    if ($2 == "CronCreate" && !listed) { violated = 1; next }
-    next
-  }
-  END { if (marker && violated) print "block"; else print "quiet" }
-')
-
-if [ "$RITUAL" = "block" ]; then
-  # THE TEXT SAYS WHAT IS TRUE ON EVERY STOP IT FIRES ON (wave-21 T13; walk-3b45d05 item 3).
-  # The window opened by the marker stays open until a CronList, so the refusal repeats on the
-  # turns after the one that made the cron; it used to open "This is the first Stop after a
-  # /clear or a resume", which is false on all of them.
-  RITUAL_REASON="Since the last /clear or resume, the transcript shows a CronCreate with no CronList before it, and that window stays open until a CronList: every Stop until then is refused, whether or not the turn made a Cron call. A predecessor Patrol cron survives a /clear and keeps firing into the new conversation — creating a job before listing and deleting the stray one leaves two clocks on one project.
-
-Do the resume ritual, in order, then stop again — this gate blocks once per turn, every turn until a CronList:
-  1. CronList
-  2. delete every bionic-patrol session=<other> job it lists
-  3. CronCreate — only if step 2 left this session with no Patrol job of its own
-  4. bash ${HOOK_DIR}/session-poker.sh arm
-  5. … adopt"
-  fold_block block stop "a cron was created with no CronList first" "list and delete stray jobs first" \
-    "$RITUAL_REASON"
-  return 2
-fi
-
-# ---------- WHAT COUNTS AS A TICK (AC-22) ----------
-#
-# THE MARKER, NOT THE COMMAND. This gate used to call a turn a tick when the last USER row
-# CONTAINED the substring `session-poker.sh tick`. The canonical-sdlc SKILL.md body contains
-# that literal (it is the line telling the reader to run it), and the body is injected into
-# the transcript as a USER row — so invoking the skill WAS a Patrol tick as far as this gate
-# could tell, and the gate then refused the invoking turn for duties no tick had asked for
-# (observed twice on session 14dcbee3, 2026-09-03; research-refusal.md §sibling defect).
-#
-# A tick is now what the patrol prompt was designed to announce: a USER row whose FIRST
-# TOKEN is `bionic-patrol session=<session-id[0:8]>` (SKILL.md §The patrol prompt), for THIS
-# session. That makes the test positional and session-scoped rather than a substring search,
-# so a row that merely quotes the tick command is not a tick, and a predecessor's job still
-# firing into this conversation after a /clear is not this session's tick either.
-TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
-
 # ---------- THE THIRD DUTY: no turn ends on a fillable gap (AC-29; wave-20 REQ-5, Δ7) ----
 #
 # WHY THIS IS A WALL AND NOT A LINE IN THE PROMPT. The tick can compute the gap between the
@@ -1712,48 +1616,6 @@ else
   FILL_REASON=""
 fi
 
-# ---------- THE PATROL MARKER OWES A TICK (wave-20 REQ-6, AC-6.2; D6) ----------
-#
-# THE DEFECT (report #1, M4). A Patrol job whose prompt carried the marker but not the tick
-# made turns this wall called ticks — the task-list refresh was asked for and nothing else —
-# while the tick never ran and nothing decided anything. The tick's own record is its stamp,
-# written with `verb=tick` BEFORE it decides (hooks/session-poker.sh), so the proof a marker
-# turn ticked is on disk: a `verb=tick` stamp whose `at=` sits at or after the marker row's
-# timestamp. Compared to the second, the precision the stamp carries.
-#
-# THE THREE SILENCES, each the direction every other reader of the stamp takes:
-#   - no stamp, or a symlink where it goes -> silent. `disarm` and a DISARM tick remove it on
-#     purpose, and a session that never armed is the arming wall's finding, not this one's.
-#   - an undated marker row               -> the stamp's verb alone answers: a row nothing can
-#     order against is not refused for the order.
-#   - not a marker turn                    -> nothing is owed.
-#   - a tick of this session is running    -> nothing is owed: the marker turn's tick is that one, or the one it
-#     refused, and the running tick stamps and decides for both (lib/patrol.sh `tick_running`, the one alive rule,
-#     so a record a killed tick left reads dead and the duty stands).
-# BLOCKS ONCE, through the same `stop_hook_active` guard as every duty here.
-NOTICK_REASON=""
-if [ "$_ST_TICK" = 1 ] && ! tick_running "$BIONIC_ROOT" "$BIONIC_SID" >/dev/null; then
-  _NT_STAMP="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
-  if [ -f "$_NT_STAMP" ] && [ ! -L "$_NT_STAMP" ]; then
-    _NT_PRESENT=1
-    _NT_LINE="$(head -n 1 "$_NT_STAMP" 2>/dev/null)"
-    _NT_VERB=""; _NT_AT=""
-    case "|$_NT_LINE|" in *"|verb="*) _NT_VERB="${_NT_LINE#*|verb=}"; _NT_VERB="${_NT_VERB%%|*}" ;; esac
-    case "|$_NT_LINE|" in *"|at="*)   _NT_AT="${_NT_LINE#*|at=}";     _NT_AT="${_NT_AT%%|*}" ;; esac
-    _NT_OK=0
-    if [ "$_NT_VERB" = tick ]; then
-      if [ -z "$_ST_MARK_TS" ]; then
-        _NT_OK=1
-      elif [ -n "$_NT_AT" ] && ! [ "${_NT_AT:0:19}" \< "${_ST_MARK_TS:0:19}" ]; then
-        _NT_OK=1
-      fi
-    fi
-    if [ "$_NT_OK" = 0 ]; then
-      NOTICK_REASON="Patrol tick not run: this turn began with this session's Patrol marker, and no tick has stamped since it (the stamp reads verb=${_NT_VERB:-none} at=${_NT_AT:-unknown}). The tick is the Patrol's whole decision — run: bash ${HOOK_DIR}/session-poker.sh tick — then stop again; this gate blocks once. If the Patrol job's prompt does not run the tick, replace the job with the prompt bash ${HOOK_DIR}/session-poker.sh prompt prints."
-    fi
-  fi
-fi
-
 # ---------- THE FOURTH DUTY: a stand-down the tick ordered is answered before the turn ends ----
 #
 # (AC-1.2; T1, D1.) The mirror of the FILL, and it exists for the same reason. The tick can
@@ -1791,40 +1653,23 @@ fi
 # reason not to stop it, and that reason is worth one line in the record. What is refused is
 # SILENCE.
 #
-# THE LOWER BOUND IS THIS TURN'S TICK. The tick writes its stamp before it decides, and its
-# orders after, so the orders this turn's tick wrote are the ones stamped at or after that
-# stamp's `at=` — the stamp the NOTICK arm above has just read and found current (a marker
-# turn whose tick never stamped is that arm's refusal, and owes no stand-down from an older
-# tick's orders). A DISARM tick removes its stamp as its last act; with no stamp, the dated
-# marker row is the bound, and an undated one gives none — silence, the direction every other
-# unreadable fact here takes.
+# THE LOWER BOUND IS THE PREVIOUS TURN END (`_ST_PREV_END`). The orders this turn answers are the
+# ones the tick wrote since the turn before it ended: the watcher's pass between the two turns, or a
+# tick this turn ran itself. An order older than that was owed by an earlier turn, which was told.
 #
 # NAMED, NOT COUNTED, and per agent: a turn that stopped two of three is missing one, and the
 # reason says which. Ids are validated against `[A-Za-z0-9_.-]+` before they are echoed back,
 # and a `.` inside one is escaped to a literal before it is spliced into the boundary pattern.
 STANDDOWN_MISSING=""
-_SD_BOUND=""
-if [ "$_ST_TICK" = 1 ]; then
-  if [ "${_NT_PRESENT:-0}" = 1 ]; then
-    [ "${_NT_OK:-0}" = 1 ] && [ "$_NT_VERB" = tick ] && _SD_BOUND="$_NT_AT"
-  else
-    _SD_BOUND="$_ST_MARK_TS"
-  fi
-fi
+_SD_BOUND="$_ST_PREV_END"
 _SD_SET="$(stop_standdown_set "$_SD_BOUND")"
 if [ -n "$_SD_SET" ]; then
-  STANDDOWN_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" -v want="$_SD_SET" '
-    $1 == "USER" {
-      t = $2; sub(/^[ \t]+/, "", t)
-      tick = (index(t, mark) == 1)
-      n = 0; answered = " "
-      next
-    }
+  STANDDOWN_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v want="$_SD_SET" '
+    $1 == "USER" { n = 0; answered = " "; next }
     $1 == "SD-DECLINE" { answered = answered $2 " "; next }
     $1 == "STOP"       { n++; sw[n] = $2; sid[n] = $3; next }
     $1 == "AGENTERR"   { if ($2 != "") err[$2] = 1; next }
     END {
-      if (!tick) exit
       for (i = 1; i <= n; i++) {
         if (sid[i] != "" && (sid[i] in err)) continue
         answered = answered sw[i] " "
@@ -1856,15 +1701,10 @@ fi
 # no second row, because a name held at or after the bound has left `_SD_SET`
 # (`stop_standdown_set`).
 if [ -n "$_SD_SET" ] && [ -f "${HOOK_DIR}/session-poker.sh" ]; then
-  printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
-    $1 == "USER" {
-      t = $2; sub(/^[ \t]+/, "", t)
-      tick = (index(t, mark) == 1)
-      n = 0; split("", why)
-      next
-    }
+  printf '%s\n' "$STREAM" | awk -F'\t' '
+    $1 == "USER" { n = 0; split("", why); next }
     $1 == "SD-DECLINE" { if (!($2 in why)) order[++n] = $2; why[$2] = $3; next }
-    END { if (tick) for (i = 1; i <= n; i++) printf "%s\t%s\n", order[i], why[order[i]] }
+    END { for (i = 1; i <= n; i++) printf "%s\t%s\n", order[i], why[order[i]] }
   ' | while IFS=$'\t' read -r _sd_name _sd_why; do
     case " $_SD_SET " in *" $_sd_name "*) : ;; *) continue ;; esac
     ( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
@@ -1893,7 +1733,6 @@ fi
 # named in the first refusal is a duty never named at all.
 TELL_REASON="$FILL_REASON"
 [ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
-[ -n "$NOTICK_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${NOTICK_REASON}"
 # The tells are judged TOGETHER, so a turn that left two of them is told both things once.
 # Blocking on one and staying silent about the other would hide the second behind the
 # one-shot: the next stop passes by design.
@@ -1903,22 +1742,15 @@ if [ -n "$TELL_REASON" ]; then
   # at 100 columns and the fix at six words (payload/scripts/lib/refuse.sh), which is why
   # these read as tightly as they do.
   if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
-    fold_block block stop "a FILL and a STANDDOWN went unanswered" \
+    fold_block duty stop "a FILL and a STANDDOWN went unanswered" \
       "dispatch, make wait, stop, or hold" "$TELL_REASON"
   elif [ -n "$FILL_REASON" ]; then
     # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap. Its detail is
-    # the dispatch line and the three forms, each on a line of its own so it pastes whole; a marker
-    # turn's paragraph rides below them, as it rode in the old paragraph.
+    # the dispatch line and the three forms, each on a line of its own so it pastes whole.
     _fill_detail="$FILL_FORMS"
-    [ -n "$NOTICK_REASON" ] && _fill_detail="${_fill_detail}"$'\n\n'"${NOTICK_REASON}"
-    fold_block block stop "$FILL_FACT" "$FILL_FIX" "$_fill_detail"
-  elif [ -n "$STANDDOWN_REASON" ]; then
-    fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
-      "$TELL_REASON"
+    fold_block duty stop "$FILL_FACT" "$FILL_FIX" "$_fill_detail"
   else
-    # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
-    # rides in the same paragraph under that duty's fact, so one refusal names every miss.
-    fold_block block stop "a Patrol marker turn ran no tick" "run the tick, then stop again" \
+    fold_block duty stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
       "$TELL_REASON"
   fi
   return 2
@@ -1943,7 +1775,9 @@ return "$_adv"
 #                   somebody else's run, so an unbound session has no ledger to fill from,
 #                   records no stop event, and is never refused for its ready rows
 #   _ST_LIVE        1 when that plan's ledger is live (past Step 3), else 0
-#   _ST_TICK        1 when the turn's prompt leads with THIS session's Patrol marker
+#   _ST_PREV_END    the instant the turn before this one ended: the last turn-end record (`stop_hook_summary`)
+#                   before this turn's prompt. With none in the window the duties are owed, as the watch
+#                   reader refuses on a transcript it cannot read: the bound is then the epoch's start
 #   _ST_TURN        the turn key: the prompt record's uuid, else its timestamp, else empty
 #   _ST_MARK_TS     the prompt record's timestamp, or empty
 #   _ST_LAUNCHED    comma-joined names of this turn's main-thread Agent calls, less the ones
@@ -1977,10 +1811,10 @@ return "$_adv"
 #                                        "Stop hook feedback:" (refuse.sh's channel table);
 #                                      a companion record — turnCompanion: a skill's body after a
 #                                        Skill call or a slash command, an attached image.
-#                                    isMeta ALONE marks neither: a cron-fired Patrol prompt is
-#                                    isMeta too, and it is a turn. So the re-entry Stop after a
-#                                    refusal keeps the prompt's key, launches and tick
-#                                    flag, and a launch made before a Skill call stays the turn's.
+#                                    isMeta ALONE marks neither: a scheduled prompt is isMeta
+#                                    too, and it is a turn. So the re-entry Stop after a
+#                                    refusal keeps the prompt's key, launches and previous turn
+#                                    end, and a launch made before a Skill call stays the turn's.
 #                                    Survey behind the rule: A-T11b.1.
 #   TOOL <name> <path/cmd> <fields>  a main-thread assistant tool_use
 #   AGENT <name> <tool_use id>       a main-thread Agent tool_use — the launch the ledger names
@@ -1988,9 +1822,8 @@ return "$_adv"
 #                                    which writes no roster row and launched nothing — or a
 #                                    refused TaskStop, which stopped nothing (any tool's error)
 #   STOP <task id words> <tool_use id>  a main-thread TaskStop tool_use — the stand-down's answer
-#   MARK clear|resume                the ritual arm, scoped as before (review F2): a marker is
-#                                    read only off rows the orchestrator authored, never a tool
-#                                    result
+#   END <timestamp>                  a turn-end record (`type: system`, `subtype: stop_hook_summary`),
+#                                    the record the watch reader dates a turn end by
 #   SD-DECLINE <name> <reason>       `standdown-declined: <name> <reason>` at a LINE START of a
 #                                    main-thread assistant TEXT block — never thinking, never a
 #                                    tool_use input, never a tool result, so prose quoting,
@@ -2004,19 +1837,17 @@ return "$_adv"
 # THE WINDOW (review, performance finding 1). Every fact here is a "since the most recent X"
 # fact, so a 2000-line tail suffices provided it holds a whole orchestrator turn: the largest
 # single turn in this repo's two busiest wave transcripts is 264 records (measured 2026-09-03),
-# so the window carries ~7.5x the worst turn observed. A clear/resume marker older than the
-# window reads as no marker — the ritual arm goes INERT, which is fail-open and the right
-# direction for a marker whose purpose is the first stop after a resume.
+# so the window carries ~7.5x the worst turn observed.
 SCAN_WINDOW_LINES=2000
 stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   [ "${_ST_DONE:-0}" = 1 ] && return "${_ST_RC:-1}"
   _ST_DONE=1; _ST_RC=1
-  _ST_STREAM=""; _ST_PLAN=""; _ST_LIVE=0; _ST_TICK=0; _ST_TURN=""; _ST_MARK_TS=""
+  _ST_STREAM=""; _ST_PLAN=""; _ST_LIVE=0; _ST_PREV_END=""; _ST_TURN=""; _ST_MARK_TS=""
   _ST_LAUNCHED=""; _ST_CURRENT=""; _ST_STATE=""; _ST_CEILING=""
   _ST_WIDTH=""; _ST_OPEN=""; _ST_FREE=""; _ST_READY=""; _ST_MISSED=""; _ST_NAMED=""
   _ST_READY_N=0; _ST_SENT=0
   _ST_GAP=""; _ST_LIVE_HEAD=""; _ST_FACTS=""
-  local tr fold mark rest ready count want cap owed FILL_ROSTER FILL_ACKS FILL_OPEN
+  local tr fold rest ready count want cap owed FILL_ROSTER FILL_ACKS FILL_OPEN
   local digest at rvat gap rcount rgap slot
 
   [ "$(bionic_jq .hook_event_name)" = Stop ] || return 1
@@ -2049,8 +1880,8 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
        and ( (($r.turnCompanion // false) == true)
              or ( ((($r.isMeta // false) == true) or (($r.isSynthetic // false) == true))
                   and (($auth // "") | startswith("Stop hook feedback:")) ) )) as $cont
-    | (if (($auth // "") | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
-      (if (($auth // "") | contains("source: resume")) then "MARK\tresume" else empty end),
+    | (if ($r != null and $r.type == "system" and $r.subtype == "stop_hook_summary")
+       then "END\t" + ((($r.timestamp // "") | tostring) | gsub("[\n\t\r]"; " ")) else empty end),
       ( if ($main and $r.type == "user" and (($r.message.content // []) | type) == "array") then
           $r.message.content[]?
           | select(.type == "tool_result" and (.is_error // false) == true)
@@ -2097,11 +1928,10 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
 
   # THE TURN, FOLDED ONCE. One output line, its fields joined by the unit separator (0x1f):
   # a tab is whitespace to `read`, so two empty fields in a row would collapse into one.
-  mark="bionic-patrol session=${BIONIC_SID:0:8}"
-  fold="$(printf '%s\n' "$_ST_STREAM" | awk -F'\t' -v mark="$mark" '
+  fold="$(printf '%s\n' "$_ST_STREAM" | awk -F'\t' '
+    $1 == "END"  { if ($2 != "") lastend = $2; next }
     $1 == "USER" {
-      t = $2; sub(/^[ \t]+/, "", t)
-      tick = (index(t, mark) == 1)
+      prev = lastend
       ts = $3; key = ($4 != "" ? $4 : $3)
       n = 0
       next
@@ -2114,26 +1944,26 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
         if (aid[i] != "" && (aid[i] in err)) continue
         launched = launched (launched == "" ? "" : ",") an[i]
       }
-      printf "%d\037%s\037%s\037%s\n", tick + 0, key, ts, launched
+      printf "%s\037%s\037%s\037%s\n", (prev == "" ? "0000-00-00T00:00:00Z" : prev), key, ts, launched
     }')"
-  IFS=$'\037' read -r _ST_TICK _ST_TURN _ST_MARK_TS _ST_LAUNCHED <<< "$fold"
-  case "$_ST_TICK" in 1) : ;; *) _ST_TICK=0 ;; esac
+  IFS=$'\037' read -r _ST_PREV_END _ST_TURN _ST_MARK_TS _ST_LAUNCHED <<< "$fold"
+  [ -n "$_ST_PREV_END" ] || _ST_PREV_END="0000-00-00T00:00:00Z"
 
   # THE TICK'S DIGEST (wave-24 T8; wave-26 T32): its path and reader are the tick's own (lib/patrol.sh
-  # `tick_digest_path`, `tick_digest_field`), at the root NOTICK below reads the stamp from. Its
+  # `tick_digest_path`, `tick_digest_field`), under the session's root. Its
   # `duty=` and `reconcile=` lines fed the task-list duty, which went at wave-31 T32 (D6); what is
   # read here now is the head and the facts state below.
   #
-  # A DIGEST OLDER THAN THIS TURN'S TICK IS NO DIGEST (wave-24 T27; critic I3). A tick that exits on a
-  # refusal writes none, so the digest's `at=` must not be earlier than the marker's timestamp, the
-  # comparison NOTICK makes against the stamp; a digest with no `at=` is no digest.
-  if [ "$_ST_TICK" = 1 ]; then
-    digest="$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")"
-    at="$(tick_digest_field "$digest" at)"
+  # A DIGEST OLDER THAN THE PREVIOUS TURN END IS NO DIGEST. The tick this turn answers ran
+  # since that turn ended, the watcher's pass or one the turn ran itself; a tick that exits on a refusal
+  # writes none, so the digest's `at=` must not be earlier than that end. A digest with no `at=` is no digest.
+  digest="$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")"
+  at="$(tick_digest_field "$digest" at)"
+  {
     # THE HEAD THE TICK JUDGED `live:head` AGAINST (wave-26 T32; A-T14.2), from the same fresh
     # digest: the wall reads no git, so on a tick's turn it hands the tick's head to the ready set
-    # below, and a follow-up review the tick offered is a review the wall owes. Off a tick turn,
-    # or with a stale digest, there is no head, and a live review waits here as before.
+    # below, and a follow-up review the tick offered is a review the wall owes. With a stale digest
+    # there is no head, and a live review waits here as before.
     #
     # A HEAD OLDER THAN THE NEWEST REVIEW PROOF IS NOT HANDED IN (wave-26 T51; review 13 F3, review 10
     # (a)). The digest can be fresh for the turn and still older than a `proof-add review` made
@@ -2155,7 +1985,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # is met only by the judge's `covered` (T14), and the wall runs no judge, so it hands in the
     # digest's `facts_state=` under the same two tests as the head: a digest of this turn, and no
     # review proof newer than it. Otherwise it hands nothing, and integrate waits, as off a tick.
-    if [ -n "$at" ] && { [ -z "$_ST_MARK_TS" ] || ! [ "${at:0:19}" \< "${_ST_MARK_TS:0:19}" ]; }; then
+    if [ -n "$at" ] && ! [ "${at:0:19}" \< "${_ST_PREV_END:0:19}" ]; then
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
       _ST_FACTS="$(tick_digest_field "$digest" facts_state)"
       if { [ -n "$_ST_LIVE_HEAD" ] || [ -n "$_ST_FACTS" ]; } && [ -n "$_ST_PLAN" ]; then
@@ -2163,7 +1993,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
         elif [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ]; then _ST_LIVE_HEAD=""; _ST_FACTS=""; fi
       fi
     fi
-  fi
+  }
 
   # THE FILL'S NUMBERS — only on a live ledger (past Step 3), exactly as before: a run at
   # Steps 0-3, a run with no plan, or a `current:` that will not parse stops here without
@@ -2395,31 +2225,30 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
       s = kv($0, "session"); if (s != "" && s != sid) next
       at = substr(kv($0, "at"), 1, 19); if (at == "" || at < lb) next
       t = kv($0, "target"); if (t !~ /^[A-Za-z0-9_.-]+$/) next
-      if (!(t in seen)) { seen[t] = 1; printf "%s ", t }
-    }' "$orders" 2>/dev/null)"
+      if (!(t in last) || at > last[t]) last[t] = at
+    }
+    END { for (t in last) printf "%s %s\n", t, last[t] }' "$orders" 2>/dev/null)"
   [ -n "$targets" ] || return 0
-  # A HOLD WRITTEN SINCE THE BOUND ANSWERS ITS NAME (wave-24 T8; D1, AC-4.12). `hold` appends
-  # the name's row with `held=<iso> <reason> fp=…`, and the latest row of a name is its row. A
-  # hold older than the bound was in place when this turn's tick ordered the name anyway, so
-  # something about the agent has changed since and the order stands.
+  # A HOLD WRITTEN AFTER A NAME'S LAST ORDER ANSWERS IT. `hold` appends
+  # the name's row with `held=<iso> <reason> fp=…`, and the latest row of a name is its row. The
+  # tick orders no held name while the hold's fingerprint stands, so an order newer than the hold
+  # says something about the agent has changed since, and that order stands.
   roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  held=""
   if [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; then
-    held="$(awk -v lb="${lb:0:19}" '
+    held="$(awk '
       function kv(line, key,   i, n, parts) {
         n = split(line, parts, "|")
         for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
         return ""
       }
       index($0, "roster-state/") == 1 { nm = kv($0, "name"); if (nm != "") h[nm] = kv($0, "held") }
-      END { for (nm in h) { at = substr(h[nm], 1, 19); if (at != "" && at >= lb) printf " %s", nm } }' "$roster" 2>/dev/null)"
-    vout=""
-    for t in $targets; do
-      case "$held " in *" $t "*) continue ;; esac
-      vout="${vout}${t} "
-    done
-    targets="$vout"
-    [ -n "$targets" ] || return 0
+      END { for (nm in h) { at = substr(h[nm], 1, 19); if (at != "") printf "%s %s\n", nm, at } }' "$roster" 2>/dev/null)"
   fi
+  targets="$(printf '%s\n' "$targets" | awk -v held="$held" '
+    BEGIN { n = split(held, l, "\n"); for (i = 1; i <= n; i++) { split(l[i], p, " "); if (p[1] != "") h[p[1]] = p[2] } }
+    NF == 2 && !(($1 in h) && h[$1] >= $2) { printf "%s ", $1 }')"
+  [ -n "$targets" ] || return 0
   [ -f "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" ] || return 0
   # Run from the root with the session key, exactly as the landing sweep above asks it;
   # `|| exit 9` keeps a failed `cd` out of the verb's exit-1 band.
@@ -2444,166 +2273,15 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
 
 # ─── stop_patrol_revive ───
 #
-# THE HOOK'S OWN HEADER, CARRIED OVER WHOLE. It is the design record for this
-# verdict — every ruling, incident and measurement that shaped it — and it
-# travels with the code rather than being left behind in a deleted file.
-# Where it says "this hook" it now means this function, and where it names a
-# registration it means hooks/stop.sh's.
-#
-# THE PATROL SELF-HEAL — epic-19 wave-01, spec AC-F6; design ledger D4, ratified
-# 2026-08-27 ("Simply update the user in the terminal of the issue, and reload the
-# Patrol").
-#
-# WHAT IT IS FOR. The CLI holds its cron table in PROCESS MEMORY, with no file
-# behind it (payload/scripts/lib/patrol.sh's own honest limit, and doctor's). A
-# `claude plugin update`, a `/reload-plugins`, a session continue or a
-# `/clear`+resume can therefore delete the Patrol job and leave nothing that says
-# so: the run keeps working, the poker never ticks again, no row is ever judged
-# against its declared duration, and the fleet dies quiet. The stamp goes stale one
-# window later — but only where somebody LOOKS, and until this hook existed the
-# only two places that looked were a dispatch attempt (hooks/dispatch-preflight.sh's
-# arming wall) and a hand-run `/bionic:doctor`. Between them, nothing observed it
-# and nothing told anyone. This hook is the thing that looks, every turn.
-#
-# WHY THE STOP CHANNEL, and not one of the stop hooks that already exist. The
-# detection has to fire on the run's own rhythm rather than on a dispatch — that is
-# the whole gap. `Stop` is the only recurring orchestrator event there is: it fires
-# once per turn, whatever the turn contained, and it keeps firing on turns the skill
-# was not re-invoked on (hooks/landing-gate.sh depends on and documents those exact
-# properties). The stop guard is hooks/stop.sh's `PreToolUse|TaskStop` arm — it fires when the
-# orchestrator stops an AGENT, which is neither recurring nor about the session's
-# clock; hooks/stop-check.sh is not registered on any channel at all. So the choice
-# was Stop or nothing.
-#
-# WHY A BLOCK AND NOT A PRINT. A shell hook cannot call `CronCreate` — that is a
-# model tool, and re-creating the cron job is half of what "reload the Patrol"
-# means. What a Stop hook CAN do is refuse the stop once with a `reason`, which the
-# CLI renders into the operator's terminal and hands to the model as the next thing
-# to act on. One mechanism therefore carries both halves of AC-F6: the reason IS the
-# terminal notice, and it is also the instruction that gets the Patrol re-armed. The
-# pattern is hooks/patrol-duties-gate.sh's, registered beside it on the same channel.
-#
-# IT MUST NEVER ARM THE STAMP ITSELF, and this is the sharpest edge in the file. A
-# hook that ran `session-poker.sh arm` would freshen the stamp over a cron table
-# that still holds nothing — buying a Patrol that reads alive to the arming wall,
-# to doctor and to this hook, and that never fires again. That is strictly worse
-# than the death it was meant to heal, because the death is at least detectable.
-# So this gate READS, exactly like every other gate (TDD §3.2), and the re-arm is
-# named in the reason with its cron half FIRST. tests/patrol-revive.test.sh Group 5
-# pins the stamp's mtime across a firing.
-#
-# THE THREE STAMP STATES, and why only one of them speaks:
-#   absent  -> silent. Never armed, OR deliberately disarmed — `session-poker.sh
-#              disarm` removes the stamp, which is how a run says its Patrol was
-#              ended on purpose. Never-armed is a real finding, but it is the ARMING
-#              WALL's to make at the moment a dispatch is attempted; raised here it
-#              would nag every session that has the skill armed and has not engaged
-#              a run yet, which is the first turn of every run.
-#   fresh   -> silent. Firings are landing; a monitor with nothing to say says so
-#              by saying nothing.
-#   stale   -> THE NOTICE. Something armed a Patrol on THIS session and the clock
-#              has stopped.
-#
-# SCOPE — WHAT "AN ACTIVE RUN" IS HERE. Two conditions, and no third. First, this
-# project has an OPEN RUN: `session_run` (which was `active_run` until
-# wave-session-bound-run made run identity per-session) under the payload's project root,
-# the same fact every other governance hook is scoped by since bionic 1.4.0. Second, a stamp
-# EXISTS for this session, which by doctrine (SKILL.md §Dispatch) happens at the
-# Step-0 confirmation of a new run or the resume ritual of an open one, and at no
-# other moment. An armed-then-stale stamp is therefore already the statement "a run
-# engaged on this session and its clock died".
-#
-# THE FIRST CONDITION USED TO BE "the governing skill is armed", and reading the plan
-# was REJECTED on two grounds. Both are answered now. It would have been a fifth
-# hand-copy of the active-wave block — there is one reader, `lib/run.sh`, and no copy
-# to drift. And it would have imported a measured silent-inert mode: a marker-less
-# `*.md` winning the newest-file race disarmed the dispatch wall repo-wide for ~15
-# minutes on 2026-08-15 (record/session-20260815-landing-supervision/
-# t8-forensic-read.md). That mode lived in the copies' selection rule, not in the
-# question; `active_plan` requires an unfenced `## SDLC State` heading, which is
-# exactly the filter whose absence caused it. A monitor whose job is to notice
-# silence must not acquire a new way to go silent — and the alternative it now
-# replaces was a worse one, because a skill registration goes quiet without leaving
-# anything on disk to notice.
-#
-# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan task STOPGATES): ONE CLOCK
-# PER RUN. This session having a stamp of its own says a Patrol was armed here; a
-# second FRESH `patrol-<other-sid>.state` in the SAME project's `.bionic/tmp` says
-# another one is ALSO alive right now — the duplicate-clock shape S5's ritual
-# exists to prevent, caught here even when it happens without a /clear or resume in
-# between (a stray `CronCreate` run twice, or two sessions racing an `arm`). This is
-# a FINDING, not a block: it is a stderr diagnostic line, exactly `loader_fail_open`'s
-# voice, because a sibling's live clock is not this session's stop to refuse — only
-# its own dead one is. Read AFTER the threshold is known (so it shares the same
-# staleness measurement) and BEFORE this session's own stale/fresh decision, so it
-# fires whichever way that decision goes.
-#   - the other stamp is this session's own                    -> not counted
-#   - the other stamp is a symlink                              -> not counted, never followed
-#   - the other stamp's mtime is unreadable                     -> not counted
-#   - the other stamp is STALE (past the same 2x limit)          -> not counted, silent
-#   - the other stamp is FRESH                                   -> one stderr finding line, naming its session
-#   - exactly one live stamp (this session's own, no others)     -> silent on this arm
-#
-# FAIL DIRECTIONS (pinned by tests/patrol-revive.test.sh):
-#   - jq absent                                       -> pass, silent
-#   - not a Stop payload (SubagentStop included)      -> pass, silent
-#   - stop_hook_active true                           -> pass, silent (ONE block per
-#                                                        turn, not one per session)
-#   - no session_id, or one not shaped like one       -> pass, silent
-#   - no cwd, or no resolvable project root           -> pass, silent
-#   - no stamp, or a symlink where the stamp goes     -> pass, silent (never armed,
-#                                                        or deliberately disarmed)
-#   - no poker on either lane, or no readable interval-> pass, silent (no threshold)
-#   - the stamp's mtime unreadable                    -> pass, silent
-#   - stamp age within 2x the poker-interval          -> pass, silent
-#   - stamp age past it                               -> BLOCK, naming the re-arm
-#
-# THREE ACCEPTED LIMITS. First, inherited from the stamp and shared with the arming
-# wall: this attests that Patrol FIRINGS ARE LANDING and cannot see the cron table,
-# so a job deleted moments ago still looks alive for up to one stale window — the
-# notice is late by design rather than wrong. Second, and now CLOSED where it
-# used to be unbounded: a deliberate stop was indistinguishable from a death.
-# Nothing in production removed a stamp, so a Patrol the run ended on purpose —
-# the run-close `CronDelete`, or the poker's own DISARM decision, which is reached
-# on every quiet stretch between dispatch batches — left an aging stamp behind and
-# was reported dead here on EVERY remaining turn of the session. This notice does
-# not "block once" in the sense that matters: `stop_hook_active` suppresses only
-# the second stop WITHIN one turn and resets at the next, so the blocks are one
-# per turn, forever, and the CLI's own override after 8 CONSECUTIVE blocks can
-# never engage above us because one-per-turn blocks are never consecutive. There
-# is no backstop; the stamp going away is the whole of the exit (critic C-2,
-# epic-19 w1). `session-poker.sh disarm` is what makes it go away: the run-close
-# ritual (SKILL.md §Dispatch) and a DISARM tick both take it, and an ABSENT stamp
-# is silent here by design. WHAT REMAINS is a disarm that FORGOT the verb — a
-# `CronDelete` with no `disarm` beside it — which still reads as a death; its cost
-# is one re-armed clock on a run that was nearly over, against a fleet nobody is
-# waiting on for the opposite error.
-#
-# Third, THIS HOOK NO LONGER SHARES THE FAILURE MODE IT MONITORS — and that reversal
-# is the point of bionic 1.4.0's always-on registration. It used to be registered in
-# the governing skill's own frontmatter, where a skill's hooks die with the
-# conversation that armed them: three of the four events that kill a Patrol — a
-# session continue, a `/clear` + resume, a `/reload-plugins` — deregistered this hook
-# itself, silently and at the same moment, so the monitor died with the thing it
-# monitors and its real coverage was the one remaining event, a `claude plugin update`
-# mid-session. It is registered once in hooks/hooks.json now and survives all four.
-# What remains outside its reach is narrower and structural: an event that stops the
-# CLI from delivering `Stop` at all.
-#
-# Registered once on the Stop channel in hooks/hooks.json, always on, and scoped by
-# `session_run` (which was `active_run` until wave-session-bound-run made run identity
-# per-session) plus this session's own stamp — both facts on disk.
+# THE WATCHER THAT DIED WITHOUT A WORD, said once at the turn end. Stop only, engaged only, on a bound open
+# run whose scale has a Patrol: a worker's turn end proves nothing about the orchestrator's watch, and a
+# bystander session sees nothing from this function. It never blocks: the turn-end hook starts the next
+# watcher at this same turn end, so there is nothing for the model to do.
 # [WALL: tests/patrol-revive.test.sh]
-#
-# hooks/patrol-revive.sh's body. Stop only: a subagent arms no Patrol — SKILL.md
-# §Dispatch, "subagents stay timerless" — so a worker's turn end can prove nothing
-# about the orchestrator's clock.
 
 stop_patrol_revive() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
-  local HOOK_DIR _RUN_PLAN STAMP_FILE POKER INTERVAL WINDOW MTIME AGE
-  local _rival_now _rival_sf _rival_sid _rival_mt _rival_age
-  local TRANSCRIPT VERDICT VLINE GAP WHY _lost
+  local HOOK_DIR _RUN_PLAN _lost
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
 
@@ -2699,167 +2377,105 @@ if declare -F watch_lost >/dev/null 2>&1 && _lost="$(watch_lost "$BIONIC_ROOT" "
   watch_lost_said "$BIONIC_ROOT" "$BIONIC_SID" "$_lost" >/dev/null 2>&1 || :
 fi
 
-# ---------- was a Patrol ever armed on this session ----------
-#
-# The filename is hooks/session-poker.sh's, and the two spellings are held together
-# by tests/cross-gate-agreement.test.sh §P so a rename on one side cannot go quiet
-# on the other. A symlink is not a stamp: it reads as ABSENT rather than being
-# followed, which is the posture every other .bionic/tmp reader takes and the
-# direction §8 requires — a hostile repo may CLOSE a wall and must never OPEN one.
-STAMP_FILE="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
-[ -L "$STAMP_FILE" ] && return "$_adv"
-[ -f "$STAMP_FILE" ] || return "$_adv"
+return "$_adv"
+}
 
-# ---------- the threshold ----------
+# ─── THE STOP LINE: the turn end that leaves the run waiting only on the person says so, once ───────────────
 #
-# THE INTERVAL IS THE POKER'S OWN, obtained by invoking its `interval` verb rather
-# than by re-reading `poker-interval:` here: one knob, one reader. A malformed
-# override makes the poker refuse, and the fallback is lib/patrol.sh's
-# PATROL_INTERVAL_DEFAULT, the constant the poker takes its own default from — never a
-# number retyped here, which would drift the first time either side moved and leave
-# this hook measuring against a threshold nobody configured.
+# The watcher rests when only the person can move the run, and it can say nothing as it does: a watcher's
+# exit 0 adds nothing to the window. So the turn-end hook says it, on the person's quiet channel (`fold_say`, a
+# `systemMessage`, which the platform paints as one grey line under the reply with no error look and no turn for
+# the model). The platform prefixes it `Stop says: `, fourteen columns, so the line keeps to 66 and the window's
+# line to 80. It names the return, because the person's reply is what starts the watch again.
 #
-# NO NUMBER MEANS NO FINDING. Where hooks/dispatch-preflight.sh still has a
-# never-armed arm to run without a threshold, this hook's only question IS the
-# threshold — so an unreadable interval leaves it with an ambiguity rather than a
-# finding, and it takes the direction every start-side ambiguity in this fleet
-# takes: pass, silent. A per-turn gate is also the worst possible place to be loud
-# about a condition it cannot measure.
-POKER="${HOOK_DIR}/session-poker.sh"
-[ -f "$POKER" ] || POKER="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
-[ -f "$POKER" ] || return "$_adv"
+# WHAT IS READ. The watch record (lib/patrol.sh `watch_record_path`), the one fact about the watch: a rest on the
+# person, written since this turn's prompt, with no roster row open. A rest older than the prompt is the person's
+# return, which the watch answers by starting again; a rest for any other reason is not the person's to end.
+#
+# THE RACE. The platform starts this hook and the watcher together at the turn end, and the watcher's first pass
+# decides whether it rests. So the hook waits, within a bound counted from its own start, kept well inside the
+# Stop hook's timeout: while this turn end's watcher (a claim at or after this hook's start, less a few seconds'
+# slack, whose process lives) is still on its pass; and, for a few seconds only, while the record still shows the
+# turn before (a rest older than the prompt, or a watcher that died) and the new claim may be about to land. A
+# watcher claimed before this turn end goes on watching and is not waited for, and a session with no record at
+# all never ran a watcher, so nothing is waited for either.
+#
+# ONCE. The key is the tick's digest at the rest, the same state twice is one key; it is kept in the session's
+# `stop-said-` file, and written only when the line goes out. This function runs last in the fold, so a turn some
+# wall refused, which shows no line, marks nothing said.
+STOP_WATCH_LINE="bionic watch: stopped - waiting on you; your reply starts it again"
+STOP_WATCH_WAIT_DEFAULT=6
+STOP_WATCH_CLAIM_GRACE=3
+STOP_WATCH_SLACK=5
 
-INTERVAL=$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$POKER" interval 2>/dev/null )
-case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
-if [ -z "$INTERVAL" ] || [ "$INTERVAL" -le 0 ]; then
-  INTERVAL="${PATROL_INTERVAL_DEFAULT:-}"
-  case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
-fi
-[ -n "$INTERVAL" ] && [ "$INTERVAL" -gt 0 ] || return "$_adv"
+_stop_watch_read() {  # <record> — sets _SW_STATE _SW_WHY _SW_AT _SW_PID; rc 1 when it is no record
+  local l
+  _SW_STATE=''; _SW_WHY=''; _SW_AT=''; _SW_PID=''
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  while IFS= read -r l; do
+    case "$l" in
+      state=*) _SW_STATE="${l#state=}" ;; why=*) _SW_WHY="${l#why=}" ;;
+      at=*) _SW_AT="${l#at=}" ;; pid=*) _SW_PID="${l#pid=}" ;;
+    esac
+  done < "$1"
+  [ -n "$_SW_STATE" ]
+}
 
-# ---------- one fire window, from the library that owns the arithmetic ----------
-#
-# THIS USED TO BE TWICE THE INTERVAL, THE MULTIPLIER TYPED HERE (wave-15 REQ-1, ADR-028).
-# "How stale is stale" was a judgment call written out at three sites; lib/patrol.sh exported
-# the retired stale multiplier to hold two of them together and this one — the site that BLOCKS
-# A TURN — kept its own literal, so a change to the judgment moved two readers and left the
-# third measuring against a threshold nobody configured.
-#
-# It is not a multiplier at all now. The window is the longest idle span in which a session
-# cron is GUARANTEED one opportunity to fire — the interval plus the scheduler's jitter,
-# which the CronCreate contract bounds at a tenth of the period — and `patrol_fire_window`
-# is the one place that arithmetic exists. Past it the stamp is worth READING THE
-# TRANSCRIPT about; it is not, on its own, a verdict.
-#
-# SOURCED HERE AND NOT AT FILE SCOPE, behind the guard units.sh and fill.sh carry above (on
-# the thing this file uses): three of the four verdict functions in this library never ask the
-# Patrol anything, and a bystander turn should not pay to parse a library it will not call.
-if ! declare -F patrol_verdict >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/patrol.sh" 2>/dev/null || :
-fi
-declare -F patrol_verdict >/dev/null 2>&1 || return "$_adv"
-WINDOW="$(patrol_fire_window "$INTERVAL")" || WINDOW=""
-[ -n "$WINDOW" ] || return "$_adv"
+stop_said_path() {  # <root> <sid> -> the session's record of the last stop line said, or nothing
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  case "$2" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  printf '%s/.bionic/tmp/stop-said-%s.state' "$1" "$2"
+}
 
-# ---------- the second-stamp finding (AC-3): one clock per run ----------
-#
-# Every OTHER patrol-*.state beside this session's own, in the same .bionic/tmp,
-# judged against the SAME window — a fresh one is a live duplicate clock, worth a
-# finding whether or not THIS session's own clock turns out to be stale or fine.
-#
-# ONE FIRE WINDOW IS THE RIGHT MEASURE FOR "LIVE" (REQ-1). A Patrol that is firing stamps
-# at least once per window by construction, so a rival stamp inside one is a clock that is
-# still running. This arm asks nothing about idleness: it is a statement about the OTHER
-# session, whose transcript this hook cannot read and whose busyness is not this session's
-# to judge.
-_rival_now="$(date -u +%s 2>/dev/null || echo 0)"
-for _rival_sf in "$BIONIC_ROOT"/.bionic/tmp/patrol-*.state; do
-  [ -e "$_rival_sf" ] || [ -L "$_rival_sf" ] || continue
-  [ "$_rival_sf" = "$STAMP_FILE" ] && continue
-  [ -L "$_rival_sf" ] && continue
-  _rival_sid="${_rival_sf##*/}"; _rival_sid="${_rival_sid#patrol-}"; _rival_sid="${_rival_sid%.state}"
-  [ -n "$_rival_sid" ] || continue
-  [ "$_rival_sid" = "$BIONIC_SID" ] && continue
-  _rival_mt=$(stat -f %m "$_rival_sf" 2>/dev/null || stat -c %Y "$_rival_sf" 2>/dev/null)
-  case "$_rival_mt" in ''|*[!0-9]*) continue ;; esac
-  _rival_age=$(( _rival_now - _rival_mt ))
-  [ "$_rival_age" -lt 0 ] && _rival_age=0
-  if [ "$_rival_age" -le "$WINDOW" ]; then
-    fold_advise "patrol-revive: a second live Patrol stamp for session $(printf '%.8s' "$_rival_sid") exists here — one clock per run; delete the stray job and stamp"; _adv=1
-  fi
-done
-
-MTIME=$(stat -f %m "$STAMP_FILE" 2>/dev/null || stat -c %Y "$STAMP_FILE" 2>/dev/null)
-case "$MTIME" in ''|*[!0-9]*) return "$_adv" ;; esac
-AGE=$(( $(date -u +%s) - MTIME ))
-[ "$AGE" -lt 0 ] && AGE=0
-[ "$AGE" -gt "$WINDOW" ] || return "$_adv"
-
-# ---------- the verdict: idle time, never wall time (REQ-1, ADR-028) ----------
-#
-# THE STAMP'S AGE IS NOT THE FINDING, and this is the whole of wave-15 REQ-1. A session
-# cron fires only while the session is IDLE, so a stamp past the window says one of two
-# things and age alone cannot tell them apart: the job is gone, or the orchestrator has
-# been working. On 2026-09-15 this notice blocked a healthy session on a 2459s stamp
-# against a 2400s limit because its orchestrator was simply busy.
-#
-# `patrol_verdict` answers the question that IS observable — has an idle stretch long
-# enough for one firing passed since the last proof of life, with no firing in it — off the
-# transcript this hook is already handed. Only `dead` blocks. `busy` and `unreadable` are
-# advisories, because a wall that cannot observe the thing it refuses on does not refuse
-# (ADR-028), and both name what they found so the degradation is visible rather than
-# silent.
-TRANSCRIPT=$(bionic_jq .transcript_path)
-VLINE="$(patrol_verdict "$STAMP_FILE" "$TRANSCRIPT" "$INTERVAL")"
-VERDICT="$(_patrol_field "$VLINE" verdict)"
-GAP="$(_patrol_field "$VLINE" gap)"
-WHY="$(_patrol_field "$VLINE" reason)"
-case "$VERDICT" in
-  dead) : ;;
-  busy)
-    fold_advise "patrol-revive: the Patrol stamp is ${AGE}s old, but this session has been busy — its longest idle gap since the stamp is ${GAP}s, under the ${WINDOW}s fire window, so the clock has had no opportunity to fire and its silence proves nothing"
-    return 1
-    ;;
-  *)
-    fold_advise "patrol-revive: the Patrol stamp is ${AGE}s old and this session's idle time could not be read (${WHY:-no reason given}) — advisory only, no verdict"
-    return 1
-    ;;
-esac
-
-# ---------- the notice ----------
-#
-# ONE LINE, AND THE SAME LINE EVERY TURN. The CLI prints a blocking hook's reason as its own
-# "Stop hook error:" line, so the plugin cannot make that line quieter, only shorter: the notice
-# is the refusal's headline with no detail, and the headline is the whole reason. It names the three
-# acts in their order and nothing else. It carries no age, no idle gap and no path, so a repeat over
-# the same stale stamp is byte-identical to the first and the line can never grow. The explanation
-# (why the clock dies, the refused CronCreate, the deliberate stop) is the dispatch rules'.
-#
-# THE CRON HALF IS FIRST because the order is a safety property: `arm` alone freshens the stamp
-# over an empty cron table and buys a Patrol that reads alive and never fires, which is worse than
-# the death because the death is at least detectable. This function therefore reads and names the
-# acts and never arms. CronCreate is the refusable half (the auto-mode classifier refuses it
-# non-deterministically), so "if absent" is in the line and the rule that a refused CronCreate is
-# never followed by `arm` is in the dispatch rules.
-#
-# THE CLOCK THAT FIRES AND NEVER TICKS. `patrol_verdict` reads a Patrol marker turn after the stamp
-# as a firing that ran no tick. The job exists and fires, so re-creating it as it is buys the same
-# silence, and arming the stamp over it would make a Patrol that never decides read alive. The repair
-# is the tick, a look at the cron table, then a job carrying the prompt the prompt verb prints, and
-# its line names the tick first.
-case "$WHY" in
-  *"marker turn"*)
-    fold_block block stop "Patrol never ticks" "tick; CronList; replace its job" ""
-    return 2
-    ;;
-esac
-
-# The JSON decision payload on STDOUT with return 2 is the Stop-hook block channel that
-# hooks/patrol-duties-gate.sh uses too; the landing arm refuses through exit 2 and stderr instead.
-# Both are live in this CLI, and gates that share no code path do not share a mechanism either.
-fold_block block stop "Patrol dead" "CronList; CronCreate if absent; arm" ""
-return 2
+stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
+  [ "${1:-}" = Stop ] || return 0
+  [ "${BIONIC_ENGAGED:-0}" = 1 ] || return 0
+  [ "${BIONIC_FOLD_BLOCKS:-0}" -eq 0 ] || return 0
+  declare -F watch_record_path >/dev/null 2>&1 || return 0
+  local rec prompt bound grace fresh live said key tmp
+  rec="$(watch_record_path "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
+  _stop_watch_read "$rec" || return 0
+  stop_turn_facts >/dev/null 2>&1
+  prompt="${_ST_MARK_TS%%.*}"; prompt="${prompt%Z}"
+  [ -n "$prompt" ] || return 0
+  prompt="${prompt}Z"
+  bound="${BIONIC_STOP_WATCH_WAIT:-$STOP_WATCH_WAIT_DEFAULT}"
+  case "$bound" in ''|*[!0-9]*) bound="$STOP_WATCH_WAIT_DEFAULT" ;; esac
+  grace="$STOP_WATCH_CLAIM_GRACE"; [ "$grace" -le "$bound" ] || grace="$bound"
+  fresh="$(date -u -v-"$((SECONDS + STOP_WATCH_SLACK))"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null     || date -u -d "-$((SECONDS + STOP_WATCH_SLACK)) seconds" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  while :; do
+    case "$_SW_STATE" in
+      resting)
+        [[ "$_SW_AT" < "$prompt" ]] || break
+        [ "$SECONDS" -lt "$grace" ] || break ;;
+      watching)
+        live=no
+        case "$_SW_PID" in ''|*[!0-9]*) : ;; *) kill -0 "$_SW_PID" 2>/dev/null && live=yes ;; esac
+        if [ "$live" = yes ] && [ -n "$fresh" ] && ! [[ "$_SW_AT" < "$fresh" ]]; then
+          [ "$SECONDS" -lt "$bound" ] || break
+        else
+          [ "$live" = no ] && [ "$SECONDS" -lt "$grace" ] || break
+        fi ;;
+      *) [ "$SECONDS" -lt "$grace" ] || break ;;
+    esac
+    sleep 0.2
+    _stop_watch_read "$rec" || return 0
+  done
+  [ "$_SW_STATE" = resting ] && [ "$_SW_WHY" = person ] || return 0
+  [[ "$_SW_AT" < "$prompt" ]] && return 0
+  [ -z "$(roster_open_names "$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state" \
+    "$BIONIC_ROOT/.bionic/tmp/sweeper-$BIONIC_SID.state" "$BIONIC_SID" 2>/dev/null)" ] || return 0
+  key="$(tick_digest_field "$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")" digest)"
+  key="digest=${key:-at $_SW_AT}"
+  said="$(stop_said_path "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
+  [ -f "$said" ] && [ ! -L "$said" ] && [ "$(cat "$said" 2>/dev/null)" = "$key" ] && return 0
+  # Written whole beside it and renamed in, never through a link; a line that cannot be marked said is not said,
+  # so it can never repeat on every turn end.
+  [ -L "$said" ] && return 0
+  tmp="$(mktemp "${said%/*}/.stop-said.XXXXXX" 2>/dev/null)" || return 0
+  printf '%s\n' "$key" > "$tmp" 2>/dev/null && mv -f "$tmp" "$said" 2>/dev/null || { rm -f "$tmp"; return 0; }
+  fold_say "$STOP_WATCH_LINE"
+  return 1
 }
 
 # ─── THE STOP GUARD: the judgement of a TaskStop, its words and its roster writes ─────────────

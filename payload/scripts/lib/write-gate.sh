@@ -30,6 +30,12 @@ An engaged run keeps what it learns where the run can see it: a judgment call go
 record/<wave>/assumptions.md, and a correction that should outlive the run goes to the user
 as a rule proposal (record/<wave>/user-rules-proposed.md), for the rules file that owns it.
 Nothing that gates or reviews this run reads the store. Reading it stays open." ;;
+    seal-home)  # <tool> <path> <home>
+      WG_FACT="this changes the seal's home"; WG_FIX="only the tool writes there"
+      WG_DETAIL="This $1 changes $2, in the seal's home ($3).
+The home holds the seals and bindings that vouch for each run, and only the tool's own writers
+change it, engaged or not. A run changed by hand is the person's to rule on, through
+session-poker.sh accept or abandon. Reading the home stays open." ;;
     misplaced)  # <docs root> <subdir> <project root>
       WG_FACT="this artifact is outside the docs root"; WG_FIX="write it under the docs root"
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' is misplaced.
@@ -266,6 +272,17 @@ _write_gate_frame() {
   WG_FACT="$1"; WG_FIX="$2"
   WG_DETAIL="canonical-sdlc artifact '$BASENAME': $3
 Path: $FILE_PATH"
+}
+
+# write_gate_in_seal_home <home> <W|D> <path> — rc 0 when the path, resolved where it lies, is the
+# seal's home or under it, or, for a delete, a directory that holds the home: removing `.git` removes
+# every seal with it. A sibling that only shares the home's name as a prefix is outside.
+write_gate_in_seal_home() {
+  local p="${3%/}"
+  case "$p/" in "$1"/*) return 0 ;; esac
+  [ "$2" = D ] || return 1
+  case "$1/" in "$p"/*) return 0 ;; esac
+  return 1
 }
 
 write_gate_refuse() {

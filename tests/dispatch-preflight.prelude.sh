@@ -477,18 +477,12 @@ make_repo() {
   fi
   git -C "$repo" commit -qm seed 2>/dev/null
   if [ "$wave" = "yes" ]; then
-    # A live wave has a live Patrol: it is armed at engagement, before the first dispatch
-    # (skills/canonical-sdlc/SKILL.md §Dispatch). Every wave-active fixture therefore
-    # carries a fresh stamp for the session ids this suite dispatches with, and the S21
-    # arms remove or backdate it to drive the arming wall. Without this the wall would be
-    # under test in every case in the file rather than in its own section.
+    # A live wave is watched. Every wave-active fixture carries a rested watch for the session ids
+    # this suite dispatches with, so the watch wall is under test in its own section alone.
     mkdir -p "$repo/.bionic/tmp"
     local _psid
     for _psid in "${SID_A:-}" "${SID_B:-}" "${SID_DEAD:-}" "${SID_LIVE:-}"; do
       [ -n "$_psid" ] || continue
-      printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" > "$repo/.bionic/tmp/patrol-$_psid.state"
-      chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
       # …AND A WATCH, rested on purpose: the dispatch wall admits a watch that is alive or that rested
       # (hooks/watch.sh writes this record), so §WATCH alone drives the watch's other states.
       watch_rested "$repo" "$_psid"
@@ -600,8 +594,7 @@ write_attestation() {
 # HOISTED FROM THE SECTIONS (wave-30 T1). Read by sections in more than one shard.
 # ======================================================================================
 
-# ---- from S21: s21_stamp_path, s21_backdate, s21_iso, s21_idle_tr, s21_busy_tr, s21_stale_payload ----
-s21_stamp_path() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "$2"; }
+# ---- from S21: s21_backdate, s21_iso ----
 
 s21_backdate() {  # <file> <seconds ago>
   local ts
@@ -609,35 +602,9 @@ s21_backdate() {  # <file> <seconds ago>
   touch -t "$ts" "$1"
 }
 
-# ---------- the transcript the staleness half reads (REQ-1, AC-1.1/1.2) ----------
-#
-# THE STALENESS HALF IS AN IDLE-TIME PREDICATE NOW (ADR-028). A session cron fires only
-# while the session is idle, so a stamp past the fire window is a DEATH only when an idle
-# gap at least that long has passed since it with no tick in it; a stamp that went stale
-# under a long busy turn is an advisory and the dispatch proceeds. Every armed-but-dead
-# fixture below therefore carries a transcript with a real gap, and the busy fixture carries
-# one without. The suite's default transcript (`S5_LIVE_TRANSCRIPT`, fixed 2026-09-05
-# timestamps) predates every stamp this section backdates, so it reads as BUSY and is the
-# right default for every fixture here that is not about the staleness half at all.
-#
-# RELATIVE TO NOW, REBUILT AT EACH CALL: the gap has to fall after the stamp, and the stamp
-# is backdated by between 50 and 4000 seconds. Nothing here sleeps.
 s21_iso() {  # <seconds ago>
   date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
     || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
-}
-
-s21_idle_tr() {  # -> path of a transcript whose last turn opened after a long idle gap
-  { printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
-      "$(s21_iso 10000)"
-    printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"carry on"}}\n' \
-      "$(s21_iso 1)"
-  } > "$SANDBOX/.s21-idle.jsonl"
-  printf '%s' "$SANDBOX/.s21-idle.jsonl"
-}
-
-s21_stale_payload() {  # <sid> <repo> -> a dispatch payload carrying the idle transcript
-  mk_agent_payload "$1" "$2" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$(s21_idle_tr)"
 }
 
 # ---- from S21: s21_plant ----

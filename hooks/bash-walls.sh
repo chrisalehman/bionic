@@ -152,6 +152,24 @@ bionic_context 2>/dev/null || exit 0
 [ "$BIONIC_ENGAGED" = 1 ] || { _run_seal && seal_binding_warm "$BIONIC_ROOT"; } >/dev/null 2>&1 || :
 BIONIC_BOUND_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_BOUND_PLAN=""
 
+# THE PERSON'S ASKS A WALL HANDED BACK, OPENED HERE. A refusal that asks the person for a waiver (a failing question,
+# a matrix row only they can let go) or a ruling on a changed run comes back from its wall beside its words, one
+# `<key> TAB <title> TAB <reply>` line each in BIONIC_WALL_OWED; the wall itself writes nothing (the freeze), so its
+# caller opens the items on the person's ledger (lib/owed.sh), keyed as the answer verb closes them. Opening is
+# idempotent per key. owed.sh is not in BIONIC_LIB_WANT and is sourced only when there is an ask. The ledger is the run's register: the session's bound plan names it, or `OWED_PLAN` from a caller
+# that drives this wall for a plan under a stand-in session (close-out.sh `gate_ask`), passed through as it came.
+# A plan verb's dry commit (`planverb-<pid>`, hooks/session-poker.sh `plan_verb_dry`) is a synthetic session whose
+# ledger nobody reads: its refusal is printed to the verb's caller, and the real commit opens the item.
+bw_open_asks() {
+  [ -n "$BIONIC_WALL_OWED" ] || return 0
+  case "$BIONIC_SID" in planverb-*) return 0 ;; esac
+  { declare -F owed_open >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/owed.sh" ] && . "$BIONIC_LIB/owed.sh"; }; } 2>/dev/null || return 0
+  while IFS=$'\t' read -r _bw_key _bw_title _bw_reply; do
+    [ -n "$_bw_key" ] || continue
+    OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" OWED_PLAN="${OWED_PLAN:-}" owed_open "$_bw_key" "$_bw_title" "$_bw_reply" >/dev/null 2>&1
+  done <<< "$BIONIC_WALL_OWED"
+}
+
 # THE SEAL, FIRST. A commit of a bound run is compared with that run's seal before the
 # engagement test and before any costly read: the collector below derives readings and the
 # gate folds the log, and a hook that runs past its ten seconds admits the commit, so a run
@@ -173,9 +191,40 @@ case "$SEAL_LINE" in
   changed*|busy)
     BIONIC_SEAL_LINE="$SEAL_LINE"; BIONIC_SEAL_PLAN="$BIONIC_BOUND_PLAN"; BIONIC_SEAL_LOG="$SEAL_LOG"
     EVENT=$(bionic_jq .hook_event_name); [ -n "$EVENT" ] || EVENT="PreToolUse"
-    bionic_fold "$EVENT" wall_run_seal
-    exit $? ;;
+    bionic_fold "$EVENT" wall_run_seal; _bw_rc=$?
+    # The catch is kept in the seal before the ask is written, so the ask's own line, which the appender cannot
+    # seal for a plan that is gone, never reads later as the log added to, and a plan put back reads changed.
+    case "$SEAL_LINE" in changed*) seal_write "$BIONIC_SEAL_PLAN" "$BIONIC_SEAL_LOG" >/dev/null 2>&1 ;; esac
+    bw_open_asks
+    exit $_bw_rc ;;
 esac
+
+# THE SEAL'S HOME IS THE TOOL'S ALONE, for every session, engaged or not, so this sits before the
+# engagement exit. `<common git dir>/bionic-seal/` holds the seals and bindings that vouch for each
+# run, and a seal removed is a run no longer compared, so a command whose effects (lib/cmd-class.sh
+# `cmd_effects`) write or delete there, or delete a directory that holds it, is refused. Each path is
+# resolved where it lies (lib/grant.sh) and compared with the home git names for this root. What the
+# reader cannot read is not refused here: a run it changes is caught at the next commit's compare.
+# The product's own writers change the home from library code inside a hook or a verb, which no
+# command text shows. The screen is `.git` or the home's name in the command, its strip or the cwd:
+# a miss costs no fork and loads nothing. The words are the write hook's (lib/write-gate.sh).
+BIONIC_SEAL_HIT=""; BIONIC_SEAL_HOME=""; _bw_sh=0
+case "$COMMAND$BIONIC_CWD" in *.git*|*bionic-seal*) _bw_sh=1 ;; esac
+if [ "$_bw_sh" = 0 ]; then
+  _wall_screen "$COMMAND"
+  case "$_WALL_STRIPPED" in *.git*|*bionic-seal*) _bw_sh=1 ;; esac
+fi
+if [ "$_bw_sh" = 1 ] && _run_seal && seal_binding_warm "$BIONIC_ROOT" 2>/dev/null \
+   && wall_libs seal-home cmd-class.sh grant.sh write-gate.sh; then
+  BIONIC_SEAL_HOME="$_SB_COMMON/$SEAL_HOME_NAME"
+  while IFS=$'\t' read -r _bw_k _bw_p; do
+    case "$_bw_k" in W|D) write_gate_in_seal_home "$BIONIC_SEAL_HOME" "$_bw_k" "$_bw_p" && { BIONIC_SEAL_HIT="$_bw_p"; break; } ;; esac
+  done <<< "$(grant_resolve_lines "$(cmd_effects "$COMMAND" "$BIONIC_CWD")")"
+fi
+if [ -n "$BIONIC_SEAL_HIT" ]; then
+  EVENT=$(bionic_jq .hook_event_name); [ -n "$EVENT" ] || EVENT="PreToolUse"
+  bionic_fold "$EVENT" wall_seal_home; exit $?
+fi
 
 # THE ENGAGEMENT GUARD, asked once for all five. EVERY UNREADABLE STATE READS AS NOT
 # ENGAGED — absent marker, a symlink at the path, a foreign or unshaped session key, no key
@@ -346,25 +395,5 @@ bionic_fold "$EVENT" \
   wall_ruling_ack
 _bw_rc=$?
 
-# THE PERSON'S ASKS THE GATE HANDED BACK, OPENED HERE (wave-34 T5; REQ-4 AC-4.1, D14). A refusal that asks the person
-# for a waiver (a failing question, a matrix row only they can let go) comes back from `wall_evidence_gate` beside its
-# words, one `<key> TAB <title> TAB <reply>` line each in BIONIC_WALL_OWED; the wall itself writes nothing (the
-# freeze), so its caller opens the items on the person's ledger (lib/owed.sh), keyed as the answer verb closes them.
-# Opening is idempotent per key. owed.sh is not in BIONIC_LIB_WANT (A-56.1) and is sourced only when there is an ask.
-# The ledger is the run's register: the session's bound plan names it, or `OWED_PLAN` from a caller that drives this
-# wall for a plan under a stand-in session (close-out.sh `gate_ask`), passed through as it came.
-# A plan verb's dry commit (`planverb-<pid>`, hooks/session-poker.sh `plan_verb_dry`) is a synthetic session whose
-# ledger nobody reads: its refusal is printed to the verb's caller, and the real commit opens the item.
-if [ -n "$BIONIC_WALL_OWED" ]; then
-  case "$BIONIC_SID" in
-    planverb-*) : ;;
-    *)
-      if { declare -F owed_open >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/owed.sh" ] && . "$BIONIC_LIB/owed.sh"; }; } 2>/dev/null; then
-        while IFS=$'\t' read -r _bw_key _bw_title _bw_reply; do
-          [ -n "$_bw_key" ] || continue
-          OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" OWED_PLAN="${OWED_PLAN:-}" owed_open "$_bw_key" "$_bw_title" "$_bw_reply" >/dev/null 2>&1
-        done <<< "$BIONIC_WALL_OWED"
-      fi ;;
-  esac
-fi
+bw_open_asks
 exit $_bw_rc

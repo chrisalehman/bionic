@@ -1285,8 +1285,8 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   c="$(_wt_bionic_committed "$root" "$acc" "$head")" && {
     c="${c%/}"; _wt_refuse_bionic "$wt" "$branch" "$onto" "${c%% *}" "${c#* }" "$(_wt_bionic_kind "$root" "$acc")"; return 2
   }
-  rec="$(line_record "$plan")" && _wt_proofs_prove "${rec%/*}/run.log" || {
-    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:+${rec%/*}/run.log} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, land again"; return 2
+  rec="$(line_record "$plan")" && _wt_proofs_prove "$rec" || {
+    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, land again"; return 2
   }
   row="$(_wt_proofs_row "$root" "$plan" "$wt")" || row="$branch"
   case "$row" in *'|'*) _wt_refuse "row-unwritable branch=${branch}"; return 2 ;; esac
@@ -1341,7 +1341,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" = 0 ] || return 2
   [ -z "$suites" ] || printf 'verdicts: %s green at %s, from %s\n' "$suites" "$g" "$vlog"
-  _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "${rec%/*}/run.log" || return $?
+  _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec" || return $?
   # What is owed, when the row has an agent on this session's roster (T6): its task, then its stop.
   [ -z "$LINE_MARKED" ] || _line_owed "$row" "$LINE_PUBLISHED" "$LINE_MARKED"
 }
@@ -1559,8 +1559,8 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   case "$debt" in *' until '?*) LINE_DEBT_TOKEN="${debt#* until }" ;; esac
   debt="${debt%% *}"; case "$debt" in ?*.test.sh) : ;; *) debt=- ;; esac
   case "${name}${debt}" in *'|'*|'') _wt_refuse "row-unwritable branch=${branch}"; return 2 ;; esac
-  rec="$(line_record "$plan")" && _wt_proofs_prove "${rec%/*}/run.log" || {
-    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:+${rec%/*}/run.log} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, say ready again"; return 2
+  rec="$(line_record "$plan")" && _wt_proofs_prove "$rec" || {
+    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, say ready again"; return 2
   }
   LINE_SID="$lsid"   # the session the publish's plan write and roster mark run under: the one holding the launch line
   _LINE_WITHIN="$within"   # the --within the waiting: reasons name (T31)

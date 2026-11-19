@@ -14,7 +14,7 @@
 #            still lands, and no later append clears the mark; an open run with no seal is sealed as found, once,
 #            with one hand line `what=seal` ahead of the caller's; a closed run and a dry call seal nothing as found;
 #            an epic's log and a tree's linked spelling find their plan; a held lock leaves the line unsealed and
-#            caught; eight racing appends leave the run clean.
+#            owed beside the seal, so it reads clean; eight racing appends leave the run clean.
 #
 # FIXTURE FIDELITY. The log is a real file in a scratch directory; only its path is synthesized. §SEAL's world is a
 # real `git init` with a real linked worktree, and its hand changes are the shell writes a person would type.
@@ -156,7 +156,7 @@ RUN_LOG="$WL" log_append dispatch row=T13; rc=$?
 expect_status "an append that meets a held lock exits 0" 0 "$rc"
 expect_regex "and lands" 'row=T13\|' "$(tail -n 1 "$WL")"
 rm -rf "$SH/.reap"
-expect_eq "unsealed, so the run then reads added and is never vouched for" "changed what=log how=added" "$(seal_verify "$WP")"
+expect_eq "unsealed, its line owed beside the seal, so the run reads clean" clean "$(seal_verify "$WP")"
 
 sealed
 for i in 1 2 3 4 5 6 7 8; do RUN_LOG="$WL" log_append dispatch "row=R$i" & done

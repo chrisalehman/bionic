@@ -265,13 +265,23 @@ _sitrep_lib() {  # -> the library directory: BIONIC_LIB, else the one beside thi
   done
   return 1
 }
+_sitrep_log_in() {  # <record directory> -> the run's log in it, as the reader names it; nothing when the reader cannot be loaded
+  local lib
+  declare -F reader_log_in >/dev/null 2>&1 || {
+    lib="$(_sitrep_lib)" || return 0
+    # shellcheck source=/dev/null
+    . "$lib/reader.sh" >/dev/null 2>&1 || return 0
+  }
+  reader_log_in "$1"
+}
 _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledger's run, one decision fact per round
-  local led="$1" log="${1%/*}/run.log" lib
+  local led="$1" log lib
   if ! declare -F reader_q_ledger >/dev/null 2>&1; then
     lib="$(_sitrep_lib)" || return 0
     # shellcheck source=/dev/null
     . "$lib/reader.sh" >/dev/null 2>&1 || return 0
   fi
+  log="$(_sitrep_log_in "${1%/*}")"
   [ -f "$log" ] && [ ! -L "$log" ] || return 0
   ( reader_events() { cat "$log"; }; reader_q_ledger "$led" )
 }
@@ -484,7 +494,8 @@ decisions_all() {
   local docs="$1" f slug out tab
   tab="$(printf '\t')"
   {
-    for f in "$docs"/record/*/run.log; do
+    for f in "$docs"/record/*/; do
+      f="$(_sitrep_log_in "${f%/}")"
       [ -f "$f" ] && [ ! -L "$f" ] || continue
       slug="${f%/*}"; slug="${slug##*/}"
       out="$(decisions_list "${f%/*}/design-ledger.md")"
@@ -1121,6 +1132,7 @@ sitrep_holds() {
   case "$key" in
     decide:D[0-9]*) ids="$(decision_waiters "$plan" "${key#decide:}" "$root")" ;;
     approve:step[0-9]|approve:step[0-9][0-9]) printf 'step %s\n' "$(( ${key#approve:step} + 1 ))"; return 0 ;;
+    seal:*) printf 'every commit\n'; return 0 ;;
     approve:*) ids="$(sitrep_approval_rows "$plan" "$rows" "${key#approve:}")" ;;
     waive:*|finding:*|row:*|hold:*)
       ids="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k) }
@@ -1179,7 +1191,7 @@ SITREP_ASKS
 # other fact set, when the run's fold fails: its facts would read absent, so the caller says they could not be read.
 sitrep_gather() {
   local plan="$1" root="$2" mode="$3" now rec rows reds red_rows lr lr1 approvals appr_at dlv_at cur lq lwait ledges
-  local sit ty gl lab desc kind note id stp state landed=0 total=0 last_id="" last_at="" proj
+  local sit ty gl lab desc kind note id stp state landed=0 total=0 last_id="" last_at="" proj pr_url
   # the findings held for this gather end with it: a hold is as fresh as its fold, and the gather writes no event
   local _PROOF_HELD_PLAN="" _PROOF_HELD_FINDINGS=""
   now="$(sitrep_now)"
@@ -1204,6 +1216,9 @@ sitrep_gather() {
      && declare -F _line_fold >/dev/null 2>&1 && line_held "$rec"; then
     lq="$(_line_fold "$rec" | awk -F'\t' 'NF >= 9 { m = 0; if ($9 != "none" && $9 != "") m = split($9, s, ","); printf "Q\t%s\t%s\t%s\t%d\t%d\n", $1, $5, $8, $12 + 0, m }')"
   fi
+  # the run's open pull request, asked of the reader and of the tick's one predicate for whether it is still open
+  pr_url=""
+  if tick_run_pr_open "$plan" 2>/dev/null; then pr_url="$(_sitrep_ask "$plan" reader_q_pr "$plan" 2>/dev/null | sed -n 's/^url=//p')"; fi
   lwait="$(units_waiting "$plan" "$cur" 2>/dev/null | awk -F'\t' 'NF >= 3 { print "W\t" $1 "\t" $2 "\t" $3 }')"
   ledges="$(units_edges "$plan" 2>/dev/null | awk -F'\t' 'NF >= 2 { print "E\t" $1 "\t" $2 }')"
   sit="$( { printf '%s\n' "$red_rows" | awk 'NF { print "X\t" $1 }'
@@ -1213,6 +1228,7 @@ sitrep_gather() {
               { r = line_kv("row"); e = ep(line_kv("at")); if (r == "" || e < 0) next; if (!(r in t)) o[++n] = r; t[r] = e; h[r] = (line_kv("kind") == "hand") }
               END { for (i = 1; i <= n; i++) print "L\t" o[i] "\t" t[o[i]] "\t" h[o[i]] }'
             printf '%s\n' "$lq" "$lwait" "$ledges" | awk 'NF'
+            [ -z "$pr_url" ] || printf 'Y\t%s\n' "$pr_url"
             # each title is the one reading lib/plan.sh plan_task_title gives, as the plan card prints it
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { x = $1; gsub(/^[ \t]+|[ \t]+$/, "", x); if (x != "") print x "\t" $4 }' \
               | while IFS='	' read -r id desc; do printf 'N\t%s\t%s\n' "$id" "$(plan_task_title "$desc")"; done
@@ -1252,6 +1268,7 @@ sitrep_gather() {
     $1 == "X" { red[$2] = 1; next }
     $1 == "A" { appr[$2] = 1; next }
     $1 == "L" { land[$2] = $3; hand[$2] = $4; next }
+    $1 == "Y" { pr = $2; next }
     $1 == "Q" { nq++; qr[nq] = $2; qc[nq] = $3; qo[nq] = $4; qg[nq] = $5; qm[nq] = $6; next }
     # a read another task writes is that task, by its label; the step, an approval, the reviews, the build and the merge
     # are said in words whoever writes them
@@ -1262,7 +1279,7 @@ sitrep_gather() {
     $1 == "V" { na[$2]++; ap[$2, na[$2]] = $3; next }
     $1 == "U" {
       s = tolower(trim($11)); if (s == "dropped") next
-      n++; id[n] = trim($2); stp[n] = trim($3); st[n] = s; at[id[n]] = n
+      n++; id[n] = trim($2); stp[n] = trim($3); st[n] = s; at[id[n]] = n; kd[n] = tolower(trim($4))
       b = 0
       if (s != "landed") {
         if (id[n] in red) b = 1
@@ -1311,6 +1328,8 @@ sitrep_gather() {
         out[pick] = 1; done++
         for (j = 1; j <= n; j++) if ((pick, j) in dep) indeg[j]--
         if (st[pick] == "held") { row(pick, "s", "held"); continue }
+        # an integrate row with the request open has done its act: what it waits on is the merge, which the person makes
+        if (pr != "" && kd[pick] == "integrate" && st[pick] == "pending") { row(pick, "s", "waits on your merge of the pull request " pr); continue }
         if (st[pick] != "pending" || !wn[id[pick]]) { row(pick, "b", ""); continue }
         row(pick, "s", waits(id[pick]))
       }
@@ -1925,11 +1944,14 @@ sitrep_tick_line() {
     fi
     if [ "$HO_MODE" != none ]; then
       HO_PLAN_REL="${PV_PLAN#"$PV_REPO"/}"
-      HO_PATROL="not armed"
-      HO_STAMP="$(patrol_stamp_file "$HO_SID")" || HO_STAMP=""
-      if [ -n "$HO_STAMP" ] && [ -f "$HO_STAMP" ] && [ ! -L "$HO_STAMP" ]; then
-        HO_PATROL="armed — stamp $(( ( $(now_epoch) - $(file_mtime "$HO_STAMP") ) / 60 ))m old"
-      fi
+      # THE WATCH, AS ITS RECORD SAYS IT (lib/patrol.sh `watch_state`): the session's watcher, or none yet.
+      HO_WS="$(watch_state "$HO_ROOT" "$HO_SID" 2>/dev/null)" || HO_WS=""
+      case "$HO_WS" in
+        watching\ *) HO_PATROL="watching" ;;
+        resting\ *)  HO_PATROL="resting, ${HO_WS#resting }" ;;
+        stopped\ *)  HO_PATROL="stopped without a word; this turn's end starts another" ;;
+        *)           HO_PATROL="none yet; this turn's end starts it" ;;
+      esac
       { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
       if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$PV_PLAN")" = no ]; then
         HO_PATROL="none — a task-scale run has no Patrol"
@@ -2005,7 +2027,7 @@ sitrep_tick_line() {
         if [ -n "$HO_ROWS" ]; then printf '2\topen tasks (%s):\n' "$(printf '%s\n' "$HO_ROWS" | grep -c .)"; printf '%s\n' "$HO_ROWS" | awk '{ print "4\t" $0 }'
         else printf '2\topen tasks: %s\n' "${HO_NOROWS:-none}"; fi
       fi
-      printf '2\tpatrol: %s\n' "$HO_PATROL"
+      printf '2\twatch: %s\n' "$HO_PATROL"
     }
     {
       printf 'bionic-handoff/v1\n'
@@ -2022,7 +2044,7 @@ sitrep_tick_line() {
             Decisions)
               if [ "$HO_MODE" != none ] && [ -n "$(decisions_list "$HO_LEDGER")" ]; then
                 handoff_render "$HO_COMP" Decisions | awk -F'\t' '$2 != "- none."'
-                HO_LOG="${HO_LEDGER%/*}/run.log"
+                HO_LOG="$(_sitrep_log_in "${HO_LEDGER%/*}")"
                 printf '2\t- every ruling of this run: session-poker.sh decisions prints them, from the run'"'"'s log, %s\n' "${HO_LOG#"$HO_ROOT"/}"
               else
                 handoff_render "$HO_COMP" Decisions
@@ -2273,7 +2295,7 @@ sitrep_tick_line() {
     fi
     DC_OUT="$(decisions_list "$DC_LEDGER")"
     if [ -z "$DC_OUT" ]; then
-      DC_LOG="${DC_LEDGER%/*}/run.log"
+      DC_LOG="$(_sitrep_log_in "${DC_LEDGER%/*}")"
       say "no ruling in the run's log, ${DC_LOG#"$REPO_REAL"/} — this run has recorded no ruling"
       exit 1
     fi
@@ -2283,16 +2305,15 @@ sitrep_tick_line() {
 
   # THE ONE DOOR (wave-38 T13; D4, D24, D13; AC-3.3). /bionic:canonical-sdlc <handoff.md> runs this first and does
   # what it prints. A /clear leaves a new session the skill's invocation has engaged and nothing else: no binding,
-  # no stamp, no roster, no task list, no memory of the run. This does every step of the resume ritual a script
-  # can do, in the ritual's order, each through its one implementation — `bind`, `arm`, `adopt`, `interval`,
-  # `prompt` and `tick` are this script's own verbs, run as this session — and prints the two only the model can
-  # do: the task list to create (the harness task list is unreadable by script, design ledger line 11) and the
-  # CronCreate. In between, the recap: the run's settled rulings (the register's parser), the decisions still open
+  # no roster, no task list, no memory of the run. This does every step of the resume ritual a script
+  # can do, in the ritual's order, each through its one implementation — `bind`, `adopt` and `tick` are this
+  # script's own verbs, run as this session — and prints the one only the model can do: the task list to create
+  # (the harness task list is unreadable by script, design ledger line 11). In between, the recap: the run's settled rulings (the register's parser), the decisions still open
   # in any session the plan recorded (each one's owed ledger), what only the user can give (those of the person's
   # four kinds, and every approval a waiting row reads), the file's branch and plan lines, the checkout, and the
   # step file. A file whose resume point says the run closed resumes nothing and says so, and a file that names no
-  # plan, written with no run bound, binds nothing and prints its Next. The arm comes before the CronCreate here, as
-  # at engagement (hooks/engage.sh arms at the marker's write): the stamp says the session asked for its Patrol.
+  # plan, written with no run bound, binds nothing and prints its Next. The watch starts at this turn's end, from the
+  # turn-end hook, as at every turn's end.
   # Refusals name the fix and change nothing: no file or no kind line (2), a plan that is not there or a session that
   # cannot be engaged (1); a sub-verb's refusal stops the ritual with that verb's code.
   poker_verb_resume() {
@@ -2310,95 +2331,98 @@ sitrep_tick_line() {
     esac
     RS_SHOWN="$(printf '%s' "${RS_ARG:0:160}" | tr -d '[:cntrl:]')"
     if [ ! -f "$RS_FILE" ] || [ -L "$RS_FILE" ]; then
-      die "REFUSED — no handoff file at '$RS_SHOWN'; write one with: bash ${HOOK_DIR}/session-poker.sh handoff, and resume from the path its last line names. Nothing was bound or armed."
+      die "REFUSED — no handoff file at '$RS_SHOWN'; write one with: bash ${HOOK_DIR}/session-poker.sh handoff, and resume from the path its last line names. Nothing was bound."
       exit 2
     fi
     if [ "$(sed -n 1p "$RS_FILE" 2>/dev/null)" != "bionic-handoff/v1" ]; then
-      die "REFUSED — '$RS_SHOWN' is not a handoff file: its first line is not bionic-handoff/v1. Write one with: bash ${HOOK_DIR}/session-poker.sh handoff. Nothing was bound or armed."
+      die "REFUSED — '$RS_SHOWN' is not a handoff file: its first line is not bionic-handoff/v1. Write one with: bash ${HOOK_DIR}/session-poker.sh handoff. Nothing was bound."
       exit 2
     fi
     RS_L2="$(handoff_line "$RS_FILE" "resume point")"
     case "$RS_L2" in
       'resume point: NONE — DELIVERED'*)
-        say "resume — '$RS_SHOWN' is the closed form: the run is delivered, so there is nothing to resume; nothing was bound, armed or adopted."
+        say "resume — '$RS_SHOWN' is the closed form: the run is delivered, so there is nothing to resume; nothing was bound or adopted."
         printf '%s\n' "$RS_L2"
         for RS_K in plan branch "working branch" continuation; do handoff_line "$RS_FILE" "$RS_K"; done
         exit 0 ;;
       # A PARKED RUN IS CLOSED, AND ITS WORK IS LEFT (wave-38 T37; T15's note to T13). close-out performed its tail
-      # without the merge and disarmed its Patrol, so nothing is bound or armed; the recap says where the work waits.
+      # without the merge, so nothing is bound; the recap says where the work waits.
       'resume point: PARKED on '*)
-        say "resume — '$RS_SHOWN' is the closed form, and the run is parked: its work is kept on its branch, not merged; the plan's Wake Note says what it waits on. Nothing was bound, armed or adopted."
+        say "resume — '$RS_SHOWN' is the closed form, and the run is parked: its work is kept on its branch, not merged; the plan's Wake Note says what it waits on. Nothing was bound or adopted."
         printf '%s\n' "$RS_L2"
         for RS_K in plan branch "working branch" continuation; do handoff_line "$RS_FILE" "$RS_K"; done
         exit 0 ;;
     esac
     RS_PLAN_REL="$(handoff_line "$RS_FILE" plan)"; RS_PLAN_REL="${RS_PLAN_REL#plan: }"
-    # A DOCUMENT WRITTEN WITH NO RUN names no plan: there is nothing to bind, arm or adopt, and the document is the
+    # A DOCUMENT WRITTEN WITH NO RUN names no plan: there is nothing to bind or adopt, and the document is the
     # whole of what the next session needs. Its Next section is printed, the first command first.
     if [ -z "$RS_PLAN_REL" ]; then
-      say "resume — '$RS_SHOWN' was written with no run bound: nothing to bind, arm or adopt. Read it whole, then do Next 1:"
+      say "resume — '$RS_SHOWN' was written with no run bound: nothing to bind or adopt. Read it whole, then do Next 1:"
       awk '$0 == "Next" { f = 1; next } f && $0 == "" { exit } f { print }' "$RS_FILE"
       exit 0
     fi
     case "$RS_PLAN_REL" in /*) RS_PLAN="$RS_PLAN_REL" ;; *) RS_PLAN="$REPO_REAL/$RS_PLAN_REL" ;; esac
     if [ ! -f "$RS_PLAN" ] || [ -L "$RS_PLAN" ]; then
-      die "REFUSED — the plan '$RS_SHOWN' names is missing: $RS_PLAN. Check out the branch that holds it, or bind the run by hand (bash ${HOOK_DIR}/session-poker.sh bind <plan>). Nothing was bound or armed."
+      die "REFUSED — the plan '$RS_SHOWN' names is missing: $RS_PLAN. Check out the branch that holds it, or bind the run by hand (bash ${HOOK_DIR}/session-poker.sh bind <plan>). Nothing was bound."
       exit 1
     fi
     SESSION_ID="$(session_id 2>/dev/null)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty); a resume binds and arms ONE session."
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty); a resume binds ONE session."
       exit 3
     fi
     if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_plan_slug >/dev/null 2>&1; then
-      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was bound or armed."
+      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was bound."
       exit 2
     fi
     # THE TERMINAL GETS WHAT A PERSON READS; THE RECAP FILE GETS THE REST. From here every line the ritual prints, the
-    # sub-verbs' own included (bind, arm, adopt's verdicts, the tick's rows), goes to one file in the run's record,
+    # sub-verbs' own included (bind, adopt's verdicts, the tick's rows), goes to one file in the run's record,
     # rewritten each resume; the terminal gets about a dozen lines at the end and that file's path. A refusal is
     # still said on stderr, naming the file that holds the lines before it.
     RS_RECAP="$RS_DOCS/record/$(proof_plan_slug "$RS_PLAN")/resume-recap.md"
     RS_RECAP_REL="${RS_RECAP#"$REPO_REAL"/}"
     if ! mkdir -p "${RS_RECAP%/*}" 2>/dev/null || [ -L "$RS_RECAP" ] || ! : > "$RS_RECAP" 2>/dev/null; then
-      die "REFUSED — the recap file cannot be written at $RS_RECAP_REL; nothing was bound or armed."
+      die "REFUSED — the recap file cannot be written at $RS_RECAP_REL; nothing was bound."
       exit 2
     fi
     exec 3>&1 >> "$RS_RECAP"
     rs_sub() { ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" "$@" ) 2>&1; }
+    rs_said() { say "resume — step: $1" >&3; }  # <step> -> one line to the terminal, written where the step starts and before any line of the step's own
     rs_step() {  # <codes it may exit with, comma-joined> <verb> [args] -> runs it; any other code stops the ritual with it
       local ok="$1" rc=0; shift
+      rs_said "$1"
       rs_sub "$@" || rc=$?
       case ",$ok," in *",$rc,"*) return 0 ;; esac
       die "resume stopped at $1 (exit $rc): its lines are in $RS_RECAP_REL; the steps after it did not run."
       tail -n 3 "$RS_RECAP" >&2
       exit "$rc"
     }
-    say "resume — $RS_SHOWN ($(handoff_line "$RS_FILE" written | sed 's/^written: //')): engage, bind, arm and adopt, then the task list, the recap, the step file, the patrol and the tick"
+    say "resume — $RS_SHOWN ($(handoff_line "$RS_FILE" written | sed 's/^written: //')): engage, bind and adopt, then the task list, the recap, the step file and the tick"
     # TYPING THE RESUME IS THE CONSENT. A session the slash command's hook did not engage is engaged here, through the
     # one verb that does it (hooks/engage.sh --root), before the binding; an engaged session is left as it is.
     RS_ENGAGED=already
     if ! engaged_session "$REPO_REAL" "$SESSION_ID"; then
+      rs_said engage
       ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/engage.sh" --root "$REPO_REAL" ) 2>&1
       if ! engaged_session "$REPO_REAL" "$SESSION_ID"; then
-        die "REFUSED — this session could not be engaged: hooks/engage.sh --root $REPO_REAL left no marker (its lines are in $RS_RECAP_REL). Nothing was bound or armed."
+        die "REFUSED — this session could not be engaged: hooks/engage.sh --root $REPO_REAL left no marker (its lines are in $RS_RECAP_REL). Nothing was bound."
         exit 1
       fi
       RS_ENGAGED=now
     fi
-    # THE PATROL IS THE SCALE'S (`scale_patrol`, lib/scale.sh): a scale whose profile has none, the task row, is never armed here,
-    # and a stamp an unbound engagement armed before this binding is removed. A plan with no `scale:` arms as before.
+    # THE PATROL IS THE SCALE'S (`scale_patrol`, lib/scale.sh): a scale whose profile has none, the task row, is not ticked
+    # here and owes no watch. A plan with no `scale:` is watched.
     RS_PATROL=yes
     { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
     if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$RS_PLAN")" = no ]; then
       RS_PATROL=no
     fi
     rs_step 0 bind "$RS_PLAN"
-    [ "$RS_PATROL" = no ] || rs_step 0 arm
     # 1 is adopt's "open rows found", its NOTIFY, never a refusal; each row it takes over is a hand event with this reason
     rs_step 0,1 adopt --why "the session was cleared and its predecessor's agents were taken over by the resume"
     # The task list: every step with its status from current:, then every row of ## Tasks with its table status.
+    rs_said "task list"
     RS_CUR=""; RS_UNREAD=""; if _fill_current_load "$RS_PLAN"; then RS_CUR="$_FILL_CURRENT_VALUE"; else RS_UNREAD=1; fi; RS_CURN="${RS_CUR%%[!0-9]*}"
     awk -v cur="$RS_CURN" 'BEGIN {
       n = split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " ")
@@ -2409,9 +2433,10 @@ sitrep_tick_line() {
       NF >= 10 { st = tolower(trim($10)); if (st == "dropped") next
                  printf "task-list: %s/%s: %s · %s\n", trim($2), trim($1), row_short($4), (st == "landed") ? "completed" : ((st == "active") ? "in_progress" : "pending") }'
     # The recap.
+    rs_said recap
     RS_LEDGER="$RS_DOCS/record/$(proof_plan_slug "$RS_PLAN")/design-ledger.md"
     RS_SET=""
-    RS_SET="$(decisions_list "$RS_LEDGER")"; RS_LOG="${RS_LEDGER%/*}/run.log"
+    RS_SET="$(decisions_list "$RS_LEDGER")"; RS_LOG="$(_sitrep_log_in "${RS_LEDGER%/*}")"
     if [ -n "$RS_SET" ]; then printf '%s\n' "$RS_SET" | sed 's/^/settled: /'
     else printf 'settled: none — no ruling in the run'"'"'s log, %s\n' "${RS_LOG#"$REPO_REAL"/}"; fi
     RS_OWED="$( { bind_sessions "$RS_PLAN" 2>/dev/null; printf '%s\n' "$SESSION_ID"; } | awk 'NF && !s[$0]++' \
@@ -2444,47 +2469,28 @@ sitrep_tick_line() {
     printf 'plan: %s\n' "$RS_PLAN_REL"
     RS_HEAD="$(git -C "$REPO_REAL" symbolic-ref --short -q HEAD 2>/dev/null)" || RS_HEAD=""
     printf 'tree: %s (checked out: %s)\n' "$REPO_REAL" "${RS_HEAD:-a detached HEAD}"
+    rs_said "step file"
     RS_PROOT="$(cd "$HOOK_DIR/.." 2>/dev/null && pwd -P)"
     case "$RS_UNREAD$RS_CURN" in
       1*) printf 'step-file: none — the run'"'"'s step is unreadable\n' ;;
       [0-9]|[0-9][0-9]) printf 'step-file: %s/skills/canonical-sdlc/steps/%s.md\n' "$RS_PROOT" "$RS_CURN" ;;
       *) printf 'step-file: none — the plan'"'"'s current: (%s) names no step\n' "${RS_CUR:-unset}" ;;
     esac
-    # The patrol: the model's one act left, in the ritual's order, the interval as the arm line prints it.
-    if [ "$RS_PATROL" = no ]; then
-      RS_GONE=""
-      if [ -f "$(patrol_stamp_file "$SESSION_ID" 2>/dev/null)" ]; then
-        rs_sub disarm >/dev/null 2>&1 && RS_GONE="; the stamp an earlier arm left is removed"
-      fi
-      printf 'patrol-interval: none — a task-scale run has no Patrol, so no job is made%s\n' "$RS_GONE"
-    else
-      RS_INT="$(rs_sub interval 2>/dev/null)" || RS_INT=""
-      RS_EVERY="every ${RS_INT:-?}s"
-      case "$RS_INT" in
-        ''|*[!0-9]*) ;;
-        *) if [ $((RS_INT % 60)) -eq 0 ]; then
-             RS_M=$((RS_INT / 60))
-             if [ "$RS_M" -ge 1 ] && [ "$RS_M" -le 30 ] && [ $((60 % RS_M)) -eq 0 ]; then RS_EVERY="$RS_EVERY (cron */$RS_M * * * *)"; fi
-           fi ;;
-      esac
-      RS_PROMPT="$(rs_sub prompt 2>/dev/null)" || RS_PROMPT=""
-      printf 'patrol-interval: %s — CronList, CronDelete every job whose prompt begins with bionic-patrol session=, then CronCreate recurring %s with the patrol: line'"'"'s text as its prompt (the stamp is armed)\n' "$RS_EVERY" "${RS_EVERY%% (*}"
-      printf 'patrol: %s\n' "${RS_PROMPT:-(the prompt verb printed nothing: run bash ${HOOK_DIR}/session-poker.sh prompt)}"
-    fi
     if [ "$RS_PATROL" = yes ]; then
       RS_RC=0
+      rs_said tick
       rs_sub tick || RS_RC=$?
       case "$RS_RC" in
         0|1) : ;;
         *) die "resume stopped at tick (exit $RS_RC): its lines are in $RS_RECAP_REL."; exit "$RS_RC" ;;
       esac
-      say "resume — done: bound, armed, adopted, ticked. Yours now: rebuild the task list from the task-list: lines (TaskList first), read the step-file:, and create the Patrol job from the patrol: line."
+      say "resume — done: bound, adopted, ticked. Yours now: rebuild the task list from the task-list: lines (TaskList first) and read the step-file:; this turn's end starts the watch."
     else
       say "resume — done: bound and adopted; a task-scale run has no Patrol, so nothing ticks. Yours now: rebuild the task list from the task-list: lines (TaskList first) and read the step-file:."
     fi
     exec 1>&3 3>&-
     # THE TERMINAL: bound (and engaged, when it was not), the step, the agents still open with what each does and for
-    # how long, what landed since the handoff was written, the one thing owed now, the Patrol, and the recap's path.
+    # how long, what landed since the handoff was written, the one thing owed now, the watch, and the recap's path.
     RS_NOW="$(now_epoch)"
     if [ "$RS_ENGAGED" = now ]; then say "resume — engaged this session and bound it to $RS_PLAN_REL"
     else say "resume — bound this session to $RS_PLAN_REL"; fi
@@ -2522,10 +2528,21 @@ sitrep_tick_line() {
     RS_FIRST="$(printf '%s\n' "$RS_OWN" | awk 'NF { sub(/^owned-by-user: /, ""); print; exit }')"
     [ -n "$RS_FIRST" ] || RS_FIRST="$(printf '%s\n' "$RS_OPEN" | awk 'NF { sub(/^open: /, ""); print; exit }')"
     printf 'owed now: %s\n' "${RS_FIRST:-nothing waits on you}"
-    if [ "$RS_PATROL" = yes ]; then printf 'patrol: armed — create its job from the patrol: line in the recap\n'
-    else printf 'patrol: none — a task-scale run has no Patrol\n'; fi
-    printf 'recap: %s — the task list, the rulings and open decisions, the step file, the Patrol job and the tick\n' "$RS_RECAP_REL"
+    if [ "$RS_PATROL" = yes ]; then printf "watch: this turn's end starts it\n"
+    else printf 'watch: none — a task-scale run has no Patrol\n'; fi
+    printf 'recap: %s — the task list, the rulings and open decisions, the step file and the tick\n' "$RS_RECAP_REL"
     exit 0
+  }
+
+  # A RUN WHOSE PLAN IS GONE has no sheet to gather, but a seal that still stands for it names its log, and what
+  # the person owes it is read there: the sheet is its head, the plan's path and the asks (lib/owed.sh finds the log
+  # through the seal). rc 1, nothing printed, when no seal stands, and the verb refuses as for no run.
+  sitrep_gone() {  # <plan> <root>
+    { declare -F proof_plan_slug >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } 2>/dev/null || return 1
+    SG_ASKS="$(sitrep_asks "$1" "$2" "" "" "$(sitrep_now)")"
+    [ -n "$SG_ASKS" ] || return 1
+    printf '%s\nrun.plan-gone: %s\n' "$SITREP_SHEET_HEAD" "$1"
+    sitrep_ask_lines
   }
 
   # THE SITUATION REPORT. Its reasoning is above the verbs, beside `sitrep_gather`: the sheet, or with --line the
@@ -2561,6 +2578,7 @@ sitrep_tick_line() {
       fi
       resolve_run "$REPO_REAL" "$SESSION_ID"
       SR_PLAN="$POKER_RUN_PLAN"
+      if [ -n "$SR_PLAN" ] && [ ! -f "$SR_PLAN" ] && [ "$SR_LINE$SR_CARD" = nono ] && sitrep_gone "$SR_PLAN" "$REPO_REAL"; then exit 0; fi
       if [ -z "$SR_PLAN" ] || [ ! -f "$SR_PLAN" ]; then
         die "REFUSED — this session has no run to report on; bind its plan first, or name it: sitrep <plan>."
         exit 2

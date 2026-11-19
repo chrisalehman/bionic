@@ -266,6 +266,24 @@ if [ "$EVENT" != "PostToolUse" ] && [ "$BIONIC_ENGAGED" = 1 ]; then
   esac
 fi
 
+# ---------- THE SEAL'S HOME ----------
+#
+# The Write/Edit half of the shell wall's refusal (hooks/bash-walls.sh), in the same words, for every
+# session, engaged or not: `<common git dir>/bionic-seal/` holds what vouches for each run, and only the
+# tool's own writers change it, from library code no tool call carries. Screened on the home's name
+# before any fork; the path is folded, then resolved where it lies (lib/grant.sh), and compared with the
+# home git names for the session's root.
+if [ "$EVENT" != "PostToolUse" ]; then
+  case "$FILE_PATH" in
+    *"$SEAL_HOME_NAME"*)
+      # shellcheck source=/dev/null
+      if seal_binding_warm "$BIONIC_ROOT" 2>/dev/null && . "$BIONIC_LIB/grant.sh" 2>/dev/null \
+         && write_gate_in_seal_home "$_SB_COMMON/$SEAL_HOME_NAME" W "$(grant_resolve "$(fold_dots "$FILE_PATH")")"; then
+        write_gate_refuse seal-home "" "$FILE_PATH" "$TOOL" "$FILE_PATH" "$_SB_COMMON/$SEAL_HOME_NAME"
+      fi ;;
+  esac
+fi
+
 PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
   # project_root always answers, so this is unreachable in practice. Kept as a
@@ -439,9 +457,10 @@ gs_bind_decline_unengaged() { echo "canonical-sdlc [bind]: $1" >&2; }
 # (`reader_log`): a plan of a delivered run, or a page the walk admits no record for, has no seal
 # for the gate to read, and one made here would be a stray.
 #
-# THE CALLER LEAVES THROUGH `exit 0` WHATEVER THIS ANSWERS. A seal that cannot be had (the lock
-# busy, the home unwritable) costs the run a changed reading at its next commit, which is the safe
-# direction, and the line on stderr and in the audit file is how the reader learns why. A plan in no
+# THE CALLER LEAVES THROUGH `exit 0` WHATEVER THIS ANSWERS. A lock held past its wait leaves the
+# plan's digest owed beside the seal (lib/seal.sh), so the admitted write still reads as the tool's;
+# an unwritable home costs the run a changed reading at its next commit, the safe direction. The line
+# on stderr and in the audit file is how the reader learns the seal was not made. A plan in no
 # repository has no home and no gate to read one, and is not worth a line.
 gs_seal_plan() {
   local log rc=0

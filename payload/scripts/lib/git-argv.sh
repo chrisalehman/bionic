@@ -833,6 +833,80 @@ git_push_targets() {
   done
 }
 
+# git_commit_stage <command>
+#
+# What the call stages for the commits it makes, in the order git stages it: one line per act, the
+# words that follow `git` joined by US, each led by its segment's own `-C <dir>` pairs. A `git add`
+# or `git stage` segment is an act as written. A commit is one too when it stages at commit time:
+# `-a` (alone, in a short cluster, or `--all`) is `add -u`; paths, or `--pathspec-from-file`, are an
+# `add` of them, so a commit `--only` is read as `--include` and never holds less than the index
+# already stages. An act after the last commit is held by none and is dropped. A commit git refuses
+# to read (`-a` with paths) and an interactive one (`-p`, `--interactive`) stage nothing here: what
+# cannot be read is judged on the index as it stands. Prints nothing when the call stages nothing.
+git_commit_stage() {
+  local _line _oldifs="$IFS" _hadf _out="" _pend="" _c _w _all _x _pf _paths _u="$GIT_ARGV_US"
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    git_argv_parse "$_line" || continue
+    case "$GIT_SUB" in add|stage|commit) ;; *) continue ;; esac
+    _git_argv_skip "$_line"
+    _hadf=0; case "$-" in *f*) _hadf=1 ;; esac
+    set -f; IFS="$_u"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $GIT_ARGV_REST
+    IFS="$_oldifs"; [ "$_hadf" -eq 1 ] || set +f
+    shift; _c=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -C) _c="$_c-C$_u${2-}$_u"; shift; [ $# -eq 0 ] || shift ;;
+        -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix) shift; [ $# -eq 0 ] || shift ;;
+        -*) shift ;;
+        *) break ;;
+      esac
+    done
+    if [ "$GIT_SUB" != commit ]; then _pend="$_pend${_c}add${GIT_ARGS:+$_u$GIT_ARGS}"$'\n'; continue; fi
+    _hadf=0; case "$-" in *f*) _hadf=1 ;; esac
+    set -f; IFS="$_u"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $GIT_ARGS
+    IFS="$_oldifs"; [ "$_hadf" -eq 1 ] || set +f
+    _all=0; _x=0; _pf=""; _paths=""
+    while [ $# -gt 0 ]; do
+      _w="$1"; shift
+      case "$_w" in
+        --) for _w in "$@"; do _paths="$_paths$_u$_w"; done; break ;;
+        --all) _all=1 ;;
+        --patch|--interactive) _x=1 ;;
+        --pathspec-from-file) _pf="$_pf$_u$_w$_u${1-}"; [ $# -eq 0 ] || shift ;;
+        --pathspec-from-file=*|--pathspec-file-nul) _pf="$_pf$_u$_w" ;;
+        --message|--file|--reuse-message|--reedit-message|--fixup|--squash|--author|--date|--template|--cleanup|--trailer)
+          [ $# -eq 0 ] || shift ;;
+        --*) ;;
+        -?*)
+          # A short cluster: flags until the letter whose value is the rest of the word, or the next word.
+          _w="${_w#-}"
+          while [ -n "$_w" ]; do
+            case "$_w" in
+              a*) _all=1 ;;
+              p*) _x=1 ;;
+              [mFCct]*) [ -n "${_w#?}" ] || { [ $# -eq 0 ] || shift; }; break ;;
+              [uS]*) break ;;
+            esac
+            _w="${_w#?}"
+          done ;;
+        *) _paths="$_paths$_u$_w" ;;
+      esac
+    done
+    if [ "$_x" -eq 0 ] && [ "$_all" -eq 1 ] && [ -z "$_pf$_paths" ]; then
+      _pend="$_pend${_c}add${_u}-u"$'\n'
+    elif [ "$_x" -eq 0 ] && [ "$_all" -eq 0 ] && [ -n "$_pf$_paths" ]; then
+      _pend="$_pend${_c}add$_pf${_paths:+$_u--$_paths}"$'\n'
+    fi
+    _out="$_out$_pend"; _pend=""
+  done <<< "$(git_argv_expand "$1")"
+  printf '%s' "$_out"
+}
+
 # git_branch_protected <branch name>
 #
 # THE ONE LIST of branches no automated write may reach: `main` and `master`.

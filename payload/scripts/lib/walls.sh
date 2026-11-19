@@ -449,6 +449,13 @@ EOF
   esac
 }
 
+wall_seal_home() {  # <event> -> 0 nothing · 2 block
+  [ -n "$BIONIC_SEAL_HIT" ] || return 0
+  write_gate_say seal-home "" "" command "$BIONIC_SEAL_HIT" "$BIONIC_SEAL_HOME"
+  fold_block exit2 write "$WG_FACT" "$WG_FIX" "$WG_DETAIL"
+  return 2
+}
+
 # ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
 #
 # HARD BLOCK: Prevents AI from pushing to main/master branches.
@@ -1201,8 +1208,10 @@ eg_step_reads_readings() {
 # eg_plan_reads_readings <plan> -> 0 when the step <plan>'s run stands at is such a step, as the reader answers it
 # (lib/proof.sh `proof_step_held`, loaded by the collector that asks); 1 when it is not, or when the run's place cannot be
 # read, which the gate's own read then refuses by name. FILE SCOPE, for the collector, which asks before the wall's body
-# has run.
+# has run. It decides what the gate is handed, so the place is folded from the log, never the held file; the collector
+# asks in the hook's own shell, and the gate's body is served that fold.
 eg_plan_reads_readings() {
+  local _PROOF_PLACE_FRESH=1
   [ -f "${1:-}" ] && declare -F proof_step_held >/dev/null 2>&1 || return 1
   proof_step_held "$1" >/dev/null || return 1
   case "$_PROOF_PLACE" in n=*) local n="${_PROOF_PLACE%%$'\n'*}"; eg_step_reads_readings "${n#n=}" ;; *) return 1 ;; esac
@@ -2036,6 +2045,13 @@ DOCS_ROOT=$(docs_root "$BIONIC_ROOT")
 # So the closed plan stays THE plan here — the hygiene refusals below still judge it,
 # because a plan that lies is a defect in every state and this hook's ordering contract
 # says so — and nothing else in the root is read to replace it.
+#
+# OPEN, AND AT WHICH STEP, ARE FOLDED FROM THE RUN'S LOG, which the seal has vouched for above this gate. The held place
+# and the kept facts under $TMPDIR stay for the hooks that decide nothing about a commit; a file anyone can rewrite there
+# never answers this gate (lib/proof.sh `_PROOF_PLACE_FRESH`). The bound plan is folded once, in this shell, and every
+# later ask of its place below is served that fold.
+_PROOF_PLACE_FRESH=1
+_eg_bound="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" && _run_place "$_eg_bound" >/dev/null 2>&1 || :
 EG_RUN=$(session_run "$BIONIC_ROOT" "$BIONIC_SID")
 EG_VERDICT="${EG_RUN%% *}"
 EG_VPATH=""
@@ -2283,7 +2299,7 @@ Fix: run the commit again; the fold's own line above names why it failed."
 }
 _eg_refuse_lowered() {
   local s found="declares canonical_sdlc_version: $SDLC_VERSION"
-  s="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+  s="$(_run_place "$PLAN")" || _eg_v15_unreadable
   case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
   [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
   [ -n "$FRONTMATTER" ] || found="has no header on its first line"
@@ -2754,13 +2770,17 @@ _eg_commit_repo() {
 # (`_eg_commit_repo`). The common case costs one `git diff --cached --quiet` over the set's
 # directories; the sums are taken only when something there is staged.
 #
-# A RESIDUAL, NAMED AND NOT CLOSED: `git commit -a` and `git commit <pathspec>` stage at commit time,
-# after this PreToolUse wall has read the index, so a growth committed that way passes here.
-# Refusing those spellings is a different wall's job.
+# WHAT THE CALL ITSELF STAGES IS READ, NOT ONLY WHAT IS STAGED BEFORE IT. This wall runs before the
+# command, so `git add f && git commit`, `git commit -a` and `git commit f` stage after it has looked.
+# The acts the call makes (lib/git-argv.sh `git_commit_stage`) are run on a copy of the index, in a
+# temporary file the real index never sees, and both sums read that copy: the commit is judged on
+# what it will hold, in the words a separate add is judged in. The copy writes the blobs the call's
+# own add would write, and nothing else. A call that stages nothing reads the index itself.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_net_zero() {
   local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a written="" row_waits=0 lacks="" fix_id fix_cell base=HEAD
-  local -a dirs=()
+  local acts idx="" src
+  local -a dirs=() words=()
   _eg_commit_repo; dir="$_EG_REPO"
   # A MERGE IN A ROW'S TREE IS MEASURED AGAINST THE PARENT THAT IS NOT THE ROW'S OWN (wave-33 T15, D10). A row's tree
   # that merges the working branch in commits that branch's content on top of its own, and growth already landed there
@@ -2769,14 +2789,24 @@ validate_net_zero() {
   # charged what it adds to it. A tree no row owns keeps HEAD: the parent that is not a row's there is HEAD itself.
   if [ -n "${_EG_RID:-}" ] && git -C "$dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then base=MERGE_HEAD; fi
   while IFS= read -r line; do dirs+=("$line"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
+  acts="$(git_commit_stage "$COMMAND")"
+  if [ -n "$acts" ] && idx="$(mktemp "${TMPDIR:-/tmp}/bionic-index.XXXXXX")"; then
+    src="$(git -C "$dir" rev-parse --path-format=absolute --git-path index 2>/dev/null)"
+    { [ -f "$src" ] && cp "$src" "$idx"; } || rm -f "$idx"
+    local GIT_INDEX_FILE="$idx"; export GIT_INDEX_FILE
+    # No act may wait on a person: an editor refuses and input is empty, so an interactive add stages nothing.
+    while IFS="$GIT_ARGV_US" read -r -a words; do
+      [ "${#words[@]}" -eq 0 ] || GIT_EDITOR=false git -C "$dir" "${words[@]}" </dev/null >/dev/null 2>&1
+    done <<< "$acts"
+  fi
   # rc 0: nothing staged under the set; rc 1: something is; anything else (no HEAD, no repository)
   # leaves nothing to compare against, and the arm is silent.
   git -C "$dir" diff --cached --quiet "$base" -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
-  [ "$rc" -eq 1 ] || return 0
+  [ "$rc" -eq 1 ] || { rm -f "$idx"; return 0; }
   # The doctrine is bionic's (D13): only bionic's own source tree, named by the manifest HEAD holds, is
   # held to net zero; a user project's agents/*.md and skills/ files are its own (wave-31 T42).
   [ "$(git -C "$dir" show HEAD:payload/.claude-plugin/plugin.json 2>/dev/null \
-        | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || return 0
+        | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || { rm -f "$idx"; return 0; }
 
   sums="$( { loaded_set_sizes "$dir" "$base" | awk '{ print "b\t" $0 }'
              loaded_set_sizes "$dir" index | awk '{ print "a\t" $0 }'; } \
@@ -2788,6 +2818,7 @@ validate_net_zero() {
           printf "0\t%d\t%d\t%d\n", ta - tb, tb, ta
           for (f in p) if (a[f] + 0 > b[f] + 0) printf "1\t%s\t%d\t%d\n", f, b[f], a[f]
         }' | sort)"
+  [ -z "$idx" ] || { rm -f "$idx"; unset GIT_INDEX_FILE; }
   line="${sums%%$'\n'*}"
   IFS=$'\t' read -r _ delta before after <<< "$line"
   [ "${delta:-0}" -gt 0 ] 2>/dev/null || return 0
@@ -2842,7 +2873,7 @@ Grew:${grown}"
 }
 
 # The step is the run's newest step event: an integer, or 8b, the adversarial critic's step.
-_eg_step="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+_eg_step="$(_run_place "$PLAN")" || _eg_v15_unreadable
 CURRENT="$(sed -n 's/^n=//p' <<< "$_eg_step")"
 [ -n "$CURRENT" ] || refuse exit2 commit "the run's log holds no step" "record the run's step" \
 "canonical-sdlc plan at version 15: the run's log holds no step event, so the step this commit is judged at is not known.
@@ -3335,7 +3366,7 @@ _eg_v15_step_asks() {
          *) for p in $(printf '%s' "$v" | tr ',' ' '); do [ -f "$DOCS_ROOT/$p" ] || [ -f "$BIONIC_ROOT/$p" ] || miss=1; done ;;
        esac
        [ -z "$miss" ] || _eg_v15_ask "Step 7's document: the header's adrs: naming records that stand, or none with its reason" ;;
-    8) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+    8) st="$(_run_place "$PLAN")" || _eg_v15_unreadable
        for r in $(plan_read_rows "$PLAN" Tasks 2>/dev/null | awk -F'\t' '{ id = ""; k = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^id=/) id = substr($i, 4); if ($i ~ /^kind=/) k = substr($i, 6) } if (k == "integrate") print id }'); do
          miss="${miss:-1}"; v="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$r")"; [ "${v#*state=landed}" = "$v" ] || miss=0
        done
@@ -3356,7 +3387,7 @@ _eg_v15_step_asks() {
        case "$st" in *$'\ncleanup=n/a'*) : ;;
          *$'\ncleanup='*$'\ntmp-wiped='*$'\ntasks-completed='*) : ;;
          *) _eg_v15_ask "Step 8's cleanup, tmp-wiped and tasks-completed, given to its step by close-out" ;; esac ;;
-    9) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+    9) st="$(_run_place "$PLAN")" || _eg_v15_unreadable
        case "$st" in *state=delivered*) : ;; *) _eg_v15_ask "Step 9's delivery, given to its step by close-out" ;; esac
        if deploy_target_named; then
          for v in deployed verified monitored; do case "$st" in *$'\n'"$v="*) : ;; *) miss="${miss:+$miss, }$v" ;; esac; done
@@ -4506,7 +4537,8 @@ return 0
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs one of these `session-poker.sh`
 # verbs: `amend`, `extend`, `task-add` and `hold` (a roster row, or a row's birth); `current` (the
 # run's step); `proof-add` (a proof the gates judge by); `approve` and `waive` (each written on the
-# user's word); `release-check` (the check's fact); `finding-move` (a finding across the line);
+# user's word); `accept` and `abandon` (the person's word on a run changed around the tool, which seals it
+# again or ends it); `release-check` (the check's fact); `finding-move` (a finding across the line);
 # `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
 # writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
 # user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
@@ -4586,7 +4618,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|accept|abandon|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
@@ -6355,8 +6387,13 @@ Nothing that gates or reviews this run reads the store. Reading it stays open."
 #   BIONIC_SEAL_PLAN   that plan, as the session's binding names it
 #   BIONIC_SEAL_LOG    the log the seal names, which outlives a plan that is gone
 # Any line but `changed …` and `busy` is nothing to judge here.
+#
+# THE ASK. A change is an ask of the person until they rule, so the refusal stages one, `seal:changed`, in
+# BIONIC_WALL_OWED as the gate stages its own, and the collector opens it on the run's register: the log the
+# seal names, which lib/owed.sh `owed_register` finds through the seal when the plan is gone. One key a
+# run: a second change while it is open is the same need, and a change after the ruling is a new round.
 wall_run_seal() {  # <event> -> 0 nothing · 2 block
-  local _w _h _fact
+  local _w _h _fact _r
   case "${BIONIC_SEAL_LINE:-}" in
     busy)
       fold_block exit2 commit "the run's seal could not be read" "run the commit again" \
@@ -6373,6 +6410,8 @@ Plan:  ${BIONIC_SEAL_PLAN:-}"
     added) _fact="the run's $_w was added to outside the tool" ;;
     *)     _fact="the run's $_w was $_h outside the tool" ;;
   esac
+  _r="session-poker.sh accept '<their words>' or session-poker.sh abandon '<their words>'"
+  BIONIC_WALL_OWED="seal:changed"$'\t'"changed run: $_w $_h"$'\t'"$_fact: the person rules, by $_r"
   fold_block exit2 commit "$_fact" "only the person can rule" \
 "The run this session is bound to no longer matches its seal: $_fact.
 Plan:  ${BIONIC_SEAL_PLAN:-}
@@ -6380,6 +6419,9 @@ Log:   ${BIONIC_SEAL_LOG:-}
 Seal:  $BIONIC_SEAL_LINE
 Its plan and its log hold only what the tool wrote; a line written by hand, or a file moved, cut
 or removed, is not the run's own work, so no commit of this run is admitted until the person
-rules on the change. Tell them what changed and wait for their word."
+rules on the change. Tell them what changed and wait for their word, one of two replies:
+  session-poker.sh accept '<their words>'    the run as it now stands is theirs, sealed again
+  session-poker.sh abandon '<their words>'   the run ends here
+Until then the change is the ask seal:changed on the run's register, in the log above."
   return 2
 }

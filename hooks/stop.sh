@@ -106,8 +106,8 @@ fi
 # what makes this process refuse rather than run three verdicts and drop the fourth.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fill.sh"
-# THE PATROL VERDICT. The death notice asks `patrol_verdict`,
-# which lives in patrol.sh. Wanted and sourced here for fill.sh's reason above: a partial
+# THE WATCH RECORD AND THE TICK'S DIGEST. The turn-end wall reads both,
+# and both live in patrol.sh. Wanted and sourced here for fill.sh's reason above: a partial
 # library makes this process refuse.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"
@@ -151,12 +151,19 @@ stop_fill_ledger "$EVENT" 2>/dev/null
 
 # BLOCKS ONCE. (jq's `//` folds `false` to empty, so a literal "true" is the only
 # value that can match here — which is the comparison we want anyway.) Nothing is
-# verdicted on a re-entry: every row is still owed its one answer.
-[ "$(bionic_jq .stop_hook_active)" = "true" ] && exit 0
+# verdicted on a re-entry: every row is still owed its one answer. The stop line still
+# rides it, since the end of the turn a duty continued can be the one that leaves the run
+# waiting only on the person, and it refuses nothing.
+if [ "$(bionic_jq .stop_hook_active)" = "true" ]; then
+  bionic_fold "$EVENT" stop_watch_line
+  exit $?
+fi
 
+# THE STOP LINE IS LAST: it speaks only when no wall before it refused the turn.
 bionic_fold "$EVENT" \
   stop_context_spend \
   stop_landing_gate \
   stop_patrol_duties \
-  stop_patrol_revive
+  stop_patrol_revive \
+  stop_watch_line
 exit $?

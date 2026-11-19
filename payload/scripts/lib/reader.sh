@@ -12,6 +12,8 @@
 #   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place,
 #     save a step's: a step written again is the run taken back to it, so the step a run stands at is the last written;
 #     and save a hand's: an act taken by hand again at another time is another act, so two timed ones are two facts;
+#   - a row's tree is one fact, so a tree made again after its removal stands; an untimed tree line keeps all its
+#     fields as its identity, so it replaces no timed one;
 #   - a later line with the same identifying fields and another value replaces the earlier, and takes its place;
 #   - a discarded verdict replaces no earlier verdict, whatever its commit, and one with none before it stands
 #     as the discarded run it was; a red or a green after it replaces it as any later line does;
@@ -43,6 +45,7 @@ declare -F line_lines >/dev/null 2>&1 || . "$_READER_LIB_DIR/line.sh"
 # The record's field reader, read by name; `ev()` is its event, for the `run/v1` shape the fold prints.
 _READER_AWK="${_LINE_FIELDS_AWK}"'
 function ev() { return line_kv("ev") }
+function is_pr() { return ev() == "published" && line_kv("part") == "pr" }
 '
 
 READER_QUESTIONS=""
@@ -56,7 +59,9 @@ reader_identity() {  # <event type> <field>… -> the fields that name one fact 
 }
 reader_identity step n
 reader_identity approval key
-reader_identity proof kind head question
+# A criterion's proof names it by `ac=`, so two criteria proved at one head by one kind are two facts, not one
+# replacing the other; `scope=` keeps a proof of one scope from replacing another's at the same head.
+reader_identity proof kind head question ac scope
 reader_identity ask key round
 # A part of the release is told from a row's landing and from another part by `part=`: the reviews part's commit is the
 # head a publish pushes, so the two name one commit and are still two facts.
@@ -96,10 +101,15 @@ reader_record() {  # <plan> -> its record directory; 2 when the plan sits where 
   printf '%s/record/%s\n' "${dir%/*}" "$READER_SLUG"
 }
 
+# THE LOG'S PATH has one home, here: a record directory holds the run's log under one name, and every place that wants
+# the path asks one of these two, so no second spelling of it can drift from the reader's.
+reader_log_in() {  # <record directory> -> the path of the run log it holds
+  printf '%s/run.log\n' "${1%/}"
+}
 reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none; above 2 when the lookup died
   local rec
   rec="$(reader_record "${1:-}")" || return
-  printf '%s/run.log\n' "$rec"
+  reader_log_in "$rec"
 }
 
 # A KEY OF A FOLD THAT READS NO TURN'S END: a stop event comes at every turn, so the log is summed less those alone. Only
@@ -139,6 +149,7 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       id = named
       if (named in idk) { m = split(idk[named], ik, ","); for (i = 1; i < m; i++) id = id SUBSEP ik[i] "=" f[ik[i]] }
       else id = id SUBSEP body
+      if (t == "tree" && f["at"] == "") id = id SUBSEP body
       # two review records are two readings, even of one question at one head and scope; a later run of a check
       # or a regression at a head still replaces the earlier one
       if (named == "proof" && f["kind"] == "review") id = id SUBSEP "evidence=" f["evidence"]
@@ -316,6 +327,8 @@ reader_identity order
 reader_identity handoff
 # One drop stands per row: a drop said again with other words replaces the first.
 reader_identity drop row
+# One tree stands per row: a removal is the row's tree event with an empty path, and a tree made again replaces it.
+reader_identity tree row
 
 # A ROW'S WORK IS NO LONGER OWED when a drop of it stands and it has not landed. This is the one rule: the questions
 # below and the fill (lib/units.sh `_units_live`) put it before their own program over the facts they already fold, so
@@ -487,7 +500,7 @@ reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no
 reader_question pr value reader_q_pr
 reader_q_pr() {  # <plan> -> the newest request's fields as key=value lines, `ev=` and `part=` dropped; nothing, 1, for none
   reader_facts "$1" | awk -F'|' "$_READER_AWK"'
-    ev() == "published" && line_kv("part") == "pr" { l = $0 }
+    is_pr() { l = $0 }
     END { if (l == "") exit 1; n = split(l, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|part)=/) print p[i] }'
 }
 
@@ -539,9 +552,6 @@ reader_q_criterion() {  # <plan> <id> -> its Eval design row as key=value, one p
   plan_read_row "$1" 'Eval design' Criterion "$2"
 }
 
-# A criterion's proof names it by `ac=`, so two criteria proved at one head by one kind are two facts, not
-# one replacing the other. This later entry for the type is the one the fold reads.
-reader_identity proof kind head question ac scope
 reader_question cell value reader_q_cell
 reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>, or state=pending; 1 not in the plan
   _reader_needs cell '<criterion>' "${2:-}" || return 2
@@ -612,7 +622,8 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
   # approval:plan by Step 3's approval once the run is at Step 4; a proof by one of its kind that did not
   # fail; step:<n> by the run reaching Step <n>. Any other wait (an external token, an id the table
   # lacks) is never met here. A dropped row is owed no more, as the fill has it: it is never ready, and
-  # a wait on it is met as a landing meets it.
+  # a wait on it is met as a landing meets it. An integrate row is not ready once the run's pull request is
+  # published: its act is done and what is left is the merge, which is the person's and the close's.
   local waits
   waits="$(plan_read_waits "$1" "${2:-}")" || return 1
   { printf '%s\n\034\n' "$waits"; reader_facts "$1"; } | awk -F'|' "$_READER_AWK$_READER_DROP_AWK"'
@@ -625,8 +636,9 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
       return 0
     }
     $0 == "\034" { facts = 1; next }
-    !facts { split($0, w, "\t"); if (w[2] == "kind") ord[++n] = w[1]; else { nw[w[1]]++; wt[w[1], nw[w[1]]] = w[2]; wv[w[1], nw[w[1]]] = w[3] }; next }
+    !facts { split($0, w, "\t"); if (w[2] == "kind") { ord[++n] = w[1]; kd[w[1]] = w[3] } else { nw[w[1]]++; wt[w[1], nw[w[1]]] = w[2]; wv[w[1], nw[w[1]]] = w[3] }; next }
     ev() == "published" { landed[line_kv("row")] = 1 }
+    is_pr() { pr = 1 }
     ev() == "dispatch" { held[line_kv("row")] = 1 }
     ev() == "approval" { appr[line_kv("key")] = 1 }
     ev() == "step" { cur = line_kv("n") }
@@ -634,6 +646,7 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
     END {
       for (i = 1; i <= n; i++) {
         r = ord[i]; if ((r in landed) || (r in held) || dropped(r)) continue
+        if (pr && kd[r] == "integrate") continue
         for (k = 1; k <= nw[r]; k++) if (!met(wt[r, k], wv[r, k])) break
         if (k > nw[r]) print r
       }
