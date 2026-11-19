@@ -30,27 +30,24 @@ POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
 # ============================================================
-section "Section 36: prompt — the canonical Patrol prompt (wave-20 REQ-6, AC-6.1; D6)"
+section "Section 36: no timed prompt — its verbs answer unknown, and no product line asks for a timed job"
 # ============================================================
 #
-# THE PROMPT IS PRINTED, NOT COMPOSED. Report #1: a Patrol job whose prompt was the bare tick
-# command (or a marker with no tick) was never a tick turn, or ran no tick. `prompt` prints the
-# one prompt a CronCreate should carry — the session's marker first, the tick command in it.
+# THE WATCHER IS THE CLOCK (hooks/watch.sh). The verbs that printed a timed job's prompt and
+# stamped or unstamped it are gone, and nothing the hooks or scripts print asks anyone to create,
+# list or delete one. The search's positive reads the same files for the watcher's own verb.
 R36="$(make_repo s36)"
-poke "$R36" prompt
-expect_eq "36a prompt exits 0" "0" "$RC"
-case "$OUT" in
-  "bionic-patrol session=${SID:0:8} "*) ok "36b AC-6.1 the prompt starts with this session's marker" ;;
-  *) no "36b AC-6.1 the prompt starts with this session's marker" "$OUT" ;;
-esac
-expect_contains "36c …and carries the tick command, by this poker's absolute path" "bash $POKER tick" "$OUT"
-expect_eq "36d …on one line (a CronCreate prompt)" "1" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
-expect_contains "36e …and names the fill answer: dispatch, or a row made not ready, never an answer in words" \
-  "a row that should wait is made not ready instead, by one of the three forms the stop wall prints" "$OUT"
-OUT="$( cd "$R36" && CLAUDE_CODE_SESSION_ID="" bash "$POKER" prompt 2>&1 )"; RC=$?
-expect_eq "36f with no session key there is no marker to print (exit 3)" "3" "$RC"
-poke "$R36" prompt extra
-expect_eq "36g prompt takes no arguments (exit 2)" "2" "$RC"
+for s36_verb in arm disarm prompt; do
+  poke "$R36" "$s36_verb"
+  expect_eq "36a-$s36_verb answers as no verb (exit 2)" "2" "$RC"
+  expect_contains "36b-$s36_verb …naming itself unknown" "unknown verb: $s36_verb" "$OUT"
+done
+S36_PAT='Cron(Create|Delete|List)|bionic-patrol session=|re-arm the Patrol|session-poker\.sh (arm|disarm|prompt)\b'
+S36_DIRS=("$BIONIC_HOOKS_DIR" "$BIONIC_SCRIPTS_DIR/payload/scripts")
+expect_nonempty "36c the search reads the product: the watch pass is found" \
+  "$(/usr/bin/grep -rlE 'tick --watch' "${S36_DIRS[@]}")"
+expect_eq "36d …and no product line names a timed job or its verbs" "" \
+  "$(/usr/bin/grep -rnE "$S36_PAT" "${S36_DIRS[@]}")"
 
 
 # ============================================================

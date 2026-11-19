@@ -13,13 +13,8 @@
 #   a ROSTER with open rows       agents the predecessor dispatched, still running,
 #                                 filed under a session id nothing now answers to.
 #                                 `/clear` does not kill agents.
-#   a PATROL STAMP under the old sid — the predecessor's clock, which the new
-#                                 session's arming does not touch or replace.
-#   a LIVE PREDECESSOR CRON       A-probe-4: a recurring job created before the
-#                                 `/clear` is STILL LISTED afterwards and STILL
-#                                 FIRES into the new conversation, carrying the old
-#                                 session's marker. It is a duplicate, not a ghost,
-#                                 and it must be DELETED before a new one is made.
+#   a WATCH RECORD under the old sid — the predecessor's watcher, which sees the
+#                                 clear and rests, or died without a word.
 #   a LEGACY `.bionic` SYMLINK    `<repo>/.worktrees/<x>/.bionic -> <repo>/.bionic`,
 #                                 planted by older spawn-worktree.sh runs. Design
 #                                 ledger C2 retired it: a second path to one state.
@@ -37,12 +32,9 @@
 # `.bionic/tmp/loaded-<sid>.state`, written only when the CLI handed the hook a
 # CLAUDE_PLUGIN_ROOT — see "the load record" below. Every OTHER byte in this file is
 # still pure detection: the report above is built
-# from reads alone, and the re-arm line it prints is an instruction for the model
-# reading it, whose ORDER is the whole point — CronList BEFORE CronCreate, because
-# a predecessor job that is still firing has to be deleted rather than raced
-# (AC-3's ritual, S5). `tests/session-start.test.sh`'s `.bionic`-subtree fingerprint
-# now expects the sweep's own deletions and, on a genuine failure, one marker file
-# — never a stamp, a roster row, or anything this hook wrote for itself.
+# from reads alone. `tests/session-start.test.sh`'s `.bionic`-subtree fingerprint
+# expects the sweep's own deletions and, on a genuine failure, one marker file
+# — never a roster row, or anything this hook wrote for itself.
 #
 # FAIL OPEN, ALWAYS EXIT 0. A SessionStart hook that refuses would block the start
 # of every conversation on this machine, and what it is protecting is a report.
@@ -53,11 +45,8 @@
 # STDOUT IS THE DELIVERY MECHANISM. A SessionStart hook's stdout is added to the
 # new conversation's context, so the block below is written to be read by the model
 # that is about to act, not by a terminal. It prints ONLY when there is something
-# to report: a clean start of a session that is NOT engaged, on a project with no
-# predecessor state, produces no output at all, because a block that prints every
-# session is a block nobody reads. An ENGAGED session always has something — the
-# arm line, the finished Patrol arm command baked from this hook's own root
-# (wave-21 T2, REQ-2; see "the arm line" below).
+# to report: a clean start on a project with no predecessor state produces no output
+# at all, because a block that prints every session is a block nobody reads.
 #
 # Registered once, in hooks/hooks.json, on SessionStart with matcher
 # `startup|clear|resume|compact` — pinned by tests/cross-gate-agreement.test.sh §L.
@@ -80,7 +69,7 @@ fi
 . "$BIONIC_LIB/context.sh"  || exit 0   # bionic_context, bionic_jq
 . "$BIONIC_LIB/root.sh"     || exit 0   # project_root
 . "$BIONIC_LIB/session.sh"  || exit 0   # session_id, and its one divergence warning
-. "$BIONIC_LIB/patrol.sh"   || exit 0   # patrol_fire_window, patrol_verdict, patrol_dead_sessions
+. "$BIONIC_LIB/patrol.sh"   || exit 0   # watch_state, patrol_dead_sessions
 . "$BIONIC_LIB/run.sh"      || exit 0   # active_run, engaged_session
 . "$BIONIC_LIB/roster.sh"   || exit 0   # roster_open_counts — the one close predicate (T17, D10)
 . "$BIONIC_LIB/binding.sh"  || exit 0   # bind_holders — who else's marker names the one run (T15)
@@ -100,8 +89,8 @@ printf 'bionic: any decision or choice between approaches you put to the user go
 # line from it (:353-354, :365-366).
 BIONIC_CONTEXT_WANT_RUN=1
 
-# The tree this hook was launched from — printed absolute in the re-arm line, and
-# the tree whose poker is asked for the interval. `$(dirname "$0")/..` and `pwd -P`
+# The tree this hook was launched from — printed absolute in the step file and adopt lines.
+# `$(dirname "$0")/..` and `pwd -P`
 # rather than `realpath`, which stock macOS does not ship (L-LOADER/5, L-BIONIC_ROOT/2).
 HOOK_ROOT="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || HOOK_ROOT=""
 [ -n "$HOOK_ROOT" ] || HOOK_ROOT="$(dirname "$0")/.."
@@ -231,10 +220,10 @@ fi
 
 # ---------------------------------------------------------------- engagement
 #
-# An open run gates the whole roster/stamp/re-arm block behind this session's
+# An open run gates the whole roster/watch block behind this session's
 # own consent to enter bionic (lib/run.sh `engaged_session`, T4/AC-11/AC-12).
 # A session that never invoked canonical-sdlc gets exactly one line naming the
-# plan and the skill — no roster dump, no stamp report, no re-arm instruction
+# plan and the skill — no roster dump, no watch report
 # — because none of that operational detail is addressed to a bystander. A sid
 # this hook cannot read is, like every other unreadable state here, NOT
 # engaged: the safe direction is the quieter one.
@@ -249,7 +238,7 @@ fi
 # session whose own binding does not resolve to one of them (unbound, or
 # bound to a run that has since closed) gets the same listing prepended to
 # today's engaged block rather than a silent guess — it is not exited early,
-# because the roster/stamp/re-arm report still belongs to an engaged reader.
+# because the roster/watch report still belongs to an engaged reader.
 RUNS="$(open_runs "$BIONIC_ROOT")" || RUNS=""
 N=$(printf '%s\n' "$RUNS" | grep -c '.')
 
@@ -352,8 +341,8 @@ print_bound_line() {  # <verdict "bound-open <plan>">
   # before acting at step N. Nothing enforces that — no hook can see whether a model read a
   # file — so this line does the one thing a hook honestly can: it puts the path in front of
   # the session at the moment the step is known, so the read is a glance away rather than a
-  # lookup. `$HOOK_ROOT` is the tree this hook was launched from, the same root the re-arm
-  # line prints and the same one `ss_interval` asks for the poker, so the path names a file
+  # lookup. `$HOOK_ROOT` is the tree this hook was launched from, the same root the adopt
+  # line prints, so the path names a file
   # in the plugin that is actually running rather than in whichever one is installed.
   #
   # ONLY FOR A NUMERIC STEP. A non-numeric `current:` is refused (`NOT-RECORDED`, D2) and names no
@@ -523,20 +512,6 @@ done
 # the name.
 sid8() { printf '%.8s' "${1:-}"; }
 
-# `ss_interval()` STARTS NOW, IN THE BACKGROUND (T16, follow-up to T6,
-# AC-6.1). It forks a whole `bash session-poker.sh interval`
-# subprocess to read one config value, and nothing it reads or returns depends
-# on — or is depended on by — the roster/stamp report below: it touches only
-# `.bionic/config.yaml`, never a predecessor's state file, so unlike the sweep
-# (which this file's own comments elsewhere are careful to run only AFTER the
-# report is read off disk, to avoid racing a delete against a read) there is no
-# ordering hazard in starting it early and collecting the answer once `LIMIT`
-# actually needs it, further down. Overlapping its ~0.1s against the roster
-# loop's own real work below hides most or all of it.
-SS_INTERVAL_OUT="${TMPDIR:-/tmp}/bionic-interval.$$.out"
-( ss_interval > "$SS_INTERVAL_OUT" 2>/dev/null ) &
-SS_INTERVAL_PID=$!
-
 ROSTER_MANIFEST=""
 for RF in "$TMP"/roster-*.state; do
   [ -f "$RF" ] || continue
@@ -566,24 +541,6 @@ $ROSTER_RAW
 EOF
   fi
 fi
-
-# ---------------------------------------------------------------- predecessor stamps
-#
-# THE INTERVAL COMES FROM THE POKER BESIDE THIS HOOK, by the same two-step
-# lib/patrol.sh's `patrol_interval` takes — the project's configured value, then
-# the library's PATROL_INTERVAL_DEFAULT. It is asked HERE rather than
-# through `patrol_interval` because that function resolves the poker through
-# `plugin_root` (lib/roots.sh), i.e. the plugin installed on the machine, while a
-# SessionStart hook must measure against the tree it was actually launched from.
-ss_interval() {
-  local poker="$HOOK_ROOT/hooks/session-poker.sh" s=""
-  if [ -f "$poker" ]; then
-    s="$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" interval 2>/dev/null )"
-    case "$s" in ''|*[!0-9]*) s="" ;; esac
-  fi
-  if [ -z "$s" ] || [ "$s" -le 0 ]; then s="$PATROL_INTERVAL_DEFAULT"; fi
-  printf '%s' "$s"
-}
 
 # THE GROUP IS CHECKED, NEVER ASSUMED (T23, the same fix detect.sh took at T22).
 # A DELIBERATE DUPLICATE of `_detect_bound_kill` / `_detect_bound_kill_tree` in
@@ -720,108 +677,9 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> [sweep flag...] -> stdout; 
   return "$rc"
 }
 
-STAMPS=""
-# COLLECT THE BACKGROUND `ss_interval()` STARTED ABOVE, not a fresh call: the
-# fork already happened before the roster loop; this just joins it and reads
-# the file it wrote. A wait on an already-finished job returns immediately.
-wait "$SS_INTERVAL_PID" 2>/dev/null
-SS_INTERVAL_VAL="$(cat "$SS_INTERVAL_OUT" 2>/dev/null)"
-rm -f "$SS_INTERVAL_OUT" 2>/dev/null
-case "$SS_INTERVAL_VAL" in ''|*[!0-9]*) SS_INTERVAL_VAL="$(ss_interval)" ;; esac
-# ONE FIRE WINDOW, NOT TWICE THE INTERVAL (epic-23 wave-16 REQ-11, AC-11.1/11.2; ADR-028).
-# This banner and doctor's own reading were the last two surfaces grading a Patrol stamp by
-# `interval * 2` — a judgment call the two WALLS stopped making at wave-15, because a session
-# cron fires only while the session is IDLE and age past a threshold cannot tell a dead job
-# from a working orchestrator. `patrol_fire_window` (lib/patrol.sh) is the one threshold left:
-# the interval plus the scheduler's jitter, the longest idle span in which a firing is
-# guaranteed an opportunity. A stamp inside it is fresh, full stop.
-SS_WINDOW="$(patrol_fire_window "$SS_INTERVAL_VAL")" || SS_WINDOW=""
-case "$SS_WINDOW" in ''|*[!0-9]*) SS_WINDOW="$SS_INTERVAL_VAL" ;; esac
-NOW="$(date -u +%s 2>/dev/null || echo 0)"
-
-# WHO IS STILL RUNNING, read once for the loop below. Past one fire window the two answers
-# part company: a stamp belonging to a LIVE session is graded on IDLE TIME, through the same
-# `patrol_verdict` the walls call, because its owner may simply have been busy — while a
-# stamp whose session is GONE is stale on the plainest fact available, that there is no
-# process left to fire anything. The verdict would call that one `busy`: a dead session's
-# transcript ends when the session did, so it holds no idle GAP to measure, and asking the
-# predicate about a corpse would report a two-day-old stamp as fresh. This branch is the
-# difference between the two questions, not a second threshold.
-SS_LIVE_IDS="$(patrol_live_session_ids 2>/dev/null)"
-
-# ONE `stat` INVOCATION FOR EVERY PREDECESSOR STAMP, not one per file (REQ-6,
-# same defect and the same fix shape as the roster loop above — one flavour
-# probe, then a single `xargs` pass over every candidate path rather than a
-# `stat` fork per file; the sweep gate below this used to carry the second copy
-# of the idiom and was deleted whole at wave-16 REQ-8, leaving this one).
-# The filtering loop stays pure bash builtins
-# (glob + `[ -f ]`/`[ -L ]`, no fork) and records each survivor's path in
-# ORDER; `stat`'s own output preserves that order one line per input, so the
-# second loop below zips path[i] back to mtime[i] positionally rather than
-# re-deriving anything from the filename.
-STAMP_FILES=""
-STAMP_OSIDS=""
-for SF in "$TMP"/patrol-*.state; do
-  [ -f "$SF" ] || continue
-  [ -L "$SF" ] && continue
-  OSID="${SF##*/}"; OSID="${OSID#patrol-}"; OSID="${OSID%.state}"
-  [ -n "$OSID" ] || continue
-  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
-  STAMP_FILES="${STAMP_FILES}${SF}
-"
-  STAMP_OSIDS="${STAMP_OSIDS}${OSID}
-"
-done
-
-if [ -n "$STAMP_FILES" ]; then
-  case "$(stat -c %Y /dev/null 2>/dev/null)" in
-    ''|*[!0-9]*)
-      STAMP_MTS="$(printf '%s' "$STAMP_FILES" | tr '\n' '\0' | xargs -0 stat -f %m 2>/dev/null)"
-      ;;
-    *)
-      STAMP_MTS="$(printf '%s' "$STAMP_FILES" | tr '\n' '\0' | xargs -0 stat -c %Y 2>/dev/null)"
-      ;;
-  esac
-  exec 8<<EOF_OSIDS
-$STAMP_OSIDS
-EOF_OSIDS
-  exec 9<<EOF_MTS
-$STAMP_MTS
-EOF_MTS
-  while IFS= read -r OSID <&8 && IFS= read -r MT <&9; do
-    [ -n "$OSID" ] || continue
-    case "$MT" in ''|*[!0-9]*) continue ;; esac
-    AGE=$(( NOW - MT )); [ "$AGE" -ge 0 ] || AGE=0
-    STATE="fresh"; WHY=""
-    if [ "$AGE" -gt "$SS_WINDOW" ]; then
-      STATE="stale"
-      # NEWLINE-DELIMITED CONTAINMENT, so a dead session whose id is a PREFIX of a live one
-      # is not mistaken for it — `patrol_dead_sessions`'s own idiom, for its own reason.
-      case "
-$SS_LIVE_IDS
-" in
-        *"
-$OSID
-"*)
-          SS_VLINE="$(patrol_verdict "$TMP/patrol-$OSID.state" \
-                        "$(patrol_transcript "$OSID" 2>/dev/null)" "$SS_INTERVAL_VAL" 2>/dev/null)"
-          case "$(_patrol_field "$SS_VLINE" verdict)" in
-            busy) STATE="fresh"; WHY=" — that session has been working" ;;
-            dead) STATE="stale" ;;
-            *)    STATE="unreadable"
-                  WHY=" — $(_patrol_field "$SS_VLINE" reason)" ;;
-          esac ;;
-      esac
-    fi
-    STAMPS="${STAMPS}  ${OSID:0:8} — ${AGE}s old (a firing lands inside ${SS_WINDOW}s)${WHY} — $STATE
-"
-  done
-  exec 8<&- 9<&-
-fi
-
 # ---------------------------------------------------------------- predecessor watches
 #
-# THE WATCH RECORD, READ BESIDE THE STAMP. hooks/watch.sh keeps `watch-<sid>.state` for each session it watches, and
+# THE WATCH RECORD. hooks/watch.sh keeps `watch-<sid>.state` for each session it watches, and
 # `watch_state` (lib/patrol.sh) reads it by the one alive rule: a predecessor still watching runs passes over a
 # conversation that is gone until it sees the clear, one that stopped died without a word, and one resting ended on
 # purpose. This session's own record is not listed: its watcher starts beside this hook.
@@ -928,71 +786,13 @@ if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
   fi
 fi
 
-# ---------------------------------------------------------------- the arm line
-#
-# THE FINISHED ARM COMMAND (epic-23 wave-21 T2; REQ-2, AC-2.1; D2; ADR-037 decision 1). The
-# model resolves no plugin root. It used to look one up in the CLI's registry and bake that
-# into the Patrol prompt, and on a directory-source install the registry can name an older
-# build than the tree these hooks run from — measured: the 1.8.6 cache against the 1.8.7 tree,
-# the two pokers differing (triage-C §R2), so the Patrol ticked an old poker against new walls.
-# This line names `$HOOK_ROOT`, the tree this hook was launched from, and nothing else.
-#
-# THE ORDER IS THE INSTRUCTION. CronList first, because a predecessor's recurring job survives
-# `/clear` and keeps firing (A-probe-4); creating before deleting leaves two clocks on one
-# project, which is the 1.3.2 B-8 bug by another route. Then CronCreate with the prompt BAKED
-# IN: it is the poker's own `prompt` verb's output for this session, so the prompt text keeps
-# one owner (session-poker.sh) and its first token is this session's marker. Then `arm`: on
-# the starts that reach this line without an engage.sh run — `compact`, `resume` — the stamp is
-# whatever the last firing left and the armed instant (R-13) predates the clock just created,
-# so the hand step restamps both. `arm` is idempotent; running it after engage.sh did costs
-# nothing. (T19 dropped it from the old re-arm line on the engaged-just-now path alone.)
-#
-# THE INTERVAL is the one the stamps above were graded by, the poker's own. Its cron spelling
-# is printed only when it is exact — whole minutes that divide the hour.
-ss_arm_line() {
-  local poker="$HOOK_ROOT/hooks/session-poker.sh" every prompt m
-  # A SCALE WITH NO PATROL HAS NOTHING TO RE-ARM: a session bound to a task-scale run (`scale_patrol`,
-  # lib/scale.sh) is told no arm line, as `arm` writes no stamp there. No bound plan, or a library without
-  # scale.sh, keeps the line.
-  if [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ]; then
-    { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "${BIONIC_LIB:-}/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-    if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$BIONIC_RUN_PLAN")" = no ]; then
-      return 0
-    fi
-  fi
-  every="every ${SS_INTERVAL_VAL}s"
-  case "$SS_INTERVAL_VAL" in
-    ''|*[!0-9]*) ;;
-    *)
-      if [ $((SS_INTERVAL_VAL % 60)) -eq 0 ]; then
-        m=$((SS_INTERVAL_VAL / 60))
-        if [ "$m" -ge 1 ] && [ "$m" -le 30 ] && [ $((60 % m)) -eq 0 ]; then
-          every="$every (cron */$m * * * *)"
-        fi
-      fi
-      ;;
-  esac
-  prompt="$( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "$poker" prompt 2>/dev/null )"
-  if [ -n "$prompt" ]; then
-    printf 're-arm: CronList → delete every job whose prompt begins with bionic-patrol session= → CronCreate, recurring %s, with the prompt `%s` → bash %s arm\n' \
-      "$every" "$prompt" "$poker"
-  else
-    # The poker could not print it (absent, or refused): name the verb rather than guess the text.
-    printf 're-arm: CronList → delete every job whose prompt begins with bionic-patrol session= → CronCreate, recurring %s, with the prompt `bash %s prompt` prints → bash %s arm\n' \
-      "$every" "$poker" "$poker"
-  fi
-}
-
 # ---------------------------------------------------------------- the block
 #
-# SILENCE IS THE DEFAULT, FOR A SESSION THAT IS NOT ENGAGED. Four findings and one verdict; if
-# every finding is empty and the three channels agree, a bystander has nothing to act on and
-# the hook says nothing at all. An ENGAGED session always gets the arm line (REQ-2): the Patrol
-# carries the session, and this is the one surface that names the root to arm it from. A sweep
-# failure is worth one line on any start (AC-R2.4): it is the one write this hook can make, and
+# SILENCE IS THE DEFAULT. Three findings and one verdict; if every finding is empty and the
+# three channels agree, there is nothing to act on and the hook says nothing at all. A sweep
+# failure is worth one line on any start: it is the one write this hook can make, and
 # a write that fails silently is worse than the noise of saying so.
-if [ -z "$ROSTERS" ] && [ -z "$STAMPS" ] && [ -z "$WATCHES" ] && [ -z "$LINKS" ] && [ "$AGREE" = "agree" ]; then
-  [ "$BIONIC_ENGAGED" = 1 ] && ss_arm_line
+if [ -z "$ROSTERS" ] && [ -z "$WATCHES" ] && [ -z "$LINKS" ] && [ "$AGREE" = "agree" ]; then
   [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
   exit 0
 fi
@@ -1007,21 +807,15 @@ printf 'session-id: env=%s payload=%s pidfile=%s — %s\n' \
 if [ -n "$ROSTERS" ]; then
   printf 'predecessor rosters:\n%s' "$ROSTERS"
 fi
-if [ -n "$STAMPS" ]; then
-  printf 'predecessor stamps:\n%s' "$STAMPS"
-fi
 if [ -n "$WATCHES" ]; then
   printf 'predecessor watches:\n%s' "$WATCHES"
 fi
 if [ -n "$LINKS" ]; then
   printf 'legacy .bionic symlinks:\n%s' "$LINKS"
 fi
-ss_arm_line
-# THE PREDECESSOR VARIANT'S EXTRA STEP, on its own line after the arm: `adopt` takes the rows
-# listed above onto this session before its first dispatch. It was the old re-arm line's last
-# step; the arm line is the same on every start now, so the step that only the predecessor
-# block needs lives with that block.
-printf 'adopt: bash %s/hooks/session-poker.sh adopt — before the first dispatch, after the arm\n' "$HOOK_ROOT"
+# THE PREDECESSOR BLOCK'S ONE STEP: `adopt` takes the rows listed above onto this session before
+# its first dispatch.
+printf 'adopt: bash %s/hooks/session-poker.sh adopt — before the first dispatch\n' "$HOOK_ROOT"
 [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
 
 exit 0

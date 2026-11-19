@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# hooks/poker/tick.sh — the tick: the Patrol stamp, the scheduler, why each row waits, whether a row is too
-# quiet, and the decision line (arm, disarm, tick).
+# hooks/poker/tick.sh — the tick: the scheduler, why each row waits, whether a row is too quiet, the decision
+# line, and the watcher's pass (tick, tick --watch).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -12,55 +12,22 @@
 # left to its hold. The writer's asks the gate never admitted are withdrawn with it; an admitted run is never ended
 # by it, finishes and writes its own cost, and while one of a stood-down writer runs no other writer is stood down.
 
-# ---------------------------------------------------------------- the Patrol stamp
-
-# The arming record's path — the stamp's, plus one suffix, so the two can never resolve to
-# different directories and a mis-resolved root loses both together rather than half.
-patrol_armed_file() {  # <session-id> -> absolute path, or empty
-  local f
-  f="$(patrol_stamp_file "$1")" || return 1
-  [ -n "$f" ] || return 1
-  printf '%s%s' "$f" "$PATROL_ARMED_SUFFIX"
-}
-
-# WRITTEN BY `arm` AND BY NOTHING ELSE. Its content is for a human reading .bionic/tmp; the
-# fact the tick reads is its mtime. A failure here is NOT fatal to arming: the stamp is what
-# the arming wall reads, and a session armed without a marker simply never auto-DISARMs —
-# which is the safe direction (ADR-002 §3), where refusing to arm would take the dispatch
-# wall down over a bookkeeping file.
-write_patrol_armed_marker() {  # <session-id> -> 0 written, 1 not
-  local sid="$1" f d
-  f="$(patrol_armed_file "$sid")" || return 1
-  [ -n "$f" ] || return 1
-  d="${f%/*}"
-  tmp_dir_ok "$d" || return 1
-  mkdir -p "$d" 2>/dev/null || return 1
-  [ -L "$f" ] && return 1
-  printf '%s|at=%s|session=%s\n' "$PATROL_ARMED_SCHEMA" "$(iso_now)" "$sid" \
-    > "$f" 2>/dev/null || return 1
-  chmod 600 "$f" 2>/dev/null
-  return 0
-}
-
-# THE DIGEST FILE'S PATH, beside the stamp under the same resolved root. The path and its
+# THE DIGEST FILE'S PATH, under the tick's resolved root. The path and its
 # reader, `tick_digest_field`, are lib/patrol.sh's (`tick_digest_path`), which the stop
 # collector calls too (wave-24 T27; critic I3).
 tick_digest_file() {  # <session-id> -> absolute path, or empty
-  local f
-  f="$(patrol_stamp_file "$1")" || return 1
-  [ -n "$f" ] || return 1
-  tick_digest_path "${f%/.bionic/tmp/*}" "$1"
+  local root
+  root="$(tick_state_root)" || return 1
+  tick_digest_path "$root" "$1"
 }
 
-# The digest file is rewritten whole, under the stamp's write guard. `arm` writes only the
-# version, so the first tick after an arm prints in full. A tick's digest carries `at=`, the
+# The digest file is rewritten whole, under the .bionic/tmp write guard. A tick's digest carries `at=`, the
 # instant it was written: `since=` is the instant the facts last changed and an unchanged tick
 # keeps it, so only `at=` tells the stop collector the digest is this turn's (critic I3).
-# `gate_raised=` is the set of gate requests already raised (below), and `arm` carries it over,
-# so a re-arm does not raise them a second time. `change=` is the fingerprint of the plan's
+# `gate_raised=` is the set of gate requests already raised (below). `change=` is the fingerprint of the plan's
 # `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
-# it moved, so `arm` does not carry it and the first tick after an arm compares against nothing.
-write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state> [<reconcile cause>]]]]]]] -> 0 written, 1 not
+# it moved, so the first tick of a session compares against nothing.
+write_tick_digest() {  # <session-id> <digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state> [<reconcile cause>]]]]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -70,40 +37,37 @@ write_tick_digest() {  # <session-id> <version> [<digest> <since> <decision> <du
   [ -L "$f" ] && return 1
   {
     printf '%s\n' "$PATROL_DIGEST_SCHEMA"
-    [ -n "$2" ] && printf 'prompt_version=%s\n' "$2"
-    if [ -n "${3:-}" ]; then
-      printf 'digest=%s\nsince=%s\ndecision=%s\nduty=%s\nat=%s\n' "$3" "$4" "$5" "$6" "$(iso_now)"
+    printf 'digest=%s\nsince=%s\ndecision=%s\nduty=%s\nat=%s\n' "$2" "$3" "$4" "$5" "$(iso_now)"
+    if [ -n "${6:-}" ]; then
+      printf 'gate_raised=%s\n' "$6"
     fi
     if [ -n "${7:-}" ]; then
-      printf 'gate_raised=%s\n' "$7"
-    fi
-    if [ -n "${8:-}" ]; then
-      printf 'change=%s\n' "$8"
+      printf 'change=%s\n' "$7"
     fi
     # THE HEAD THIS TICK JUDGED `live:head` AGAINST (wave-26 T32; A-T14.2), so the turn-end wall,
     # which reads no git, hands the same head to the same ready set on this tick's turn.
-    if [ -n "${9:-}" ]; then
-      printf 'head=%s\n' "$9"
+    if [ -n "${8:-}" ]; then
+      printf 'head=%s\n' "$8"
     fi
     # THE PLAN'S `current:` AND ITS `## Tasks` ROW COUNT, as this tick read them (wave-27 T13; D20):
     # the next tick asks for a task-list reconcile when current: went 3 to 4 or the count grew.
-    # `arm` carries neither, so the first tick after an arm compares against nothing.
-    if [ -n "${10:-}" ]; then
-      printf 'plan_current=%s\n' "${10}"
+    # The first tick of a session carries neither, so it compares against nothing.
+    if [ -n "${9:-}" ]; then
+      printf 'plan_current=%s\n' "${9}"
     fi
-    if [ -n "${11:-}" ]; then
-      printf 'plan_rows=%s\n' "${11}"
+    if [ -n "${10:-}" ]; then
+      printf 'plan_rows=%s\n' "${10}"
     fi
     # THE FACTS STATE THIS TICK JUDGED (wave-27 T43; A-orch-82), `sched_facts_state`'s answer, so
     # the turn-end wall, which runs no judge and reads no git, hands the integrate row's
     # `proof:review` the same answer on this tick's turn, as it hands the head above. One line.
-    if [ -n "${12:-}" ]; then
-      printf 'facts_state=%s\n' "$(printf '%s' "${12}" | tr '\n' ' ')"
+    if [ -n "${11:-}" ]; then
+      printf 'facts_state=%s\n' "$(printf '%s' "${11}" | tr '\n' ' ')"
     fi
     # WHY THE RECONCILE IS OWED, when the plan moved (wave-27 T37): `step4` or `grew`, read by the
     # turn-end wall (lib/stop.sh `stop_turn_facts`) so its refusal gives the tick's own cause.
-    if [ -n "${13:-}" ]; then
-      printf 'reconcile=%s\n' "${13}"
+    if [ -n "${12:-}" ]; then
+      printf 'reconcile=%s\n' "${12}"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -147,56 +111,6 @@ gate_requests() {  # <gate file> <session id> <raised keys, comma-separated>
       seen[k] = 1
       print k "\t" (index(raised, "," k ",") ? "raised" : "new") "\t" a "\t" c "\t" hd
     }' "$1" 2>/dev/null
-}
-
-write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
-  local sid="$1" verb="$2" f d
-  f="$(patrol_stamp_file "$sid")" || return 1
-  [ -n "$f" ] || return 1
-  d="${f%/*}"
-  tmp_dir_ok "$d" || return 1
-  mkdir -p "$d" 2>/dev/null || return 1
-  [ -L "$f" ] && return 1
-  printf '%s|at=%s|session=%s|verb=%s\n' "$PATROL_STAMP_SCHEMA" "$(iso_now)" "$sid" "$verb" \
-    > "$f" 2>/dev/null || return 1
-  chmod 600 "$f" 2>/dev/null
-  return 0
-}
-
-# THE OTHER END OF THE SAME RECORD, and the only writer in production that ever removes a
-# stamp. Until it existed, an aging stamp had exactly one reading available to every
-# consumer — "the Patrol died" — and the two deliberate stops this system takes routinely
-# (the run-close `CronDelete`, and the DISARM decision below) produced that reading on a
-# run that had simply finished. hooks/patrol-revive.sh then blocked the stop of EVERY
-# remaining turn of the session, since one block per turn is not a block that stops
-# repeating. Removing the stamp is the readable fact that closes it: the revive hook's
-# ABSENT state is silent by design, so a stamp that is gone ends the notice rather than
-# restarting it, and the arming wall's never-armed refusal is exactly the right thing to
-# say to the next dispatch on a run whose clock was deliberately stopped.
-#
-# A SYMLINK IS NOT A STAMP, here as everywhere else under .bionic/tmp. It is left alone
-# rather than unlinked: every reader in the fleet already treats it as absent, so there is
-# nothing to close, and a script that deletes files it never wrote is a worse trade than a
-# no-op. The directory shape is checked exactly as the writer checks it, so a resolution
-# that landed somewhere else removes nothing.
-remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 could not
-  local sid="$1" f d a
-  f="$(patrol_stamp_file "$sid")" || return 1
-  [ -n "$f" ] || return 1
-  d="${f%/*}"
-  case "$d" in */.bionic/tmp) : ;; *) return 1 ;; esac
-  # THE ARMING RECORD GOES WITH THE STAMP, best-effort. Both halves say "this session's
-  # Patrol is live", so leaving one behind leaves the disk saying half of a thing that
-  # ended. It is best-effort because no reader consults the marker without a stamp beside
-  # it, so a survivor claims nothing — where a surviving STAMP claims a live clock, which
-  # is why that one decides the return code.
-  a="$(patrol_armed_file "$sid")" || a=""
-  if [ -n "$a" ] && [ ! -L "$a" ] && [ -e "$a" ]; then rm -f "$a" 2>/dev/null; fi
-  [ -L "$f" ] && return 0
-  [ -e "$f" ] || return 0
-  rm -f "$f" 2>/dev/null
-  [ -e "$f" ] && return 1
-  return 0
 }
 
 # ---------------------------------------------------------------- the scheduler
@@ -800,26 +714,6 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
   return 1
 }
 
-# ---------------------------------------------------------------- does the bound run owe a Patrol stamp?
-
-# tick_patrol_owed <session-id> -> rc 1 only when the bound plan's scale has no Patrol (`scale_patrol` says `no`); rc 0
-# otherwise. `arm` and the tick both ask it, so a scale with no Patrol is neither armed nor stamped.
-#
-# THE SCALE IS READ THE WAY RESUME READS IT: the plan this session's run resolves to, its frontmatter's `scale:`.
-# `resolve_run` answers once per process and is the selection every later read of the tick takes, so asking it here
-# first changes nothing below. A tick that resolves no plan, a plan with no readable `scale:` or a library without
-# scale.sh keeps the behaviour from before the table: a Patrol is assumed and the stamp is written, so a wave-scale
-# run loses nothing and an unreadable scale never silences a Patrol that may be needed.
-tick_patrol_owed() {  # <session-id>
-  local root
-  root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)" && [ -n "$root" ] || return 0
-  resolve_run "$root" "$1"
-  [ -n "${POKER_RUN_PLAN:-}" ] || return 0
-  { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-  declare -F scale_patrol >/dev/null 2>&1 || return 0
-  [ "$(scale_patrol "$POKER_RUN_PLAN")" != no ]
-}
-
 # ---------------------------------------------------------------- the decision line
 #
 # THE TICK'S LAST LINE, AND THE ONLY PLACE THIS SCHEMA IS PRINTED (REQ-10 AC-10.2/10.4; D5).
@@ -908,7 +802,7 @@ tick_runs_out() (
 # Read once a tick: the predicate and the pass's look both ask it at the tick's exit.
 tick_run_delivered() {
   [ -n "${TICK_RUN_STATE:-}" ] || TICK_RUN_STATE="${RUN_STATE_RAW:-}"
-  [ -n "$TICK_RUN_STATE" ] || TICK_RUN_STATE="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID" 2>/dev/null)"
+  [ -n "$TICK_RUN_STATE" ] || TICK_RUN_STATE="$(run_state "$REPO_REAL" "$SESSION_ID" 2>/dev/null)"
   [ "${TICK_RUN_STATE%%|*}" = delivered ]
 }
 
@@ -929,7 +823,7 @@ tick_run_pr_open() {
   [ "$rc" -ne 1 ] || return 1
   [ "$rc" -eq 0 ] || return 2
   asks="$(reader_main "$1" asks 2>/dev/null)" || return 2
-  printf '%s\n' "$asks" | /usr/bin/grep -qF "|key=$(line_merge_ask_key "$(printf '%s\n' "$pr" | sed -n 's/^branch=//p')")|" && return 1
+  /usr/bin/grep -qF "|key=$(line_merge_ask_key "$(printf '%s\n' "$pr" | sed -n 's/^branch=//p')")|" <<< "$asks" && return 1
   return 0
 }
 
@@ -956,73 +850,6 @@ tick_watch_facts() {  # <file>
   printf '%s\n%s' "$line" "$more" > "$f" 2>/dev/null || :
 }
 
-  poker_verb_arm() {
-    SESSION_ID="$(session_id)" || SESSION_ID=""
-    if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
-      die "A Patrol stamp answers for ONE session, so without the key there is nothing to write."
-      exit 3
-    fi
-    # A SCALE WITH NO PATROL IS NOT ARMED. The tick stamps only a run that owes a Patrol (`tick_patrol_owed`), and an
-    # `arm` that wrote the stamp anyway would claim a Patrol the scale's profile says nobody runs. Said in one line,
-    # so a caller that was told to re-arm sees why nothing was.
-    if ! tick_patrol_owed "$SESSION_ID"; then
-      say "no Patrol to arm — a $(plan_frontmatter_get "$POKER_RUN_PLAN" scale 2>/dev/null)-scale run has none; no stamp was written"
-      exit 0
-    fi
-    if ! write_patrol_stamp "$SESSION_ID" arm; then
-      die "REFUSED — the Patrol stamp could not be written; this session is NOT armed."
-      die "Check that .bionic/tmp is a writable real directory under the project root."
-      exit 2
-    fi
-    # THE SECOND HALF OF ARMING: the instant, recorded so a later tick can tell THIS run's
-    # delivery from the previous one's (R-13). Advisory — a session armed without it keeps
-    # ticking and never auto-DISARMs, which is the safe direction — so it warns and the arm
-    # still stands.
-    write_patrol_armed_marker "$SESSION_ID" \
-      || die "WARN — the arming instant could not be recorded; this Patrol will not auto-DISARM (run \`disarm\` to stop it)."
-    # THE PROMPT VERSION THIS ARM PAIRS WITH (wave-24 T7; D5). An arm follows the CronCreate of
-    # `prompt`'s output, so the version this poker prints is the one the job now carries. The
-    # digest it replaces is dropped with it: the first tick after an arm prints in full. The gate
-    # requests already raised are kept (wave-25 T5): a re-arm is not a reason to raise them again.
-    write_tick_digest "$SESSION_ID" "$PATROL_PROMPT_VERSION" "" "" "" "" \
-      "$(tick_digest_field "$(tick_digest_file "$SESSION_ID")" gate_raised)" \
-      || die "WARN — the prompt version could not be recorded; the tick will ask for a re-arm."
-    say "armed — the Patrol stamp is fresh for this session: $(patrol_stamp_file "$SESSION_ID")"
-    exit 0
-  }
-
-  # THE DELIBERATE STOP. Paired with `CronDelete` at run close (the ritual is stated in
-  # skills/canonical-sdlc/SKILL.md §Dispatch, and both halves belong to it): `CronDelete`
-  # stops the firing, this stops the CLAIM that something is still firing. Either half
-  # alone leaves a Patrol that is half-stopped in the direction that lies.
-  #
-  # IDEMPOTENT, AND SILENT ABOUT NOTHING. A ritual is a thing a model runs from a list, so
-  # running it twice, or on a session that never armed, answers 0 and says which of the two
-  # it was — a no-op reported as a failure is a line the operator has to stop and interpret
-  # at exactly the moment the run is trying to end.
-  poker_verb_disarm() {
-    SESSION_ID="$(session_id)" || SESSION_ID=""
-    if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
-      die "A Patrol stamp answers for ONE session, so without the key there is nothing to remove."
-      exit 3
-    fi
-    DISARM_STAMP="$(patrol_stamp_file "$SESSION_ID")" || DISARM_STAMP=""
-    if [ -n "$DISARM_STAMP" ] && [ -f "$DISARM_STAMP" ] && [ ! -L "$DISARM_STAMP" ]; then
-      if remove_patrol_stamp "$SESSION_ID"; then
-        say "disarmed — the Patrol stamp for this session is removed: $DISARM_STAMP"
-        say "CronDelete the Patrol job too if it is still in the table; this half only stops the claim that it fires."
-        exit 0
-      fi
-      die "REFUSED — the Patrol stamp could not be removed, so this session still reads as armed."
-      die "Remove it by hand or the death notice keeps firing every turn: $DISARM_STAMP"
-      exit 2
-    fi
-    say "already disarmed — no Patrol stamp for this session${DISARM_STAMP:+: $DISARM_STAMP}"
-    exit 0
-  }
-
   poker_verb_tick() {
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -1033,27 +860,23 @@ tick_watch_facts() {  # <file>
 
     # ---------- THE ENGAGEMENT GUARD (AC-10): is this session bionic's at all? ----------
     #
-    # BEFORE ANYTHING IS READ, DECIDED OR WRITTEN — above the stamp, above the roster,
+    # BEFORE ANYTHING IS READ, DECIDED OR WRITTEN — above the roster,
     # above the sweeper. Chris, 2026-09-03: "all guardrails imposed by bionic should only
     # apply when exercising bionic. Nothing should apply until bionic is triggered" — and
     # the trigger is the canonical-sdlc skill, which writes
-    # `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. The Patrol prompt
-    # runs this verb, and a Patrol inherited by a session that never invoked the skill
-    # must decide nothing about it rather than deciding wrongly.
+    # `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A tick run in a
+    # session that never invoked the skill must decide nothing about it rather than deciding wrongly.
     #
     # ONE LINE, EXIT 0, and not a refusal: the tick fired correctly and found nothing it
-    # is entitled to judge. `arm` is deliberately not guarded (writing a stamp for a
-    # session that asked for one is harmless) and neither is `disarm`, which removes the
-    # stamp and leaves this marker exactly where it is — a session that invoked the skill
-    # is bionic's for its whole life, so every hook still binds after a disarm (AC-15).
+    # is entitled to judge.
     # [WALL: tests/session-poker.test.sh]
     if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
       say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
       exit 0
     fi
 
-    # THE WALK, TAKEN BEFORE THE STAMP IS WRITTEN, and that ordering is load-bearing.
-    # `write_patrol_stamp` mkdir -p's `<resolved root>/.bionic/tmp`, so a tick that resolved
+    # THE WALK, TAKEN BEFORE ANYTHING IS WRITTEN, and that ordering is load-bearing.
+    # The running tick's claim may create `<resolved root>/.bionic/tmp`, so a tick that resolved
     # the WRONG root creates a `.bionic` there as its first act — and every walk taken after
     # that point reports the root it just manufactured as `chosen`. Read here, the walk still
     # describes the filesystem the tick actually arrived in, which is the only version of it
@@ -1062,15 +885,15 @@ tick_watch_facts() {  # <file>
     TICK_ROOT_TAG="$(printf '%s\n' "$TICK_ROOT_WALK" | tail -1 | awk -F'\t' '{ print $2 }')"
 
     # ONE TICK OF A SESSION AT A TIME. The tick records its process while it runs (lib/patrol.sh `tick_run_claim`),
-    # after the walk, since the claim may create `.bionic/tmp`, and before the stamp, since a tick that finds a live
-    # one of its session decides nothing and so attests nothing: it says so in one line and exits 0, the quiet exit,
+    # after the walk, since the claim may create `.bionic/tmp`, and before anything is decided, since a tick that finds
+    # a live one of its session decides nothing: it says so in one line and exits 0, the quiet exit,
     # so the watch pass that ran it stays quiet too. A record that cannot be written leaves the tick as it ran
     # before the record existed: unrecorded, on stderr. The exit trap removes the record; tick_emit, which replaces
     # that trap below, removes it as its last act.
     TICK_RUN_ROOT=""
-    _tr_stamp="$(patrol_stamp_file "$SESSION_ID")" || _tr_stamp=""
-    if [ -n "$_tr_stamp" ] && tmp_dir_ok "${_tr_stamp%/*}"; then
-      TICK_RUN_ROOT="${_tr_stamp%/.bionic/tmp/*}"
+    _tr_root="$(tick_state_root)" || _tr_root=""
+    if [ -n "$_tr_root" ] && tmp_dir_ok "$_tr_root/.bionic/tmp"; then
+      TICK_RUN_ROOT="$_tr_root"
       _tr_held="$(tick_run_claim "$TICK_RUN_ROOT" "$SESSION_ID" "$$")"
       case $? in
         0) trap 'tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"' EXIT ;;
@@ -1079,20 +902,6 @@ tick_watch_facts() {  # <file>
         *) TICK_RUN_ROOT=""
            die "WARN — the running tick's record could not be written; this tick runs unrecorded." ;;
       esac
-    fi
-
-    # STAMP FIRST, BEFORE ANYTHING IS READ OR DECIDED. Every line below this one can end in
-    # a refusal, and each of those refusals is a HEALTHY Patrol firing into a state it has
-    # nothing to say about. What the stamp attests is the firing, so it is taken here — the
-    # first thing after the session key exists to name the file with.
-    #
-    # A SCALE WITH NO PATROL STAMPS NOTHING (the scale table's `patrol` cell, lib/scale.sh). Resume
-    # removes the stamp a task-scale run never owed and the stop wall judges none, so a tick that
-    # wrote one on every plan re-created what resume had removed and the wall then demanded the
-    # Patrol resume said does not exist. The tick still reads and decides; only the stamp is the cell's.
-    if tick_patrol_owed "$SESSION_ID"; then
-      write_patrol_stamp "$SESSION_ID" tick \
-        || die "WARN — the Patrol stamp could not be written; the tick itself is unaffected."
     fi
 
     # ---------- THE TICK SAYS WHAT CHANGED, OR "unchanged" (wave-24 T7, REQ-4; D4, D5) ----------
@@ -1108,9 +917,6 @@ tick_watch_facts() {  # <file>
     # hash `tick_digest_file` kept from the last tick. The exit trap then prints the buffer, or
     # the one line, and writes the file. A tick that exits on a refusal prints its buffer as it
     # always did and writes no digest. stderr is not held: a warning is a warning on every tick.
-    #
-    # THE PROMPT VERSION rides the same file: `arm` records the version its prompt carried, and a
-    # tick that finds none, or an older one, prints one re-arm line above everything else.
     TICK_BUF="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-tick.XXXXXX" 2>/dev/null)" || TICK_BUF=""
     # ONE REGRESSION STATE PER TICK (wave-26 T64). The schedule and the change fingerprint below each
     # parse the table under their own `units_memoised`; this names the one file both keep the
@@ -1120,8 +926,6 @@ tick_watch_facts() {  # <file>
     TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""
     TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""; TICK_LANDINGS=""; TICK_RUNS_LINES=""; TICK_RUNS_KEY=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
-    TICK_PVER="$(tick_digest_field "$TICK_DIGEST_FILE" prompt_version)"
-    TICK_REARM=""
     # ONE RESTART LINE, FROM DOCTOR'S READER (wave-35 T5; REQ-4 AC-4.5; D13). The CLI holds hooks.json,
     # the skills, the role files and the commands as they were at its start; doctor.sh `--restart-lines`
     # is the one comparison, and the tick prints its own session's line, if any, above everything else
@@ -1140,18 +944,11 @@ tick_watch_facts() {  # <file>
         TICK_RESTART="restart needed — ${_tr_classes} changed after this session loaded them (pid ${_tr_pid}): exit claude and start it again"
       fi
     fi
-    case "$TICK_PVER" in ''|*[!0-9]*) TICK_PVER_N=0 ;; *) TICK_PVER_N="$TICK_PVER" ;; esac
-    if [ "$TICK_PVER_N" -lt "$PATROL_PROMPT_VERSION" ]; then
-      TICK_REARM="poker: note: re-arm the Patrol — its prompt is v=${TICK_PVER:-unrecorded} and this poker prints v=${PATROL_PROMPT_VERSION}: replace the bionic-patrol job with one carrying the output of \`bash ${POKER_WORD} prompt\`, then run \`bash ${POKER_WORD} arm\`"
-    fi
     tick_emit() {
       local rc=$?
       [ -n "$TICK_BUF" ] || { [ -z "$TICK_RUN_ROOT" ] || tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"; exit "$rc"; }
       exec 1>&3 3>&-
       [ -z "${TICK_RESTART:-}" ] || say "$TICK_RESTART"
-      if [ -n "$TICK_DIGEST" ] && [ -n "$TICK_REARM" ]; then
-        printf '%s\n' "$TICK_REARM"
-      fi
       [ -z "${TICK_DECIDED:-}" ] || sitrep_tick_line "${SCHED_PLAN:-}"  # THE TICK'S ONE-LINE SITREP, EVERY TICK (wave-38 T11; D13)
       # The watcher's pass asks whether the run waits only on the person, after the asks the line above counted.
       [ -z "${BIONIC_WATCH_FACTS:-}" ] || [ -z "${TICK_DECIDED:-}" ] || tick_watch_facts "$BIONIC_WATCH_FACTS" >/dev/null 2>&1
@@ -1174,7 +971,7 @@ tick_watch_facts() {  # <file>
       fi
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
+        write_tick_digest "$SESSION_ID" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       [ -z "$TICK_RUN_ROOT" ] || tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"
@@ -2774,29 +2571,12 @@ EOF
     # Patrol"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
     # file exists, so OPEN=0-with-TOTAL>0 can never be the absent-file case.
     if [ "$TOTAL" -eq 0 ] && [ ! -e "$ROSTER_FILE" ]; then
-      # AC-38 (fold-in ratified 2026-09-03): THE ARM SPLITS. "No roster" was one refusal
-      # covering two states that deserve opposite answers, and the wrong one was observed on
-      # this wave's own Patrol tick #1 — an orchestrator that had armed at engagement, was
-      # standing in the right project, and had simply not dispatched anything yet got
-      # REFUSED with a wall of candidate paths describing a root that was perfectly correct.
-      # Arming precedes dispatch by design (SKILL.md §Dispatch: "arm at engagement"), so the
-      # first tick of every run reaches this line, and answering it with a refusal teaches
-      # the reader to ignore the one message that also reports a mis-resolved root.
-      #
-      # THE TWO STATES, and the fact that tells them apart:
-      #   armed here, and the walk CHOSE a real `.bionic`  -> QUIET. The Patrol is doing its
-      #     job; there is simply nothing on the roster yet. Exit 0, stamp kept (it was
-      #     written above), one line, and no candidate walk — the root is not in doubt.
-      #   anything else                                     -> the refusal below, unchanged.
-      #
-      # THE ARMING RECORD IS THE LOAD-BEARING HALF. It is written only by `arm`, and its
-      # path is resolved against the SAME root the roster's is, so a tick that resolved the
-      # wrong root finds no arming record there either and refuses — which is exactly the
-      # failure the refusal exists to report. The root tag is the second guard, and it is
-      # read off the walk taken ABOVE the stamp write for the reason given there.
-      TICK_ARMED="$(patrol_armed_file "$SESSION_ID")" || TICK_ARMED=""
-      if [ -n "$TICK_ARMED" ] && [ -f "$TICK_ARMED" ] && [ ! -L "$TICK_ARMED" ] \
-         && [ "$TICK_ROOT_TAG" = "chosen" ]; then
+      # THE ARM SPLITS. "No roster" covers two states that deserve opposite answers: an engaged
+      # session that has simply not dispatched anything yet, and a tick that resolved the wrong
+      # root. The walk tells them apart: a root the walk CHOSE is a real `.bionic`, and the tick
+      # there is QUIET with the scheduler's lines; any other answer is the refusal below, which
+      # prints the walk. The walk is the one taken before the claim could create a `.bionic`.
+      if [ "$TICK_ROOT_TAG" = "chosen" ]; then
         # THE SCHEDULER, FROM ITS ONE SITE (wave-26 T59; REQ-6 AC-6.6), above the decision line.
         # The rung (AC-17: on EVERY tick); the holds and the ledger (wave-21 T13: no roster yet
         # is the reader's no-roster rule, the gate's own, so what prints is what the gate would
@@ -2823,15 +2603,14 @@ EOF
           tick_decision_line FILL "$TOTAL" "$OPEN" "" "" "$SCHED_FILL"
           exit 0
         fi
-        say "QUIET — armed, nothing dispatched yet on this session"
+        say "QUIET — engaged, nothing dispatched yet on this session"
         tick_decision_line QUIET "$TOTAL" "$OPEN"
         exit 0
       fi
       die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
-      die "An armed session with nothing dispatched yet is QUIET, and was answered above — so"
-      die "reaching this line means the Patrol never armed here, or the wrong project root was"
-      die "resolved. Either way nothing was read to decide DISARM from, and DISARM ends the"
-      die "Patrol for the rest of this session."
+      die "An engaged session with nothing dispatched yet is QUIET under the root the walk chose, so"
+      die "reaching this line means the wrong project root was resolved, and nothing was read to"
+      die "decide DISARM from."
       # THE WALK, SHOWN (2.4, AC-13). The sentence above names the likely cause and then
       # leaves the reader with the one question they cannot answer from a message: WHICH
       # ancestor was taken, and what was passed over to get there. That answer is a property
@@ -2854,7 +2633,7 @@ EOF
     RUN_STATE=open
     RUN_STATE_WHY="the roster still carries open work"
     # THE TERMINAL DECISION KEEPS THE ROSTER'S COUNT, never the live set's (S19). DISARM
-    # removes the stamp and ends the Patrol for the rest of the session, and the state it
+    # ends the watch's reason to wake for the rest of the session, and the state it
     # would fire on here is precisely the one that most needs supervising: a row whose
     # contract is UNMET and whose agent has finished without delivering. `open=` and the
     # fill are advisory arithmetic and may be trimmed; this may not.
@@ -2863,13 +2642,13 @@ EOF
       # so a latch it sets dies with the subshell and `sched_budget_read` would resolve and
       # announce a second time. One resolution in the parent, one announcement.
       resolve_run "$REPO_REAL" "$SESSION_ID"
-      RUN_STATE_RAW="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID")"
+      RUN_STATE_RAW="$(run_state "$REPO_REAL" "$SESSION_ID")"
       RUN_STATE="${RUN_STATE_RAW%%|*}"
       RUN_STATE_WHY="${RUN_STATE_RAW#*|}"
     fi
 
     # DISARM — no open row AND a run that says it is delivered, in a delivery that POSTDATES
-    # this Patrol's arming (R-13: an older one is the previous run's close-out, still newest
+    # this session's binding (R-13: an older one is the previous run's close-out, still newest
     # while the new run's plan does not exist yet). "No open row" alone was the whole
     # predicate until 1.3.2, and it is also exactly what a live wave looks like between two
     # batches: every writer of a task landed, the next not yet briefed. The tick ended the
@@ -2878,9 +2657,8 @@ EOF
     # literal "disarmed on empty roster" to a roster whose every row is MET/WAIVED/acked (S2
     # design decision, logged to the plan); the second is what tells a finish from a lull.
     #
-    # An empty roster on a run that has not delivered falls through to QUIET below, and QUIET
-    # KEEPS THE STAMP — which is the half that matters on disk. The clock keeps running, the
-    # arming wall stays satisfied, and hooks/patrol-revive.sh has nothing to report.
+    # An empty roster on a run that has not delivered falls through to QUIET below, and the
+    # watch keeps passing.
     if [ "$OPEN_ROSTER" -eq 0 ] && [ "$RUN_STATE" = delivered ]; then
       # THE RUNG ON THE TERMINAL TICK TOO (AC-17). The number is moot to a Patrol that is
       # stopping, and that is not the point: the acceptance criterion is that every tick
@@ -2892,17 +2670,8 @@ EOF
       tick_plan_memoised tick_plan_report
       tick_conclude DISARM
       tick_gate_report
-      say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
+      say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); nothing is left to watch."
       tick_decision_line DISARM "$TOTAL" "$OPEN" "" "" "" "" "$TICK_GATE_FIELD"
-      # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
-      # so the stamp this very tick wrote before it decided has to stop claiming a live
-      # clock, or hooks/patrol-revive.sh reads the stop this line just chose as a death and
-      # blocks every remaining turn of the session demanding a re-arm nobody wants (critic
-      # C-2, epic-19 w1). It is LAST so that nothing above it can be skipped by it: the
-      # decision line is already printed, and a removal that fails costs a late notice
-      # rather than a lost decision.
-      remove_patrol_stamp "$SESSION_ID" \
-        || die "WARN — the Patrol stamp could not be removed; the death notice may fire on later turns."
       exit 0
     fi
 
@@ -3022,7 +2791,7 @@ EOF
     elif [ "$TICK_DECISION" = STANDDOWN ]; then
       say "STANDDOWN — ${SD_ORDER_NAMES} met and still on the panel; TaskStop each, or hold it."
     elif [ "$OPEN_ROSTER" -eq 0 ]; then
-      say "QUIET — no open row on this roster, but the run is not delivered (${RUN_STATE_WHY}); the Patrol keeps its stamp and its clock."
+      say "QUIET — no open row on this roster, but the run is not delivered (${RUN_STATE_WHY}); the watch goes on."
     else
       # NAMING BOTH READINGS, because both are now taken: a row can be inside its duration
       # and still have gone quiet, and a QUIET tick that named only the duration was the
@@ -3048,10 +2817,9 @@ EOF
 
   # ---------------------------------------------------------------- the watcher's pass
   #
-  # ONE PASS OF THE TICK WITH NO MODEL. The tick runs whole, in a process of its own, exactly as the Patrol runs it:
-  # it stamps, lands, orders, opens asks and writes its digest, so the walls that read any of those read a watched
-  # session as they read a patrolled one. What the pass adds is the reading of its print, which the Patrol's prompt
-  # left to the model: `watch_wake_line` (lib/patrol.sh) names the act a print owes, if any, and the pass exits with
+  # ONE PASS OF THE TICK WITH NO MODEL. The tick runs whole, in a process of its own: it lands, orders, opens asks
+  # and writes its digest, so the walls that read any of those read what it decided. What the pass adds is the
+  # reading of its print: `watch_wake_line` (lib/patrol.sh) names the act a print owes, if any, and the pass exits with
   # that library's codes, a wake printing its one line on stdout and nothing else. The tick's own stderr is passed
   # through, so a warning is still a warning.
   #

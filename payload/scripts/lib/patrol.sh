@@ -1,77 +1,22 @@
 #!/bin/bash
-# patrol.sh — the Patrol, reconstructed from disk (task T2, plan
-# task-dispatch-wall-channel-loss).
+# patrol.sh — the supervision of each live session, read from disk: which sessions live, what state each keeps
+# under .bionic/tmp, what its roster holds against the dispatches its transcript shows, the tick's digest and
+# running record, and the watcher's record and wake line.
 #
-# WHAT THIS FILE OWNS. One question: what is the Patrol actually doing on this
-# machine right now. Nobody can answer it from the authoritative source, because
-# there is no authoritative source on disk — the CLI holds its cron table in
-# process memory and writes none of it down. So the answer here is RECONSTRUCTED
-# from two things that ARE on disk, and every consumer is told so in the same
-# breath: `${CLAUDE_CONFIG_DIR}/sessions/<pid>.json`, which names each live
-# process with its session id and cwd, and that session's transcript under
-# `${CLAUDE_CONFIG_DIR}/projects/<slug>/<sid>.jsonl`, where `CronCreate` and
-# `CronDelete` are recorded tool_uses like any other.
-#
-# THE LIMIT IS PART OF THE ANSWER, not a caveat attached to it. A reconstruction
-# is what the transcript IMPLIES; the process may hold something else. A job
-# created before the transcript this file can see, one created by a CLI build
-# that words its confirmation differently, a delete the platform refused — each
-# of those is a live job this file cannot see or a dead one it still counts.
-# Every renderer of these lines prints the limit beside them.
-#
-# THE JOB ID IS NOT IN THE REQUEST. `CronCreate`'s input carries `cron`,
-# `prompt` and `recurring` and nothing else; the platform mints the id and
-# returns it in the tool_result prose — "Scheduled recurring job b63afd05 (13,43
-# * * * *)…" and "Scheduled one-shot task 1037a802 (46 10 18 8 *)…" are the two
-# shapes measured on this machine (2026-08-22). So a job is reconstructed by
-# JOINING the request to its result on `tool_use_id`, and a request whose result
-# is missing from the transcript is a job whose id is unknown — reported as
-# such, never guessed, because an id is what a `CronDelete` line is made of.
-#
-# WHICH JOB IS THE PATROL. Not by its prose: the patrol prompt is composed per
-# session by a model, so its wording is not a fact anything may key on. What IS
-# fixed is what the prompt has to CONTAIN — skills/canonical-sdlc/SKILL.md
-# §Dispatch makes `session-poker.sh tick` the first of its four reads, so a
-# recurring job whose prompt runs the poker is a Patrol and one that does not is
-# some other timer. That is a structural marker taken from the contract rather
-# than a phrase taken from a sample.
-#
-# READ-ONLY, LIKE ITS ONE CALLER. Nothing here writes, moves or deletes: it
-# stats two state files, reads a transcript, and shells out to
-# `session-poker.sh interval`, a verb whose whole job is to print a number.
+# THE SESSIONS ARE READ FROM `${CLAUDE_CONFIG_DIR}/sessions/<pid>.json`, which names each live process with its
+# session id and cwd, and each session's transcript under `${CLAUDE_CONFIG_DIR}/projects/<slug>/<sid>.jsonl`.
 #
 # Sourced, never executed.  Depends on detect.sh only for `detect_bounded`,
 # and degrades to an unbounded run if that is not present.
 
 PATROL_SCHEMA="patrol-session/v1"
-PATROL_JOB_SCHEMA="patrol-job/v1"
-PATROL_STAMP_SCHEMA_OUT="patrol-stamp/v1"
 PATROL_ROSTER_SCHEMA="patrol-roster/v1"
 PATROL_WALL_SCHEMA="patrol-wall/v1"
 
-# THE DEFAULT PATROL INTERVAL, in seconds: its one copy. hooks/session-poker.sh takes its own default from it, and
-# every reader of the interval (this file's `patrol_interval`, the arming wall, the stop library, session start) asks
-# the poker's `interval` for the project's configured value and falls back to this when that refuses or cannot be
-# asked, so a broken config line cannot disarm a wall and no second copy can drift from the poker's.
+# THE DEFAULT POKER INTERVAL, in seconds: its one copy. hooks/session-poker.sh takes its own default from it, and
+# every reader of the interval (this file's `patrol_interval`, the sweep's window, the fill's quiet reads) asks the
+# poker's `interval` for the project's configured value and falls back to this when that refuses or cannot be asked.
 PATROL_INTERVAL_DEFAULT=1200
-
-# HOW STALE IS STALE IS NOT A MULTIPLE OF THE INTERVAL ANY MORE (epic-23 wave-16
-# REQ-11, retiring L-DETECT/4.5's constant below). It held one judgment call —
-# "the stamp is stale past twice the poker interval" — for the three sites that
-# each used to type it out. Every one of them has stopped asking: age past a
-# threshold cannot tell a dead cron from a busy orchestrator, because a session
-# cron fires only while the session is IDLE. `patrol_fire_window` below is the
-# one threshold left (the interval plus the scheduler's jitter, the longest idle
-# span in which a firing is GUARANTEED an opportunity), and past it the answer
-# comes from `patrol_verdict` over the transcript rather than from arithmetic —
-# this file's own `patrol_stamp_state`, `hooks/session-start.sh`'s banner,
-# `hooks/dispatch-preflight.sh` and the stop library all read that pair now.
-#
-# THE EXPORT ITSELF IS GONE (wave-16 REQ-10 moved `adopt`'s window — a ROW's
-# declared CADENCE, a different question that borrowed this name for the number —
-# onto `observe_class`, and this file's readers went with REQ-11).
-# tests/patrol-stale.test.sh holds the readers; the tree-wide absence is pinned
-# at the wave head in tests/cross-gate-agreement.test.sh §PV.
 
 _patrol_self_dir() { dirname "${BASH_SOURCE[0]:-$0}"; }
 # roots.sh, THE SOFT SOURCE — the idiom lib/detect.sh uses for lib/deps.sh, taken at source
@@ -167,11 +112,12 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #   preflight    hooks/preflight-probe.sh      the budget attestation
 #   engaged      scripts/lib/binding.sh        the engagement marker
 #   sweeper      hooks/session-sweeper.sh      the ack ledger
-#   patrol       hooks/session-poker.sh        the Patrol stamp, plus its `.armed` sibling
+#   patrol       (none now)                    the old timed job's stamp and its `.armed` sibling: no hook
+#                                              writes them, and the class stays so the sweep and close-out's
+#                                              wipe still clear the copies an older build left
 #   stop-orders  hooks/stop-orders.sh          the per-session order queue (AC-6.2, wave-13)
-#   tick-digest  hooks/session-poker.sh        the tick's digest, duty and armed prompt version
-#                                              (wave-24 T7) — kept off the `patrol-` prefix,
-#                                              whose `patrol-*.state` glob reads stamps
+#   tick-digest  hooks/session-poker.sh        the tick's digest and duty — kept off the `patrol-` prefix,
+#                                              whose class glob would read it as a session named `digest-<sid>`
 #   workspaces   scripts/lib/worktree.sh       the run's workspace record, one line per tree
 #                                              `spawn-worktree.sh create` made (wave-25 T15)
 #   gate         hooks/permission-answer.sh    the reserved requests the tick escalates
@@ -186,6 +132,8 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #                                              `tick-digest-` file as a session named `digest-<sid>`
 #   watch        hooks/watch.sh                the watch record: the watcher's process while it watches, or
 #                                              why it rests (`watch_state` below)
+#   duty         scripts/lib/refuse.sh         the whole refusal the turn-end hook last kept for the duty verb
+#   stop-said    scripts/lib/stop.sh           the tick digest the stop line was last said for
 #
 # THE OWNER IS THE NAME UP TO ITS FIRST DOT, FOR EVERY CLASS (wave-27 T68; review pass 47 S1,
 # A-orch-137). A session id holds no dot (lib/context.sh admits `[A-Za-z0-9_-]` only) and an
@@ -200,7 +148,7 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 # so no id derived here can address one. A non-session file added later is safe on
 # arrival for the same reason. (`stop-check.state` was a third of these until
 # epic-23 wave-15 deleted the observation record itself — ADR-028.)
-PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock owed tick-run watch"
+PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock owed tick-run watch duty stop-said"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
 # EVERY SESSION ID WITH STATE HERE, each once, in class-then-name order. Symlinks
@@ -380,15 +328,7 @@ _patrol_scan_jq='
   | select((.message.content? | type) == "array")
   | . as $entry
   | $entry.message.content[]
-  | if (.type == "tool_use" and .name == "CronCreate") then
-      ["C", .id,
-       ((.input.cron // "") | tostring),
-       (if (.input.recurring // false) then "yes" else "no" end),
-       (if ((.input.prompt // "") | test("session-poker\\.sh[[:space:]]+tick")) then "patrol" else "other" end),
-       ((.input.prompt // "") | gsub("[\n\r\t|]"; " ") | .[0:160])]
-    elif (.type == "tool_use" and .name == "CronDelete") then
-      ["D", ((.input.id // "") | tostring)]
-    elif (.type == "tool_use" and .name == "Agent") then
+  | if (.type == "tool_use" and .name == "Agent") then
       # THE TIMESTAMP RIDES ALONG: the ENTRY own `timestamp` field, the same one
       # hooks/session-poker.sh window-scopes count_main_thread_dispatches against, read off
       # $entry rather than off this content item (a tool_use block carries none of its own).
@@ -404,11 +344,7 @@ _patrol_scan_jq='
   | @tsv
 '
 
-# THE JOIN, AND THE SUBTRACTION. A `CronCreate` is joined to its result to learn
-# the id the platform minted; ids named by a `CronDelete` are removed. What is
-# left is the job table as the transcript implies it. Creation order is
-# preserved, which is what lets the duplicate verdict keep the NEWEST job and
-# name the older ones for deletion.
+# THE COUNT OF DISPATCHES AND OF REFUSALS, off the A and R records of one pass.
 #
 # REFUSED DISPATCHES ARE COUNTED HERE TOO, off the same `R` records the job
 # join already reads — no second pass over the transcript. This is a
@@ -458,30 +394,15 @@ _patrol_join_awk='
     d = substr(ts, 1, 19)
     return (d >= substr(since, 1, 19))
   }
-  $1 == "C" { ord[++n] = $2; cron[$2] = $3; rec[$2] = $4; kind[$2] = $5; head[$2] = $6 }
-  $1 == "D" { del[$2] = 1 }
-  $1 == "R" { res[$2] = $4; if ($3 == "1" && ($2 in isagent) && in_window($5)) refused++ }
+  $1 == "R" { if ($3 == "1" && ($2 in isagent) && in_window($5)) refused++ }
   $1 == "A" { if (in_window($3)) { agents++; isagent[$2] = 1 } }
   END {
-    for (i = 1; i <= n; i++) {
-      tid = ord[i]
-      id = ""
-      nf = split(res[tid], w, " ")
-      for (j = 1; j < nf; j++) {
-        if (w[j] == "job" || w[j] == "task") { id = w[j+1]; break }
-      }
-      # A trailing punctuation mark on the id would make it a different string
-      # from the one CronDelete was given.
-      gsub(/[^0-9A-Za-z_-]/, "", id)
-      if (id != "" && (id in del)) continue
-      printf "JOB\t%s\t%s\t%s\t%s\t%s\n", (id == "" ? "?" : id), cron[tid], rec[tid], kind[tid], head[tid]
-    }
     printf "AGENTS\t%d\n", agents
     printf "REFUSED\t%d\n", refused
   }
 '
 
-_patrol_scan() {  # <transcript> [<since ISO>] -> JOB/AGENTS/REFUSED records
+_patrol_scan() {  # <transcript> [<since ISO>] -> AGENTS/REFUSED records
   local t="${1:-}" since="${2:-}" secs
   [ -f "$t" ] || return 1
   command -v jq >/dev/null 2>&1 || return 1
@@ -510,8 +431,7 @@ patrol_interval() {  # <repo-root> -> "<seconds> <configured|default>"
 }
 
 # THE WINDOW: since when does THIS roster's own record of this session begin. The answer is the roster file's
-# creation instant, or the Patrol stamp's beside it when the roster cannot be dated: arming precedes the first
-# dispatch, so the stamp still dates the stretch the session answers for. The creation instant is the filesystem's
+# creation instant. The creation instant is the filesystem's
 # own (`stat %B`, `%W` on GNU, where 0 means none is kept), never the mtime: the roster is append-only, so its mtime
 # is the last dispatch and a window from it would hide every gap but the newest. tests/cross-gate-agreement.test.sh
 # §Q.3 compares the two COUNTING functions this window feeds on one shared fixture.
@@ -522,10 +442,9 @@ patrol_window() {  # <repo-root> <sid> -> ISO instant on stdout, empty for "the 
   local repo="${1:-}" sid="${2:-}" t f b=""
   [ -n "$repo" ] && [ -n "$sid" ] || return 0
   t="$(tmp_root "$repo" 2>/dev/null)" || return 0
-  for f in "$t/roster-${sid}.state" "$t/patrol-${sid}.state"; do
-    b="$(stat -f %B "$f" 2>/dev/null || stat -c %W "$f" 2>/dev/null)" || b=""
-    case "$b" in ''|*[!0-9]*|0) b="" ;; *) break ;; esac
-  done
+  f="$t/roster-${sid}.state"
+  b="$(stat -f %B "$f" 2>/dev/null || stat -c %W "$f" 2>/dev/null)" || b=""
+  case "$b" in ''|*[!0-9]*|0) b="" ;; esac
   [ -n "$b" ] || return 0
   date -u -r "$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
   return 0
@@ -535,281 +454,8 @@ _patrol_mtime() {  # <file>
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
 }
 
-# THE STAMP SAYS FIRINGS ARE LANDING, and nothing else. It cannot see the cron
-# table, so a job deleted a moment ago still stamps fresh for up to one stale
-# window — which is why the job table above and this line are two facts printed
-# side by side rather than one verdict merged out of both.
-#
-# AND ITS AGE ALONE IS NOT A VERDICT (epic-23 wave-16 REQ-11, AC-11.1/11.2; ADR-028).
-# This is DOCTOR'S READING of the stamp, and it used to be `age > interval * 2` — the
-# same arithmetic wave-15 removed from the two walls, left in the surface a person
-# actually reads. So on 2026-09-15 the walls let a busy orchestrator work while the page
-# in front of it said "the Patrol is armed but not firing", 1080s apart at a 1200s
-# interval. A session cron fires only while the session is IDLE: past one fire window
-# the stamp is worth READING THE TRANSCRIPT about, and `patrol_verdict` is what reads it.
-#
-# THE TWO-STEP IS THE WALLS' OWN, copied deliberately rather than shared through a
-# fourth function: inside one fire window no firing can have been missed, so the scan is
-# not taken and a transcript that cannot be dated never costs a healthy session its row.
-# Past it, the verdict's three answers map onto the three this record has always carried
-# plus one new one — `busy` is `firing`, `dead` is `not-firing`, and `unreadable` is
-# itself, with the library's own reason, because a surface that cannot observe the thing
-# it would accuse does not accuse (ADR-028, one layer up from the wall).
-#
-# THE TRANSCRIPT IS AN ARGUMENT, not a second lookup: `patrol_report`'s walk has already
-# resolved it for its own scan, and resolving it again here would be a second `stat` walk
-# over `projects/` per session. A caller that has not got it (doctor's own tests, any
-# direct reader) may leave it out and this function resolves it itself.
-patrol_stamp_state() {  # <repo-root> <sid> [<transcript>] -> state=…|age=…|limit=…|interval=…|source=…|path=…|reason=…
-  local repo="${1:-}" sid="${2:-}" tr="${3:-}" f iv secs src mt age window state
-  local vline verdict reason=""
-  f="$(tmp_root "$repo")/patrol-${sid}.state"
-  iv="$(patrol_interval "$repo")"; secs="${iv%% *}"; src="${iv##* }"
-  window="$(patrol_fire_window "$secs")" || window=""
-  if [ -L "$f" ] || [ ! -f "$f" ]; then
-    state="never-armed"; age=""
-  else
-    mt="$(_patrol_mtime "$f")"
-    case "$mt" in
-      ''|*[!0-9]*) state="unknown"; age="" ;;
-      *)
-        age=$(( $(date -u +%s 2>/dev/null || echo 0) - mt ))
-        [ "$age" -lt 0 ] && age=0
-        if [ -z "$window" ]; then
-          # No readable interval, so there is no window to measure against and no
-          # threshold to be past. The same answer the predicate gives, for the same input.
-          state="unreadable"; reason="the Patrol interval is not a readable number"
-        elif [ "$age" -le "$window" ]; then
-          state="firing"
-        else
-          [ -n "$tr" ] || tr="$(patrol_transcript "$sid")" || tr=""
-          vline="$(patrol_verdict "$f" "$tr" "$secs")"
-          verdict="$(_patrol_field "$vline" verdict)"
-          case "$verdict" in
-            busy) state="firing" ;;
-            dead) state="not-firing" ;;
-            *)    state="unreadable"; reason="$(_patrol_field "$vline" reason)" ;;
-          esac
-        fi ;;
-    esac
-  fi
-  printf 'state=%s|age=%s|limit=%s|interval=%s|source=%s|path=%s|reason=%s' \
-    "$state" "$age" "${window:-0}" "$secs" "$src" "$f" "$reason"
-}
-
-# ─── THE PATROL VERDICT: idle time, never wall time (epic-23 wave-15 REQ-1, ADR-028) ──
-#
-# WHAT WENT WRONG WITH THE STAMP'S AGE. A session cron fires only while the session is
-# IDLE. So a stamp older than any threshold says one of two things and the arithmetic
-# could not tell them apart: the job is gone, or the orchestrator has been working. On
-# 2026-09-15 the death notice blocked a healthy session on a 2459s stamp against a 2400s
-# limit because its orchestrator was busy — the wall asserted a condition it had not
-# observed, from a proxy that could not distinguish the guarded case from an innocent one.
-#
-# WHAT IS OBSERVABLE INSTEAD. A cron leaves a trace the hook can read: the tick prompt in
-# the session transcript, and the transcript dates every record. So the question "could
-# this job have fired and did not" is answerable — find an idle stretch long enough for
-# one firing, and look for the firing in it.
-#
-# THE THREE VERDICTS, and only one of them blocks:
-#   dead        an idle gap at least one fire window long has passed since the reference
-#               instant with no tick in it, OR a Patrol marker turn ran after the stamp and
-#               its tick never stamped (wave-20 REQ-6, AC-6.3: a clock that fires without
-#               ticking is as dead as one that stopped)
-#   busy        every idle gap since the reference instant is shorter than one fire window
-#   unreadable  no transcript, no user record inside the scan window, or a record that
-#               cannot be dated — the wall cannot observe, so it does not refuse
-#
-# WHY A GAP ENDS AT A TURN-STARTING USER RECORD AND STARTS AT ANY RECORD AT ALL. The
-# design says "the span between an assistant record and the next non-sidechain user
-# record". A turn's tool results are `type: "user"` records carrying no text, and a
-# thirty-minute foreground suite run is bracketed by an assistant tool_use and the tool
-# result it produces with nothing in between — so counting every user record as the end of
-# a gap would read that one command as half an hour of idleness, which is the same false
-# positive one layer down. The gap therefore CLOSES only on a user record that carries
-# text (a turn a human or a cron started) and OPENS at the last record of any kind, tool
-# results included. Both rules move the verdict toward `busy`, which is the fail-open
-# direction this wall owes.
-#
-# THE SCAN WINDOW IS BOUNDED BY LINES, NOT BY A CLOCK, and deliberately carries no
-# `detect_bounded` wrapper: `_patrol_scan` above needs one because it reads a transcript
-# from byte zero, where this reads a fixed 2000-line tail — the same window
-# `stop_patrol_duties` takes, and for the same reason (a long wave transcript reaches tens
-# of megabytes). Bounded work does not need a timeout to be bounded. Where the window is
-# too short to hold one fire window, the verdict is `unreadable` and advisory.
-PATROL_VERDICT_SCAN_LINES=2000
-
-# ONE STREAMING PASS, emitting one record per interesting line: a kind and an ISO instant.
-# MAIN THREAD ONLY, by `_patrol_scan`'s own two rules above — `isSidechain` says a
-# subagent's turn, and an entry carrying an explicit agent-id key is somebody's agent turn
-# and not this thread's. A verdict about the orchestrator's clock read off a worker's turns
-# would be a different session's idleness.
-#   T  a tick prompt — a user record whose text begins `bionic-patrol session=`
-#   U  a turn-starting user record — a user record carrying text
-#   A  anything else on the main thread: assistant records, tool results
-_patrol_verdict_jq='
-  . as $line
-  | (($line | fromjson?) // null) as $r
-  | if $r == null then empty
-    elif (($r.isSidechain // false) == true) then empty
-    elif (((($r.agentId // $r.agent_id) // "") | tostring) != "") then empty
-    elif (($r.type != "user") and ($r.type != "assistant")) then empty
-    else
-      (($r.timestamp // "") | tostring) as $ts
-      | ( if $r.type != "user" then ""
-          elif ($r.message.content | type) == "string" then ($r.message.content // "")
-          else ([$r.message.content[]? | select(.type == "text") | .text] | join(" "))
-          end ) as $t
-      | ( if (($t // "") | startswith("bionic-patrol session=")) then "T"
-          elif (($t // "") != "") then "U"
-          else "A" end ) as $k
-      | $k + "\t" + $ts
-    end
-'
-
-# THE DATES ARE CONVERTED IN awk, NOT BY `date`. A 2000-line window can hold hundreds of
-# records and a fork per record is a per-turn cost nobody would accept. The arithmetic is lib/time.sh's
-# `_TIME_ISO_AWK` (wave-39 T17; D18, burns debt iso-to-epoch): it was this file's own until the gate and the poker
-# were found carrying two more readers of an instant with two more grammars. The name stays, because
-# hooks/session-poker.sh's readers and this file's own prefix their programs with it; the text is time.sh's.
-# `iso2epoch` reads the strict instant alone, `…:SSZ`.
-#
-# AN UNDATABLE RECORD POISONS THE WHOLE ANSWER, on purpose: a verdict computed over a
-# window it could only partly read is a guess wearing an observation's clothes, and this
-# file's whole subject is not doing that. It is also the fail-open direction — `unreadable`
-# never blocks — and the advisory names it, so the degradation is visible rather than
-# silent.
+# THE DATE FUNCTIONS OF lib/time.sh, as the poker's parts and the readers here splice them into an awk program.
 _PATROL_ISO_AWK="${_TIME_ISO_AWK:-}"
-# THE VERDICT'S OWN PROGRAM, after the date functions of lib/time.sh.
-# THE TRANSCRIPT'S INSTANTS CARRY MILLISECONDS (`…:33.724Z`, as Claude Code writes them), which is the
-# transcript's grammar and not an instant's (wave-39 T17; D18). They are cut to the whole second at this edge, the
-# second the patrol always read off them, and anything else goes to `iso2epoch` as it stands.
-_patrol_verdict_awk="$_PATROL_ISO_AWK"'
-function transcript_second(s,   z) {
-  if (substr(s, 20, 1) != ".") return s
-  z = index(s, "Z")
-  if (z <= 21 || z != length(s) || !alldig(substr(s, 21, z - 21))) return s
-  return substr(s, 1, 19) "Z"
-}
-{
-  e = iso2epoch(transcript_second($2))
-  if (e < 0) { bad = 1; next }
-  n++; kind[n] = $1; ep[n] = e
-  if ($1 == "U" || $1 == "T") users++
-}
-END {
-  if (bad) {
-    print "unreadable|0|0|a record in the scanned window carries no readable timestamp"
-    exit
-  }
-  if (n == 0 || users == 0) {
-    print "unreadable|0|0|no user record in the scanned window"
-    exit
-  }
-  ref = ref0
-  # A MARKER TURN AFTER THE STAMP IS A FIRING THAT DID NOT TICK (wave-20 REQ-6, AC-6.3; D6).
-  # The tick writes the stamp before it decides, so a marker row its tick answered always
-  # sits at or before the stamp. One AFTER it is the clock firing into a turn that never ran
-  # the tick — and a clock that fires without ticking is a dead Patrol. This used to be the
-  # other way round: a marker row moved the reference instant forward, as if the marker were
-  # the proof of life, and a Patrol whose job carried the marker but not the tick read healthy
-  # to the death notice, the arming wall and doctor for as long as it kept firing (report #1).
-  fired = 0
-  for (i = 1; i <= n; i++) if (kind[i] == "T" && ep[i] > ref) fired++
-  haslast = 0; last = 0; gap = 0
-  for (i = 1; i <= n; i++) {
-    if (kind[i] == "U" && haslast) {
-      start = (last > ref ? last : ref)
-      if (ep[i] > start && ep[i] - start > gap) gap = ep[i] - start
-    }
-    last = ep[i]; haslast = 1
-  }
-  if (fired > 0) print "dead|" ref "|" gap "|" fired " marker turn(s) since the stamp ran no tick"
-  else if (gap >= window) print "dead|" ref "|" gap "|"
-  else print "busy|" ref "|" gap "|"
-}
-'
-
-# ONE FIRE WINDOW — the longest idle span during which a session cron is GUARANTEED one
-# opportunity to fire: the interval plus the scheduler's jitter, which the CronCreate
-# contract bounds at a tenth of the period (spec assumption 2). This is the only place in
-# the payload where that arithmetic is written; `patrol_verdict` reads it, and so does
-# every caller that needs to know whether a stamp is stale enough to be worth a transcript
-# scan. A reader that recomputed it would be the literal `INTERVAL * 2` back under another
-# name, which is the defect wave-15 removed.
-patrol_fire_window() {  # <interval seconds> -> seconds, or empty on a bad interval
-  local iv="${1:-}"
-  case "$iv" in ''|*[!0-9]*) printf ''; return 1 ;; esac
-  [ "$iv" -gt 0 ] || { printf ''; return 1; }
-  printf '%s' "$(( iv + iv / 10 ))"
-}
-
-# ONE LINE, AND IT ENDS LIKE ONE (wave-15 carry-over 13, wave-16 AC-10.6). Every caller
-# today captures this in `$( )`, which strips the trailing newline either way — so the
-# missing `\n` was harmless and invisible, which is exactly how a line-oriented record
-# reaches a caller that reads it with `read` or appends it to a log and finds two records
-# glued together. A record whose shape is a line terminates like one.
-_patrol_verdict_line() {  # <verdict> <ref> <gap> <window> <reason>
-  printf 'verdict=%s|ref=%s|gap=%s|window=%s|reason=%s\n' \
-    "${1:-unreadable}" "${2:-0}" "${3:-0}" "${4:-0}" "$(_patrol_clean "${5:-}" 200)"
-}
-
-# THE PREDICATE ITSELF. Prints one line and RETURNS 0 whatever it found: "I cannot tell"
-# is an answer here, not an error, and a caller that had to distinguish a failed call from
-# an `unreadable` verdict would have two ways to spell one outcome.
-patrol_verdict() {  # <stamp-file> <transcript-path> <interval-s> -> verdict=…|ref=…|gap=…|window=…|reason=…
-  local stamp="${1:-}" tr="${2:-}" iv="${3:-}"
-  local window mt out verdict ref gap reason
-
-  window="$(patrol_fire_window "$iv")" || window=""
-  if [ -z "$window" ]; then
-    _patrol_verdict_line unreadable 0 0 0 "the Patrol interval is not a readable number"
-    return 0
-  fi
-
-  # THE REFERENCE INSTANT starts at the stamp's own mtime — the verdict never looks before
-  # the last thing that proved the Patrol alive. A symlink is not a stamp, the posture
-  # every other reader of .bionic/tmp takes.
-  mt=""
-  if [ -n "$stamp" ] && [ ! -L "$stamp" ] && [ -f "$stamp" ]; then
-    mt="$(_patrol_mtime "$stamp")"
-    case "$mt" in ''|*[!0-9]*) mt="" ;; esac
-  fi
-  if [ -z "$mt" ]; then
-    _patrol_verdict_line unreadable 0 0 "$window" "the Patrol stamp's mtime could not be read"
-    return 0
-  fi
-  ref="$mt"
-
-  if [ -z "$tr" ] || [ -L "$tr" ] || [ ! -f "$tr" ]; then
-    _patrol_verdict_line unreadable "$ref" 0 "$window" "no readable transcript at that path"
-    return 0
-  fi
-  if ! command -v jq >/dev/null 2>&1; then
-    _patrol_verdict_line unreadable "$ref" 0 "$window" "jq is not on PATH, so no record can be read"
-    return 0
-  fi
-
-  out="$( tail -n "$PATROL_VERDICT_SCAN_LINES" "$tr" 2>/dev/null \
-            | jq -Rr "$_patrol_verdict_jq" 2>/dev/null \
-            | awk -F'\t' -v ref0="$ref" -v window="$window" "$_patrol_verdict_awk" 2>/dev/null )" \
-    || out=""
-
-  verdict=""; gap=0; reason=""
-  IFS='|' read -r verdict ref gap reason <<EOF
-$out
-EOF
-  case "$verdict" in
-    dead|busy) : ;;
-    unreadable) : ;;
-    *) _patrol_verdict_line unreadable "$mt" 0 "$window" "the transcript could not be read back"
-       return 0 ;;
-  esac
-  case "$ref" in ''|*[!0-9]*) ref="$mt" ;; esac
-  case "$gap" in ''|*[!0-9]*) gap=0 ;; esac
-  _patrol_verdict_line "$verdict" "$ref" "$gap" "$window" "$reason"
-  return 0
-}
 
 # THE ROSTER, COUNTED THE WAY IT IS WRITTEN. The file is append-only and a row
 # is appended per status transition — `intended` at the wall, then `confirmed`,
@@ -859,9 +505,9 @@ EOF
 # EVERY LINE THE PATROL REPORT IS MADE OF, for every live session on this
 # machine. Emitted as keyed records rather than prose so the renderer decides
 # what a reader sees and this file decides nothing about presentation.
-patrol_report() {  # -> patrol-session/v1 … patrol-job/v1 … patrol-stamp/v1 … patrol-roster/v1 … patrol-wall/v1
+patrol_report() {  # -> patrol-session/v1 … patrol-roster/v1 … patrol-wall/v1
   local sess sid pid cwd repo here_repo tr scan since agents refused cause blind
-  local id cron rec kind phead rline dispatches tag a b c d e
+  local rline dispatches tag a
 
   here_repo="$(project_root "$PWD")"
 
@@ -886,13 +532,8 @@ patrol_report() {  # -> patrol-session/v1 … patrol-job/v1 … patrol-stamp/v1 
     if [ -n "$tr" ] && [ -z "$cause" ]; then
       since="$(patrol_window "$repo" "$sid")"
       scan="$(_patrol_scan "$tr" "$since")"
-      while IFS=$'\t' read -r tag a b c d e; do
+      while IFS=$'\t' read -r tag a; do
         case "$tag" in
-          JOB)
-            id="$a"; cron="$b"; rec="$c"; kind="$d"; phead="$e"
-            printf '%s|session=%s|id=%s|cron=%s|recurring=%s|kind=%s|prompt=%s\n' \
-              "$PATROL_JOB_SCHEMA" "$sid" "$id" "$(_patrol_clean "$cron" 40)" \
-              "$rec" "$kind" "$(_patrol_clean "$phead" 160)" ;;
           AGENTS) agents="$a" ;;
           REFUSED) refused="$a" ;;
         esac
@@ -901,12 +542,6 @@ $scan
 EOF
     fi
     case "$refused" in ''|*[!0-9]*) refused=0 ;; esac
-
-    # THE TRANSCRIPT THIS WALK ALREADY RESOLVED is handed to the stamp's reading, which
-    # needs it for the idle-time verdict past one fire window (REQ-11). Empty is fine —
-    # `patrol_stamp_state` resolves it itself then, and the verdict's own `unreadable`
-    # answer covers a session with no transcript at all.
-    printf '%s|session=%s|%s\n' "$PATROL_STAMP_SCHEMA_OUT" "$sid" "$(patrol_stamp_state "$repo" "$sid" "$tr")"
 
     rline="$(patrol_roster_state "$repo" "$sid")"
     printf '%s|session=%s|%s\n' "$PATROL_ROSTER_SCHEMA" "$sid" "$rline"
@@ -935,14 +570,13 @@ EOF
 
 # ─── THE TICK'S DIGEST FILE: ITS PATH AND ITS READER (wave-24 T7, T27; D4, D5) ──────────────
 #
-# TWO PROCESSES, ONE FILE. `session-poker.sh tick` writes the digest beside its stamp (its
+# TWO PROCESSES, ONE FILE. `session-poker.sh tick` writes the digest under its root (its
 # `tick_digest_file` passes the root it resolved), and the stop library's collector reads its
 # `at=`, `head=` and `facts_state=` to judge a tick turn (`duty=` and `reconcile=` are written
 # for the tick's own advice and read by no wall, since wave-31 T32). The path and the
 # reader live here, which both already source, so a renamed file cannot leave the stop wall
 # reading a path the tick no longer writes (Step-6 review finding 15; critic I3). Not
-# `patrol-digest-`: `patrol-*.state` is the stamp glob, and a file under it reads as the stamp
-# of a session named `digest-<sid>` (A-orch-9).
+# `patrol-digest-`: the `patrol` class glob would read it as a session named `digest-<sid>` (A-orch-9).
 tick_digest_path() {  # <project root> <session-id> -> absolute path, or nothing
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   printf '%s/.bionic/tmp/tick-digest-%s.state' "$1" "$2"
@@ -957,7 +591,7 @@ tick_digest_field() {  # <digest file> <key>
 # ─── A TICK OF THIS SESSION IS RUNNING: ITS RECORD AND THE ONE QUESTION ───────────────────────
 #
 # `<root>/.bionic/tmp/tick-run-<sid>.state`, two lines: `pid=<pid>` and `start=<start>`, the start as lib/alive.sh's
-# `alive_since` reads it. The tick claims it before it stamps and removes it as it exits (hooks/poker/tick.sh), and
+# `alive_since` reads it. The tick claims it before it decides and removes it as it exits (hooks/poker/tick.sh), and
 # both the tick and the stop wall ask `tick_running`, so a second tick and the turn end read one answer. The answer
 # is lib/alive.sh's one rule, never the file's age or existence: a tick killed before it could remove its record
 # leaves one naming a dead process, or a pid the OS has since handed on, and that record holds nothing off.
@@ -1064,9 +698,10 @@ WATCH_LIFE_MARGIN=600
 #
 # THE WOKEN KINDS ARE THE LINES THAT ASK FOR AN ACT, OF THE MODEL OR OF THE PERSON, AND NO OTHERS. In the order the
 # line leads with them, the person's first: GATE (a denied reserved request, put to the person), restart, GOAL,
-# DISARM, DUPLICATE-SESSION and DUPLICATE-START, GONE? and GONE, NOTIFY, STANDDOWN, NOT-LANDED, FILL (IDLE rides it),
-# RECONCILE, and the re-arm note. Advice (HELD, LEDGER, FINDING, SPLIT, RANGE), what the tick did itself (LANDED,
-# regression-run, RUNNING) and the quiet lines (QUIET, WAITING, no FILL, the gate share) wake nothing.
+# DUPLICATE-SESSION and DUPLICATE-START, GONE? and GONE, NOTIFY, STANDDOWN, NOT-LANDED, FILL (IDLE rides it), and
+# RECONCILE. Advice (HELD, LEDGER, FINDING, SPLIT, RANGE), what the tick did itself (LANDED, regression-run, RUNNING),
+# DISARM (the run is delivered, and nothing is owed for it) and the quiet lines (QUIET, WAITING, no FILL, the gate
+# share) wake nothing.
 #
 # AN UNCHANGED PRINT WAKES NOTHING. The tick's digest already says whether anything it decided moved; a print that
 # ends `unchanged since` was told in full before, so the standing holds and the restart line it re-prints were seen.
@@ -1107,7 +742,6 @@ watch_wake_line() {  # <tick print file>
     $2 == "GATE" { s = $5; sub(/:$/, "", s); add("GATE", s); next }
     $2 == "restart" && $3 == "needed" { mark("restart"); next }
     $2 == "GOAL" { add("GOAL", $3); next }
-    $2 == "DISARM" { mark("DISARM"); next }
     $2 == "DUPLICATE-SESSION" || $2 == "DUPLICATE-START" || $2 == "GONE?" || $2 == "GONE" || $2 == "NOT-LANDED" {
       add($2, $3); next
     }
@@ -1122,7 +756,6 @@ watch_wake_line() {  # <tick print file>
     $2 == "FILL" { if (!dash($3)) for (i = 3; i <= NF; i++) add("FILL", $i); else mark("FILL"); next }
     $2 == "IDLE" { mark("FILL"); next }
     $2 == "RECONCILE" { mark("RECONCILE"); next }
-    $2 == "note:" && $3 == "re-arm" { mark("re-arm"); next }
     END {
       if (unchanged) exit
       if ("FILL" in seen && fill != "") { n = split(fill, w, ","); for (i = 1; i <= n; i++) add("FILL", w[i]) }
@@ -1130,7 +763,6 @@ watch_wake_line() {  # <tick print file>
       act["GATE"] = "put it to the person as a gate act; never perform it"
       act["restart"] = "tell the person: exit claude and start it again"
       act["GOAL"] = "missed; put it to the person"
-      act["DISARM"] = "the run is delivered: CronDelete the Patrol job"
       act["DUPLICATE-SESSION"] = "ListAgents and look at it; never stop it silently"
       act["DUPLICATE-START"] = "ListAgents and look at it; never stop it silently"
       act["GONE?"] = "ListAgents; close its row only if it is gone"
@@ -1140,8 +772,7 @@ watch_wake_line() {  # <tick print file>
       act["NOT-LANDED"] = "its landing waits: read the refusal the tick prints and repair it"
       act["FILL"] = "ready with room: dispatch each row now"
       act["RECONCILE"] = "TaskList and bring the task list in line with the plan"
-      act["re-arm"] = "replace the Patrol job with the prompt verb output, then arm"
-      k = split("GATE restart GOAL DISARM DUPLICATE-SESSION DUPLICATE-START GONE? GONE NOTIFY STANDDOWN NOT-LANDED FILL RECONCILE re-arm", order, " ")
+      k = split("GATE restart GOAL DUPLICATE-SESSION DUPLICATE-START GONE? GONE NOTIFY STANDDOWN NOT-LANDED FILL RECONCILE", order, " ")
       lead = ""; tail = ""
       for (i = 1; i <= k; i++) {
         if (!(order[i] in seen)) continue

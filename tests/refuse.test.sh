@@ -11,6 +11,7 @@
 #   §5  fail-closed: `refuse` exits, and no path out of it waves the action past.
 #   §6  with the knob UNSET an exit2 wall's detail reaches the reader, at most twelve lines.
 #   §T47  a refusal never loses its own line to a long value.
+#   §DUTY  an agent's refusal goes out as one fixed line, its whole reason kept for the duty verb.
 #   §NEEDS  a refusal that needs a person is an event on the bound plan's landing record.
 #
 # THE SHAPES ARE ASSERTED LITERALLY, NOT READ BACK OUT OF THE TABLE. §2's exit2 rows say
