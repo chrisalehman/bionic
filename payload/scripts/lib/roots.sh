@@ -289,13 +289,11 @@ plugin_root() {
 # repository; its parent is the main working tree.
 #
 # RETIRES `_wt_main_root` (worktree.sh) and `resolve_main_root`
-# (spawn-worktree.sh). The <dir> argument and the `cd "$dir"` before the second
-# rev-parse are `_wt_main_root`'s and are kept: git < 2.31 has no --path-format, and
-# its answer is then relative to the cwd the question was asked in.
+# (spawn-worktree.sh). The common directory is lib/root.sh's `git_common_dir`, which
+# answers an absolute path on git before 2.31 as well.
 worktree_root() {
   local d="${1:-.}" common
-  common="$( cd "$d" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null )"
-  [ -n "$common" ] || common="$( cd "$d" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null )"
-  [ -n "$common" ] || return 1
-  ( cd "$d" 2>/dev/null && cd "$common/.." 2>/dev/null && pwd -P )
+  [ -d "$d" ] || return 1
+  common="$(git_common_dir "$d")" || return 1
+  ( cd "$common/.." 2>/dev/null && pwd -P )
 }

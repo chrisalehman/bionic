@@ -266,9 +266,7 @@ tree_parent_line() {  # <main-root> <parent-abs> <tree-abs> -> the parent's anch
 exclude_lines() {  # <main-root> <line or empty>... — appends each line the exclude file lacks
   local root="$1" line common exfile want="" said=""
   shift
-  common="$(cd "$root" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-  [ -n "$common" ] || common="$(cd "$root" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)"
-  case "$common" in /*) ;; ?*) common="${root}/${common}" ;; esac
+  common=""; [ -d "$root" ] && common="$(git_common_dir "$root")"
   exfile="${common}/info/exclude"
   for line in "$@"; do
     [ -n "$line" ] || continue
