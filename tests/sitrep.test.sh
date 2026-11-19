@@ -1300,6 +1300,14 @@ sed 's/^| REQ-1 | x | AC-1\.1 |/| — | x | AC-101 |/' "$SR_PLAN" > "$SR_PLAN.t"
 sr_run "$SR_PLAN"; SR_UNM="$(printf '%s\n' "$OUT" | /usr/bin/grep '^not mapped: ')"
 expect_contains "RG1-4 a criterion naming no requirement: the sheet's line names the Requirement cell of its Eval design row" "Requirement cell" "$SR_UNM"
 expect_absent "RG1-4b …and no serves: line, which no page at 15 holds" "serves:" "$SR_UNM"
+# fails-when: a criterion mapped by its dotted id draws "rows carry no serves:", or any text naming a serves cell.
+sr_world rg1-byid "6 6 12 12"; sr_themes 4 $SR_MIXED
+sed 's/^| REQ-1 | x | AC-1\.1 |/| — | x | AC-1.1 |/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"; SR_BYID="$(printf '%s\n' "$OUT" | /usr/bin/grep '^mapped by id: ')"
+expect_eq "RG1-5 a page at 15 with a blank Requirement cell and a dotted id: the sheet's line says it is mapped by its id" \
+  "15|mapped by id: 1 criteria" "$(sed -n 's/^canonical_sdlc_version: //p' "$SR_PLAN" | head -1)|$(printf '%s' "$SR_BYID" | /usr/bin/grep -o 'mapped by id: 1 criteria')"
+expect_contains "RG1-5c …the line names the Requirement cell" "Requirement cell" "$SR_BYID"
+expect_absent "RG1-5d …and no text of the sheet names a serves cell (RG1-5 read the sheet)" "serves" "$OUT"
 
 # ============================================================
 section "§REQ-GOALS-2: a goals: line's measured goals follow the theme goals"

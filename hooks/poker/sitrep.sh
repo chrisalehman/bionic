@@ -600,7 +600,8 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
 #   run.so-far: <n> acts taken by hand · <m> open asks      the release card's line too (`sitrep_so_far`)
 #   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
-#   mapped by id: <n> rows carry no serves: · read as the first: <n> rows serve several requirements ·
+#   mapped by id: <n> criteria name no requirement in the Requirement cell, read by their dotted id ·
+#   read as the first: <n> rows serve several requirements ·
 #   not mapped: <n> criteria name no requirement and no dotted id: … the Requirement cell …      each once, after the goals, as lib/plan.sh's theme reading says it
 #   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or -> blocks=<yes|no> waits=<user|event <what>>
 #   review: question=<q> scope=<piece|whole> result=<pass|flag|fail|running> at=<clock or -> open-findings=<n> record=<path or ->
