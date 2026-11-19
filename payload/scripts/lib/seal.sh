@@ -283,8 +283,9 @@ seal_remove() {  # <plan> -> 0 removed or none stood, 2 no home, 75 the lock not
 seal_binding_warm() {  # <root> -> 0 when the root has a home; the cache filled in this shell
   local root="${1:-}" c s
   [ -n "$root" ] || return 1
-  # Only a found home is kept: a root asked before its repository exists is asked again.
-  [ "${_SB_ROOT:-}" = "$root" ] && [ -n "${_SB_COMMON:-}" ] && return 0
+  # Only a found home that still stands is kept: a root asked before its repository exists, or
+  # made again without one, is asked again.
+  [ "${_SB_ROOT:-}" = "$root" ] && [ -n "${_SB_COMMON:-}" ] && [ -d "$_SB_COMMON" ] && return 0
   c="$(git_common_dir "$root")" || c=""
   s="$(cd "$root/.bionic" 2>/dev/null && pwd -P)" \
     || s="$(cd "$root" 2>/dev/null && pwd -P)/.bionic" || s="$root/.bionic"

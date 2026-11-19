@@ -94,7 +94,9 @@ make_repo() {  # <label> -> repo path, in a session that has ENGAGED bionic
 # `arm` and `disarm` are deliberately NOT guarded: writing or removing a stamp for a
 # session that asked for one is harmless, and disarm must leave this marker in place —
 # a session that invoked the skill is bionic's for its whole life (AC-15).
-engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$SID.state"; }
+# ENGAGED AND UNBOUND, whatever was bound before: the session's binding record beside the seal
+# is dropped (tests/lib/bound-marker.sh), or it would be believed over the empty marker.
+engage()   { mkdir -p "$1/.bionic/tmp" && { ! declare -F bound_marker_unrecord >/dev/null || bound_marker_unrecord "$1" "$SID"; } && : > "$1/.bionic/tmp/engaged-$SID.state"; }
 unengage() { rm -f "$1/.bionic/tmp/engaged-$SID.state"; }
 
 roster_of() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "${2:-$SID}"; }
