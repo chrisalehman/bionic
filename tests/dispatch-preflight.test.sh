@@ -772,7 +772,6 @@ section "§WORDS — every refusal of the wall is said by key from lib/dispatch.
 WORDS_GOT="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 3
 w() { local k="$1" rc=0; shift; dispatch_say "$k" "$@" || rc=$?; printf "%s|%s (%s)|%s\n" "$k" "$DISPATCH_FACT" "$DISPATCH_FIX" "$rc"; }
 w deadline 22 /r; w attest-none "bash /h/p.sh"; w attest-failed out "bash /h/p.sh"; w plan-unreadable /p.md
-w patrol-never /h/sp.sh /s; w patrol-silent 9 3 /h/sp.sh /s; w patrol-stopped /h/sp.sh 9 8 7 6 default /s
 w watch-never /h /r; w watch-stopped 4242 /w
 w reviewer-retired bionic:reviewer; w facts-unread w /p.md; w fill-missing w /p.md /lib "a b"; w unapproved w /p.md 3 "a b"
 w unbound w adv "a b"; w name-ambiguous x-T1 "$(printf "T1\nA-T1")" /p.md; w approval-waits T9 release w-T9 /p.md /h
@@ -788,9 +787,6 @@ expect_eq "W.1 each key says the fact and fix the wall gave, and an unknown key 
 attest-none|this repo has no environment attestation (run the preflight probe)|0
 attest-failed|the environment check ran and did not pass (fix what the probe named)|0
 plan-unreadable|the bound plan cannot be read (restore read access to the plan)|0
-patrol-never|no Patrol stamp exists for this session (CronCreate the Patrol job)|0
-patrol-silent|the Patrol fires but never ticks (run the tick; replace the job)|0
-patrol-stopped|the Patrol was armed and stopped firing (re-arm the Patrol, both halves)|0
 watch-never|this session was never watched (restart claude, or start the watcher)|0
 watch-stopped|the watch stopped without a word (end this turn; it starts another)|0
 reviewer-retired|bionic:reviewer is retired (1.14.0) (dispatch bionic:critic)|0

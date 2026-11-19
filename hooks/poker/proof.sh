@@ -1858,7 +1858,7 @@ DSP_READINGS
     DEBT_ROOT="$(cd "$(project_root "${DEBT_PLAN%/*}")" 2>/dev/null && pwd -P)"
     [ -n "$DEBT_ROOT" ] || DEBT_ROOT="$REPO_REAL"
     DEBT_DOCS="$(docs_root "$DEBT_ROOT")"
-    _proof_reader_load || { die "REFUSED — lib/reader.sh cannot be loaded, so the run's log cannot be named; reinstall the plugin."; exit 2; }
+    _proof_reader_load || { die "REFUSED — lib/reader.sh cannot be loaded, so the run's log cannot be named. Fix: reinstall the plugin."; exit 2; }
     DEBT_REL="$(reader_log_in "record/$(proof_plan_slug "$DEBT_PLAN")")"
     DEBT_HAVE="$(proof_debt_items "$DEBT_PLAN")"
     if [ "$DEBT_SUB" = list ]; then

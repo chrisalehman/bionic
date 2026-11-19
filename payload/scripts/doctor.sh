@@ -1526,79 +1526,21 @@ fi  # ! _doctor_filtering
 
 # ─── The Patrol, gathered and rendered before the fix accounting ─────────────
 #
-# RUNNING PATROLS OR NOTHING (F3, epic-19 wave-01 — design ledger ratification
-# round 2, 2026-08-27). Chris's own invariant is the whole rationale: an
-# active run has exactly one Patrol armed, and F6 makes a dead one self-healing
-# — the dispatch wall re-arms it the moment a dispatch needs it — so a reader
-# of this page has nothing to act on beyond "is one running, and how much is
-# it carrying". Everything this section used to reconstruct beyond that — the
-# session's cwd, cron ids and prompt heads, the stamp's age and interval
-# provenance, the dispatch-wall tally — answered a question this page no longer
-# asks; that machinery still lives in lib/patrol.sh, doctor just stops rendering
-# it. Two exceptions, both ratified:
-#
-#   - TWO Patrols armed on one session is always wrong regardless of how minimal
-#     this page gets, so its fix line stays — and it costs nothing in the
-#     healthy, single-Patrol case.
-#   - THE STAMP'S STATE IS READ AGAIN, and rendered nowhere. Minimising this
-#     section deleted the parse arm along with the row, and with it the only
-#     fact that could tell an armed Patrol from a dead one — see the gate on
-#     `_patrol_flush` below, which is where the whole argument lives. "Running
-#     Patrols or nothing" needs a way to know which; this is the only one.
+# EACH SESSION OF THIS PROJECT: its watch, then its roster. The watch row is `watch_verdict`'s reading, the one the
+# dispatch wall refuses on; the roster row is the open count, or the launches the roster never saw.
 if _doctor_want PATROL FIXES; then
 PATROL_ROWS=""
 _patrol_add() { PATROL_ROWS="${PATROL_ROWS}$1"$'\n'; }
 
 PATROL_LINES="$(patrol_report 2>/dev/null)"
 
-_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""; _p_reason=""
+_p_sid=""; _p_open=0; _p_present=""; _p_blind=""
 _p_here=""
 
-# WHY THE JOB COUNT ALONE CANNOT ANSWER "IS IT RUNNING" (Step-6 correctness C1,
-# a FAIL against AC-F3). The jobs on this page are RECONSTRUCTED FROM THE
-# TRANSCRIPT — `CronCreate` tool_uses minus the ids a `CronDelete` names
-# (lib/patrol.sh) — and the four events that actually kill a Patrol delete the
-# job from the CLI's in-memory cron table with no tool call behind them: a
-# `claude plugin update`, a `/reload-plugins`, a session continue, a `/clear`
-# and resume. The transcript cannot observe any of them. So after any one, the
-# count is still positive and this section printed `✓ session … · N open
-# dispatches` for a Patrol that no longer exists — the very failure F6 shipped a
-# whole hook to detect, with doctor contradicting that hook on the same machine.
-#
-# THE STAMP IS THE ONLY FACT ON THIS PAGE THAT KNOWS. hooks/session-poker.sh
-# touches it on every tick, so its age answers "did this thing fire recently"
-# where the transcript answers only "was it ever asked for". Task 4/2 removed
-# this parse arm while minimising the section; lib/patrol.sh never stopped
-# emitting it. Restored here with a smaller job than it had — it renders
-# nothing, it GATES.
-#
-#   firing      — the row prints, exactly as before.
-#   not-firing  — a stamp that has gone stale AND a session whose transcript shows
-#                 an idle stretch long enough for a firing with no firing in it.
-#                 No row (F3's ratified rule is running-or-nothing, and a dead
-#                 Patrol is nothing), and one FIX line, because this is the one
-#                 state a person can and should act on.
-#   unreadable  — the stamp is past one fire window and the idle time could not be
-#                 read (no transcript, no user record in the window, a record that
-#                 cannot be dated). One informational row naming the library's own
-#                 reason, and NO fix line: the accusation above is one this page
-#                 cannot support, and making it anyway is the defect wave-16 REQ-11
-#                 removes (ADR-028 one layer up from the walls — the 2026-09-19
-#                 report of "/doctor still reports bionic unhealthy").
-#   anything else — never armed, or deliberately ended: the disarm verb REMOVES
-#                 the stamp (S10), so an absent stamp is a decision, not a
-#                 fault. No row and no fix line, which is what the section
-#                 already does for a machine with no Patrol at all.
-#
-# THE STAMP'S AGE IS NO LONGER THE QUESTION IT ANSWERS. `patrol_stamp_state` graded
-# the age against twice the poker interval until wave-16; it now thresholds on the
-# library's fire window and, past it, on `patrol_verdict`'s reading of idle time. The
-# three states above are what this renderer receives, so the mapping lives there and
-# this file renders it.
 # THE WATCH, PER ENGAGED SESSION OF THIS PROJECT. hooks/watch.sh keeps the session's watch record and `watch_verdict`
 # (lib/patrol.sh) reads it, the reading the dispatch wall refuses on: a live or a rested watch is a row, a watcher that
 # died without a word and a session that ended a turn with no watch are each a fix. A session bionic never engaged has
-# no watch to report. Asked before the Patrol's own gate, since a session can be watched with no Patrol job armed.
+# no watch to report.
 _doctor_watch_row() {  # <sid>
   local sid="$1" short="${1%%-*}" mark at v
   engaged_session "$DOCTOR_ROOT" "$sid" || return 0
@@ -1626,105 +1568,23 @@ _patrol_flush() {
   # in is not a repair they can make.
   [ "$_p_here" = "yes" ] || return 0
   _doctor_watch_row "$_p_sid"
-  [ "$_p_n_patrol" -gt 0 ] || return 0
-  local short="${_p_sid%%-*}" j id extras="" n open=0 blind="${_p_blind}" _p_lead
+  local short="${_p_sid%%-*}" open=0 blind="${_p_blind}"
   case "$blind" in ''|*[!0-9]*) blind=0 ;; esac
-  case "$_p_stamp" in
-    firing)
-      # ENGAGED / NOT ENGAGED — report only (T4/AC-16). `engaged_session` is
-      # the same single switch every run-scoped hook reads first (lib/run.sh);
-      # doctor changes nothing on disk, it only says which side of it this
-      # session's marker is on. Computed once, read by both rows below, so a
-      # bystander session (no marker) reads the same whether or not its
-      # roster is present.
-      local _p_engaged="not engaged"
-      engaged_session "$DOCTOR_ROOT" "$_p_sid" && _p_engaged="engaged"
-      # AN ABSENT ROSTER IS NOT A ZERO, and printing it as one is the defect
-      # this arm exists to end (Chris 2026-08-29, on 1.3.0: `✓ session 61be8dc9 ·
-      # 0 open dispatches` on a machine running two agents). The launch-time
-      # hook does not survive a continue, a /clear+resume or a /reload-plugins,
-      # so a long session can lose the wall and never write a roster file at
-      # all — and `0 open dispatches` is then a number nobody dispatched,
-      # printed beside a Patrol whose every tick was emitting `NOTIFY
-      # wall-blind`. lib/patrol.sh has always said which of the two it is
-      # (`present=yes|no`); this is the first renderer to read it.
-      #
-      # THE ROW KEEPS ITS ✓ BECAUSE THE PATROL IS RUNNING. Running-or-nothing
-      # (F3) is about the Patrol, and the stamp above has already answered that
-      # question; the roster is a different object, and its absence is what the
-      # text says rather than what the symbol implies.
-      #
-      # AN ABSENT FILE IS NOT YET A DEFECT — `blind` IS (Step-6 correctness
-      # FLAG, t1-six-axis-review §1). The roster file is created by the FIRST
-      # dispatch: hooks/dispatch-preflight.sh:1337-1344 appends its header and
-      # its first row together, and no hook pre-creates it at session start. So
-      # `present=no` describes two different machines — a session whose wall was
-      # lost and is launching agents nobody recorded, and a perfectly healthy
-      # session that has simply not dispatched anything yet. Only the first has
-      # something unrecorded, and `blind` (launches the roster never saw, from
-      # the same `patrol-wall/v1` record the fix line below reads) is the field
-      # that tells them apart. Gating on the file alone would print `roster
-      # absent — launches unrecorded` over a session with no launches — the same
-      # class of untrue claim this arm exists to end, pointed the other way — so
-      # a zero `blind` falls through to the ordinary count row, where `0 open
-      # dispatches` is what 1.3.0 printed and was TRUE.
-      if [ "$_p_present" = "yes" ] || [ "$blind" -eq 0 ]; then
-        open="$_p_open"
-        _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches) · ${_p_engaged}"
-      else
-        _patrol_add "  ${DOCTOR_OK} session ${short} · roster absent — launches unrecorded · ${_p_engaged}"
-      fi
-      # THE COUNT IS THE ACTIONABLE HALF. Doctor is now the ONE surface for this
-      # fact — the tick's `NOTIFY wall-blind` diagnosis was deleted in 1.4.0
-      # (task ADOPT; it had no "no active run" branch and false-fired pre-plan),
-      # so there is no second speller to agree with; tests/doctor-patrol.test.sh
-      # §9 pins the `patrol-wall/v1` record this reads and the library that
-      # defines it. It is printed for a present-but-incomplete roster too: the
-      # row's open count stays true, and this line says what it does not cover.
-      #
-      # THE LINE ENDS IN THE COMMAND and carries no cause clause, which is
-      # doctor's first format rule meeting lib/width.sh's 100 columns — the
-      # spelled-out cause ran the line to 116. The row above already names the
-      # absence, and the cure names the repair.
-      if [ "$blind" -gt 0 ]; then
-        fix "session ${short}: ${blind} $(_doctor_plural "$blind" launch launches) unrostered → re-invoke /bionic:canonical-sdlc"
-      fi ;;
-    not-firing)
-      fix "session ${short}: the Patrol is armed but not firing → ask Claude to re-arm the Patrol" ;;
-    unreadable)
-      # ONE ROW, THE NIL GLYPH, NO FIX (REQ-11, AC-11.1). The state is neither a running
-      # Patrol nor a stopped one, and the reason is the library's own words — the same
-      # sentence the two walls put on stderr for the same input, so the three surfaces
-      # degrade in one vocabulary. `$DOCTOR_NIL` for the reason `active run: none` uses it:
-      # a true fact that names no action is informational, not a problem to be counted.
-      #
-      # CUT WITH THE PRODUCT'S OWN RULER. The reason can run to 200 characters (the
-      # library's own clamp) and this page's rows are 100 columns, so the row's fixed part
-      # is measured and the reason absorbs the shortfall — `bionic_trunc` drops whole words.
-      _p_lead="  ${DOCTOR_NIL} session ${short} · the Patrol cannot be graded — "
-      _patrol_add "${_p_lead}$(bionic_trunc "${_p_reason:-the reason was not recorded}" \
-        "$(( BIONIC_LINE_WIDTH - $(bionic_cols "$_p_lead") ))")" ;;
-  esac
-
-  # THE DUPLICATE VERDICT KEEPS THE NEWEST and names every older one. Creation
-  # order is what the transcript gives, and the newest job is the one whose
-  # prompt reflects the run as it now stands — an older duplicate is a leftover
-  # from an arming that was repeated, which is exactly how the second one gets
-  # there.
-  if [ "$_p_n_patrol" -gt 1 ]; then
-    n=0
-    while IFS= read -r j; do
-      [ -n "$j" ] || continue
-      n=$((n + 1))
-      [ "$n" -lt "$_p_n_patrol" ] || continue
-      id="$j"
-      [ "$id" = "?" ] && continue
-      extras="${extras}${extras:+ }${id}"
-    done <<EOF
-$_p_jobs
-EOF
-    [ -n "$extras" ] && \
-      fix "session ${short} has ${_p_n_patrol} Patrol jobs armed → CronDelete ${extras}"
+  # ENGAGED / NOT ENGAGED — report only. `engaged_session` is the switch every run-scoped hook reads
+  # first (lib/run.sh); doctor only says which side of it this session's marker is on.
+  local _p_engaged="not engaged"
+  engaged_session "$DOCTOR_ROOT" "$_p_sid" && _p_engaged="engaged"
+  # AN ABSENT ROSTER IS NOT A ZERO. The roster is created by the first dispatch, so a session with
+  # no file and no launch reads its true count of none; one with launches the roster never saw
+  # (`blind`, the `patrol-wall/v1` record) reads as absent, and the fix line names the repair.
+  if [ "$_p_present" = "yes" ] || [ "$blind" -eq 0 ]; then
+    open="$_p_open"
+    _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches) · ${_p_engaged}"
+  else
+    _patrol_add "  ${DOCTOR_OK} session ${short} · roster absent — launches unrecorded · ${_p_engaged}"
+  fi
+  if [ "$blind" -gt 0 ]; then
+    fix "session ${short}: ${blind} $(_doctor_plural "$blind" launch launches) unrostered → re-invoke /bionic:canonical-sdlc"
   fi
 }
 
@@ -1734,22 +1594,9 @@ while IFS= read -r _p_line; do
     "patrol-session/v1|"*)
       _patrol_flush
       _p_sid="$(_doctor_pfield "$_p_line" session)"
-      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""; _p_reason=""
+      _p_open=0; _p_present=""; _p_blind=""
       _p_here=no
       if _doctor_session_here "$(_doctor_pfield "$_p_line" cwd)"; then _p_here=yes; fi ;;
-    "patrol-job/v1|"*)
-      if [ "$(_doctor_pfield "$_p_line" kind)" = "patrol" ]; then
-        _p_n_patrol=$((_p_n_patrol + 1))
-        _p_jobs="${_p_jobs}$(_doctor_pfield "$_p_line" id)"$'\n'
-      fi ;;
-    "patrol-stamp/v1|"*)
-      # Read for the gate above and rendered nowhere — the stamp's age,
-      # interval and provenance stay deleted (spec AC-F3).
-      _p_stamp="$(_doctor_pfield "$_p_line" state)"
-      # THE REASON RIDES WITH THE STATE, and only an `unreadable` one carries text: the
-      # library says why it could not read idle time, and this page repeats that rather
-      # than inventing a second wording for the same finding.
-      _p_reason="$(_doctor_pfield "$_p_line" reason)" ;;
     "patrol-roster/v1|"*)
       _p_open="$(_doctor_pfield "$_p_line" open)"
       _p_present="$(_doctor_pfield "$_p_line" present)" ;;
@@ -3007,10 +2854,8 @@ fi
 
 # ─── The Patrol ──────────────────────────────────────────────────────────────
 #
-# RUNNING PATROLS OR NOTHING. See the gathering comment above for the full
-# rationale; this is just its render. Doctor still changes nothing here — a
-# `CronDelete` fix line is PRINTED, never run, and running it is the reader's
-# act in the session that owns the job.
+# THE WATCH AND THE ROSTER OF EACH SESSION OF THIS PROJECT. See the gathering comment above; this is
+# just its render, and doctor changes nothing here.
 #
 # AND IT STAYS THE LAST SECTION OF A DEFAULT RUN. RESOURCES was placed above it
 # rather than below for that reason: the Patrol block is read from its header to
@@ -3019,11 +2864,7 @@ fi
 if _doctor_want PATROL; then
 echo ""
 echo "PATROL"
-# GATED ON WHETHER THERE IS ANYTHING TO SAY, not on the count of firing Patrols (REQ-11).
-# The two are the same question until a session reaches the `unreadable` state — a stale
-# stamp whose idle time could not be read — which produces a row without producing a
-# running Patrol. Counting firings would have discarded that row and printed `none running`
-# in its place: a claim this page has just finished saying it cannot make.
+# GATED ON WHETHER THERE IS ANYTHING TO SAY: a session of this project with no row prints none.
 if [ -n "$PATROL_ROWS" ]; then
   printf '%s' "$PATROL_ROWS"
 else
@@ -3031,9 +2872,8 @@ else
 fi
 # PLUGIN-ROOT DRIFT (wave-21 T3, AC-2.3). The registry's root and the root the hooks are
 # running from can be two trees: the CLI resolves a cached older build while the session's
-# hooks run a newer one (triage-C R2). The Patrol is armed by a prompt that names the poker
-# by path, so arming from the registry's copy runs the wrong script. The test is byte-wise on
-# the poker alone, the one file the Patrol is armed from; identical copies, no registry entry,
+# hooks run a newer one (triage-C R2). The test is byte-wise on the poker alone, the script the
+# watcher runs; identical copies, no registry entry,
 # or a registry root with no poker (cmp exits 2, not 1) all print nothing. The running root is
 # this script's own location, resolved the way DOCTOR_REPO_ROOT is, never from the env.
 _drift_reg="$(detect_plugin_root 2>/dev/null)" || _drift_reg=""
@@ -3044,7 +2884,7 @@ fi
 if [ -n "$_drift_reg" ] && [ "$_drift_reg" != "$_drift_run" ]; then
   cmp -s "${_drift_reg}/hooks/session-poker.sh" "${_drift_run}/hooks/session-poker.sh" 2>/dev/null
   if [ "$?" -eq 1 ]; then
-    echo "  plugin-root drift: registry=${_drift_reg} running=${_drift_run} — the Patrol must be armed from the running root"
+    echo "  plugin-root drift: registry=${_drift_reg} running=${_drift_run} — the session's hooks run a poker the registry does not hold"
   fi
 fi
 fi

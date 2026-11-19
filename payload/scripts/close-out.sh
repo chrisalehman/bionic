@@ -57,10 +57,10 @@
 # SYNTHETIC id, never the live one: removing the live session's marker at the end would
 # disengage the session that is running this script.
 #
-# TWO ACTS ARE INSTRUCTIONS AND SAY SO. `TaskUpdate` and `CronDelete` are model tools;
-# a shell script cannot call either. Printing the exact instruction is the whole of what
-# this script can honestly do for them, and printing it in the same line shape as the
-# seven acts it does perform is what keeps the report readable as one thing.
+# ONE ACT IS AN INSTRUCTION AND SAYS SO. `TaskUpdate` is a model tool; a shell script
+# cannot call it. Printing the exact instruction is the whole of what this script can
+# honestly do for it, and printing it in the same line shape as the acts it does perform
+# is what keeps the report readable as one thing.
 #
 # THE ARCHIVE COMES LAST, AFTER THE GATE, AND THAT IS NOT THE ORDER THE ACTS ARE NUMBERED
 # IN. `archive_run` moves a run only when every plan under its slug reads CLOSED to
@@ -1060,9 +1060,9 @@ TASKS_LINE="mark every 4/*, 5–9 entry completed (TaskUpdate)"
 #
 # THE CONTINUATION IS WRITTEN WHOLE (wave-33 T8; D8, AC-3.3). Every field this script can derive it
 # writes: the commit it closed at, the task count (the plan's build rows), the regression result (the
-# floor's proof line), the reviews (the review proof lines), the ADRs (the spec's or the plan's `adrs:`)
-# and the Patrol job (this session's transcript, or no sentence at all). The wave-32 close completed
-# fourteen marks by hand (A-orch-50); five remain, and they are the ones only a person decides: the
+# floor's proof line), the reviews (the review proof lines) and the ADRs (the spec's or the plan's `adrs:`).
+# A close once completed
+# fourteen marks by hand; five remain, and they are the ones only a person decides: the
 # first decision put to the user, what was ruled at the close, the next wave's version and ideas file, and
 # its carry-overs. `co_owed_line` names each of them in the close-out output. A template that invented
 # plausible values for those would produce a continuation that read true and was not.
@@ -1439,23 +1439,8 @@ co_reviews_text() {
   printf 'Reviews: %s. ADRs: %s.' "${revs:-none recorded}" "$adrs"
 }
 
-# co_patrol_sentence -> the sentence naming this session's Patrol job(s), or nothing. The id is the one
-# the platform minted, read from this session's transcript with lib/patrol.sh's own scan: a patrol job
-# (its prompt runs the poker's tick) that no CronDelete has named. No session id, no transcript or no such
-# job is no sentence: the id is not guessed.
-co_patrol_sentence() {
-  local tr ids n
-  [ -n "$CO_SID" ] || return 0
-  tr="$(patrol_transcript "$CO_SID")" || return 0
-  ids="$(_patrol_scan "$tr" "" 2>/dev/null | awk -F'\t' '$1 == "JOB" && $5 == "patrol" && $2 != "?" { printf "%s%s", (n++ ? ", " : ""), $2 } END { print "" }')"
-  [ -n "$ids" ] || return 0
-  n="$(printf '%s' "$ids" | awk -F', ' '{ print NF }')"
-  if [ "$n" = 1 ]; then printf 'Patrol job %s deleted and the stamp disarmed at close.' "$ids"
-  else printf 'Patrol jobs %s deleted and the stamp disarmed at close.' "$ids"; fi
-}
-
 continuation_template() {
-  local sha tasks regress reviews patrol inherited acts head resume ws line at ev whole_text
+  local sha tasks regress reviews inherited acts head resume ws line at ev whole_text
   # The integration branch at the merge this close read; the local branch only when no merge was read (a parked run).
   sha="$(git -C "$ROOT" rev-parse --short "${CO_MERGE_COMMIT:-$INTEGRATION}" 2>/dev/null)"
   acts="$(co_hand_acts_section)"
@@ -1479,7 +1464,6 @@ continuation_template() {
     fi
   fi
   reviews="$(co_reviews_text)"
-  patrol="$(co_patrol_sentence)"
   # A PARKED RUN SAYS SO IN ITS HEADER (wave-38 T15; AC-4.3): parked, where the work is, and why; nothing was merged.
   if [ "$PARKED" = yes ]; then
     ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
@@ -1525,7 +1509,7 @@ $(co_scorecard_section)
 
 ## Resume instruction
 
-$resume${patrol:+ $patrol} The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
+$resume The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
 this file is the wave-local copy.
 CONT_TEMPLATE
 }
@@ -1689,12 +1673,6 @@ co_epic_print() {
   say "epic-edit: add the row above to the shipped table of ${EPIC_PLAN##*/} by an edit of your own; this close writes no plan (a plan with no shipped table takes the header $EPIC_SHIPPED_HEADER and its rule line first)"
 }
 
-# ─── Act 8: the Patrol ───────────────────────────────────────────────────────
-#
-# CronDelete is a model tool and `disarm` is a hook verb; both sides have to be stopped
-# (dispatch.md:24), so both are named in one line.
-PATROL_LINE="CronDelete the bionic-patrol job, then: bash $(plugin_root)/hooks/session-poker.sh disarm"
-
 # ─── Act 9: the step's events ────────────────────────────────────────────────
 #
 # WHAT THE CLOSE GIVES ITS STEPS is written through the step's one writer (lib/proof.sh `proof_step_event`): at 8 what
@@ -1848,16 +1826,16 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
   tmp="$CO_HO_FILE.close-out.$$"
   {
     printf 'bionic-handoff/v1\n%s\n\n' "$title"
-    CO_HO_STATE="$(printf 'written: %s\ninstant: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
+    CO_HO_STATE="$(printf 'written: %s\ninstant: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s' \
         "$CO_HO_CLOCK" "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
-        "$CONT_REL" "$PATROL_LINE")" \
+        "$CONT_REL")" \
       awk -v secs="$HANDOFF_SECTIONS" -v old="$old" '
         BEGIN {
           n = split(secs, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1
           # an old-shape file: its five human lines go to the section that holds their kind of thing
           M["mid-flight"] = "Open"; M["order"] = "Next"; M["rulings"] = "Decisions"; M["lessons"] = "Findings"; M["risks"] = "Open"
           # the keys the closed State writes itself: an old line under one of them is kept, marked "was"
-          K["written"] = K["instant"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = K["patrol"] = 1
+          K["written"] = K["instant"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = 1
         }
         FNR == 1 { next }
         old {
@@ -2258,7 +2236,6 @@ do_check() {
   else
     co_epic_print
   fi
-  say "patrol: $PATROL_LINE"
   co_handoff_where
   if [ "$PARKED" = yes ]; then
     say "handoff: would write the closed form ($(co_resume_point)) to $CO_HO_REL; the run's log would name it"
@@ -2373,7 +2350,6 @@ do_run() {
   act_continuation; say "continuation: $CONT_LINE"
                     say "$(co_owed_line)"
   co_epic_print
-                    say "patrol: $PATROL_LINE"
   # ORDER: step 8's event -> the attestation -> step 9's. The attestation judges the run while it is
   # still OPEN at 8; delivering first would close it, and the gate checks no evidence of a closed run. A refusal here
   # leaves step 8 standing in the log with what the close cleaned, and no delivery.

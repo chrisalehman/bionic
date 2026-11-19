@@ -156,10 +156,6 @@ expect_eq "1k: …in the 1.7.1 shape — the five headings" "yes" \
 expect_eq "1l: …and it leaves the orchestrator's unknowns marked" "yes" \
   "$(contains "$(cat "$P1/$CONT_REL")" "<fill")"
 expect_eq "1m: act 6 — shipped-row: prints the wave's row for the orchestrator's edit" "yes" "$(contains "$CO_OUT" "shipped-row: | 01 | ")"
-expect_eq "1p: act 8 — patrol: names CronDelete and the disarm verb" "yes" \
-  "$(contains "$CO_OUT" "patrol: CronDelete")"
-expect_eq "1q: …and the disarm command" "yes" \
-  "$(contains "$CO_OUT" "session-poker.sh disarm")"
 HO_REL="$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$P1/$PLAN_REL" handoff 2>/dev/null | sed -n 's/^path=//p')"
 expect_eq "1r2: …under the file's kind line" "bionic-handoff/v1" "$(sed -n 1p "$P1/$HO_REL" 2>/dev/null)"
 expect_eq "1r3: …whose last line is the one door, naming the file" "/bionic:canonical-sdlc $HO_REL" "$(tail -1 "$P1/$HO_REL" 2>/dev/null)"

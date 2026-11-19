@@ -1,15 +1,9 @@
 #!/bin/bash
 # Tests for hooks/patrol-duties-gate.sh — the PATROL-DUTIES WALL.
 #
-# THE CONTRACT UNDER TEST. A Patrol tick is a turn the machine started, not the
-# user, and its two standing duties — refresh the subagent panel, refresh the
-# task list — are carried today by prompt text, which cannot bind. This Stop
-# hook makes the TURN'S END the wall: if the last user prompt was a Patrol tick
-# (structural marker: it contains `session-poker.sh tick`), the turn may not end
-# until the transcript shows, AFTER that prompt, a main-thread `ListAgents` AND
-# either a `TaskList` or a write naming the active plan file (the version-gated
-# fallback for sessions where the task tools are absent — see
-# the task-tools census in payload/scripts/lib/env.sh).
+# THE CONTRACT UNDER TEST. The turn's END is the wall for what the tick decided and only the
+# model can do: a fillable gap left undispatched, and a stand-down the tick ordered since the
+# previous turn end left unanswered.
 #
 # HARNESS IDIOM mirrored tests/context-spend.test.sh (deleted at 8582861, epic-18
 # wave-03): PASS/FAIL counters, mktemp
@@ -17,8 +11,8 @@
 # transcript fixtures replay the JSONL shapes read out of live transcripts under
 # ~/.claude/projects/-Users-admin-workspace-personal-bionic/ on 2026-08-22:
 #
-#   a cron-fired Patrol tick  -> {"type":"user", ..., "message":{"content":"Patrol tick — ..."}}
-#                                content is a STRING, isMeta true, isSidechain false
+#   a turn's prompt           -> {"type":"user", ..., "message":{"content":"..."}}
+#                                content is a STRING, isSidechain false
 #   a tool call               -> {"type":"assistant", "isSidechain":false,
 #                                 "message":{"content":[{"type":"tool_use","name":"ListAgents","input":{}}]}}
 #                                main-thread entries carry NO agentId/agent_id
@@ -27,10 +21,8 @@
 # THE TASK-LIST DUTIES ARE GONE (wave-31 T32; D6, REQ-6 AC-6.5). No tick turn owes a task-list
 # refresh and no dispatch turn owes a task entry set in progress: a process check the turn's end
 # demanded of the model, with nothing behind it to do. The tick still prints `poker: RECONCILE` and
-# writes `duty=` to its digest, as advice no wall reads. What this wall still refuses on a tick turn
-# is a marker turn that ran no tick, an unanswered FILL or stand-down, an unrecorded launch and the
-# resume ritual, and the rows below that used the refresh to show the wall was listening now use the
-# marker that ran no tick (`u_marker` beside an `arm` stamp).
+# writes `duty=` to its digest, as advice no wall reads. What this wall still refuses is an
+# unanswered FILL, and a stand-down the tick ordered since the previous turn end left unanswered.
 #
 # Usage: bash tests/patrol-duties-gate.test.sh
 
@@ -76,10 +68,8 @@ PLAN_REL="task-fixture.plan.md"
 PLAN_NAME="$PLAN_REL"
 
 # THE FIXTURE SESSION. Spelled once now that two things are built from it: the payload the
-# driver ships, and — since task-engaged-session — the engagement marker every fixture
-# plants and the `bionic-patrol session=<sid[0:8]>` token that makes a USER row a TICK.
+# driver ships, and — since task-engaged-session — the engagement marker every fixture plants.
 SID="11111111-2222-3333-4444-555555555555"
-SID8="${SID:0:8}"
 
 # ---------- fixture builders ----------
 
@@ -121,32 +111,13 @@ u_prompt() {  # <dir> <text>
                         message:{role:"user",content:$t}}' >> "$1/transcript.jsonl"
 }
 
-# The tick itself, verbatim in shape: the patrol prompt leads with the marker
-# `bionic-patrol session=<session-id[0:8]>` (skills/canonical-sdlc/SKILL.md §The patrol
-# prompt) and the rest of the prompt follows it.
-#
-# RESHAPED AT task-engaged-session (T6, AC-22). It used to lead with prose and be
-# recognised by the substring `session-poker.sh tick` anywhere in the row — a test the
-# injected canonical-sdlc SKILL.md body passes, because that body contains the literal.
-# Invoking the skill was therefore a Patrol tick as far as this gate could tell, and the
-# gate refused the invoking turn for duties no tick had asked for. What identifies a tick
-# is the marker the prompt was designed to carry, at the front, naming THIS session.
-#
-# A TICK TURN IS THE MARKER AND THE TICK (wave-20 REQ-6, D6; AC-6.2). The stop wall now refuses
-# a marker turn whose tick never stamped, so a fixture that means "the Patrol fired and ticked"
-# plants both halves: the prompt, and the `verb=tick` stamp the tick writes before it decides
-# (hooks/session-poker.sh `write_patrol_stamp`). The marker row is undated here, so the stamp's
-# verb alone answers for it; the dated rows of §5f drive the "at or after" half. `u_marker` is
-# the prompt alone — a cron that fired and a turn that never ran the tick.
-u_marker() {  # <dir>
-  u_prompt "$1" "bionic-patrol session=$SID8 — Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row; QUIET/DISARM = no-op. Then continue toward the goal until a wall."
-}
-tick_stamp() {  # <dir> [at ISO] [verb] — the stamp the tick (or `arm`) writes
-  printf 'patrol-stamp/v1|at=%s|session=%s|verb=%s\n' \
-    "${2:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$SID" "${3:-tick}" > "$1/.bionic/tmp/patrol-$SID.state"
-}
+# A turn's prompt, and the previous turn's end: the transcript's `stop_hook_summary` record, the
+# instant the stand-down duty counts the tick's orders from.
 u_tick() {  # <dir>
-  u_marker "$1"; tick_stamp "$1"
+  u_prompt "$1" "continue the fixture wave"
+}
+u_end() {  # <dir> <ISO>
+  jq -nc --arg t "$2" '{type:"system",subtype:"stop_hook_summary",timestamp:$t}' >> "$1/transcript.jsonl"
 }
 
 # A tool_result carrier: a `user`-typed entry that is NOT a prompt. It must not
@@ -279,25 +250,11 @@ section "Section 2: discrimination — what counts, and when"
 # refresh (its order, the plan-file write, a subagent's TaskList); the duty is gone with them.
 d=$(make_env); u_tick "$d"
 fire "$d"; expect_allow "7a: AC-6.5 a tick turn with no TaskList and no plan write ends: not refused"
-# 7b: THE PAIRED POSITIVE on the same fixture: the marker under an `arm` stamp ran no tick, and the
-# wall says so, naming the tick and never a refresh.
-tick_stamp "$d" "" arm
-fire "$d"; expect_block "7b: …while the same marker turn under an arm stamp is refused for the tick, never a refresh" \
-  "session-poker.sh tick" "$TL_MISSING"
-
 # 14: a tool_result carrier is not a prompt. The turn's boundary is the last
 # PROMPT; if results reset it, a tick whose duties are separated by any tool
 # result reads as a fresh non-tick turn and the wall goes permanently silent.
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_result "$d"; a_tool "$d" TaskList
 fire "$d"; expect_allow "14: tool_result entries do not end the tick's turn"
-
-# 14b: a tool_result carrier must not reset internal duty/tick bookkeeping either
-# -- same fixture family as 14, but only ONE duty is done, so a wrongful reset
-# (tick lost -> quiet/allow) is DISCRIMINABLE from the correct outcome (block,
-# naming the missing duty), unlike 14 where both outcomes coincide at allow.
-d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm; a_tool "$d" ListAgents; u_result "$d"
-fire "$d"; expect_block "14b: a tool_result carrier does not end the marker's turn: the unticked turn is still refused" \
-  "session-poker.sh tick" "$TL_MISSING"
 
 # 15: a batch — two tool_uses in one assistant entry.
 d=$(make_env); u_tick "$d"; a_tool_batch "$d" ListAgents TaskList
@@ -324,29 +281,6 @@ fire_raw "$d" "$(jq -nc --arg c "$d" '{session_id:"s",cwd:$c,hook_event_name:"St
 # 20: malformed lines are skipped, not fatal.
 d=$(make_env); u_tick "$d"; junk "$d"; a_tool "$d" ListAgents; junk "$d"; a_tool "$d" TaskList
 fire "$d"; expect_allow "20: malformed transcript lines do not break the read"
-
-# 21/22: NO PLAN, BUT A TICK IS STILL A TICK (task-engaged-session, AC-23). What scopes
-# this gate is ENGAGEMENT, not the plan: bionic 1.4.0 scoped it by `active_run`, and that
-# walled every session in a repo that merely held an open plan while leaving an engaged
-# session at Step 0 — whose plan does not exist yet — unpoliced. Both duties are owed to
-# the TICK, and a tick fires as soon as the Patrol is armed, which is at engagement. So a
-# plan-less project with an engaged session and a skipped duty is refused; what the missing
-# plan costs is only the ALTERNATIVE way to discharge the task-list duty (a write to the
-# plan file), which is why the refusal below names the task list and not the panel.
-d=$(make_env_planless); u_marker "$d"; tick_stamp "$d" "" arm; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
-fire "$d"; expect_block "21: an engaged session with no plan still owes the marker its tick" "session-poker.sh tick" "$TL_MISSING"
-
-# 21b: THE SAME transcript, the SAME plan-less project, the marker removed. A bystander
-# session is not policed at all — the pairing that makes 21 a statement about engagement
-# rather than about the transcript.
-rm -f "$d/.bionic/tmp/engaged-$SID.state"
-fire "$d"; expect_allow "21b: …and with no engagement marker it is silent"
-
-# THE PAIRED POSITIVE, and it is what keeps 21 from passing vacuously: the SAME
-# transcript, in a project that does have an open run, refuses. Nothing separates the
-# two but the plan file.
-d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
-fire "$d"; expect_block "22: …and with a plan, the same turn is refused the same way" "session-poker.sh tick" "$TL_MISSING"
 
 # 23: THE GATE WRITES NOTHING. It is a gate, and gates only read (TDD §3.2). The one file the
 # Stop process writes is the run's log, where the recorder of the turn's `stop` event, which is
@@ -400,127 +334,6 @@ else
   ok "26b: …and no longer claims that backstop as its own"
 fi
 
-section "Section 4: the resume/clear ritual arm (bionic 1.4.0, AC-3)"
-#
-# A /clear rewrites the session id in place but does NOT kill a predecessor's cron
-# job (A-probe-4: it survives and keeps firing into the new conversation). The
-# probe's own new transcript begins with the literal `<command-name>/clear</command-name>`
-# turn (record/wave-1.4.0-probe.md); a resume is announced the same way this gate's
-# SessionStart sibling (hooks/session-start.sh) prints it: the literal substring
-# `source: resume` inside its title line. Either marker means a CronCreate that is
-# not preceded by a CronList SINCE that marker would leave two clocks on one
-# project — the wall refuses once, naming the resume ritual.
-
-# A user-role entry shaped exactly like the probe's own new-transcript first turn.
-u_clear_marker() { u_prompt "$1" "<command-name>/clear</command-name>"; }
-
-# The marker is type-agnostic by design (a SessionStart report is not a user
-# prompt), so this is driven as a "system"-typed entry — proving the scan reads
-# raw transcript text, not one JSON shape.
-u_resume_marker() {
-  jq -nc '{type:"system",isSidechain:false,
-           message:{content:"bionic session-start (source: resume) — state the previous conversation left on this project."}}' \
-    >> "$1/transcript.jsonl"
-}
-
-RITUAL_CRONLIST="CronList"
-RITUAL_JOB="bionic-patrol session="
-RITUAL_CRONCREATE="CronCreate"
-RITUAL_ARM="session-poker.sh arm"
-RITUAL_ADOPT="adopt"
-
-# 27: a clear marker, then a CronCreate with no CronList since it -> block, naming
-# every step of the ritual.
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
-fire "$d"
-expect_block "27: CronCreate with no prior CronList after a clear marker blocks" "$RITUAL_CRONLIST"
-r=$(reason_of)
-case "$r" in
-  *"$RITUAL_CRONLIST"*"$RITUAL_JOB"*"$RITUAL_CRONCREATE"*"$RITUAL_ARM"*"$RITUAL_ADOPT"*)
-    ok "28: the reason states the ritual in order — CronList, delete the stray job, CronCreate, arm, adopt" ;;
-  *) no "28: the reason does not state the ritual in order" "$r" ;;
-esac
-
-# 29: the same marker, but CronList precedes the CronCreate -> passes.
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronList; a_tool "$d" CronCreate
-fire "$d"; expect_allow "29: CronList before CronCreate after a clear marker passes"
-
-# 30: no marker at all -> the arm is inert, whatever the Cron calls did.
-d=$(make_env); a_tool "$d" CronCreate
-fire "$d"; expect_allow "30: no marker in the transcript — the arm is inert"
-
-# 31: the resume spelling blocks the same way.
-d=$(make_env); u_resume_marker "$d"; a_tool "$d" CronCreate
-fire "$d"; expect_block "31: a resume marker with no prior CronList blocks" "$RITUAL_CRONLIST"
-
-# 32: BLOCKS ONCE. The re-entry with stop_hook_active true always passes, exactly
-# the mechanism the tick-duties arm already uses — nothing new to enforce it.
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
-fire "$d" Stop true
-expect_allow "32: stop_hook_active true passes the same unresolved ritual — the refusal fires only once"
-
-# 33: ORDERING. A CronCreate that happened BEFORE the marker is not "since" it —
-# only a later marker starts the window this rule judges.
-d=$(make_env); a_tool "$d" CronCreate; u_clear_marker "$d"
-fire "$d"; expect_allow "33: a CronCreate before the marker does not count against it"
-
-# 34: a CronList satisfies the ritual with nothing else following it.
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronList
-fire "$d"; expect_allow "34: a marker followed only by CronList passes — nothing to cure"
-
-# 35: agent-context calls are not the orchestrator's ritual, same exclusion as the
-# tick-duties arm's ListAgents/TaskList reads.
-d=$(make_env); u_clear_marker "$d"; a_tool_sidechain "$d" CronCreate
-fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the ritual"
-
-# 35a-c: THE RITUAL DISCHARGES. The offending CronCreate never leaves the transcript, so a
-# verdict that only ever set `violated` latched: every later turn's first Stop was refused
-# again, "blocks once" holding within one turn (case 32) and failing across turns. A CronList
-# since the marker is the look the gate exists to force, so it clears the violation whichever
-# side of the CronCreate it falls on; a LATER marker still opens a fresh window (35c).
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
-fire "$d"; expect_allow "35a: a CronList after the CronCreate discharges the ritual"
-
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
-a_tool "$d" CronDelete; a_tool "$d" CronCreate
-fire "$d"; expect_allow "35b: CronCreate, CronList, CronDelete, CronCreate — the whole ritual in the order the refusal asks — passes"
-
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_tool "$d" CronList
-u_clear_marker "$d"; a_tool "$d" CronCreate
-fire "$d"; expect_block "35c: a CronList before a LATER marker does not discharge the new window" "$RITUAL_CRONLIST"
-
-# 35d: THE STEP-3 TEXT. A session whose own Patrol job already exists has nothing to re-create,
-# so the refusal's step 3 is conditional on what step 2 left.
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
-fire "$d"
-case "$(reason_of)" in
-  *"3. CronCreate — only if step 2 left this session with no Patrol job of its own"*)
-    ok "35d: step 3 of the refusal is conditional on step 2's result" ;;
-  *) no "35d: step 3 of the refusal is still unconditional" "$(reason_of)" ;;
-esac
-
-# 35e: THE LATER TURN (wave-21 T13; walk-3b45d05 item 3). The window since the marker stays open
-# until a CronList, so the block repeats on the turn AFTER the one that created the cron — and
-# its reason opened "This is the first Stop after a /clear or a resume", false on that turn.
-# The text says what is true on every turn it fires: the window is open until a CronList.
-d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate; a_text "$d" "armed."
-u_prompt "$d" "carry on with the wave"; a_text "$d" "on it."
-# THE LATER TURN IS REAL ONLY IF ITS TEXT LANDED (wave-21 T14; floor-4e6d4a9). `a_text` was
-# defined below this case, so both calls printed "command not found" and the fixture had no
-# assistant entry after the prompt — the case still passed, on a transcript that was not the
-# one it describes. The fixture is asserted first: the CronCreate's turn said "armed.", the
-# later turn said only "on it." and made no Cron call.
-expect_eq "35e0 precondition: the CronCreate's turn and the later turn each carry their text" "armed.|on it." \
-  "$(jq -sr '[.[] | select(.type=="assistant") | .message.content[] | select(.type=="text") | .text] | join("|")' \
-       "$d/transcript.jsonl" 2>/dev/null)"
-expect_eq "35e0b precondition: …and the later turn made no Cron call" "0" \
-  "$(jq -sr '(map(.type=="user" and (.message.content|type)=="string") | rindex(true)) as $i
-             | .[($i+1):] | [.[] | select(.type=="assistant") | .message.content[]
-             | select(.type=="tool_use" and (.name|startswith("Cron")))] | length' \
-       "$d/transcript.jsonl" 2>/dev/null)"
-fire "$d"; expect_block "35e: a later turn with the window still open is refused, saying the window is open until a CronList" \
-  "stays open until a CronList" "This is the first Stop"
-
 section "Section 5b: the fourth duty — a stand-down the tick ordered is answered (AC-1.2; T1, D1; wave-20 T19)"
 #
 # THE CONTRACT. `session-poker.sh tick` stands down every row whose contract is MET and whose
@@ -536,7 +349,7 @@ section "Section 5b: the fourth duty — a stand-down the tick ordered is answer
 # FILL: a model's own prose could plant a name, a `cat` of a file could forge one, and a tick
 # output nobody showed let every name go. The set is now what the tick WROTE, read back from
 # disk: this session's MET, unacked lineages (the sweeper's verdict) carrying a `by=patrol`
-# stop order stamped at or after this turn's tick stamp. The printed line still rides in the
+# stop order stamped at or after the previous turn end. The printed line still rides in the
 # fixtures that model a real tick, for realism; the §SD rows below take it away, restate it
 # and forge it, and none of that moves the verdict.
 #
@@ -638,19 +451,15 @@ fire "$d"; expect_block "52: a decline naming a third agent leaves this one unan
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET — 0 open row(s)"
 fire "$d"; expect_allow "53: a tick that stood nothing down is not asked about one"
 
-# 54: ORDERING. A stand-down ordered in an EARLIER turn is not this turn's to answer.
-# RE-AUTHORED at wave-20 T19: the earlier turn's line is no longer what binds, the earlier
-# tick's ORDER is — so the order is dated before this turn's tick stamp, which is what a tick
-# one Patrol interval later leaves on disk. Same claim, on the fact the wall now reads.
+# 54: ORDERING. A stand-down ordered before the previous turn ended was that turn's to answer.
 d=$(make_env); u_tick "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
 sed -i.bak 's/|at=[^|]*|/|at=2026-01-01T00:00:00Z|/' "$d/.bionic/tmp/stop-orders-$SID.state"
-u_tick "$d"; both_duties "$d"
-fire "$d"; expect_allow "54: a stand-down from a previous turn does not bind this one"
+u_end "$d" 2026-06-01T00:00:00.000Z; u_tick "$d"; both_duties "$d"
+fire "$d"; expect_allow "54: a stand-down ordered before the previous turn end does not bind this one"
 
-# 55: a non-tick turn is never asked, whatever its transcript or the disk carries.
-d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"; sd_stood "$d" W-ALPHA
-u_tick_out "$d" "$(sd_line W-ALPHA)"
-fire "$d"; expect_allow "55: a turn the user started is not asked about a stand-down"
+# 55: …and one ordered since it binds whatever started the turn: a reply of the person's too.
+d=$(make_env); u_end "$d" 2026-01-01T00:00:00.000Z; u_prompt "$d" "run the suite and tell me what broke"; sd_stood "$d" W-ALPHA
+fire "$d"; expect_block "55: a stand-down ordered since the previous turn end binds a turn the person started" "W-ALPHA"
 
 # 56: BLOCKS ONCE, through the same stop_hook_active valve the other three duties use.
 d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"
@@ -745,13 +554,6 @@ jq -nc '{type:"user",isSidechain:false,
          message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_SD8",is_error:true,content:"refused"}]}}' \
   >> "$d/transcript.jsonl"
 fire "$d"; expect_block "SD8: a TaskStop the harness refused does not answer the stand-down" "W-ALPHA"
-
-# SD9: NO TICK STAMPED THIS TURN, NO STAND-DOWN SET. A marker turn whose tick never ran owes the
-# tick (§5f), and the orders on disk belong to whichever tick wrote them — not to this turn.
-d=$(make_env); u_marker "$d"; sd_stood "$d" W-ALPHA
-tick_stamp "$d" "2026-01-01T00:00:00Z" arm
-both_duties "$d"
-fire "$d"; expect_block "SD9: a marker turn that ran no tick is refused for the tick" "Patrol tick not run" "W-ALPHA"
 
 # ============================================================
 finish
