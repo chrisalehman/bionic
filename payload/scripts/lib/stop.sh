@@ -2225,31 +2225,30 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
       s = kv($0, "session"); if (s != "" && s != sid) next
       at = substr(kv($0, "at"), 1, 19); if (at == "" || at < lb) next
       t = kv($0, "target"); if (t !~ /^[A-Za-z0-9_.-]+$/) next
-      if (!(t in seen)) { seen[t] = 1; printf "%s ", t }
-    }' "$orders" 2>/dev/null)"
+      if (!(t in last) || at > last[t]) last[t] = at
+    }
+    END { for (t in last) printf "%s %s\n", t, last[t] }' "$orders" 2>/dev/null)"
   [ -n "$targets" ] || return 0
-  # A HOLD WRITTEN SINCE THE BOUND ANSWERS ITS NAME (wave-24 T8; D1, AC-4.12). `hold` appends
-  # the name's row with `held=<iso> <reason> fp=…`, and the latest row of a name is its row. A
-  # hold older than the bound was in place when this turn's tick ordered the name anyway, so
-  # something about the agent has changed since and the order stands.
+  # A HOLD WRITTEN AFTER A NAME'S LAST ORDER ANSWERS IT (wave-24 T8; D1, AC-4.12). `hold` appends
+  # the name's row with `held=<iso> <reason> fp=…`, and the latest row of a name is its row. The
+  # tick orders no held name while the hold's fingerprint stands, so an order newer than the hold
+  # says something about the agent has changed since, and that order stands.
   roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  held=""
   if [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; then
-    held="$(awk -v lb="${lb:0:19}" '
+    held="$(awk '
       function kv(line, key,   i, n, parts) {
         n = split(line, parts, "|")
         for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
         return ""
       }
       index($0, "roster-state/") == 1 { nm = kv($0, "name"); if (nm != "") h[nm] = kv($0, "held") }
-      END { for (nm in h) { at = substr(h[nm], 1, 19); if (at != "" && at >= lb) printf " %s", nm } }' "$roster" 2>/dev/null)"
-    vout=""
-    for t in $targets; do
-      case "$held " in *" $t "*) continue ;; esac
-      vout="${vout}${t} "
-    done
-    targets="$vout"
-    [ -n "$targets" ] || return 0
+      END { for (nm in h) { at = substr(h[nm], 1, 19); if (at != "") printf "%s %s\n", nm, at } }' "$roster" 2>/dev/null)"
   fi
+  targets="$(printf '%s\n' "$targets" | awk -v held="$held" '
+    BEGIN { n = split(held, l, "\n"); for (i = 1; i <= n; i++) { split(l[i], p, " "); if (p[1] != "") h[p[1]] = p[2] } }
+    NF == 2 && !(($1 in h) && h[$1] >= $2) { printf "%s ", $1 }')"
+  [ -n "$targets" ] || return 0
   [ -f "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" ] || return 0
   # Run from the root with the session key, exactly as the landing sweep above asks it;
   # `|| exit 9` keeps a failed `cd` out of the verb's exit-1 band.

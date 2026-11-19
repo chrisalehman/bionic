@@ -428,15 +428,16 @@ expect_true "5.16 …and a live session's tick digest is kept" \
 # trees in `workspaces-<sid>.state` (payload/scripts/lib/worktree.sh) and
 # hooks/permission-answer.sh queues the reserved requests the tick escalates in
 # `gate-<sid>.state`. Both are `<class>-<sid>.state` like every class above, so a dead
-# session's copies are residue the sweep removes and a live one's are kept.
+# session's copies are residue the sweep removes and a live one's are kept. So are the turn-end
+# hook's `duty-<sid>.state` and `stop-said-<sid>.state`.
 R5F="$(make_repo r5f)"
 live_home 5f "$SID_LIVE"; H5F="$CLAUDE_HOME"
-plant_session "$R5F" "$SID_LIVE" workspaces gate
-plant_session "$R5F" "$SID_DEAD" workspaces gate
+plant_session "$R5F" "$SID_LIVE" workspaces gate duty stop-said
+plant_session "$R5F" "$SID_DEAD" workspaces gate duty stop-said
 poke "$R5F" "$H5F" "$SID_SELF" sweep
 expect_eq "5.17 a sweep over a workspaces-and-gate-only session completes (exit 0)" "0" "$RC"
 expect_contains "5.18 …and counts the session that holds only those two files dead" "|dead=1|" "$OUT"
-for c in workspaces gate; do
+for c in workspaces gate duty stop-said; do
   expect_false "5.19 ($c) a dead session's $c state is swept" \
     test -e "$(f_of "$R5F" "$c" "$SID_DEAD")"
   expect_true "5.20 ($c) …and a live session's $c state is kept" \

@@ -72,7 +72,7 @@ WP_TR="$WP_CFG/projects/-fixture-project/$SID.jsonl"
 
 # THE QUIET WORLD: armed, one open row inside its duration and on the panel, no plan, nothing ready.
 wp_quiet_world() {  # <label> -> repo
-  local r; r="$(make_repo "$1")"; new_roster "$r"; armed_ago "$r"
+  local r; r="$(make_repo "$1")"; new_roster "$r"; bound_ago "$r"
   add_row "$r" name=busy deliverable="$r/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
   printf '%s' "$r"
 }
@@ -107,7 +107,7 @@ expect_nonempty "Q5.a …and stdout carries its line" "$WP_OUT"
 section "§WAKE: a ready row with room, an agent that reported and an agent quiet past its cadence each wake (AC-9.2)"
 # ============================================================
 # A READY ROW WITH ROOM. T1 landed, T3 ready on it, writers=8 and an empty roster: the tick fills T3.
-RF="$(make_repo wp-fill)"; new_roster "$RF"; armed_ago "$RF"
+RF="$(make_repo wp-fill)"; new_roster "$RF"; bound_ago "$RF"
 sp_plan_at_step "$RF" 4 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
@@ -127,7 +127,7 @@ wk_msg() {
 report
 </teammate-message>" '{type:"user",timestamp:"2026-09-05T00:50:10.000Z",message:{role:"user",content:$b}}'
 }
-RS="$(make_repo wp-reported)"; new_roster "$RS"; armed_ago "$RS"
+RS="$(make_repo wp-reported)"; new_roster "$RS"; bound_ago "$RS"
 WK_PLAN="$(wave_plan_at "$RS" "epic-99-fixture/wave-41.plan.md" \
   "writers=1 suites=2 worktrees=8 test_jobs=8 source=user" \
   "| R1 | 4 | build | ready row | implementor | — | 15m | REQ-x | r1.sh | pending |")"
@@ -144,7 +144,7 @@ expect_contains "W2.a …its line names the agent" "w-1" "$WK_SD"
 expect_contains "W2.b …and the act" "TaskStop" "$WK_SD"
 
 # AN AGENT QUIET PAST ITS CADENCE. T1 active, w1's progress file ten cadences old, no carrier and no request.
-RN="$(make_repo wp-cadence)"; new_roster "$RN"; armed_ago "$RN"
+RN="$(make_repo wp-cadence)"; new_roster "$RN"; bound_ago "$RN"
 wave_plan_at "$RN" 'epic-99-fixture/wave-01-fixture.plan.md' "-" \
   "| T1 | 4 | build | the writer's row | implementor | — | 60 | REQ-x | a.sh | active |" > /dev/null
 printf 'working\n' > "$RN/progress-w1.md"; backdate "$RN/progress-w1.md" 3000
@@ -252,7 +252,7 @@ expect_contains "G3.b …while the ask stays open" "gate:" "$(wp_owed "$RG" owed
 # THE PERSON'S WORLD: armed, an empty roster, the session bound to a plan at Step 3, so no row is ready, no run is
 # delivered and the run's log holds no pull request. Sets WP_R and WP_PLAN (not a subshell, so both survive).
 wp_person_world() {  # <label>
-  WP_R="$(make_repo "$1")"; new_roster "$WP_R"; armed_ago "$WP_R"
+  WP_R="$(make_repo "$1")"; new_roster "$WP_R"; bound_ago "$WP_R"
   WP_PLAN="$(sp_plan_at_step "$WP_R" 3 "| T1 | 4 | build | a row | implementor | — | 15m | REQ-x | a.sh | pending |")"
   bind_marker "$WP_R" "$WP_PLAN"
 }
@@ -422,7 +422,7 @@ for ev in Stop SessionStart; do
 done
 
 section "§HOOK-WAKE: a pass that wakes ends the watcher with the wake code and the pass's line on stderr, and nothing else"
-RHW="$(make_repo wh-fill)"; new_roster "$RHW"; armed_ago "$RHW"; wh_fast "$RHW"
+RHW="$(make_repo wh-fill)"; new_roster "$RHW"; bound_ago "$RHW"; wh_fast "$RHW"
 sp_plan_at_step "$RHW" 4 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null

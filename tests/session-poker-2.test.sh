@@ -288,7 +288,7 @@ expect_eq "40d4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # last tick says so. No other case ticks DISARM over a plan with a hold and a finding, so the
 # report's call on that arm was unpinned: deleting it left every suite green.
 R40E="$(make_repo s40-disarm)"; new_roster "$R40E"
-armed_ago "$R40E"
+bound_ago "$R40E"
 P40E="$(sp_plan_at_step "$R40E" 9 \
   "| T1 | 4 | build | launched under a name no roster row carries | w-T9 | — | 15m | REQ-x | a.sh | active |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40e | 15m | REQ-x | b.sh | pending |")"
@@ -326,7 +326,7 @@ ss_res() { printf '%s\n' "$1" > "$SS_CFG/bionic/reserve"; ss_verb reserve="$1" >
 expect_eq "SS.4 the verb and gate_reserve (its print) judge a reserve alike: ten characters refused by both (2, read 1), 2.5 taken by both" \
   "2|1 0|2.5" "$(ss_res 0000000002) $(ss_res 2.5)"
 # ============================================================
-section "Section 41: the quiet Patrol, tick side — prompt, band, hold, digest, version (wave-24 T7; REQ-4 AC-4.1–4.6, 4.9, 4.11; D1, D4, D5; ADR-041)"
+section "Section 41: the quiet Patrol, tick side — band, hold, digest (wave-24 T7; REQ-4 AC-4.2–4.6, 4.9; D1, D4; ADR-041)"
 # ============================================================
 #
 # THE DEFECT (research-R1). The prompt asked for a `fill-declined:` line on every tick, so all 29
@@ -366,7 +366,7 @@ s41_transcript() {  # <messages from w-1> <name:status>... -> this session's tra
 # A LIVE LEDGER WITH NO GAP: writers=1, one ready row, and the MET row still unacked holds the
 # slot — so the tick names no FILL and the stop wall's fill duty owes nothing.
 s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with a landed deliverable
-  local r; r="$(make_repo "$1")"; new_roster "$r"; armed_ago "$r"
+  local r; r="$(make_repo "$1")"; new_roster "$r"; bound_ago "$r"
   local p; p="$(wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" \
     "writers=1 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| R1 | 4 | build | ready row | implementor | — | 15m | REQ-x | r1.sh | pending |")"
@@ -380,16 +380,6 @@ s41_count() {  # <text> <fixed string> -> lines carrying it
   printf '%s\n' "$1" | grep -cF -- "$2" | tr -d ' '
 }
 
-# ---------- §PROMPT (AC-4.1; D5): the prompt asks only for what the tick printed ----------
-R41P="$(make_repo s41-prompt)"
-poke "$R41P" prompt
-S41_PROMPT="$OUT"
-expect_nonempty "41a precondition: the prompt printed" "$S41_PROMPT"
-expect_contains "41a4 …and the fill answer is still named" 'Answer a FILL only if a "poker: FILL" line printed' "$S41_PROMPT"
-expect_absent "41a4b …and names no decline" 'decline' "$S41_PROMPT"
-expect_regex "41a7 AC-4.11 …and it carries its version after the session token" \
-  "^bionic-patrol session=${SID:0:8} v=[0-9]+ — " "$S41_PROMPT"
-
 # ---------- §BAND (AC-4.2; D4): a stand-down raises the band ----------
 R41B="$(s41_world s41-band)"
 s41_transcript 1 "w-1:idle"
@@ -401,13 +391,14 @@ expect_absent "41b2 …never QUIET beside a STANDDOWN line" "decision=QUIET" "$S
 expect_contains "41b3 …and the order is written" "target=w-1" "$(cat "$(orders_of "$R41B")" 2>/dev/null)"
 expect_contains "41b4 AC-4.12 …and the STANDDOWN line names the standing answer" "hold w-1" "$S41B_OUT"
 
-# The tick turn the stop wall judges: the Patrol prompt, the tick's Bash call and its output,
+# The tick turn the stop wall judges: a prompt, the tick's Bash call and its output,
 # and the task-list refresh — no decline text anywhere.
 S41_STOP="${BIONIC_HOOKS_DIR}/stop.sh"
-s41_turn() {  # <repo> <tick output> -> the transcript path
+s41_turn() {  # <repo> <tick output> [<previous turn end ISO>] -> the transcript path
   local tr="$1/s41-turn.jsonl"
   {
-    jq -nc --arg t "$S41_PROMPT" '{type:"user",isMeta:true,isSidechain:false,userType:"external",message:{role:"user",content:$t}}'
+    [ -z "${3:-}" ] || jq -nc --arg t "$3" '{type:"system",subtype:"stop_hook_summary",timestamp:$t}'
+    jq -nc --arg t "continue the run" '{type:"user",isMeta:true,isSidechain:false,userType:"external",message:{role:"user",content:$t}}'
     jq -nc --arg c "bash $POKER tick" '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S41TICK",name:"Bash",input:{command:$c}}]}}'
     jq -nc --arg o "$2" '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S41TICK",content:$o}]}}'
     jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S41TL",name:"TaskList",input:{}}]}}'
@@ -428,7 +419,7 @@ expect_contains "41b5 the CONTROL: the real stop wall refuses an unanswered stan
   "stand-down unanswered" "$(s41_reason)"
 
 # ---------- §HOLD-fix (wave-24 T27; critic I4): one pasteable hold line at all three sites ----------
-# The tick's STANDDOWN line, the stop wall's stand-down refusal and the Patrol prompt each print
+# The tick's STANDDOWN line and the stop wall's stand-down refusal each print
 # the hold command. A bare `<reason>` pasted as printed is a redirect from a file named `reason`;
 # each site now prints the reason as the one quoted placeholder. The tick's and the wall's lines
 # carry the real name and parse, as a pasting shell parses them, into exactly five arguments.
@@ -444,6 +435,8 @@ expect_eq "41b6 critic I4 the tick's STANDDOWN line pastes as one hold of w-1 wi
   "5|w-1|why it stays up" "$(s41_hold_argv "$S41B_OUT")"
 expect_eq "41b7 …and the stop wall's refusal prints the same command for the same row" \
   "5|w-1|why it stays up" "$(s41_hold_argv "$S41B_WALL")"
+s41_stop "$R41B" "$(s41_turn "$R41B" "$S41B_OUT" 2099-01-01T00:00:00.000Z)"
+expect_eq "41b8 the wall owes no stand-down the tick ordered before the previous turn ended" "" "$(s41_refused)"
 
 # ---------- §HOLD (AC-4.3; D1): a hold stands, prints once, and the turn ends ----------
 R41H="$(s41_world s41-hold)"
@@ -541,12 +534,10 @@ expect_contains "41e precondition: the held row prints its note" "poker: held w-
 expect_absent "41e AC-4.5 two ticks over a held idle row draw no NOTIFY" "NOTIFY" "$S41I_T1$OUT"
 
 # ---------- §DIGEST (AC-4.9; D4): an unchanged tick is one line ----------
-R41D="$(make_repo s41-digest)"; new_roster "$R41D"; armed_ago "$R41D"
+R41D="$(make_repo s41-digest)"; new_roster "$R41D"; bound_ago "$R41D"
 add_row "$R41D" name=busy deliverable="$R41D/never-written.md" duration="4 hours" \
   launched_at="$(iso_ago 60)"
 plant_answer "$S41_TR" fresh "busy:running"
-expect_contains "41f precondition: arm recorded the prompt version" "prompt_version=" \
-  "$(cat "$(digest_of "$R41D")" 2>/dev/null)"
 poke "$R41D" tick
 S41D_T1="$OUT"
 expect_contains "41f2 the first tick prints its decision" "decision=QUIET" "$S41D_T1"
@@ -567,22 +558,8 @@ poke "$R41D" tick
 expect_absent "41f7 a new row is a change: the full tick prints" "unchanged since" "$OUT"
 expect_contains "41f8 …with its decision line" "decision=" "$OUT"
 
-# ---------- §PVER (AC-4.11; D5): a stale or missing prompt version asks for a re-arm ----------
-R41V="$(make_repo s41-pver)"; new_roster "$R41V"
-add_row "$R41V" name=busy deliverable="$R41V/never-written.md" duration="4 hours" \
-  launched_at="$(iso_ago 60)"
-poke "$R41V" tick
-expect_eq "41g AC-4.11 a tick with no recorded version prints one re-arm line" "1" \
-  "$(s41_count "$OUT" "re-arm the Patrol")"
-printf 'patrol-digest/v1\nprompt_version=1\n' > "$(digest_of "$R41V")"
-poke "$R41V" tick
-expect_eq "41g2 …and so does a tick under an older version" "1" "$(s41_count "$OUT" "re-arm the Patrol")"
-poke "$R41V" arm
-poke "$R41V" tick
-expect_eq "41g3 …and an armed one prints none" "0" "$(s41_count "$OUT" "re-arm the Patrol")"
-expect_contains "41g4 …while still printing its decision" "decision=" "$OUT"
 # ---------- §DIGEST-over (D4; wave-28 T13): a tick over the share prints in full every time ----------
-R41X="$(make_repo s41-emergency)"; new_roster "$R41X"; armed_ago "$R41X"
+R41X="$(make_repo s41-emergency)"; new_roster "$R41X"; bound_ago "$R41X"
 add_row "$R41X" name=suite-writer deliverable="$R41X/never-written.md" duration="4 hours" \
   claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
 plant_answer "$S41_TR" fresh "suite-writer:running"

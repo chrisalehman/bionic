@@ -151,7 +151,7 @@ R3E="$(make_repo s3-empty)"; new_roster "$R3E"
 # The run says it is delivered, so the empty roster is a finish and not a lull (AC-14) — and
 # the Patrol armed before that delivery was recorded, which is what makes the delivery THIS
 # run's (R-13, AC-14's second half).
-armed_ago "$R3E"
+bound_ago "$R3E"
 delivered_plan "$R3E"
 poke "$R3E" tick
 expect_eq "an empty roster ticks quietly (exit 0)" "0" "$RC"
@@ -210,7 +210,7 @@ expect_contains "…decision=NOTIFY survives the marker" "decision=NOTIFY" "$OUT
 expect_contains "…naming the row" "rows=overdue-swept" "$OUT"
 
 # --- all rows closed (MET), roster non-empty -> DISARM generalizes past "empty" ---
-R3C="$(make_repo s3-closed)"; new_roster "$R3C"; armed_ago "$R3C"; delivered_plan "$R3C"
+R3C="$(make_repo s3-closed)"; new_roster "$R3C"; bound_ago "$R3C"; delivered_plan "$R3C"
 DEL_C="$R3C/delivered.md"; echo "done" > "$DEL_C"
 add_row "$R3C" name=finished deliverable="$DEL_C" duration="1 minute" \
   launched_at="$(iso_ago 600)"
@@ -262,7 +262,7 @@ expect_absent   "…never NOTIFY on a duration the parser refused" "decision=NOT
 # and its artifact — accounted for by a human rather than written to disk — will never
 # appear. DISARM requires OPEN=0, so the self-wake could not be ended by the ordinary path
 # an orchestrator uses to close a row that produced no artifact.
-R3AK="$(make_repo s3-all-acked)"; new_roster "$R3AK"; armed_ago "$R3AK"; delivered_plan "$R3AK"
+R3AK="$(make_repo s3-all-acked)"; new_roster "$R3AK"; bound_ago "$R3AK"; delivered_plan "$R3AK"
 add_row "$R3AK" name=acked-1 deliverable="$R3AK/absent-1.md" duration="1 minute" \
   launched_at="$(iso_ago 600)"
 add_row "$R3AK" name=acked-2 deliverable="$R3AK/absent-2.md" duration="1 minute" \
@@ -286,7 +286,7 @@ expect_absent   "…never NOTIFY on rows a human already closed" "decision=NOTIF
 # The sandbox label deliberately does NOT contain the row name: the DISARM line now names
 # the plan path it decided from, and a repo dir called `s3-acked-overdue` would put the row
 # name into the output by way of the fixture rather than by way of a notification.
-R3AN="$(make_repo s3-ack-past-due)"; new_roster "$R3AN"; armed_ago "$R3AN"; delivered_plan "$R3AN"
+R3AN="$(make_repo s3-ack-past-due)"; new_roster "$R3AN"; bound_ago "$R3AN"; delivered_plan "$R3AN"
 add_row "$R3AN" name=acked-overdue deliverable="$R3AN/absent-acked-overdue.md" \
   duration="1 minute" launched_at="$(iso_ago 100000)"
 ack_rows "$R3AN" acked-overdue
@@ -472,7 +472,7 @@ section "Section 6: the Patrol stamp — the arm verb, and stamp-before-decide o
 # design (doctrine: arm at engagement, never on dispatch), so the first stamp cannot come
 # from a tick that has a roster to read. Without the verb the wall is a chicken-and-egg.
 
-# `stamp_of`, `armed_of` and `armed_ago` are defined with the other fixture builders above:
+# `stamp_of`, `armed_of` and `bound_ago` are defined with the other fixture builders above:
 # Section 3's DISARM cases need them, and a definition here would be too late for those.
 mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
 

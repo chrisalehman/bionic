@@ -124,29 +124,8 @@ unmet_row() {  # <project>
   } > "$1/.bionic/tmp/roster-$SID.state"
 }
 
-# A PATROL STAMP PAST ONE FIRE WINDOW — patrol-revive's block. The interval is
-# pinned tiny through the project's own knob and the age is a backdated mtime; the idle gap
-# the verdict needs beside it comes from `usage_tx`'s dated transcript above (REQ-1, T1).
-stale_stamp() {  # <project>
-  printf 'poker-interval: 1s\n' > "$1/.bionic/config.yaml"
-  printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID" \
-    > "$1/.bionic/tmp/patrol-$SID.state"
-  touch -t "$(date -v-600S +%Y%m%d%H%M.%S 2>/dev/null || date -d '-600 seconds' +%Y%m%d%H%M.%S)" \
-    "$1/.bionic/tmp/patrol-$SID.state"
-}
-
 # A TRANSCRIPT whose last assistant entry carries usage — what context-spend reads.
-#
-# AND WHOSE RECORDS ARE DATED, WITH ONE IDLE GAP IN THEM (amended at epic-23 wave-15 REQ-1,
-# T1). The Patrol verdict is an idle-time predicate now: `stop_patrol_revive` reads this
-# same `transcript_path` for the span between the last activity record and the next
-# turn-starting user record, and a stamp past the fire window is a DEATH only when such a
-# gap has passed with no tick in it. This fixture used to be one undated assistant record,
-# which the predicate reads — correctly — as "idle time cannot be measured here", so §1 and
-# §4d would have been asserting the advisory rather than the block they name. Every record
-# the CLI writes carries `.timestamp` (spec assumption 1, verified live 2026-09-16), so the
-# dated shape is also the faithful one. The usage entry stays LAST, which is what
-# context-spend reads.
+# Its records are dated, as every record the CLI writes is; the usage entry stays LAST.
 usage_tx() {  # <file>
   local t_old t_now
   t_old="$(date -u -v-10000S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
@@ -193,45 +172,27 @@ verdict_of() { duty_channel "$STOP_OUT"; }
 reason_of() { duty_reason "$STOP_OUT" "$(duty_path "$STOP_D" "$STOP_SID")"; }
 headline_of() { reason_of | /usr/bin/grep -m1 '^bionic: ' || true; }
 
-# offset_in_reason <needle> — where the needle sits in the composed reason, or -1.
-# ORDER IS ASSERTED BY POSITION, which is the whole content of "blocks before
-# advisories" and of "in manifest order".
-offset_in_reason() {
-  local hay pre
-  hay=$(reason_of)
-  pre="${hay%%$1*}"
-  if [ "$pre" = "$hay" ]; then printf '%s' "-1"; else printf '%s' "${#pre}"; fi
-}
-
 refusal_lines() {
   printf '%s\n' "$STOP_ERR" | /usr/bin/grep -c '^bionic: ' || true
 }
 
-require_helpers roster_header roster_row_fixture mkfix unmet_row stale_stamp usage_tx fire reason_of \
-                offset_in_reason refusal_lines verdict_of duty_ctx duty_path headline_of
+require_helpers roster_header roster_row_fixture mkfix unmet_row usage_tx fire reason_of \
+                refusal_lines verdict_of duty_ctx duty_path headline_of
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "1: TWO verdicts block on one Stop — both reasons, blocks first"
+section "1: a bound session's landing refusal at the turn end is one duty"
 
-# THE CASE THE MERGE EXISTS FOR. An undelivered landing contract AND a dead Patrol,
-# on one turn end. Before the merge these were two processes: landing-gate exited 2
-# with its line on stderr, patrol-revive exited 0 with a JSON block on stdout, and
-# nothing said how the two combine. One verdict now.
-D=$(mkfix); unmet_row "$D"; stale_stamp "$D"
+D=$(mkfix); unmet_row "$D"
 fire "$D"
 
 expect_nonempty "1a: the turn end is refused — something was rendered" "$STOP_OUT$STOP_ERR"
 expect_contains "1b: the LANDING reason is in the composed verdict" \
   "LANDING CONTRACT UNMET" "$(reason_of)"
-expect_true "1d: …and in the manifest's order, landing before patrol, by offset" \
-  test "$(offset_in_reason 'LANDING CONTRACT UNMET')" -lt \
-       "$(offset_in_reason 'Patrol dead')"
-expect_eq "1e: the two compose into ONE duty, and the person's stream carries no refusal line" \
+expect_eq "1e: it is ONE duty, and the person's stream carries no refusal line" \
   "duty|0" "$(verdict_of)|$(refusal_lines)"
 
 # A BOUND SESSION HEARS NO UNBOUND ADVISORY (wave-23-fixit-1810, REQ-1, D1). This session
-# is bound to the run it is in, which is what lets the Patrol verdict reach the stamp at all;
-# §2 drives the unbound session, where the advisory survives the block and prints last.
+# is bound to the run it is in; §2 drives the unbound session, where the advisory survives the block and prints last.
 expect_absent "1g: a bound session's composed verdict carries no unbound advisory" \
   "session unbound" "$STOP_ERR"
 
@@ -258,10 +219,6 @@ section "4: SubagentStop — only the landing arm has anything to say there"
 # keeps that scope through its own guard. So a SubagentStop payload over a fixture
 # that would make all four speak on a Stop produces the LANDING answer and nothing
 # else — asserted from both sides, or it would pass on a hook that did nothing.
-D=$(mkfix); unmet_row "$D"; stale_stamp "$D"
-fire "$D" SubagentStop false "$(jq -nc --arg a "$AID" '{agent_id:$a,agent_type:"worker"}')"
-expect_absent "4a: the PATROL verdict does not speak on SubagentStop" \
-  "Patrol dead" "$STOP_OUT$STOP_ERR"
 # THE STOP-ONLY ARMS' ADVISORY, on an UNBOUND copy of the fixture: the instrument, the duties
 # gate and the revive arm are the ones that announce the unbound state, and none of them runs
 # on SubagentStop — while the same unbound fixture on a Stop does announce it, so the absence
@@ -273,13 +230,6 @@ expect_absent "4b: nor does an unbound session's advisory, on SubagentStop" \
 fire "$D3"
 expect_contains "4c: …which the SAME unbound fixture on a Stop does print" \
   "session unbound" "$STOP_ERR"
-
-# THE PAIRED POSITIVE: the same fixture on a Stop does make the patrol verdict
-# speak, so §4a is a claim about the event and not about the fixture.
-D2=$(mkfix); unmet_row "$D2"; stale_stamp "$D2"
-fire "$D2"
-expect_contains "4d: …while the SAME fixture on a Stop does reach the patrol verdict" \
-  "Patrol dead" "$(reason_of)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-10.2; D5; wave-20 Δ7)"
@@ -336,13 +286,10 @@ expect_contains "7b: the fixture wave really does fill — the tick printed the 
 expect_contains "7c: …and the decision line carries the band, which is what D5 added" \
   "decision=FILL" "$S7_TICK"
 
-# THE TURN: a Patrol tick prompt, the two standing duties answered, the tick's own output as
-# a tool result, and NO dispatch after it. The prompt shape is the one the wall recognises
-# (it carries the literal `session-poker.sh tick`), mirrored from
-# tests/patrol-duties-gate.test.sh's `u_tick`.
+# THE TURN: a prompt, the tick's own output as a tool result, and NO dispatch after it.
 s7_transcript() {  # <file> <tick output> [extra assistant tool_use name]
   local f="$1" out="$2"
-  { jq -nc --arg t "bionic-patrol session=${SID:0:8} — Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row." \
+  { jq -nc --arg t "continue the fixture wave: bash /abs/hooks/session-poker.sh tick" \
       '{type:"user",isMeta:true,isSidechain:false,userType:"external",timestamp:"2026-09-19T00:00:00Z",message:{role:"user",content:$t}}'
     jq -nc '{type:"assistant",isSidechain:false,timestamp:"2026-09-19T00:00:01Z",
              message:{role:"assistant",content:[{type:"tool_use",id:"toolu_la",name:"ListAgents",input:{}}]}}'
@@ -1057,7 +1004,7 @@ expect_eq "WAIT4d the control: the order lifted, the row is ready and refused" "
 expect_contains "WAIT4e …naming it" "ready with room: T13" "$(headline_of)"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "GONE: no verb records a wait in prose: decline is an unknown verb, nothing writes a decline or a lapse, and the Patrol prompt names none"
+section "GONE: no verb records a wait in prose: decline is an unknown verb, and nothing writes a decline or a lapse"
 
 # THE HISTORY READER. A run's old fill ledger keeps its decline and lapse lines, and the hand-holds
 # count (hooks/poker/line.sh) still counts them as history, so its text spells the state. Every
@@ -1072,66 +1019,6 @@ GONE_OUT="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$GONE_P
 GONE_RC=$?
 expect_eq "GONE2 the decline verb exits as any unknown verb does" "2" "$GONE_RC"
 expect_contains "GONE2b …and says it is unknown" "unknown verb: decline" "$GONE_OUT"
-
-GONE_PROMPT="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$GONE_POKER" prompt 2>/dev/null)"
-expect_contains "GONE3 the Patrol prompt still says how a FILL is answered" 'Answer a FILL only if a "poker: FILL" line printed' "$GONE_PROMPT"
-expect_absent "GONE3b …and names no decline" "decline" "$GONE_PROMPT"
-
-# ─────────────────────────────────────────────────────────────────────────────
-section "PATROL: a dead Patrol clock names its three acts in order, a clock that never ticks is told apart, and the one report sentence is in the rules and the prompt"
-
-# A dead clock is three acts in one order (look, create if absent, stamp), so the reason names them in that order.
-PT_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
-PT_SAY="Patrol re-armed: the session's cron table was empty, so I created the recurring <interval> job and stamped it. Next fire is <time>."
-
-D=$(mkfix); stale_stamp "$D"
-fire "$D"
-PT_R1="$(reason_of)"
-expect_eq "PATROL0 meta: the dead-clock fixture is refused, a duty" "duty" "$(verdict_of)"
-expect_contains "PATROL1 the reason names the verdict" "Patrol dead" "$PT_R1"
-expect_true "PATROL1d …naming CronList, then CronCreate, then arm" \
-  test "$(offset_in_reason 'CronList')" -ge 0 -a "$(offset_in_reason 'CronList')" -lt "$(offset_in_reason 'CronCreate')" \
-       -a "$(offset_in_reason 'CronCreate')" -lt "$(offset_in_reason '; arm')"
-expect_contains "PATROL1e …CronCreate only if absent" "CronCreate if absent" "$PT_R1"
-
-# THE SAME STAMP, OLDER: the repeat is refused as the first was.
-touch -t "$(date -v-1100S +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1100 seconds' +%Y%m%d%H%M.%S)" \
-  "$D/.bionic/tmp/patrol-$SID.state"
-fire "$D"
-expect_nonempty "PATROL2 a second Stop over the same stale stamp is refused too" "$(reason_of)"
-
-# THE CLOCK THAT FIRES AND NEVER TICKS: the job exists, so its repair differs and it names the tick first.
-PT_TX="$(mktemp)"
-PT_OLD="$(date -u -v-10000S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-10000 seconds' +%Y-%m-%dT%H:%M:%SZ)"
-PT_MARK="$(date -u -v-5S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-5 seconds' +%Y-%m-%dT%H:%M:%SZ)"
-{ jq -nc --arg t "$PT_OLD" '{type:"assistant",timestamp:$t,message:{role:"assistant",content:[{type:"text",text:"working"}]}}'
-  jq -nc --arg t "$PT_MARK" '{type:"user",timestamp:$t,message:{role:"user",content:"bionic-patrol session=aaaaaaaa v=8 — Patrol tick."}}'
-} > "$PT_TX"
-D=$(mkfix); stale_stamp "$D"
-fire "$D" Stop false "$(jq -nc --arg t "$PT_TX" '{transcript_path:$t}')"
-PT_NT="$(reason_of | awk '/Patrol never ticks/{print; exit}')"
-expect_nonempty "PATROL3 meta: a marker turn after the stamp reads as a clock that never ticks" "$PT_NT"
-expect_true "PATROL3c …naming the tick first, then CronList" \
-  test "$(printf '%s' "${PT_NT%%(tick;*}" | wc -c | tr -d ' ')" -lt "$(printf '%s' "${PT_NT%%CronList*}" | wc -c | tr -d ' ')" \
-       -a "$(printf '%s' "$PT_NT" | /usr/bin/grep -c '(tick; CronList')" -eq 1
-expect_absent "PATROL3d …and not the dead-clock line" "Patrol dead" "$(reason_of)"
-
-PT_PROMPT="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$PT_POKER" prompt 2>/dev/null)"
-
-# THE ONE SENTENCE, in the rules and in the prompt, and no other instruction about what to say beside it.
-# The words are counted in the two arming paragraphs of the rendered rules and in the prompt line.
-PT_RULES="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
-PT_ARMING="$(/usr/bin/grep -E '^\*\*(The Patrol|The arming wall)\.\*\*' "$PT_RULES")"
-expect_eq "PATROL6 meta: both arming paragraphs are found" "2" "$(printf '%s\n' "$PT_ARMING" | /usr/bin/grep -c .)"
-expect_eq "PATROL6b the rules carry the sentence once" "1" "$(/usr/bin/grep -c 'Patrol re-armed: the session' "$PT_RULES")"
-expect_contains "PATROL6c …whole, with its two slots" "$PT_SAY" "$(cat "$PT_RULES")"
-expect_eq "PATROL6d the prompt carries it once" "1" "$(printf '%s\n' "$PT_PROMPT" | /usr/bin/grep -c 'Patrol re-armed: the session')"
-expect_contains "PATROL6e …whole, with its two slots" "$PT_SAY" "$PT_PROMPT"
-PT_SAYRE='(^|[^[:alpha:]])(say|says|tell|tells)([^[:alpha:]]|$)'
-expect_eq "PATROL6f the arming paragraphs hold one instruction about what to say: the sentence" "1" \
-  "$(printf '%s\n' "$PT_ARMING" | /usr/bin/grep -oiE "$PT_SAYRE" | wc -l | tr -d ' ')"
-expect_eq "PATROL6g the prompt holds one as well" "1" \
-  "$(printf '%s\n' "$PT_PROMPT" | /usr/bin/grep -oiE "$PT_SAYRE" | wc -l | tr -d ' ')"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "LOG: the wall reads the run's step, approval and order from its facts, as the tick does, so a fact the log alone holds moves the ready-with-room verdict"
@@ -1420,7 +1307,7 @@ for f in main-thread foreign-roster unengaged roster-link tmp-link bionic-link; 
 done
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "RUNNING: a tick of this session is running: its record is judged by the one alive rule, a second tick exits at once, and the turn end owes no tick while one runs"
+section "RUNNING: a tick of this session is running: its record is judged by the one alive rule, and a second tick exits at once"
 
 # THE RECORD. A tick writes `.bionic/tmp/tick-run-<sid>.state` (pid= and start=, the start as `ps -o lstart=` prints
 # it in the C locale and UTC) while it runs and removes it when it ends. A record whose process is gone, or whose pid
@@ -1436,53 +1323,21 @@ expect_nonempty "RUN0 meta: the live fixture process has a start to record" "$RN
 rn_record() {  # <project> <pid> <start>
   printf 'pid=%s\nstart=%s\n' "$2" "$3" > "$1/.bionic/tmp/tick-run-$SID.state"
 }
-# A MARKER TURN UNDER A FRESH `arm` STAMP: the turn began with this session's Patrol marker and no tick stamped since.
-# The stamp's mtime is now, so the dead-clock arm stays silent and the no-tick duty is the only thing judged.
-RN_TX="$(mktemp)"
-{ jq -nc --arg t "$(date -u -v-100S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-100 seconds' +%Y-%m-%dT%H:%M:%SZ)" \
-    '{type:"assistant",timestamp:$t,message:{role:"assistant",content:[{type:"text",text:"working"}]}}'
-  jq -nc --arg t "$(date -u -v-5S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-5 seconds' +%Y-%m-%dT%H:%M:%SZ)" \
-    '{type:"user",timestamp:$t,message:{role:"user",content:"bionic-patrol session=aaaaaaaa v=8 — Patrol tick."}}'
-} > "$RN_TX"
-rn_world() {
-  D=$(mkfix)
-  { roster_header; } > "$D/.bionic/tmp/roster-$SID.state"
-  printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID" > "$D/.bionic/tmp/patrol-$SID.state"
-}
-rn_fire() { fire "$D" Stop false "$(jq -nc --arg t "$RN_TX" '{transcript_path:$t}')"; }
-
-rn_world; rn_fire
-expect_eq "RUN1 the control: with no tick record the marker turn that ran no tick is refused" "duty" \
-  "$(verdict_of)"
-expect_contains "RUN1b …for the tick" "Patrol tick not run" "$(reason_of)"
-
-rn_world; rn_record "$D" "$RN_LIVE" "$RN_LIVE_START"; rn_fire
-expect_eq "RUN2 with a live tick record for the session the same turn end is not refused" "0|" \
-  "$STOP_RC|$(verdict_of)"
-
-rn_world; rn_record "$D" "$RN_DEAD" "$RN_LIVE_START"; rn_fire
-expect_contains "RUN3 a record whose process is dead holds nothing off: the duty stands" "Patrol tick not run" "$(reason_of)"
-rn_world; rn_record "$D" "$RN_LIVE" "Thu Jan 1 00:00:00 1970"; rn_fire
-expect_contains "RUN3b …and so does a record whose pid now runs another process" "Patrol tick not run" "$(reason_of)"
-rn_world; printf 'pid=%s\nstart=%s\n' "$RN_LIVE" "$RN_LIVE_START" > "$D/.bionic/tmp/tick-run-1f4a7c02-3bd9-4e15-8a66-90c1de77b204.state"; rn_fire
-expect_contains "RUN3c …and another session's live tick is not this session's" "Patrol tick not run" "$(reason_of)"
+rn_world() { D=$(mkfix); { roster_header; } > "$D/.bionic/tmp/roster-$SID.state"; }
 
 # THE SECOND TICK. With a live record for the session a tick exits at once, says so in one line, and writes nothing:
-# the stamp keeps its `arm` line and the record its holder.
+# the record keeps its holder.
 rn_tick() { RN_OUT="$(cd "$D" && env HOME="$RN_HOME" PATH="$D/stub:$PATH" CLAUDE_CODE_SESSION_ID="$SID" bash "$RN_POKER" tick "$@" 2>"$D/tick.err")"; RN_RC=$?; }
-RN_ARM="patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=$SID|verb=arm"
 rn_world; rn_record "$D" "$RN_LIVE" "$RN_LIVE_START"; rn_tick
 expect_eq "RUN4 a second tick of the session exits at once, 0, in one line" "0|1" \
   "$RN_RC|$(printf '%s\n' "$RN_OUT" | /usr/bin/grep -c .)"
 expect_contains "RUN4b …naming the running tick by its pid" "poker: TICK-RUNNING — pid $RN_LIVE" "$RN_OUT"
-expect_eq "RUN4c …and the stamp is not rewritten" "$RN_ARM" "$(cat "$D/.bionic/tmp/patrol-$SID.state")"
 expect_eq "RUN4d …nor the running tick's record" "pid=$RN_LIVE|start=$RN_LIVE_START" \
   "$(tr '\n' '|' < "$D/.bionic/tmp/tick-run-$SID.state" | sed 's/|$//')"
 rn_tick --watch
-expect_eq "RUN4e the watch pass over a running tick is quiet (WATCH_RC_QUIET) and stamps nothing" "0|$RN_ARM" \
-  "$RN_RC|$(cat "$D/.bionic/tmp/patrol-$SID.state")"
+expect_eq "RUN4e the watch pass over a running tick is quiet (WATCH_RC_QUIET)" "0" "$RN_RC"
 
-# THE TICK THAT RUNS. With no record, or a dead one, the tick runs whole: it stamps, decides, and its record is gone
+# THE TICK THAT RUNS. With no record, or a dead one, the tick runs whole: it decides, and its record is gone
 # when it ends. While it runs, a `git` it calls finds the record naming a live process at its recorded start; the
 # stub keeps the last record it saw, so a dead record the tick found and took over is not the one read back.
 rn_stub() {
@@ -1500,7 +1355,6 @@ STUB
 }
 rn_world; rn_stub; export RN_REC="$D/.bionic/tmp/tick-run-$SID.state"; rn_tick
 expect_contains "RUN5 meta: with no record the tick runs whole to its decision line" "|decision=" "$RN_OUT"
-expect_contains "RUN5b …and stamps" "|verb=tick" "$(cat "$D/.bionic/tmp/patrol-$SID.state")"
 expect_nonempty "RUN5c meta: the stub git ran while the record was on disk" "$(cat "$RN_REC.seen" 2>/dev/null)"
 RN_SEEN_START="$(sed -n 's/^start=//p' "$RN_REC.seen" 2>/dev/null)"
 expect_eq "RUN5d …and the record named a live process at its recorded start" "$RN_SEEN_START" \
