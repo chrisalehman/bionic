@@ -102,17 +102,6 @@ run_close "$FB" run
 expect_eq "FILL.15 the same plan with an adrs: line closes (rc 0) and the cell and the continuation name the ADR" "0/052/yes" \
   "$CO_RC/$(printed_adr_cell)/$(contains "$(cat "$FB/$CONT_REL")" "ADRs: 052.")"
 
-# THE PATROL JOB, from this session's transcript, when it is known: the id the platform minted, still undeleted.
-FP="$(mk_fixture fill-p)"; advance_to "$FP" 8
-FP_SID="closeout-fill-sid"
-mkdir -p "$SB_HOME/.claude/projects/-fixture-fill"
-FP_TR="$SB_HOME/.claude/projects/-fixture-fill/$FP_SID.jsonl"
-jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_cron1",name:"CronCreate",input:{cron:"*/30 * * * *",recurring:true,prompt:"Patrol tick (bionic). Run: bash /abs/hooks/session-poker.sh tick"}}]}}' > "$FP_TR"
-jq -nc '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_cron1",content:"Scheduled recurring job pj7c91ab (*/30 * * * *) — Patrol tick"}]}}' >> "$FP_TR"
-expect_contains "FILL.16 precondition: the transcript scan yields the Patrol job, kind patrol" "JOB	pj7c91ab	" \
-  "$(bash -c '. "$1/roots.sh" && . "$1/patrol.sh" && _patrol_scan "$2" ""' _ "$REPO_ROOT/payload/scripts/lib" "$FP_TR")"
-run_close_as "$FP_SID" "$FP" run
-
 # A LANDING REPORT THAT CANNOT BE READ is a sentence, not a mark: the plugin root's poker is a stub that fails.
 FQ="$(mk_fixture fill-q)"; advance_to "$FQ" 8
 FQ_PLUG="$SANDBOX/fill-q-plugin"
@@ -185,7 +174,7 @@ ord_fixture() {  # <name> -> a wave-scale project at Step 8 whose release entry 
   p="$(mk_fixture "$1")" && advance_to "$p" 8 || return 1
   wt="$p-wave"
   awk '{ print } /^adrs: none$/ && !d { print "release: 9.9.9"; d = 1 }' "$p/$PLAN_REL" > "$p/$PLAN_REL.r" \
-    && mv "$p/$PLAN_REL.r" "$p/$PLAN_REL"
+    && mv "$p/$PLAN_REL.r" "$p/$PLAN_REL" && seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '# Changelog\n\n## 9.9.9 — 2026-10-22\n\nThe prose a person wrote.\n\n### Known limits\n\n- one limit\n' > "$wt/CHANGELOG.md"
   fixture_git "$wt" add CHANGELOG.md && fixture_git "$wt" commit -q -m "the release entry" >/dev/null 2>&1 \
     && fixture_git "$p" merge -q --no-ff -m "merge the release" wave/01-fixture >/dev/null 2>&1 || return 1

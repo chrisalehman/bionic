@@ -29,6 +29,7 @@
 #                 the tree holds none. The tree event is folded in the reader alone: a second fold planted in a
 #                 script is found beside it, and the checkout holds the reader's one.
 #   §DEAD         a planted name of a removed landing function is found by its line; the checkout names neither.
+#   §LOGPATH      the run log's path is joined in the reader alone: a planted second join is found by its line.
 #   §GITHOME      a second resolution of the common git directory planted in a hook is found by its file; the checkout holds
 #                 none beside the root library's `git_common_dir`.
 #   §LOADER      the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
@@ -249,7 +250,7 @@ DPIECES="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 1
   for k in $(dispatch_keys); do dispatch_say "$k" @ @ @ @ @ @ @ @ @ @ && printf "%s\n" "$DISPATCH_FACT"; done' _ "$L" | tr '@' '\n' | awk 'length($0) >= 10')"
 pieces_in() { awk '!/^[ \t]*#/' "$1" > "$S/.code"; printf '%s\n' "$DPIECES" | while IFS= read -r p; do /usr/bin/grep -qF -- "$p" "$S/.code" && printf '%s\n' "$p"; done; }
 DKEYS="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" && for k in $(dispatch_keys); do dispatch_say "$k" @ && [ -n "$DISPATCH_FACT" ] && echo "$k"; done' _ "$L" | grep -c .)"
-expect_eq "the dispatch library says a fact under a key for each of the wall's 46 refusals" 46 "$DKEYS"
+expect_eq "the dispatch library says a fact under a key for each of the wall's 43 refusals" 43 "$DKEYS"
 expect_eq "every piece of those facts is found in the library's own text" "$(printf '%s\n' "$DPIECES" | grep -c .)" "$(pieces_in "$L/dispatch.sh" | grep -c .)"
 expect_eq "no fact of the dispatch library is found in the wall's file" "" "$(pieces_in "$S/hooks/dispatch-preflight.sh")"
 expect_eq "the stop hook's file, which answers the stop of an agent, lists no refusal" "0" "$(own stop | grep -c .)"

@@ -40,7 +40,8 @@
 #             holding it, or reaches it through a link, is refused in one line, engaged or not; a read, a
 #             command the reader cannot read, a sibling sharing the home's name and a verb's call are not.
 #   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
-#             and one line names the word and the change. §ABANDON: abandon on typed words ends the run.
+#             and one line names the word and the change.
+#   §ABANDON  abandon is taken only on words a session typed, and on them it ends the run.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.

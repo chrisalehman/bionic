@@ -13,9 +13,6 @@
 #            (`_gate_row_done`, over a landing record written by line.sh's `line_event`: the epoch is the last
 #            asked= the record's `published` line still finishes after, found by bisection). Each valid instant
 #            reads one epoch on all three; each refused one reads nothing on all three.
-#   §TRANSCRIPT  the patrol's verdict reads Claude Code's transcript, whose instants carry milliseconds: a
-#            fractional `…33.724Z` there is read to the whole second (the transcript's edge, not the grammar), and
-#            a no-Z one is still unreadable.
 #
 # FIXTURE FIDELITY. The instants are SYNTHESIZED, each valid one's epoch measured with macOS `date -u -j -f
 # '%Y-%m-%dT%H:%M:%SZ'` (the poker's former reader). The poker's reader is its own text in the hook, not a copy. The
@@ -105,20 +102,5 @@ AG.12|2026-10-18T15:07:33+00:00|an offset for the Z
 AG.13| 2026-10-18T15:07:33Z|a leading blank
 ROWS
 expect_eq "AG.14 the empty string reads nothing on lib|poker|gate" "||" "$(three "")"
-
-section "§TRANSCRIPT — the patrol reads the transcript's milliseconds to the whole second; the grammar stays strict"
-STAMP="$TMP/patrol.stamp"; : > "$STAMP"
-TZ=UTC touch -t 202610181506.40 "$STAMP"   # 1792336000
-tr_line() { printf '{"type":"user","timestamp":"%s","message":{"content":"go"}}\n' "$1"; }
-verdict() { bash -c '. "$1/patrol.sh" 2>/dev/null; patrol_verdict "$2" "$3" 60' _ "$LIB" "$STAMP" "$1" 2>/dev/null; }
-{ tr_line 2026-10-18T15:07:33.724Z; tr_line 2026-10-18T15:17:33.5Z; } > "$TMP/frac.jsonl"
-expect_regex "TR.1 two turns at …33.724Z and ten minutes on at …33.5Z: dead, gap 600 s, the stamp the reference" \
-  '^verdict=dead\|ref=1792336000\|gap=600\|window=66\|' "$(verdict "$TMP/frac.jsonl")"
-{ tr_line 2026-10-18T15:07:33Z; tr_line 2026-10-18T15:17:33Z; } > "$TMP/whole.jsonl"
-expect_regex "TR.2 the same turns at whole seconds read alike (gap 600)" \
-  '^verdict=dead\|ref=1792336000\|gap=600\|' "$(verdict "$TMP/whole.jsonl")"
-{ tr_line 2026-10-18T15:07:33.724Z; tr_line 2026-10-18T15:17:33; } > "$TMP/noz.jsonl"
-expect_regex "TR.3 a turn stamped with no Z leaves the window unreadable" \
-  '^verdict=unreadable\|.*no readable timestamp' "$(verdict "$TMP/noz.jsonl")"
 
 finish

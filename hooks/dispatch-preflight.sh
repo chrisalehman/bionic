@@ -168,7 +168,7 @@ if ! declare -F owed_open >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
   # shellcheck source=/dev/null
   . "$BIONIC_LIB/owed.sh"
 fi
-# THE SCALE PROFILE: the arming wall asks whether the plan's scale has a Patrol. Sourced
+# THE SCALE PROFILE: the watch wall asks whether the plan's scale has a Patrol. Sourced
 # the same way: a library without it leaves the wall as it was. (The budget wall's cap comes from `fill_cap`.)
 if ! declare -F scale_patrol >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
   # shellcheck source=/dev/null
@@ -376,7 +376,7 @@ attested() {
 # WHAT IS ABOVE IT, AND STAYS ABOVE IT. The attestation arm (the combined preflight, next
 # section) refuses where it stands, first and alone. A repo that cannot be written, or a
 # redirected state directory, makes every later disk read meaningless — the roster, the
-# stamp, the plan, the transcript are all read out of the tree that arm is checking — so a
+# plan, the transcript are all read out of the tree that arm is checking — so a
 # list that mixed its verdict with theirs would be reporting facts it had just been told
 # not to trust. Relevance, the loader, the root and the engagement switch are above it for
 # the same kind of reason and are not refusals at all.
@@ -451,204 +451,30 @@ if ! attested; then
     "$STATE_FILE" >&2
 fi
 
-# ============================================================== THE ARMING WALL
-# (epic-17 wave-05, spec AC-6; design ledger D-C, ratified 2026-08-19.)
+# ============================================================== THE WATCH WALL
 #
 # WHAT THIS ASKS THAT NOTHING ELSE DOES. Every wall above decides whether the dispatch is
 # well-formed and whether the environment it inherits is sound. This one asks whether
-# anything is WATCHING. The Patrol is the run's one clock — armed at engagement, ticking the
-# poker, surfacing rows that have gone past their declared duration — and a fleet launched
-# under a Patrol that was never armed, or that was armed and has silently stopped firing,
-# dies quiet: no notify, no landing verdict read by anyone, nothing until a human wanders
-# back. The failure is measured, repeatedly, across epic-16 and epic-17.
-#
-# THE STAMP IS THE SIGNAL. hooks/session-poker.sh writes .bionic/tmp/patrol-<sid>.state on
-# `arm` and on every `tick` BEFORE it decides anything, so the file's age measures firings
-# LANDING rather than decisions succeeding. Two states refuse here and they are named
-# separately, because the operator does something different about each: ABSENT is a Patrol
-# that was never armed (arm it), and older than 2x the poker-interval is one that was armed
-# and has died (re-arm it, and find out why the clock stopped).
-#
-# SCOPE IS THE PREDICATE ALREADY ABOVE — no second definition of "active". Outside a wave
-# this script exited hundreds of lines ago; a dispatch reaching this point is by
-# construction one the run is accountable for. The wall sits after the attestation gate on
-# purpose: a broken environment is the more urgent finding, and reporting "no Patrol" to an
-# operator whose repo is unwritable would name the second problem first.
-#
-# THE INTERVAL IS THE POKER'S OWN, obtained by invoking its `interval` verb rather than by
-# re-reading `poker-interval:` here. One knob, one reader. When that read fails — no poker
-# beside this gate, a malformed override the poker itself refuses — the gate has an
-# AMBIGUITY rather than a finding, and takes the direction §7 assigns every start-side
-# ambiguity: say so on stderr and let the dispatch through. A wall that refused because it
-# could not measure would be a new failure mode, not a safety property.
-#
-# HONEST LIMIT, inherited from the stamp: this attests that Patrol firings are landing. It
-# cannot see the CLI's cron table, so a job deleted seconds ago still looks alive for up to
-# 2x the interval. That window is the price of measuring the thing that actually matters.
+# anything is WATCHING: a fleet launched with nobody waiting on it dies quiet, no notify and
+# no landing verdict read by anyone, until a human wanders back. It sits after the
+# attestation gate on purpose: a broken environment is the more urgent finding.
 
 STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
-PATROL_STAMP_FILE="$STATE_DIR/patrol-${BIONIC_SID}.state"
 
 # THE SCALE, AND WHETHER IT HAS A PATROL, read once from the bound plan through
 # `scale_patrol` (payload/scripts/lib/scale.sh). `DP_PATROL` is `no` for a scale with none (the task row), which
-# arms nothing at engagement, so this wall does not apply. `DP_SCALE` names the scale in the budget wall's
-# refusal. No plan, no `scale:`, or no profile: both stay empty and the wall runs as it did before the profile.
+# owes no watch, so this wall does not apply. `DP_SCALE` names the scale in the budget wall's
+# refusal. No plan, no `scale:`, or no profile: both stay empty and the wall runs.
 DP_SCALE=""; DP_PATROL=""
 if [ -n "$PLAN" ] && declare -F scale_patrol >/dev/null 2>&1; then
   DP_SCALE="$(plan_frontmatter_get "$PLAN" scale 2>/dev/null)"
   DP_PATROL="$(scale_patrol "$PLAN" 2>/dev/null)" || DP_PATROL=""
 fi
 
-# The poker beside this gate, so a test drives the real one and an installed gate finds its
-# installed sibling — the same resolution, and the same residual config-dir second lane, the
-# probe above already uses, and for the same reason: the two registration channels serve ONE
-# tree, so the sibling lane is the one that answers.
-#
-# WHERE THIS ONE DIFFERS FROM THE PROBE'S (critic C-2, W5): a missing probe DENIES, and a
-# missing poker used to skip the arming wall in silence — so on a machine where the legacy
-# `${CLAUDE_CONFIG_DIR}/hooks/` copies are gone and the sibling lane somehow missed too, a
-# teardown would have quietly bought a disarmed wall. The arms below now degrade per-arm
-# instead: the never-armed half needs no poker at all and still refuses, and the staleness
-# half says out loud that it did not run.
-POKER_SCRIPT="${HOOK_DIR}/session-poker.sh"
-[ -f "$POKER_SCRIPT" ] || POKER_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
-
-# THE TWO ARMS HAVE DIFFERENT REMEDIES (lib/dispatch.sh `patrol-never` and `patrol-stopped`). NEVER
-# ARMED asks for the CronCreate alone: hooks/engage.sh runs `session-poker.sh arm` itself as the
-# session engages, so a refusal that ordered `arm` would hand the model work the machine already
-# has. ARMED AND STOPPED FIRING keeps both halves: the clock died, and a fresh stamp is what proves
-# the revived clock is landing. Both record into the pool and the wall carries on.
-
-# THE INTERVAL IS A THRESHOLD, NOT A PRECONDITION (critic C-2, W5). This block used to
-# skip BOTH arms when the interval could not be read — so one unparseable line in
-# `.bionic/config.yaml`, a file that is machine-local and agent-writable, disabled the
-# whole wall. That contradicts §8 twenty lines below in this same script: a hostile repo
-# may CLOSE a wall and must never be able to OPEN one. And the line that gets you there is
-# the likeliest typo available — a BARE NUMBER (`poker-interval: 30`) makes the poker
-# refuse, where `30m` and `30 minutes` both parse.
-#
-# Only the STALENESS arm needs a number. An absent stamp is absent at every interval, so
-# that arm runs unconditionally now. For staleness, an unreadable config falls back to
-# lib/patrol.sh's PATROL_INTERVAL_DEFAULT, the constant the poker takes its own default
-# from, never a number retyped here, which would drift the first time either moved and
-# leave the gate measuring against a threshold nobody configured.
-PATROL_INTERVAL=""
-PATROL_INTERVAL_SOURCE=configured
-if [ -f "$POKER_SCRIPT" ]; then
-  PATROL_INTERVAL=$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$POKER_SCRIPT" interval 2>/dev/null )
-  case "$PATROL_INTERVAL" in
-    ''|*[!0-9]*) PATROL_INTERVAL="" ;;
-  esac
-  if [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
-    PATROL_INTERVAL="${PATROL_INTERVAL_DEFAULT:-}"
-    PATROL_INTERVAL_SOURCE=default
-    echo "dispatch-preflight: the Patrol interval could not be read from this project's config — interval unreadable, wall ran at default (${PATROL_INTERVAL:-none}s)." >&2
-  fi
-fi
-
-# A symlink is not a stamp. The directory levels were discharged by the attestation gate
-# above (it refuses outright on a symlinked `.bionic` or `.bionic/tmp`, and the probe it
-# runs refuses on the same three), so only the file's own path is checked here — the same
-# split the roster append below makes, and for the same reason (§8): a hostile repo may
-# CLOSE this wall and must never be able to OPEN it.
-#
-# UNCONDITIONAL, and that is the C-2 fix in one word: this arm asks whether anything armed
-# the Patrol, a question with no threshold in it.
-PATROL_STAMPED=1
-if [ "$DP_PATROL" = no ]; then
-  # A SCALE WITH NO PATROL OWES NO STAMP (wave-38 T16): neither half of this wall applies.
-  PATROL_STAMPED=not-owed
-elif [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
-  PATROL_STAMPED=0
-  dispatch_finding patrol-never "$POKER_SCRIPT" "$PATROL_STAMP_FILE"
-fi
-
-# The staleness half. Its threshold may be the project's or the poker's default; what it
-# may never be is silently absent, so the one case with no number at all — the poker
-# unreachable on BOTH lanes, which is what a machine looks like once the legacy
-# `${CLAUDE_CONFIG_DIR}/hooks/` copies are torn down and the sibling lane misses too —
-# says which half did not run rather than letting the whole wall go quiet.
-# THE STALENESS HALF NEEDS A STAMP TO AGE. Until REQ-8 the never-armed arm above exited,
-# so reaching here meant the file was there; it records and carries on now, and a `stat` of
-# a file that is not there would print "the stamp's age could not be read" as though
-# something had gone wrong with a stamp nobody ever wrote. Absent is absent, once.
-if [ "$PATROL_STAMPED" = "0" ] || [ "$PATROL_STAMPED" = not-owed ]; then
-  :
-elif [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
-  echo "dispatch-preflight: no Patrol interval could be obtained (${POKER_SCRIPT} is not readable on either lane); the staleness half of the arming wall did not run, though the never-armed half did." >&2
-else
-  # THE THRESHOLD IS THE LIBRARY'S FIRE WINDOW (epic-23 wave-15 REQ-1, ADR-028). It was
-  # the interval times the library's stale multiplier — twice the interval, a judgment call
-  # held in a shared constant because it was written out at three sites. It is not a multiplier at all
-  # now: one FIRE WINDOW is the longest idle span in which a session cron is guaranteed one
-  # opportunity to fire, the interval plus the scheduler's jitter, and `patrol_fire_window`
-  # is the one place that arithmetic lives. Past it the stamp is worth asking the
-  # transcript about; it is not, on its own, a finding.
-  PATROL_WINDOW="$(patrol_fire_window "$PATROL_INTERVAL")" || PATROL_WINDOW=""
-
-  PATROL_MTIME=$(stat -f %m "$PATROL_STAMP_FILE" 2>/dev/null \
-                 || stat -c %Y "$PATROL_STAMP_FILE" 2>/dev/null)
-  case "$PATROL_MTIME" in
-    ''|*[!0-9]*)
-      echo "dispatch-preflight: the Patrol stamp's age could not be read (${PATROL_STAMP_FILE}); the staleness half of the arming wall did not run." >&2
-      ;;
-    *)
-      PATROL_AGE=$(( $(date -u +%s) - PATROL_MTIME ))
-      [ "$PATROL_AGE" -lt 0 ] && PATROL_AGE=0
-      if [ -n "$PATROL_WINDOW" ] && [ "$PATROL_AGE" -gt "$PATROL_WINDOW" ]; then
-        # ---------- the verdict: idle time, never wall time ----------
-        #
-        # A SESSION CRON FIRES ONLY WHILE THE SESSION IS IDLE, so a stamp past the window
-        # says one of two things and its age cannot tell them apart: the job is gone, or
-        # the orchestrator has been working. This wall is hit MID-TURN by construction —
-        # a dispatch happens inside a busy turn — which makes it the likeliest of the two
-        # blocking readers to meet a healthy session with a stale stamp, and on
-        # 2026-09-15 that is exactly what it refused.
-        #
-        # `patrol_verdict` (lib/patrol.sh) answers the observable question off the
-        # transcript this hook is already handed: has an idle stretch long enough for one
-        # firing passed since the last proof of life, with no firing in it. Only `dead`
-        # denies. `busy` and `unreadable` say what they found on stderr and let the
-        # dispatch through, because a wall that cannot observe the thing it refuses on
-        # does not refuse (ADR-028).
-        PATROL_VLINE="$(patrol_verdict "$PATROL_STAMP_FILE" "$(_jq '.transcript_path')" "$PATROL_INTERVAL")"
-        PATROL_VERDICT="$(_patrol_field "$PATROL_VLINE" verdict)"
-        PATROL_GAP="$(_patrol_field "$PATROL_VLINE" gap)"
-        PATROL_WHY="$(_patrol_field "$PATROL_VLINE" reason)"
-        case "$PATROL_VERDICT" in
-          dead)
-            # TWO CAUSES READ `dead`, and the reason says which (wave-20 T19; REQ-6, AC-6.3).
-            # `patrol_verdict` also answers `dead` when Patrol marker turns ran after the stamp
-            # and none of them ticked — a job whose prompt carries the marker but not the tick.
-            # That is not idleness, and its repair is not a re-arm: the job exists and fires,
-            # so re-creating it as it is buys the same silence. Named the way the stop wall's
-            # death notice names it (payload/scripts/lib/stop.sh, stop_patrol_revive).
-            case "$PATROL_WHY" in
-              *"marker turn"*)
-                dispatch_finding patrol-silent "$PATROL_AGE" "${PATROL_WHY%% marker turn*}" "$POKER_SCRIPT" "$PATROL_STAMP_FILE"
-                ;;
-              *)
-                dispatch_finding patrol-stopped "$POKER_SCRIPT" "$PATROL_AGE" "$PATROL_GAP" "$PATROL_WINDOW" \
-                  "$PATROL_INTERVAL" "$PATROL_INTERVAL_SOURCE" "$PATROL_STAMP_FILE"
-                ;;
-            esac
-            ;;
-          busy)
-            echo "dispatch-preflight: the Patrol stamp is ${PATROL_AGE}s old, but this session has been busy — its longest idle gap since the stamp is ${PATROL_GAP}s, under the ${PATROL_WINDOW}s fire window, so the clock has had no opportunity to fire and its silence proves nothing." >&2
-            ;;
-          *)
-            echo "dispatch-preflight: the Patrol stamp is ${PATROL_AGE}s old and this session's idle time could not be read (${PATROL_WHY:-no reason given}); the staleness half of the arming wall reached no verdict." >&2
-            ;;
-        esac
-      fi
-      ;;
-  esac
-fi
-
 # THE WATCH. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory and `watch_verdict` (lib/patrol.sh) reads it: a
 # watcher alive, or one that rested on purpose (the turn's end starts the next), admits; a record naming a dead
-# watcher, or no record once a turn has ended since the session engaged, is a fleet nobody is waiting on. Scoped as
-# the stamp's arms are: a scale with no Patrol owes no watch. The turn that engaged the session has no record yet,
+# watcher, or no record once a turn has ended since the session engaged, is a fleet nobody is waiting on. A scale
+# with no Patrol owes no watch. The turn that engaged the session has no record yet,
 # since the watcher starts at a turn's end, so it is admitted and told so.
 if [ "$DP_PATROL" != no ]; then
   DP_ENGAGED_AT=""
@@ -974,7 +800,7 @@ fi
 ROSTER_VERSION="$ROSTER_SCHEMA_VERSION"
 ROSTER_PREFIX="roster-"
 ROSTER_SUFFIX=".state"
-# STATE_DIR is set above, at the arming wall — the first thing on this path to need it.
+# STATE_DIR is set above, at the watch wall — the first thing on this path to need it.
 ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${BIONIC_SID}${ROSTER_SUFFIX}"
 
 # The sweeper's own ledger, named the way ROSTER_FILE is and for the same reason: a reader
@@ -1580,13 +1406,13 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # researcher (2026-09-13). Wave-12 T2 pooled the five BRIEF-SHAPE arms and left every STATE
 # arm refusing where it stood, on the argument that a broken environment and a typo in a
 # label do not belong in one list. The measurement says otherwise: the six refusals Chris
-# counted were the arming wall, then the budget, then the suite allowance — three DIFFERENT
+# counted were the watch wall, then the budget, then the suite allowance — three DIFFERENT
 # arms, one fault per attempt, each of them a fact the gate had already read off disk before
 # it refused for the one above. The split was drawn in the right place for the wrong
 # quantity. What makes two faults reportable together is not that they live in one artifact;
 # it is that reading one did not depend on the other being clean (wave-14 REQ-8, D3).
 #
-# SO EVERYTHING BELOW THE ATTESTATION POOLS. The arming wall, the approval checkpoint, the
+# SO EVERYTHING BELOW THE ATTESTATION POOLS. The watch wall, the approval checkpoint, the
 # lease wall, the budget, the name-in-flight arm and the five brief-shape arms
 # all call `dispatch_finding` and carry on. Principle P-A reads the same way
 # at a wall as at a precondition: where the machine already has the facts, the machine
@@ -1594,7 +1420,7 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # the normal path.
 #
 # THE ONE ARM THAT STAYS FIRST AND ALONE is the attestation (the combined preflight, far
-# above). Its subject is the tree every other arm reads out of — the roster, the stamp, the
+# above). Its subject is the tree every other arm reads out of — the roster, the
 # plan, the transcript — so a list that set its verdict beside theirs would be reporting
 # facts it had just been told not to trust. That is a dependency, not a category.
 #
@@ -2004,7 +1830,7 @@ fi
 #
 # THE LAST ARM THAT CAN FIND A FAULT IS ABOVE THIS LINE, and everything below is the
 # LEDGER. So this is where the list is spent: one refusal carrying every fault every arm
-# from the arming wall down found, in file order, or a silent return when they found none.
+# from the watch wall down found, in file order, or a silent return when they found none.
 #
 # IT MOVED DOWN PAST THE FULL-RUN WALL (wave-14 REQ-8; the one-regression wall then).
 # It used to sit between the
