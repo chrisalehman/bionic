@@ -385,7 +385,7 @@ PARKED=no
 if PARKED_WHY="$(plan_parked_why "$PLAN")"; then PARKED=yes; fi
 
 # THE SCALE (wave-38 T16; D25, AC-5.1): the plan's `scale:`, read at the wave row when it names none or one the profile
-# does not hold. Its branch cell shapes the worktree census below; its integrate cell is the act.
+# does not hold. Its branch cell shapes the worktree census below; its integrate cell names a branch still waiting on its pull request.
 CO_SCALE="$(plan_frontmatter_get "$PLAN" scale)"
 scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
 
@@ -393,7 +393,7 @@ scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
 # lib/line.sh `line_merge_seen`, which reads the integration branch on the remote and the host's word on the run's pull
 # request, and the tail runs only once that says merged. A working branch nothing merged holds the run, whatever the
 # scale's integrate cell; the cell says only how the closed form names a branch still waiting on its pull request.
-CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=merge
+CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=pr
 # co_pr_owed -> 0 when the act is `pr` and the working branch exists and is not yet reachable from the integration
 # branch; a branch that is gone was merged and deleted, so nothing is owed
 co_pr_owed() {

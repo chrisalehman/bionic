@@ -102,7 +102,7 @@ owed_register() {
   case "$run" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
   declare -F docs_root >/dev/null 2>&1 || return 1
   docs="$(docs_root "$root" 2>/dev/null)" && [ -n "$docs" ] || return 1
-  printf '%s/record/%s/run.log\n' "$docs" "$run"
+  reader_log_in "$docs/record/$run"
 }
 
 # owed_file -> the store's absolute path on stdout: the run's log, else the session's own file; rc 1

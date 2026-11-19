@@ -199,6 +199,33 @@ case "$SEAL_LINE" in
     exit $_bw_rc ;;
 esac
 
+# THE SEAL'S HOME IS THE TOOL'S ALONE, for every session, engaged or not, so this sits before the
+# engagement exit. `<common git dir>/bionic-seal/` holds the seals and bindings that vouch for each
+# run, and a seal removed is a run no longer compared, so a command whose effects (lib/cmd-class.sh
+# `cmd_effects`) write or delete there, or delete a directory that holds it, is refused. Each path is
+# resolved where it lies (lib/grant.sh) and compared with the home git names for this root. What the
+# reader cannot read is not refused here: a run it changes is caught at the next commit's compare.
+# The product's own writers change the home from library code inside a hook or a verb, which no
+# command text shows. The screen is `.git` or the home's name in the command, its strip or the cwd:
+# a miss costs no fork and loads nothing. The words are the write hook's (lib/write-gate.sh).
+BIONIC_SEAL_HIT=""; BIONIC_SEAL_HOME=""; _bw_sh=0
+case "$COMMAND$BIONIC_CWD" in *.git*|*bionic-seal*) _bw_sh=1 ;; esac
+if [ "$_bw_sh" = 0 ]; then
+  _wall_screen "$COMMAND"
+  case "$_WALL_STRIPPED" in *.git*|*bionic-seal*) _bw_sh=1 ;; esac
+fi
+if [ "$_bw_sh" = 1 ] && _run_seal && seal_binding_warm "$BIONIC_ROOT" 2>/dev/null \
+   && wall_libs seal-home cmd-class.sh grant.sh write-gate.sh; then
+  BIONIC_SEAL_HOME="$_SB_COMMON/$SEAL_HOME_NAME"
+  while IFS=$'\t' read -r _bw_k _bw_p; do
+    case "$_bw_k" in W|D) write_gate_in_seal_home "$BIONIC_SEAL_HOME" "$_bw_k" "$_bw_p" && { BIONIC_SEAL_HIT="$_bw_p"; break; } ;; esac
+  done <<< "$(grant_resolve_lines "$(cmd_effects "$COMMAND" "$BIONIC_CWD")")"
+fi
+if [ -n "$BIONIC_SEAL_HIT" ]; then
+  EVENT=$(bionic_jq .hook_event_name); [ -n "$EVENT" ] || EVENT="PreToolUse"
+  bionic_fold "$EVENT" wall_seal_home; exit $?
+fi
+
 # THE ENGAGEMENT GUARD, asked once for all five. EVERY UNREADABLE STATE READS AS NOT
 # ENGAGED — absent marker, a symlink at the path, a foreign or unshaped session key, no key
 # at all — and the fail direction is inverted here on purpose: a session that never invoked

@@ -5,14 +5,14 @@
 #
 # ONE ROW PER SCALE, ONE CELL PER PROPERTY. What a scale changes about a run was five literals in
 # five files: the Patrol armed at engagement, the regression line's default, the dealing's whole
-# read, the branch-shape refusal and the merge act. Each is a column here, and each site reads its
+# read, the branch-shape refusal and the integrate act. Each is a column here, and each site reads its
 # cell through `scale_cell`. The rule (D25): the next property of a scale is a column, never a
 # check.
 #
 #   scale  patrol  rigor   writers   regression  branch            integrate  dealing
 #   task   no      single  3         no          any               pr         piece
-#   wave   yes     double  uncapped  yes         wave/<NN>-<slug>  merge      piece+whole
-#   epic   yes     double  uncapped  no          epic/<NN>-<slug>  merge      piece
+#   wave   yes     double  uncapped  yes         wave/<NN>-<slug>  pr         piece+whole
+#   epic   yes     double  uncapped  no          epic/<NN>-<slug>  pr         piece
 #
 # THE COLUMNS AND THEIR READERS:
 #   patrol      `yes` arms the Patrol at engagement and holds the dispatch wall's arming check;
@@ -28,8 +28,8 @@
 #   branch      the working branch's shape: `any`, or a pattern whose `<NN>` is the run's number
 #               and `<slug>` its name (payload/scripts/close-out.sh, the shape refusal and the
 #               worktree census's wt/NN-* scope).
-#   integrate   `merge`: the working branch is merged before the tail; `pr`: close-out merges
-#               nothing and prints and records the `gh pr create` command (payload/scripts/close-out.sh).
+#   integrate   `pr` at every scale: the working branch reaches the integration branch by a pull request, and
+#               close-out merges nothing, it reads the host's merge (payload/scripts/close-out.sh).
 #   dealing     the reads each code question is dealt: `piece`, or `piece+whole` for one more read
 #               of the whole. WHO reads at each rigor stays lib/proof.sh's PROOF_DEALING, the
 #               per-rigor map, because a flag can raise a task-scale run to `double` and the
@@ -47,8 +47,8 @@
 SCALE_COLUMNS="patrol rigor writers regression branch integrate dealing"
 SCALE_ROWS="task wave epic"
 SCALE_TABLE="task|no|single|3|no|any|pr|piece
-wave|yes|double|uncapped|yes|wave/<NN>-<slug>|merge|piece+whole
-epic|yes|double|uncapped|no|epic/<NN>-<slug>|merge|piece"
+wave|yes|double|uncapped|yes|wave/<NN>-<slug>|pr|piece+whole
+epic|yes|double|uncapped|no|epic/<NN>-<slug>|pr|piece"
 
 # scale_cell <scale> <column> -> that cell on stdout, exit 0. A scale or a column the table does
 # not hold: nothing on stdout, one line on stderr naming the words it takes, exit 1.

@@ -449,6 +449,13 @@ EOF
   esac
 }
 
+wall_seal_home() {  # <event> -> 0 nothing · 2 block
+  [ -n "$BIONIC_SEAL_HIT" ] || return 0
+  write_gate_say seal-home "" "" command "$BIONIC_SEAL_HIT" "$BIONIC_SEAL_HOME"
+  fold_block exit2 write "$WG_FACT" "$WG_FIX" "$WG_DETAIL"
+  return 2
+}
+
 # ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
 #
 # HARD BLOCK: Prevents AI from pushing to main/master branches.
@@ -2763,13 +2770,17 @@ _eg_commit_repo() {
 # (`_eg_commit_repo`). The common case costs one `git diff --cached --quiet` over the set's
 # directories; the sums are taken only when something there is staged.
 #
-# A RESIDUAL, NAMED AND NOT CLOSED: `git commit -a` and `git commit <pathspec>` stage at commit time,
-# after this PreToolUse wall has read the index, so a growth committed that way passes here.
-# Refusing those spellings is a different wall's job.
+# WHAT THE CALL ITSELF STAGES IS READ, NOT ONLY WHAT IS STAGED BEFORE IT. This wall runs before the
+# command, so `git add f && git commit`, `git commit -a` and `git commit f` stage after it has looked.
+# The acts the call makes (lib/git-argv.sh `git_commit_stage`) are run on a copy of the index, in a
+# temporary file the real index never sees, and both sums read that copy: the commit is judged on
+# what it will hold, in the words a separate add is judged in. The copy writes the blobs the call's
+# own add would write, and nothing else. A call that stages nothing reads the index itself.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_net_zero() {
   local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a written="" row_waits=0 lacks="" fix_id fix_cell base=HEAD
-  local -a dirs=()
+  local acts idx="" src
+  local -a dirs=() words=()
   _eg_commit_repo; dir="$_EG_REPO"
   # A MERGE IN A ROW'S TREE IS MEASURED AGAINST THE PARENT THAT IS NOT THE ROW'S OWN (wave-33 T15, D10). A row's tree
   # that merges the working branch in commits that branch's content on top of its own, and growth already landed there
@@ -2778,14 +2789,24 @@ validate_net_zero() {
   # charged what it adds to it. A tree no row owns keeps HEAD: the parent that is not a row's there is HEAD itself.
   if [ -n "${_EG_RID:-}" ] && git -C "$dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then base=MERGE_HEAD; fi
   while IFS= read -r line; do dirs+=("$line"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
+  acts="$(git_commit_stage "$COMMAND")"
+  if [ -n "$acts" ] && idx="$(mktemp "${TMPDIR:-/tmp}/bionic-index.XXXXXX")"; then
+    src="$(git -C "$dir" rev-parse --path-format=absolute --git-path index 2>/dev/null)"
+    { [ -f "$src" ] && cp "$src" "$idx"; } || rm -f "$idx"
+    local GIT_INDEX_FILE="$idx"; export GIT_INDEX_FILE
+    # No act may wait on a person: an editor refuses and input is empty, so an interactive add stages nothing.
+    while IFS="$GIT_ARGV_US" read -r -a words; do
+      [ "${#words[@]}" -eq 0 ] || GIT_EDITOR=false git -C "$dir" "${words[@]}" </dev/null >/dev/null 2>&1
+    done <<< "$acts"
+  fi
   # rc 0: nothing staged under the set; rc 1: something is; anything else (no HEAD, no repository)
   # leaves nothing to compare against, and the arm is silent.
   git -C "$dir" diff --cached --quiet "$base" -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
-  [ "$rc" -eq 1 ] || return 0
+  [ "$rc" -eq 1 ] || { rm -f "$idx"; return 0; }
   # The doctrine is bionic's (D13): only bionic's own source tree, named by the manifest HEAD holds, is
   # held to net zero; a user project's agents/*.md and skills/ files are its own (wave-31 T42).
   [ "$(git -C "$dir" show HEAD:payload/.claude-plugin/plugin.json 2>/dev/null \
-        | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || return 0
+        | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || { rm -f "$idx"; return 0; }
 
   sums="$( { loaded_set_sizes "$dir" "$base" | awk '{ print "b\t" $0 }'
              loaded_set_sizes "$dir" index | awk '{ print "a\t" $0 }'; } \
@@ -2797,6 +2818,7 @@ validate_net_zero() {
           printf "0\t%d\t%d\t%d\n", ta - tb, tb, ta
           for (f in p) if (a[f] + 0 > b[f] + 0) printf "1\t%s\t%d\t%d\n", f, b[f], a[f]
         }' | sort)"
+  [ -z "$idx" ] || { rm -f "$idx"; unset GIT_INDEX_FILE; }
   line="${sums%%$'\n'*}"
   IFS=$'\t' read -r _ delta before after <<< "$line"
   [ "${delta:-0}" -gt 0 ] 2>/dev/null || return 0
@@ -4515,7 +4537,8 @@ return 0
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs one of these `session-poker.sh`
 # verbs: `amend`, `extend`, `task-add` and `hold` (a roster row, or a row's birth); `current` (the
 # run's step); `proof-add` (a proof the gates judge by); `approve` and `waive` (each written on the
-# user's word); `release-check` (the check's fact); `finding-move` (a finding across the line);
+# user's word); `accept` and `abandon` (the person's word on a run changed around the tool, which seals it
+# again or ends it); `release-check` (the check's fact); `finding-move` (a finding across the line);
 # `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
 # writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
 # user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
@@ -4595,7 +4618,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|accept|abandon|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"

@@ -30,8 +30,10 @@
 # that change: whatever the check catches is kept in the seal as changed, the line is still appended, and no
 # later append clears it. The run is the plan the log is joined to by the record's name (`_log_plan`, the
 # inverse of lib/reader.sh `reader_log`, confirmed by it); a log no plan names, or one in no repository, takes
-# the line with nothing sealed. A lock that cannot be had leaves the line appended and unsealed, so the next
-# check reads the log as added to: a busy lock fails toward a caught change, never toward a vouched one.
+# the line with nothing sealed. A lock that cannot be had in its wait (many writers at once) leaves the line
+# appended unsealed, a note of it left first beside the seal (`seal_owe`), so the next check reads that line,
+# and only that line, as the tool's own: an honest writer that met the lock is never a change caught, and a
+# line no note names is caught beside it. A call out of shape (64) leaves no note, and its line is caught.
 # A RUN FOUND WITH NO SEAL is sealed as it stands, and the sealing is written first, as one `hand` line,
 # `what=seal`, through the hand events' one writer, then the caller's line. Only a run that a fresh fold of its
 # log reads open is sealed so, never one a kept answer reads open, and never under a dry call (BIONIC_DRY_STEP),
@@ -88,7 +90,10 @@ _log_put() {  # <log> <line> -> 0 appended, 1 not; inside the seal when the log 
     *) _wt_proofs_put "$1" "$2"; return ;;
   esac
   seal_write "$plan" "$log" _wt_proofs_put "$1" "$2"
-  case "$?" in 64|75) _wt_proofs_put "$1" "$2"; return ;; esac
+  case "$?" in
+    75) seal_owe "$plan" "$2"; _wt_proofs_put "$1" "$2"; return ;;
+    64) _wt_proofs_put "$1" "$2"; return ;;
+  esac
   return "$SEAL_RC"
 }
 
