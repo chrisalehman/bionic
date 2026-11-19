@@ -1821,19 +1821,16 @@ RR_DISP_EOF
     esac
 
     # EVERY ASK THAT WAITS ON THE PERSON IS ON THE PAGE (lib/owed.sh `ask_waits_on`), read after the findings' reader
-    # opened theirs. One the page has not put is an approval it numbers, or, where no reply could answer it (the
-    # changed run's accept or abandon, a pull request closed unmerged, a design decision's option), an aside in its own
-    # words, so the reply leaves open nothing the page did not show. Never the regression's waiver, which no surface
-    # offers; a gate act is an aside above; the merge without a pass is the decision above or settled by the pass.
+    # opened theirs. One the page has not numbered above is one no reply could answer (the changed run's accept or
+    # abandon, a pull request closed unmerged, a design decision's option, an approval no row reads), so it is an aside
+    # in its own words, and the reply leaves open nothing the page did not show. Never the regression's waiver, which
+    # no surface offers; a gate act is an aside above; the merge without a pass is the decision above or settled by it.
     while IFS='	' read -r key _ ttl line; do
       case "$key" in ''|gate:*|waive:regression|approve:merge-unproved) continue ;; esac
       rr_dec_of "$key" >/dev/null && continue
       case $'\n'"$RR_FASKS" in *$'\n'"$key"$'\n'*) continue ;; esac
       { declare -F ask_waits_on >/dev/null 2>&1 && [ "$(ask_waits_on "$key" "$PV_PLAN" "$PV_REPO")" = user ]; } || continue
-      case "$key" in
-        approve:?*) nm="${key#approve:}"; rr_add approve "$key" "approve $nm" "-" "-" "Approval $nm" approve withhold "$nm" "hold the $nm" ;;
-        *) line="${line:-${ttl:-$key}}"; RR_ASIDE="${RR_ASIDE}${line#poker: }"$'\n' ;;
-      esac
+      line="${line:-${ttl:-$key}}"; RR_ASIDE="${RR_ASIDE}${line#poker: }"$'\n'
     done <<RR_USER_ASKS
 $(owed_list_plan "$PV_PLAN" "$PV_REPO" 2>/dev/null)
 RR_USER_ASKS
