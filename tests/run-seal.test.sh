@@ -36,6 +36,9 @@
 #             move down, a record written into the record folder, step 8's wipe of the state folder, and an
 #             honest append that met a held lock: the run verifies clean and no commit is refused for a
 #             change. A hand line beside the held append, or its bytes again once paid, is caught.
+#   §SHUT     a Write, an Edit or a command that writes or deletes in the seal's home, deletes a directory
+#             holding it, or reaches it through a link, is refused in one line, engaged or not; a read, a
+#             command the reader cannot read, a sibling sharing the home's name and a verb's call are not.
 #   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
 #             and one line names the word and the change. §ABANDON: abandon on typed words ends the run.
 #
@@ -470,6 +473,43 @@ for k in place facts 'place facts'; do
   expect_eq "with the kept $k read delivered, the refusal is the one before, word for word" "$E0" "$(cat "$SB/gate.err")"
 done
 
+section "SHUT"
+HL="bionic: write refused — this changes the seal's home (only the tool writes there)"
+SHUT_ROWS="R|rm -rf .git/bionic-seal
+R|rm .git/bionic-seal/w.plan.md.1-1.seal
+R|printf x > .git/bionic-seal/new.seal
+R|mv .git/bionic-seal ../away
+R|cd .git && rm -rf bionic-seal
+R|find .git/bionic-seal -delete
+R|rm -rf .git
+R|cp notes .git/bionic-seal/
+R|rm -rf gl/bionic-seal
+A|cat .git/bionic-seal/*
+A|rm -rf .git/bionic-*
+A|printf x > .git/bionic-seal-notes
+A|rm -rf .git/hooks
+A|bash hooks/session-poker.sh accept 'the .git/bionic-seal change is mine'
+R|Write|.git/bionic-seal/new.seal
+R|Edit|.git/bionic-seal/*.seal
+R|Write|gl/bionic-seal/new.seal
+A|Write|.git/bionic-seal-notes"
+shut() {  # <engaged|unengaged> -> each row judged in a gate world of that kind: refused by HL, or admitted
+  local want call arg line rc
+  world; ln -s .git "$G/gl"; [ "$1" = engaged ] || { rm "$GM"; seal_binding_drop "$G" "$SID"; gate "git commit -m x"
+    expect_status "the unengaged world: its commit is not judged" 0 "$GRC"; }
+  while IFS="|" read -r want call arg <&3; do
+    case "$call" in
+      Write|Edit) set -- "$1" "$G"/$arg; arg="$2"
+        if [ "$call" = Write ]; then tool Write "$arg" x; else tool Edit "$arg" state= state=; fi
+        rc="$TOOL_PRE"; line="$(head -1 "$SB/hook.err")" ;;
+      *) gate "$call"; rc="$GRC"; line="$GLINE" ;;
+    esac
+    if [ "$want" = A ]; then expect_status "$1, admitted: $call $arg" 0 "$rc"; continue; fi
+    expect_status "$1, refused: $call $arg" 2 "$rc"; expect_eq "$1, by the home's line: $call $arg" "$HL" "$line"
+  done 3<<< "$SHUT_ROWS"
+}
+shut engaged
+shut unengaged
 section "ACCEPT"
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh"
 CFG="$SB/cfg/projects/$(printf '%s' "$G" | sed 's/[^a-zA-Z0-9]/-/g')"; FX="$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move"

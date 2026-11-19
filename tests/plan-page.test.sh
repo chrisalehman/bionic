@@ -35,6 +35,7 @@
 set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/seal-fixture.sh"
 HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 PLAN_READ="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh"
 [ -r "$HOOK" ] && bash -n "$HOOK" || { echo "plan-page: the write hook is missing or does not parse: $HOOK"; exit 1; }
@@ -151,9 +152,10 @@ section "GATE"
 git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q --allow-empty -m base
 H="$(git -C "$R" rev-parse HEAD)"; GL="$R/.bionic/docs/record/wave-01-x/run.log"
 mkdir -p "${GL%/*}"; printf 'proof\n' > "$R/.bionic/docs/record/generic-evidence.md"
-gate_as() {  # <session> <a pending step, or nothing> [the tree it commits in] -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
+gate_as() {  # <session> <a pending step, or nothing> [the tree it commits in] [the command] -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
   local in
-  in="$(jq -n --arg s "$1" --arg c "${3:-$R}" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m x"}}')"
+  seal_fixture "$(sed -n 's/^plan=//p' "$R/.bionic/tmp/engaged-$1.state" 2>/dev/null)"
+  in="$(jq -n --arg s "$1" --arg c "${3:-$R}" --arg k "${4:-git commit -m x}" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $k}}')"
   GATE_SAID="$(cd "${3:-$R}" && HOME="$HOME_DIR" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$1" BIONIC_DRY_STEP="$2" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" <<< "$in" 2>&1 >/dev/null)"
   GATE_EXIT=$?
 }
@@ -244,6 +246,11 @@ mkdir -p "$R/payload/.claude-plugin" "$R/agents"; printf '{"name": "bionic"}\n' 
 nz() { gate; for w in 'no approval of doctrine-growth' 'no .## Tasks. row owns'; do printf '%s\n' "$GATE_SAID" | /usr/bin/grep -q "Not admitted: .*$w" && printf 'y' || printf 'n'; done; }
 printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"; A="$(nz)"; printf 'run/v1|ev=approval|key=doctrine-growth|by=f|said=yes|at=2026-11-01T00:00:14Z\n' >> "$L2"
 expect_eq "growth of the loaded set names the approval while the run holds none, and not once it does; no task owns the tree" "yy|ny" "$A|$(nz)"
+# Growth staged inside the commit's own call is refused in the separate add's words; what no commit in the call holds is not read.
+gate; SEP="$(grep 'loaded set grows' <<< "$GATE_SAID")"; git -C "$R" reset -q agents/a.md; : > "$R/x.txt"
+for c in 'git add agents/a.md && git commit -m x|1' 'git stage -A; git commit -m x|1' 'git commit -a -m x|1' 'git commit -qam x|1' 'git commit agents/a.md -m x|1' 'git commit -m x|0' 'git commit -ma|0' 'git add x.txt && git commit x.txt -m x|0' 'git commit -m x && git add agents/a.md|0'; do
+  gate_as "$SID" "" "$R" "${c%|*}"; expect_eq "growth by \`${c%|*}\`: the separate add's refusal, $([ "${c#*|}" = 1 ] || printf 'not ')said" "${SEP:+${c#*|}}" "$(grep -cxF "$SEP" <<< "$GATE_SAID")"; done
+git -C "$R" add agents/a.md; rm -f "$R/x.txt"
 # A task at 15 names the approval it waits on: its page is admitted, approve takes the name, and growth is admitted from its tree.
 NW="$(printf '%s\n' "$NINE" '| T2 | 4 | build | the second | T1, approval:D7 | 30 | REQ-1 | b.sh | — |')"; write_plan "$(printf '## Tasks\n\n%s\n' "$NW" | page 15)"; A="$HOOK_EXIT"; write_plan "$(printf '## Tasks\n\n%s\n' "${NW/approval:D7/aproval:D7}" | page 15)"
 expect_eq "a page at 15 whose task waits on approval:D7 is admitted; one misspelling it is refused, naming it" "0|2|1" "$A|$HOOK_EXIT|$(grep -c 'T2: dep aproval:D7 names no row' <<< "$HOOK_SAID")"
