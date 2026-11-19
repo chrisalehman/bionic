@@ -1493,7 +1493,21 @@ matrix_load() {  # <plan> [head]
   case "$rc" in 0) ;; 1) MATRIX_CELLS="" ;; *) return 2 ;; esac
   MATRIX_TASKS="$(plan_read_criterion_task "$1" 2>/dev/null)" || MATRIX_TASKS=""
   MATRIX_TASKS_OF="$1"
+  # The plan's `## Tasks` rows (lib/units.sh `units_rows`) are held too: every criterion's owing step and openness is read
+  # from them, each asked in a subshell that can keep no fold, so asking per criterion folds the run once a criterion.
+  MATRIX_UROWS_OF="$1"; MATRIX_UROWS_RC=0
+  MATRIX_UROWS="$(units_rows "$1" 2>/dev/null)" || MATRIX_UROWS_RC=1
   return 0
+}
+
+# _matrix_urows <plan> -> 0 with _MATRIX_UROWS set to `units_rows <plan>`, the answer matrix_load holds when it loaded this
+# plan, else asked now; 1 when units_rows has none. Held only under both keys, so a load of another plan in a scope that
+# kept its own MATRIX_TASKS_OF is never read as this one's.
+_matrix_urows() {
+  if [ "${MATRIX_TASKS_OF:-}" = "$1" ] && [ "${MATRIX_UROWS_OF:-}" = "$1" ]; then
+    _MATRIX_UROWS="${MATRIX_UROWS:-}"; return "${MATRIX_UROWS_RC:-1}"
+  fi
+  _MATRIX_UROWS="$(units_rows "$1" 2>/dev/null)"
 }
 
 # matrix_fails_when_missing <plan> -> the first criterion, in the reader's order (lib/reader.sh `reader_criteria`, no
@@ -1568,7 +1582,8 @@ matrix_owing_step() {  # <plan> <AC> -> the step number, or nothing
   val="$(matrix_criterion_task "$1" "$2")"
   [ -n "$val" ] || return 0
   if [ "$val" = 9 ]; then printf '9\n'; return 0; fi
-  rows="$(units_rows "$1" 2>/dev/null)" || return 0
+  _matrix_urows "$1" || return 0
+  rows="$_MATRIX_UROWS"
   for id in $(printf '%s' "$val" | tr ',' ' '); do
     rec="$(awk -F'\t' -v i="$id" '$1 == i { print; exit }' <<< "$rows")"
     [ -n "$rec" ] || continue
@@ -1585,7 +1600,8 @@ matrix_owing_step() {  # <plan> <AC> -> the step number, or nothing
 # row prints nothing. The status is read through the same `units_rows` the owing step is.
 matrix_owing_open() {
   local id rec s rows
-  rows="$(units_rows "$1" 2>/dev/null)" || return 0
+  _matrix_urows "$1" || return 0
+  rows="$_MATRIX_UROWS"
   for id in $(matrix_criterion_task "$1" "$2" | tr ',' ' '); do
     rec="$(awk -F'\t' -v i="$id" '$1 == i { print; exit }' <<< "$rows")"
     [ -n "$rec" ] || continue
@@ -1646,7 +1662,7 @@ matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"
 # order: owed at Step 9, and its Eval design row's eval is the close's measure (matrix_close_eval).
 # close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF ac tier status ev aud conf w
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC ac tier status ev aud conf w
   matrix_load "$PLAN" || return 2
   while IFS=$'\037' read -r ac tier status ev aud conf w; do
     [ -n "$ac" ] && [ "$status" = pending ] || continue
@@ -1754,7 +1770,7 @@ matrix_row_owes() {
 # lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read. A fourth argument,
 # any word, prints only those that also await their person (`matrix_row_awaits`, fed as the commit gate feeds it).
 matrix_unruled() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF RIGOR ac tier status ev aud conf waiver defer
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC RIGOR ac tier status ev aud conf waiver defer
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
   matrix_load "$PLAN" "${3:-}" || return 2
