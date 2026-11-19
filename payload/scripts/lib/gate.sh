@@ -436,13 +436,13 @@ _gate_reap() {
   _gate_reap_fact "${1##*/}"
 }
 # A KILLED RUN IS A RUN FACT: the shim that writes a run's line died with the run, so the gate that finds it
-# killed writes it, `ev=run` with rc=137, to the run's log beside the landing record its request names (record=,
-# a landing's run). A request that names no record is no run's the gate can name, and writes nothing there.
+# killed writes it, `ev=run` with rc=137, to the run's log its request names (record=, a landing's run). A request
+# that names no record is no run's the gate can name, and writes nothing there.
 # Soft: a log that cannot be written changes no gate decision.
 _gate_reap_fact() {  # <id> -> the reaped request's run line in its run's log
   case "$_R_record" in /*/*) ;; *) return 0 ;; esac
   _gate_load_line || return 0
-  line_run_event "${_R_record%/*}/run.log" rc=137 "key=$_R_key" "kind=$_R_kind" "tree=$_R_tree" \
+  line_run_event "$_R_record" rc=137 "key=$_R_key" "kind=$_R_kind" "tree=$_R_tree" \
     "landing=$_R_landing" "request=$1" >/dev/null 2>&1 || :
 }
 

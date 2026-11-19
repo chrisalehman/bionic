@@ -96,10 +96,15 @@ reader_record() {  # <plan> -> its record directory; 2 when the plan sits where 
   printf '%s/record/%s\n' "${dir%/*}" "$READER_SLUG"
 }
 
+# THE LOG'S PATH has one home, here: a record directory holds the run's log under one name, and every place that wants
+# the path asks one of these two, so no second spelling of it can drift from the reader's.
+reader_log_in() {  # <record directory> -> the path of the run log it holds
+  printf '%s/run.log\n' "${1%/}"
+}
 reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none; above 2 when the lookup died
   local rec
   rec="$(reader_record "${1:-}")" || return
-  printf '%s/run.log\n' "$rec"
+  reader_log_in "$rec"
 }
 
 # A KEY OF A FOLD THAT READS NO TURN'S END: a stop event comes at every turn, so the log is summed less those alone. Only

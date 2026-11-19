@@ -272,6 +272,21 @@ printf '%s\n' "planted_trees() { awk -F'|' 'ev() == \"tree\" { t[line_kv(\"row\"
 expect_eq "a fold of the tree event planted in a script is found beside the reader's" "payload/scripts/lib/reader.sh payload/scripts/planted-tree.sh" "$(tree_folds "$S/tree-fold")"
 expect_eq "the checkout folds the tree event once, in the reader" "payload/scripts/lib/reader.sh" "$(tree_folds "$BIONIC_SCRIPTS_DIR")"
 
+section "LOGPATH"
+# The run log's path is joined in the reader alone: a line that puts the file's name after a directory is a second builder.
+# A comment and a case arm or a `%` strip that only reads a given path's name are no join.
+joins() { ( cd "$1" && /usr/bin/grep -rnE '[^%#/]/run\.log' hooks payload/scripts \
+  | /usr/bin/grep -vE '^payload/scripts/lib/reader\.sh:|^[^:]*:[0-9]+:[[:space:]]*#|\*[^ ()"]*/run\.log\)' | cut -d: -f1,2 | tr '\n' ' ' | sed 's/ $//' ); }
+mkdir -p "$S/logpath/hooks" "$S/logpath/payload/scripts/lib"
+printf '%s\n' '# the log is DIR/run.log' 'case "$1" in */record/*/run.log) ;; esac' 'rec="${log%/run.log}"' \
+  'planted_log() { RUN_LOG="${x%/*}/run.log" log_append t; }' > "$S/logpath/payload/scripts/p.sh"
+printf '%s\n' 'log="$d"/run.log' > "$S/logpath/hooks/h.sh"
+printf '%s\n' 'printf "%s/run.log\n" "$rec"' > "$S/logpath/payload/scripts/lib/reader.sh"
+expect_eq "a join planted in a script and a hook is found by its line; a comment, a case arm, a strip and the reader's own are not" \
+  "hooks/h.sh:1 payload/scripts/p.sh:4" "$(joins "$S/logpath")"
+expect_eq "the checkout joins the log's name to a path in the reader alone" "" "$(joins "$BIONIC_SCRIPTS_DIR")"
+expect_eq "the reader joins it once" 1 "$(/usr/bin/grep -vE '^[[:space:]]*#' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" | /usr/bin/grep -cE '[^%#/]/run\.log')"
+
 section "DEAD"
 dead() { ( cd "$1" && /usr/bin/grep -rnwE 'worktree_land|worktree_land_for_session' payload hooks skills agents-src agents 2>/dev/null | cut -d: -f1,2 | tr '\n' ' ' | sed 's/ $//' ); }
 mkdir -p "$S/dead/payload/scripts"; printf '%s\n' 'f() { :; }' '# worktree_land_for_session lands a tree' > "$S/dead/payload/scripts/p.sh"

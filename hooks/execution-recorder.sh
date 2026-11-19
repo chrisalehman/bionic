@@ -500,10 +500,11 @@ dispatch_event() {  # <confirmed roster row> -> 0 always; appends the launch's d
   [ -n "$row" ] && [ -n "$brief" ] && [ -n "$(line_field "$r" name)" ] || return 0
   case "$brief" in /*) abs="$brief" ;; *) abs="$BIONIC_ROOT/$brief" ;; esac
   case "$abs" in */briefs/*.md) ;; *) return 0 ;; esac
-  [ -d "${abs%/briefs/*}" ] && [ ! -L "${abs%/briefs/*}/run.log" ] || return 0
+  [ -d "${abs%/briefs/*}" ] || return 0
   # shellcheck source=/dev/null
-  ( . "$BIONIC_LIB/log.sh" >/dev/null 2>&1 || exit 0
-    RUN_LOG="${abs%/briefs/*}/run.log" log_append dispatch "row=$row" "name=$(line_field "$r" name)" \
+  ( . "$BIONIC_LIB/log.sh" >/dev/null 2>&1 && . "$BIONIC_LIB/reader.sh" >/dev/null 2>&1 || exit 0
+    RUN_LOG="$(reader_log_in "${abs%/briefs/*}")"; [ ! -L "$RUN_LOG" ] || exit 0
+    log_append dispatch "row=$row" "name=$(line_field "$r" name)" \
       "role=$(line_field "$r" subagent_type)" "session=$BIONIC_SID" "tool_use_id=$(line_field "$r" tool_use_id)" \
       "brief=$brief" "sum=$(line_field "$r" brief_sum)" ) >/dev/null 2>&1
   return 0
