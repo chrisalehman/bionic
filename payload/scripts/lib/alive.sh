@@ -21,6 +21,7 @@
 # read says.
 #
 #   alive_run <pid> <start>                 rc 0 alive (an empty start is an older record: kill -0)
+#   alive_since <pid>                       -> the start a record of <pid> carries; nothing when it is gone
 #   alive_session <sid>                     rc 0 alive
 #   alive_sessions                          -> session=<sid>|pid=<pid>|cwd=<path>, one per live session
 #   alive_note <sid>                        rc 0 when <sid>'s process is recorded; dead records go
@@ -40,6 +41,9 @@ done
 unset _alive_dep
 
 alive_run() { _slots_live "${1:-}" "${2:-}"; }
+
+# The writer's half of the rule: a record that names a process stores this, and alive_run compares against it.
+alive_since() { _slots_since "${1:-}"; }
 
 _alive_records() { printf '%s/bionic/alive' "$(claude_home)"; }
 

@@ -420,7 +420,8 @@ write_plan() {  # <path> <state-body>
     printf '%s\n' "$2"
     case "$2" in *approved-by:*) ;; *) printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n' ;; esac
     printf '\n- Step 3: prior evidence\n'
-  } > "$1"
+  } > "$1" || return
+  seal_fixture "$1"
 }
 
 # A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). hooks/dispatch-preflight.sh refuses a

@@ -1121,6 +1121,32 @@ SR_AT=$((SR_NOW + 120)) sr_tick
 expect_contains "S4 an unchanged tick (nothing decided moved) still takes the unchanged path" "poker: unchanged since " "$OUT"
 
 # ============================================================
+section "§REST: the watcher's rest and the status line's waits-on-you agree: it rests only while the line says every open ask is on you"
+# ============================================================
+# The tick's world above, its plan unapproved, so nothing is ready and no agent is out: the asks alone decide the rest.
+# The pass is the shipped `tick --watch`; its rest code is read from lib/patrol.sh, its one home.
+SR_REST="$(bash -c '. "$1/patrol.sh" >/dev/null 2>&1 && printf %s "${WATCH_RC_REST:-}"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib")"
+sr_pass() { sr_poke tick --watch > "$TMPROOT/pass.out" 2> "$TMPROOT/pass.err"; RC=$?; }
+sr_owed_of() { printf '%s\n' "$1" | /usr/bin/grep -oE 'owed: [0-9]+ on you · [0-9]+ on events'; }
+expect_nonempty "RS0 precondition: the library names the rest code" "$SR_REST"
+SR_APPROVED=none sr_tick_world rest "6 6 12 12"
+sr_pass; SR_R0="$RC"
+sr_run --line "$SR_PLAN"
+expect_eq "RS1 no ask open: the line owes nothing on you, and the pass does not rest" "owed: 0 on you · 0 on events|no" \
+  "$(sr_owed_of "$OUT")|$([ "$SR_R0" = "$SR_REST" ] && echo yes || echo no)"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
+SR_AT=$((SR_NOW + 60)) sr_pass; SR_R1="$RC"
+SR_AT=$((SR_NOW + 60)) sr_run --line "$SR_PLAN"
+expect_eq "RS2 one ask open on the person: the line says one on you and none on events, and the pass rests" \
+  "owed: 1 on you · 0 on events|$SR_REST" "$(sr_owed_of "$OUT")|$SR_R1"
+sr_ask_ev "key=waive:Q1|sent=-|title=waiver: Q1|at=2026-10-06T20:01:00Z"
+sr_ask_ev "key=waive:Q1|answer=no|event=-|at=2026-10-06T20:02:00Z"
+SR_AT=$((SR_NOW + 120)) sr_pass; SR_R2="$RC"
+SR_AT=$((SR_NOW + 120)) sr_run --line "$SR_PLAN"
+expect_eq "RS3 a waiver answered no waits on its review's run: the line counts it on events, and the pass does not rest" \
+  "owed: 1 on you · 1 on events|no" "$(sr_owed_of "$OUT")|$([ "$SR_R2" = "$SR_REST" ] && echo yes || echo no)"
+
+# ============================================================
 section "§SCOPE: the asks are read from the named plan's register, never the session running the verb, never a session acting for no run"
 # ============================================================
 SID2="9a8b7c6d-1e2f-4a3b-8c4d-5e6f7a8b9c0d"

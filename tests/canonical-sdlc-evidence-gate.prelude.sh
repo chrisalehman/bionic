@@ -340,7 +340,8 @@ EG_PF_DIR="$(mktemp -d)"; cleanup_dirs+=("$EG_PF_DIR")
 #   fixture's events and then each line given; prints its path. The gate reads the run from the log, never the page.
 eg_page() {
   local p; p="$(plan_fixture --current "$2" "$1/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)" || return 1
-  shift 2; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$p")"; printf '%s' "$p"
+  shift 2; [ "$#" -eq 0 ] || { printf '%s\n' "$@" >> "$(plan_fixture_log "$p")" && seal_fixture "$p" "$(plan_fixture_log "$p")"; }
+  printf '%s' "$p"
 }
 # One row of the one table, in plan_fixture's thirteen-cell order: <id> <agent> <status> [<worktree>].
 eg_pf_row() {

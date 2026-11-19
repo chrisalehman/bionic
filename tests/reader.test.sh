@@ -38,6 +38,8 @@
 #   §SESSION    an order, a handoff and a session are the log's, each the last of its kind; a session counts once,
 #               by its first act.
 #   §HELD       the run's held place, its order and its sessions answer as the whole fold over every plan this suite built.
+#   §PR         the run's pull request is the newest published fact of part pr; a reviews part at the same commit is a
+#               fact of its own, and a run with no request answers nothing.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -654,5 +656,22 @@ hs_plant; HS_PL="$(/usr/bin/grep -x 'n=7' "$(hs_file)" 2>/dev/null)"
 printf 'run/v1|ev=stop|session=s1|turn=t2|at=2026-10-04T00:04:00Z\n' >> "$HL"
 expect_eq "HS3 a line in no stop event's shape drops the held place too" "n=7|5" "$HS_PL|$(hs_ask)"
 rm -rf "$HS" "$HT"
+
+section "PR"
+# fails-when: `pr` answers a request the log does not hold, answers an older one over the newest, prints its part or
+# event type, or a request at the reviews part's commit replaces that part's fact (a published fact named by row and
+# commit alone).
+W=pr; plan pr <<EOF
+run/v1|ev=published|row=T1|commit=$G|kind=queue|at=2026-11-03T00:00:01Z
+run/v1|ev=published|part=reviews|commit=$H|branch=wave/x|by=T4|at=2026-11-03T00:00:02Z
+EOF
+PR_NONE="$(ask pr)"; PR_RC=$?
+expect_eq "PR-1 a run with no request: pr prints nothing and exits 1" "1|" "$PR_RC|$PR_NONE"
+printf 'run/v1|ev=published|part=pr|url=https://example.invalid/pull/1|branch=wave/x|commit=%s|base=main|by=publish|at=2026-11-03T00:00:03Z\n' "$G" >> "$D/record/pr/run.log"
+printf 'run/v1|ev=published|part=pr|url=https://example.invalid/pull/1|branch=wave/x|commit=%s|base=main|by=publish|at=2026-11-03T00:00:04Z\n' "$H" >> "$D/record/pr/run.log"
+expect_eq "PR-2 the newest request answers, its fields by name, no ev= or part=" \
+  "base=main branch=wave/x by=publish commit=$H url=https://example.invalid/pull/1 at=2026-11-03T00:00:04Z" "$(ask pr | paste -sd' ' -)"
+expect_eq "PR-3 the reviews part at that commit still stands beside it, and the row's landing" "reviews pr pr|T1" \
+  "$(ask landed | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^part=/) printf "%s%s", (n++ ? " " : ""), substr($i, 6) }')|$(ask landed T1 | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^row=/) print substr($i, 5) }')"
 
 finish

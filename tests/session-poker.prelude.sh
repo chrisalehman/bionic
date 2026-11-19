@@ -16,6 +16,8 @@
 # the map reads a suite's own lines and does not follow this file, so POKER, S46_LIB and
 # S31_STOP_HOOK are assigned by each shard that needs them, before this file is sourced.
 
+# shellcheck source=/dev/null
+declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
 TMPROOT="$(mktemp -d)"
 
 # THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
@@ -229,7 +231,8 @@ ack_rows() {  # <repo> <name>...
 # delivery in its log.
 delivered_plan() {  # <repo>
   local p; p="$(sp_plan_at_step "$1" 9)"
-  printf 'run/v1|ev=step|n=9|delivered=bionic 9.9.9; report: record/fixture/close-out.md|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$p")"
+  printf 'run/v1|ev=step|n=9|delivered=bionic 9.9.9; report: record/fixture/close-out.md|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$p")" || return
+  seal_fixture "$p" "$(plan_fixture_log "$p")"
 }
 
 # ---------- the session binding (wave-session-bound-run, AC-2/AC-3/AC-6/AC-8) ----------
@@ -465,7 +468,8 @@ sp_at15() {
       if (cell(r, "status") == "landed") ev("published|row=" cell(r, "id")); next }
     { print }
     END { if (eval) { print "\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
-      print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p"
+      print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p" || return
+  seal_fixture "$p" "$d/record/$n/run.log"
 }
 
 # sp_fact <plan> <line> -> a proof or waiver line in the shape lib/proof.sh's proof_line and proof_waiver_line print
@@ -478,7 +482,8 @@ sp_fact() {
       print o "|" a }' >> "$log" ;;
     'waived: '*) printf '%s\n' "$l" | sed -E 's/^waived: question=([^ ]*) head=([^ ]*) by (.*) ([0-9]{4}-[^ ]*Z) "(.*)"$/run\/v1|ev=waiver|question=\1|head=\2|by=\3|said=\5|at=\4/' >> "$log" ;;
     *) return 1 ;;
-  esac
+  esac || return
+  seal_fixture "$1" "$log"
 }
 
 # ── hoisted from Section 12: sp_plan_at_step — Sections 37–40, 50, 55 and 67 write plans with it. ──
@@ -618,7 +623,7 @@ s42_unchanged() {  # <label> <want rc> <plan>
 }
 # s42_builds_landed <plan> -> the fixture's active build row T2 landed, as T1 is, by its `published` event: a whole read
 # is registered only once no build row is pending or active.
-s42_builds_landed() { printf 'run/v1|ev=published|row=T2|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$1")"; }
+s42_builds_landed() { printf 'run/v1|ev=published|row=T2|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$1")" && seal_fixture "$1" "$(plan_fixture_log "$1")"; }
 
 # ── hoisted from Section 47 §WAIT: s47_plan, s47_lines — Section 59, §SEV, §RC-DEFER and §MOVE-PASTED write reads tables and read tick lines with them. ──
 s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, current: 4
@@ -729,6 +734,7 @@ s60_whole() {  # <head> <scope> -> a structure reading's proof line
 s60_world() {  # <label> <whole head @A|@C> <scope> -> R59W, P59W: §59's shape plus criteria under five requirements
   s59_world "$1" "$(s60_whole "$2" "$3")" "$S60_T1" "$S60_T7" "$S60_T8" "$(s59w_q T3 structure)" "$S59W_T5"
   printf '| REQ-%s | fixture | AC-%s | hermetic | `tests/a.test.sh` | the fixture is wrong |\n' 2 2.1 2 2.2 4 4.1 5 5.1 >> "$P59W"
+  seal_fixture "$P59W"
   ( cd "$R59W" && git add -f "$P59W" && git commit -qm matrix ) >/dev/null 2>&1
   S60_INIT="$(git -C "$R59W" rev-parse "$S59W_A~1" 2>/dev/null)"
   S60_REC="$R59W/.bionic/docs/record/wave-01-fixture/run.log"; mkdir -p "${S60_REC%/*}"

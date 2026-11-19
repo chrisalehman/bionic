@@ -852,6 +852,86 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
   printf '%s\n' "$line"
 }
 
+# ---------------------------------------------------------------- the run waits only on the person
+#
+# tick_waits_only_on_person -> rc 0 when nothing but the person can move the run, read from what this tick decided:
+# the band QUIET, no open row on this roster, nothing ready and nothing filled, no detached run alive, the run not
+# delivered, its bound plan readable, no pull request in its log, and the asks open on the run at least one, every one
+# waiting on the person. rc 1 otherwise, with TICK_REST_WHY naming the first fact that keeps the run moving.
+#
+# A REST ENDS THE WATCH, so it is only ever a state the person alone can end and already knows about. An ask open on
+# them is what says they were told; with none open nothing has put anything to them, and the run is not resting. An
+# open pull request is not the person's alone: the run watches for its merge. Doubt never rests: a fact that cannot be
+# read keeps the watch.
+#
+# THE ASKS ARE THE SITUATION REPORT'S, the ones the tick's own sitrep line has just counted (`sitrep_tick_line` gathers
+# them, `sitrep_waits_only_on_you` reads them), so the status line's `owed: <n> on you · 0 on events` and this predicate
+# cannot disagree. Called from the tick's exit, after that line; nothing here prints on stdout.
+tick_waits_only_on_person() {
+  local st
+  TICK_REST_WHY=""
+  [ "${TICK_DECISION:-}" = QUIET ] || { TICK_REST_WHY=decision; return 1; }
+  [ "${OPEN_ROSTER:-1}" = 0 ] || { TICK_REST_WHY=open-row; return 1; }
+  case "${SCHED_READY_ALL:-}${SCHED_FILL:-}" in *[!\ ]*) TICK_REST_WHY=ready; return 1 ;; esac
+  if [ -n "${TICK_RUNS_KEY:-}" ] || tick_runs_out; then TICK_REST_WHY=detached-run; return 1; fi
+  # The run's state is read on the empty-roster arm; the armed tick with no roster yet reads it here.
+  st="${RUN_STATE_RAW:-}"
+  [ -n "$st" ] || st="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID" 2>/dev/null)"
+  [ "${st%%|*}" != delivered ] || { TICK_REST_WHY=delivered; return 1; }
+  [ -n "${SCHED_PLAN:-}" ] || { TICK_REST_WHY=no-plan; return 1; }
+  [ "${POKER_RUN_OPEN:-}" != unreadable ] || { TICK_REST_WHY=plan-unreadable; return 1; }
+  tick_run_pr_open "$SCHED_PLAN"
+  [ $? -eq 1 ] || { TICK_REST_WHY=pull-request; return 1; }
+  sitrep_waits_only_on_you && return 0
+  if [ "${SG_UNREAD+set}" != set ] || [ -n "$SG_UNREAD" ]; then TICK_REST_WHY=asks-unread
+  else
+    case "$(sitrep_owed_counts)" in
+      '0 '*) TICK_REST_WHY=no-ask ;;
+      *) TICK_REST_WHY=ask-on-event ;;
+    esac
+  fi
+  return 1
+}
+
+# tick_runs_out -> rc 0 when a row of this roster carries a detached run still alive, read now: the run the tick started
+# on this very tick is out too, and the tick's RUNNING lines were read before it started. A subshell, so the run
+# readers' RUN_* globals are not moved under the tick.
+tick_runs_out() (
+  [ -f "${ROSTER_FILE:-}" ] && [ ! -L "$ROSTER_FILE" ] || exit 1
+  for n in $(awk -F'|' '/[|]run_log=/ { for (i = 1; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6) }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
+    run_load_row "$(run_row_of "$ROSTER_FILE" "$n")" "$ROSTER_FILE" || continue
+    run_read
+    [ "$RUN_STATE" != RUNNING ] || exit 0
+  done
+  exit 1
+)
+
+# tick_run_pr_open <plan> -> rc 0 when the run's log holds its pull request, 1 when it holds none, 2 when the log cannot
+# be read. The request is the published event of its own part, `part=pr`, read through the reader's landings; its
+# state on the host is not read here, so a request in the log reads as open until the run is delivered. The one place
+# the predicate asks it: the reader's own pull request question replaces this read when it lands.
+tick_run_pr_open() {
+  local l
+  [ -n "${1:-}" ] && [ -f "$1" ] || return 2
+  declare -F reader_main >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/reader.sh" ] && . "$BIONIC_LIB/reader.sh"; } >/dev/null 2>&1
+  declare -F reader_main >/dev/null 2>&1 || return 2
+  l="$(reader_main "$1" landed 2>/dev/null)" || return 2
+  printf '%s\n' "$l" | awk -F'|' "$_READER_AWK"'line_kv("part") == "pr" { f = 1 } END { exit !f }' && return 0
+  return 1
+}
+
+# tick_watch_facts <file> -> the predicate's answer written to <file> for the watcher's pass, one line:
+# `watch-facts/v1|rest=yes` or `watch-facts/v1|rest=no|why=<fact>`, and `|plan=unreadable` when the bound plan cannot be
+# read. Only the pass names the file (BIONIC_WATCH_FACTS), so a tick the Patrol runs writes nothing and prints the same.
+tick_watch_facts() {  # <file>
+  local f="${1:-}" line
+  [ -n "$f" ] && [ ! -L "$f" ] || return 0
+  if tick_waits_only_on_person; then line="watch-facts/v1|rest=yes"
+  else line="watch-facts/v1|rest=no|why=${TICK_REST_WHY:-unknown}"; fi
+  [ "${POKER_RUN_OPEN:-}" != unreadable ] || line="${line}|plan=unreadable"
+  printf '%s\n' "$line" > "$f" 2>/dev/null || :
+}
+
   poker_verb_arm() {
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -957,6 +1037,26 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     TICK_ROOT_WALK="$(project_root_candidates "$PWD")"
     TICK_ROOT_TAG="$(printf '%s\n' "$TICK_ROOT_WALK" | tail -1 | awk -F'\t' '{ print $2 }')"
 
+    # ONE TICK OF A SESSION AT A TIME. The tick records its process while it runs (lib/patrol.sh `tick_run_claim`),
+    # after the walk, since the claim may create `.bionic/tmp`, and before the stamp, since a tick that finds a live
+    # one of its session decides nothing and so attests nothing: it says so in one line and exits 0, the quiet exit,
+    # so the watch pass that ran it stays quiet too. A record that cannot be written leaves the tick as it ran
+    # before the record existed: unrecorded, on stderr. The exit trap removes the record; tick_emit, which replaces
+    # that trap below, removes it as its last act.
+    TICK_RUN_ROOT=""
+    _tr_stamp="$(patrol_stamp_file "$SESSION_ID")" || _tr_stamp=""
+    if [ -n "$_tr_stamp" ] && tmp_dir_ok "${_tr_stamp%/*}"; then
+      TICK_RUN_ROOT="${_tr_stamp%/.bionic/tmp/*}"
+      _tr_held="$(tick_run_claim "$TICK_RUN_ROOT" "$SESSION_ID" "$$")"
+      case $? in
+        0) trap 'tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"' EXIT ;;
+        1) say "TICK-RUNNING — pid ${_tr_held%% *}, started ${_tr_held#* }, is this session's tick; this one exits"
+           exit 0 ;;
+        *) TICK_RUN_ROOT=""
+           die "WARN — the running tick's record could not be written; this tick runs unrecorded." ;;
+      esac
+    fi
+
     # STAMP FIRST, BEFORE ANYTHING IS READ OR DECIDED. Every line below this one can end in
     # a refusal, and each of those refusals is a HEALTHY Patrol firing into a state it has
     # nothing to say about. What the stamp attests is the firing, so it is taken here — the
@@ -1022,13 +1122,15 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     fi
     tick_emit() {
       local rc=$?
-      [ -n "$TICK_BUF" ] || exit "$rc"
+      [ -n "$TICK_BUF" ] || { [ -z "$TICK_RUN_ROOT" ] || tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"; exit "$rc"; }
       exec 1>&3 3>&-
       [ -z "${TICK_RESTART:-}" ] || say "$TICK_RESTART"
       if [ -n "$TICK_DIGEST" ] && [ -n "$TICK_REARM" ]; then
         printf '%s\n' "$TICK_REARM"
       fi
       [ -z "${TICK_DECIDED:-}" ] || sitrep_tick_line "${SCHED_PLAN:-}"  # THE TICK'S ONE-LINE SITREP, EVERY TICK (wave-38 T11; D13)
+      # The watcher's pass asks whether the run waits only on the person, after the asks the line above counted.
+      [ -z "${BIONIC_WATCH_FACTS:-}" ] || [ -z "${TICK_DECIDED:-}" ] || tick_watch_facts "$BIONIC_WATCH_FACTS" >/dev/null 2>&1
       if [ "$TICK_UNCHANGED" = yes ]; then
         # EVERY STANDING HOLD RIDES THE UNCHANGED TICK (wave-35 T5; REQ-4 AC-4.4; D13). The backstop runs
         # on every tick and says its NOT-LANDED lines into the buffer; an equal digest means the world
@@ -1051,6 +1153,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
         write_tick_digest "$SESSION_ID" "$TICK_PVER" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
+      [ -z "$TICK_RUN_ROOT" ] || tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"
       exit "$rc"
     }
     if [ -n "$TICK_BUF" ]; then
@@ -2933,24 +3036,33 @@ EOF
   #
   # THE INTERVAL IS ASKED ON EVERY PASS THAT HAS NO ACT TO NAME, so a period above the ceiling is said by the watch
   # that would have taken it rather than by nothing: the pass wakes with the line that names the fix.
+  #
+  # THE REST. The tick writes whether the run waits only on the person (`tick_waits_only_on_person`) to a file this pass
+  # names, on every pass, its print changed or not; a pass with no act to name over a resting run exits with the rest
+  # code and prints nothing. A bound plan that cannot be read is the person's to restore but nothing has told them, so
+  # it is no rest: the pass wakes once, on the print that first holds it, and the turn that wakes ends where the
+  # turn-end wall puts the refusal to the person.
   poker_verb_watch_pass() {
-    local out err rc line iv_rc
+    local out err facts rc line iv_rc rest=no
     out="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
-      && err="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" || {
+      && err="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
+      && facts="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" || {
       die "REFUSED — no scratch file for the tick's print; the pass did not run."
       exit "$WATCH_RC_REFUSED"
     }
-    bash "$HOOK_DIR/${0##*/}" tick > "$out" 2> "$err"
+    BIONIC_WATCH_FACTS="$facts" bash "$HOOK_DIR/${0##*/}" tick > "$out" 2> "$err"
     rc=$?
     cat "$err" >&2
     case "$rc" in
       0|1) ;;
-      *) rm -f "$out" "$err"
+      *) rm -f "$out" "$err" "$facts"
          die "REFUSED — the tick refused (exit $rc); this pass decided nothing."
          exit "$WATCH_RC_REFUSED" ;;
     esac
     line="$(watch_wake_line "$out")"
-    rm -f "$out" "$err"
+    [ -n "$line" ] || line="$(watch_person_wake "$out" "$facts")"
+    /usr/bin/grep -q '^watch-facts/v[0-9]*|rest=yes' "$facts" 2>/dev/null && rest=yes
+    rm -f "$out" "$err" "$facts"
     if [ -z "$line" ]; then
       poker_watch_interval_seconds >/dev/null; iv_rc=$?
       [ "$iv_rc" -eq 0 ] \
@@ -2960,5 +3072,14 @@ EOF
       printf '%s\n' "$line"
       exit "$WATCH_RC_WAKE"
     fi
+    [ "$rest" = no ] || exit "$WATCH_RC_REST"
     exit "$WATCH_RC_QUIET"
+  }
+
+  # watch_person_wake <tick print> <watch facts> -> the wake line for a state the person alone can end and nobody has
+  # told them of, on the print that first holds it; nothing on an unchanged print, which was told before.
+  watch_person_wake() {
+    /usr/bin/grep -q '^poker: unchanged since ' "$1" 2>/dev/null && return 0
+    /usr/bin/grep -q '^watch-facts/v[0-9]*|.*|plan=unreadable' "$2" 2>/dev/null || return 0
+    printf '%s\n' "bionic watch: PLAN unreadable - only the person can restore read access to the bound plan: tell them"
   }

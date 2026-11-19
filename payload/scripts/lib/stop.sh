@@ -1727,9 +1727,12 @@ fi
 #   - an undated marker row               -> the stamp's verb alone answers: a row nothing can
 #     order against is not refused for the order.
 #   - not a marker turn                    -> nothing is owed.
+#   - a tick of this session is running    -> nothing is owed: the marker turn's tick is that one, or the one it
+#     refused, and the running tick stamps and decides for both (lib/patrol.sh `tick_running`, the one alive rule,
+#     so a record a killed tick left reads dead and the duty stands).
 # BLOCKS ONCE, through the same `stop_hook_active` guard as every duty here.
 NOTICK_REASON=""
-if [ "$_ST_TICK" = 1 ]; then
+if [ "$_ST_TICK" = 1 ] && ! tick_running "$BIONIC_ROOT" "$BIONIC_SID" >/dev/null; then
   _NT_STAMP="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
   if [ -f "$_NT_STAMP" ] && [ ! -L "$_NT_STAMP" ]; then
     _NT_PRESENT=1
