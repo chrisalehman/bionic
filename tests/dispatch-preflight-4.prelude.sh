@@ -25,6 +25,8 @@
 # is a single plain file each part makes afresh in its own sandbox.
 
 # ---- from S10h (part a): the decoy roster file §RECORDER (part b) points a symlink at ----
+# shellcheck source=/dev/null
+declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
 DECOY_ROSTER="$SANDBOX/decoy-roster.txt"
 printf 'untouched\n' > "$DECOY_ROSTER"
 
@@ -32,7 +34,8 @@ printf 'untouched\n' > "$DECOY_ROSTER"
 q_rigor() {  # <repo> <rigor> — the bound plan's frontmatter rigor, rewritten in place
   local p="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   awk -v r="$2" '/^rigor:/ && !done { print "rigor: " r; done = 1; next } { print }' "$p" > "$p.tmp" \
-    && mv "$p.tmp" "$p"
+    && mv "$p.tmp" "$p" || return
+  seal_fixture "$p" "$1/.bionic/docs/record/wave-01-test/run.log"
 }
 q_brief() {  # <tag> [<questions line>] — a reader brief with one declared suite
   printf 'Your task: read the wave-99 change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh' "$1"
