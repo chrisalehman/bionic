@@ -266,7 +266,10 @@ BOUND=0
 ENGAGE_HELD_BY=""; ENGAGE_HELD_PLAN=""
 if PLAN=$(session_plan "$REPO" "$SID" 2>/dev/null); then
   BOUND=1
-elif [ -e "$MARKER" ]; then
+elif [ -e "$MARKER" ] || session_binding "$REPO" "$SID" >/dev/null 2>&1; then
+  # A binding to none recorded beside the seal is that same answer, and it stands when the
+  # marker has been removed: removing a file in the state folder is no first engagement.
+  #
   # FIRST ENGAGEMENT ONLY (wave-23-fixit-1810 T15, critic N-1; spec D1 Δ5). A marker that
   # exists but names no plan — `plan=none`, or an older writer's empty file — is a binding
   # too: the answer this hook, or the operator, already gave. It is rewritten as `none`
