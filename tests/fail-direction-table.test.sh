@@ -135,6 +135,8 @@ make_world() {
                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" \
                    > "$repo/.bionic/tmp/patrol-$_psid.state"
                  chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+                 # …and a watch that rested on purpose: the dispatch wall admits it as it admits a live one.
+                 printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$repo/.bionic/tmp/watch-$_psid.state"
                  # A LIVE WAVE HAS AN ENGAGED SESSION (task-engaged-session). Both gates
                  # ask `engaged_session` before anything else, so an unmarked world would
                  # rewrite this whole table to one answer — open, silent — exactly the way

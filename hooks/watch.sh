@@ -21,8 +21,9 @@
 # while the run stands still. The watcher wakes on it once, and `told=` on the record keeps it from saying it twice.
 #
 # ITS DAY. The platform ends the hook at its timeout without a word, so the watcher ends itself first: when the next
-# pass would come within WATCH_LIFE_MARGIN of the day's end, an agent still out wakes the model once (the turn's end
-# starts a fresh watcher), and with none out it rests at its limit.
+# pass would come within WATCH_LIFE_MARGIN of the day's end, an agent still out, or the run's pull request still open
+# and watched for its merge, wakes the model once (the turn's end starts a fresh watcher), and with neither it rests at
+# its limit. The pass says whether it watched the request in the file BIONIC_WATCH_PR names.
 #
 # AT MOST ONE A SESSION: the record is the lock (lib/patrol.sh `watch_claim`). A second watcher, from a second turn
 # end, finds the first alive and ends at once and silently.
@@ -89,6 +90,8 @@ case "$W_SPAN" in ''|*[!0-9]*) W_SPAN=$(( WATCH_LIFE_MAX - WATCH_LIFE_MARGIN )) 
 # conversation, whose own start brings its own watcher, and this one would wake it with the old one's acts.
 W_CLI="$(alive_holder "$W_SID" 2>/dev/null)" || W_CLI=""
 W_SLEEP=""
+W_PR="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pr.XXXXXX" 2>/dev/null)" || W_PR=""
+trap '[ -z "$W_PR" ] || rm -f "$W_PR"' EXIT
 trap '[ -z "$W_SLEEP" ] || kill "$W_SLEEP" 2>/dev/null; exit 143' TERM INT HUP
 
 w_rest() { watch_rest "$W_ROOT" "$W_SID" "$$" "$1" >/dev/null 2>&1; exit 0; }
@@ -124,7 +127,7 @@ while :; do
     [ -z "$W_NOW" ] || [ "$W_NOW" = "$W_SID" ] || w_rest cleared
   fi
 
-  W_LINE="$(bash "$W_POKER" tick --watch 2>/dev/null)"
+  W_LINE="$(BIONIC_WATCH_PR="$W_PR" bash "$W_POKER" tick --watch 2>/dev/null)"
   W_RC=$?
   case "$W_RC" in
     "$WATCH_RC_WAKE")
@@ -146,8 +149,9 @@ while :; do
   if [ $(( $(date +%s) - W_BORN + W_IV )) -ge "$W_SPAN" ]; then
     # Out is open on the roster, by the one close predicate every wall asks.
     W_OPEN="$(roster_open_names "$W_ROOT/.bionic/tmp/roster-$W_SID.state" "$W_ROOT/.bionic/tmp/sweeper-$W_SID.state" "$W_SID")"
-    [ -n "$W_OPEN" ] || w_rest limit
-    w_wake "bionic watch: RENEW - the watch has run its day with an agent still out: end this turn; its end starts a new watch"
+    [ -n "$W_OPEN" ] && w_wake "bionic watch: RENEW - the watch has run its day with an agent still out: end this turn; its end starts a new watch"
+    [ -n "$W_PR" ] && [ -s "$W_PR" ] || w_rest limit
+    w_wake "bionic watch: RENEW - the watch has run its day with the pull request open: end this turn; its end starts a new watch"
   fi
   sleep "$W_IV" &
   W_SLEEP=$!

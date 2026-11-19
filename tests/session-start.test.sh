@@ -800,4 +800,30 @@ OUT=$(drive "$P15h" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
 hasnt "15h.9 …and no holder named" "holds it" "$OUT"
 has   "15h.10 …and the run on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}" "$OUT"
 
+
+section "16 — predecessor watches: each record but this session's own, read by the alive rule"
+# THE CONTRACT. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory. The banner lists each predecessor's: watching
+# over a live process, stopped over a dead one (the watcher died without a word), or resting and why. This
+# session's own record is not a predecessor's: its watcher starts beside this hook.
+# FIXTURE FIDELITY: records in the shape hooks/watch.sh writes; a live `sleep` and a finished subshell as watchers.
+# ANTI-VACUITY: this session's record is planted too, and the listing that names the other three omits it.
+# fails-when: a predecessor's dead watcher reads as watching, a live one as stopped, or this session is listed.
+sleep 600 & W16_LIVE=$!
+W16_START="$(bash -c '. "$1/alive.sh" && alive_since "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$W16_LIVE")"
+( exit 0 ) & W16_DEAD=$!; wait "$W16_DEAD" 2>/dev/null
+W16_THIRD="33333333-4444-5555-6666-777777777777"
+P16=$(make_env 60s)
+printf 'state=watching\npid=%s\nstart=%s\n' "$W16_LIVE" "$W16_START" > "$P16/.bionic/tmp/watch-$OLD_SID.state"
+printf 'state=watching\npid=%s\nstart=%s\n' "$W16_DEAD" "$W16_START" > "$P16/.bionic/tmp/watch-$OLD2_SID.state"
+printf 'state=resting\nwhy=cleared\n' > "$P16/.bionic/tmp/watch-$W16_THIRD.state"
+printf 'state=resting\nwhy=person\n' > "$P16/.bionic/tmp/watch-$CUR_SID.state"
+OUT=$(drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq  "16.1 exit 0" "0" "$(rc)"
+has "16.2 the watches section is present" "predecessor watches:" "$OUT"
+has "16.3 a predecessor's live watcher reads watching" "  ${OLD_SID:0:8} — watch watching (pid $W16_LIVE)" "$OUT"
+has "16.4 a dead one reads stopped without a word, naming it" "  ${OLD2_SID:0:8} — watch stopped without a word (pid $W16_DEAD)" "$OUT"
+has "16.5 a rested one says why" "  ${W16_THIRD:0:8} — watch resting (cleared)" "$OUT"
+hasnt "16.6 THIS session's own record is not a predecessor's" "  ${CUR_SID:0:8} — watch" "$OUT"
+kill "$W16_LIVE" 2>/dev/null
+
 finish
