@@ -1564,6 +1564,35 @@ expect_eq "RC3 the decision ruled: no open: and no ask: line names it while the 
   "0|0|2|settled: D21 · \"1\" · Chris Lehman 2026-10-06 · the gate the judge holds" \
   "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^ask: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^ask: approval: ')|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^settled: D21')"
 
+section "§RESUME-LINES: a resume says each step to the terminal as the step starts, before the step's own lines reach the recap"
+# The terminal is appended to the recap's own path, so the terminal's lines and the recap's land in one file in the order
+# they were written; the recap the verb keeps is read from a run with the terminal apart. fails-when: a step's line
+# comes after its first line, a step goes unsaid, the lines reach the recap, or the lines arrive out of order.
+sr_recap
+RL_TERM="$(/usr/bin/grep -c '^poker: resume — step: ' "$TMPROOT/rs.out")"
+RL_REC="$(printf '%s\n' "$RECAP" | /usr/bin/grep -c 'resume — step: ')"
+RL_F="$SR_DIR/resume-recap.md"; : > "$RL_F"; sr_poke resume "$SR_HF" >> "$RL_F" 2>/dev/null
+rl_at() { awk -v p="$1" 'index($0, p) == 1 { print NR; exit }' "$RL_F"; }  # <prefix> -> the number of the first line that starts with it
+RL_PREV=0; RL_GOT=""; RL_WANT=""; RL_N=0
+while IFS=$'\t' read -r RL_NAME RL_PFX; do  # <step> <the first line the step writes to the recap>
+  RL_OWN="$(rl_at "$RL_PFX")"; RL_SAID="$(rl_at "poker: resume — step: $RL_NAME")"
+  RL_N=$((RL_N + 1)); RL_WANT="$RL_WANT $RL_NAME:said-before"
+  if [ -n "$RL_OWN" ] && [ -n "$RL_SAID" ] && [ "$RL_SAID" -lt "$RL_OWN" ] && [ "$RL_SAID" -gt "$RL_PREV" ]; then RL_GOT="$RL_GOT $RL_NAME:said-before"
+  else RL_GOT="$RL_GOT $RL_NAME:${RL_SAID:-unsaid}/${RL_OWN:-no-lines}"; fi
+  [ -z "$RL_SAID" ] || RL_PREV="$RL_SAID"
+done <<EOT
+bind	poker: bound
+arm	poker: armed
+adopt	poker-adopt/v1|
+task list	task-list: 0:
+recap	settled:
+step file	step-file:
+patrol	patrol-interval:
+tick	poker: sitrep
+EOT
+expect_eq "RL1 each step's line is on the terminal before its first line in the recap and after the step before it" "$RL_WANT" "$RL_GOT"
+expect_eq "RL2 …the terminal got one line a step and the recap the verb keeps got none" "$RL_N|0" "$RL_TERM|$RL_REC"
+
 section "§FOLD: a fold that fails is no fact: the sheet prints none and exits 2, the line and the recap say the status could not be read, and nothing is held"
 SR_ST="$TMPROOT/stand"; mkdir -p "$SR_ST/payload/scripts"; cp -R "$BIONIC_HOOKS_DIR" "$SR_ST/hooks"; cp -R "${SR_OWED_LIB%/*}" "$SR_ST/payload/scripts/lib"; echo 'reader_facts() { return 128; }' >> "$SR_ST/payload/scripts/lib/reader.sh"
 sr_fd() { printf '%s %s %s' "$RC" "$(printf '%s\n' "$OUT" | grep -cE "$1")" "$(printf '%s\n%s\n' "$OUT" "$ERR" | grep -c 'could not be read')"; }  # <pattern> -> exit, its lines, could-not-read lines

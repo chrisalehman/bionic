@@ -2367,8 +2367,10 @@ sitrep_tick_line() {
     fi
     exec 3>&1 >> "$RS_RECAP"
     rs_sub() { ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" "$@" ) 2>&1; }
+    rs_said() { say "resume — step: $1" >&3; }  # <step> -> one line to the terminal, written where the step starts and before any line of the step's own
     rs_step() {  # <codes it may exit with, comma-joined> <verb> [args] -> runs it; any other code stops the ritual with it
       local ok="$1" rc=0; shift
+      rs_said "$1"
       rs_sub "$@" || rc=$?
       case ",$ok," in *",$rc,"*) return 0 ;; esac
       die "resume stopped at $1 (exit $rc): its lines are in $RS_RECAP_REL; the steps after it did not run."
@@ -2380,6 +2382,7 @@ sitrep_tick_line() {
     # one verb that does it (hooks/engage.sh --root), before the binding; an engaged session is left as it is.
     RS_ENGAGED=already
     if ! engaged_session "$REPO_REAL" "$SESSION_ID"; then
+      rs_said engage
       ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/engage.sh" --root "$REPO_REAL" ) 2>&1
       if ! engaged_session "$REPO_REAL" "$SESSION_ID"; then
         die "REFUSED — this session could not be engaged: hooks/engage.sh --root $REPO_REAL left no marker (its lines are in $RS_RECAP_REL). Nothing was bound or armed."
@@ -2399,6 +2402,7 @@ sitrep_tick_line() {
     # 1 is adopt's "open rows found", its NOTIFY, never a refusal; each row it takes over is a hand event with this reason
     rs_step 0,1 adopt --why "the session was cleared and its predecessor's agents were taken over by the resume"
     # The task list: every step with its status from current:, then every row of ## Tasks with its table status.
+    rs_said "task list"
     RS_CUR=""; RS_UNREAD=""; if _fill_current_load "$RS_PLAN"; then RS_CUR="$_FILL_CURRENT_VALUE"; else RS_UNREAD=1; fi; RS_CURN="${RS_CUR%%[!0-9]*}"
     awk -v cur="$RS_CURN" 'BEGIN {
       n = split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " ")
@@ -2409,6 +2413,7 @@ sitrep_tick_line() {
       NF >= 10 { st = tolower(trim($10)); if (st == "dropped") next
                  printf "task-list: %s/%s: %s · %s\n", trim($2), trim($1), row_short($4), (st == "landed") ? "completed" : ((st == "active") ? "in_progress" : "pending") }'
     # The recap.
+    rs_said recap
     RS_LEDGER="$RS_DOCS/record/$(proof_plan_slug "$RS_PLAN")/design-ledger.md"
     RS_SET=""
     RS_SET="$(decisions_list "$RS_LEDGER")"; RS_LOG="${RS_LEDGER%/*}/run.log"
@@ -2444,6 +2449,7 @@ sitrep_tick_line() {
     printf 'plan: %s\n' "$RS_PLAN_REL"
     RS_HEAD="$(git -C "$REPO_REAL" symbolic-ref --short -q HEAD 2>/dev/null)" || RS_HEAD=""
     printf 'tree: %s (checked out: %s)\n' "$REPO_REAL" "${RS_HEAD:-a detached HEAD}"
+    rs_said "step file"
     RS_PROOT="$(cd "$HOOK_DIR/.." 2>/dev/null && pwd -P)"
     case "$RS_UNREAD$RS_CURN" in
       1*) printf 'step-file: none — the run'"'"'s step is unreadable\n' ;;
@@ -2451,6 +2457,7 @@ sitrep_tick_line() {
       *) printf 'step-file: none — the plan'"'"'s current: (%s) names no step\n' "${RS_CUR:-unset}" ;;
     esac
     # The patrol: the model's one act left, in the ritual's order, the interval as the arm line prints it.
+    rs_said patrol
     if [ "$RS_PATROL" = no ]; then
       RS_GONE=""
       if [ -f "$(patrol_stamp_file "$SESSION_ID" 2>/dev/null)" ]; then
@@ -2473,6 +2480,7 @@ sitrep_tick_line() {
     fi
     if [ "$RS_PATROL" = yes ]; then
       RS_RC=0
+      rs_said tick
       rs_sub tick || RS_RC=$?
       case "$RS_RC" in
         0|1) : ;;
