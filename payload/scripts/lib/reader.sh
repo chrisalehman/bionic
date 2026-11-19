@@ -45,6 +45,7 @@ declare -F line_lines >/dev/null 2>&1 || . "$_READER_LIB_DIR/line.sh"
 # The record's field reader, read by name; `ev()` is its event, for the `run/v1` shape the fold prints.
 _READER_AWK="${_LINE_FIELDS_AWK}"'
 function ev() { return line_kv("ev") }
+function is_pr() { return ev() == "published" && line_kv("part") == "pr" }
 '
 
 READER_QUESTIONS=""
@@ -499,7 +500,7 @@ reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no
 reader_question pr value reader_q_pr
 reader_q_pr() {  # <plan> -> the newest request's fields as key=value lines, `ev=` and `part=` dropped; nothing, 1, for none
   reader_facts "$1" | awk -F'|' "$_READER_AWK"'
-    ev() == "published" && line_kv("part") == "pr" { l = $0 }
+    is_pr() { l = $0 }
     END { if (l == "") exit 1; n = split(l, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|part)=/) print p[i] }'
 }
 
@@ -621,7 +622,8 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
   # approval:plan by Step 3's approval once the run is at Step 4; a proof by one of its kind that did not
   # fail; step:<n> by the run reaching Step <n>. Any other wait (an external token, an id the table
   # lacks) is never met here. A dropped row is owed no more, as the fill has it: it is never ready, and
-  # a wait on it is met as a landing meets it.
+  # a wait on it is met as a landing meets it. An integrate row is not ready once the run's pull request is
+  # published: its act is done and what is left is the merge, which is the person's and the close's.
   local waits
   waits="$(plan_read_waits "$1" "${2:-}")" || return 1
   { printf '%s\n\034\n' "$waits"; reader_facts "$1"; } | awk -F'|' "$_READER_AWK$_READER_DROP_AWK"'
@@ -634,8 +636,9 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
       return 0
     }
     $0 == "\034" { facts = 1; next }
-    !facts { split($0, w, "\t"); if (w[2] == "kind") ord[++n] = w[1]; else { nw[w[1]]++; wt[w[1], nw[w[1]]] = w[2]; wv[w[1], nw[w[1]]] = w[3] }; next }
+    !facts { split($0, w, "\t"); if (w[2] == "kind") { ord[++n] = w[1]; kd[w[1]] = w[3] } else { nw[w[1]]++; wt[w[1], nw[w[1]]] = w[2]; wv[w[1], nw[w[1]]] = w[3] }; next }
     ev() == "published" { landed[line_kv("row")] = 1 }
+    is_pr() { pr = 1 }
     ev() == "dispatch" { held[line_kv("row")] = 1 }
     ev() == "approval" { appr[line_kv("key")] = 1 }
     ev() == "step" { cur = line_kv("n") }
@@ -643,6 +646,7 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
     END {
       for (i = 1; i <= n; i++) {
         r = ord[i]; if ((r in landed) || (r in held) || dropped(r)) continue
+        if (pr && kd[r] == "integrate") continue
         for (k = 1; k <= nw[r]; k++) if (!met(wt[r, k], wv[r, k])) break
         if (k > nw[r]) print r
       }

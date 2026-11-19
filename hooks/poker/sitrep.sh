@@ -1190,7 +1190,7 @@ SITREP_ASKS
 # other fact set, when the run's fold fails: its facts would read absent, so the caller says they could not be read.
 sitrep_gather() {
   local plan="$1" root="$2" mode="$3" now rec rows reds red_rows lr lr1 approvals appr_at dlv_at cur lq lwait ledges
-  local sit ty gl lab desc kind note id stp state landed=0 total=0 last_id="" last_at="" proj
+  local sit ty gl lab desc kind note id stp state landed=0 total=0 last_id="" last_at="" proj pr_url
   # the findings held for this gather end with it: a hold is as fresh as its fold, and the gather writes no event
   local _PROOF_HELD_PLAN="" _PROOF_HELD_FINDINGS=""
   now="$(sitrep_now)"
@@ -1215,6 +1215,9 @@ sitrep_gather() {
      && declare -F _line_fold >/dev/null 2>&1 && line_held "$rec"; then
     lq="$(_line_fold "$rec" | awk -F'\t' 'NF >= 9 { m = 0; if ($9 != "none" && $9 != "") m = split($9, s, ","); printf "Q\t%s\t%s\t%s\t%d\t%d\n", $1, $5, $8, $12 + 0, m }')"
   fi
+  # the run's open pull request, asked of the reader and of the tick's one predicate for whether it is still open
+  pr_url=""
+  if tick_run_pr_open "$plan" 2>/dev/null; then pr_url="$(_sitrep_ask "$plan" reader_q_pr "$plan" 2>/dev/null | sed -n 's/^url=//p')"; fi
   lwait="$(units_waiting "$plan" "$cur" 2>/dev/null | awk -F'\t' 'NF >= 3 { print "W\t" $1 "\t" $2 "\t" $3 }')"
   ledges="$(units_edges "$plan" 2>/dev/null | awk -F'\t' 'NF >= 2 { print "E\t" $1 "\t" $2 }')"
   sit="$( { printf '%s\n' "$red_rows" | awk 'NF { print "X\t" $1 }'
@@ -1224,6 +1227,7 @@ sitrep_gather() {
               { r = line_kv("row"); e = ep(line_kv("at")); if (r == "" || e < 0) next; if (!(r in t)) o[++n] = r; t[r] = e; h[r] = (line_kv("kind") == "hand") }
               END { for (i = 1; i <= n; i++) print "L\t" o[i] "\t" t[o[i]] "\t" h[o[i]] }'
             printf '%s\n' "$lq" "$lwait" "$ledges" | awk 'NF'
+            [ -z "$pr_url" ] || printf 'Y\t%s\n' "$pr_url"
             # each title is the one reading lib/plan.sh plan_task_title gives, as the plan card prints it
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { x = $1; gsub(/^[ \t]+|[ \t]+$/, "", x); if (x != "") print x "\t" $4 }' \
               | while IFS='	' read -r id desc; do printf 'N\t%s\t%s\n' "$id" "$(plan_task_title "$desc")"; done
@@ -1263,6 +1267,7 @@ sitrep_gather() {
     $1 == "X" { red[$2] = 1; next }
     $1 == "A" { appr[$2] = 1; next }
     $1 == "L" { land[$2] = $3; hand[$2] = $4; next }
+    $1 == "Y" { pr = $2; next }
     $1 == "Q" { nq++; qr[nq] = $2; qc[nq] = $3; qo[nq] = $4; qg[nq] = $5; qm[nq] = $6; next }
     # a read another task writes is that task, by its label; the step, an approval, the reviews, the build and the merge
     # are said in words whoever writes them
@@ -1273,7 +1278,7 @@ sitrep_gather() {
     $1 == "V" { na[$2]++; ap[$2, na[$2]] = $3; next }
     $1 == "U" {
       s = tolower(trim($11)); if (s == "dropped") next
-      n++; id[n] = trim($2); stp[n] = trim($3); st[n] = s; at[id[n]] = n
+      n++; id[n] = trim($2); stp[n] = trim($3); st[n] = s; at[id[n]] = n; kd[n] = tolower(trim($4))
       b = 0
       if (s != "landed") {
         if (id[n] in red) b = 1
@@ -1322,6 +1327,8 @@ sitrep_gather() {
         out[pick] = 1; done++
         for (j = 1; j <= n; j++) if ((pick, j) in dep) indeg[j]--
         if (st[pick] == "held") { row(pick, "s", "held"); continue }
+        # an integrate row with the request open has done its act: what it waits on is the merge, which the person makes
+        if (pr != "" && kd[pick] == "integrate" && st[pick] == "pending") { row(pick, "s", "waits on your merge of the pull request " pr); continue }
         if (st[pick] != "pending" || !wn[id[pick]]) { row(pick, "b", ""); continue }
         row(pick, "s", waits(id[pick]))
       }

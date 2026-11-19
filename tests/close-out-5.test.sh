@@ -126,6 +126,7 @@ carry_req() {
     > "$proj/.bionic/docs/$rel"
   sed "s#^walk: exempt\$#&\\
 requirements: $rel#" "$plan" > "$plan.req" && mv "$plan.req" "$plan"
+  seal_fixture "$plan" "$proj/$LOG_REL"
 }
 PI="$(mk_fixture carry7)"; advance_to "$PI" 8
 carry_prev "$PI"

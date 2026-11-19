@@ -54,6 +54,7 @@ SPAWN="$BIONIC_SCRIPTS_DIR/payload/scripts/spawn-worktree.sh"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
 
 . "$(dirname "$0")/lib/world.sh"
+. "$(dirname "$0")/lib/seal-fixture.sh"
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 
@@ -79,6 +80,7 @@ in_world() {  # -> the world root
   p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
   # The base Step 4 owes joins the header of the world's page at 15.
   awk -v b="$(git -C "$r" rev-parse main)" '{ print } /^working-branch: / { print "base-sha: " b }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
+  seal_fixture "$p"
   for t in T1 T2; do
     printf '%s|row=%s|lands_on=a.test.sh\n' \
       "$(roster_row_fixture status=intended session="$WORLD_SID" name="wx-$t" agent_id="b00$t" plan="$p")" "$t" \
