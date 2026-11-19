@@ -368,4 +368,199 @@ wp_pass "$RD"
 expect_eq "ST3 …and once the run has ended the same world rests" "$WP_REST" "$WP_RC"
 
 # ============================================================
+# THE HOOK: hooks/watch.sh, the shipped file, run as the platform runs it: the event's JSON on stdin, the session's id
+# in that JSON alone (CLAUDE_CODE_SESSION_ID is removed from its environment), the project as its cwd. Each world sets
+# `watch-interval: 1s`, so a pass comes as fast as a tick runs. A pass is seen by the stamp it moves: the suite plants
+# a year-2000 stamp and waits for the next pass to rewrite it.
+# ============================================================
+WH_HOOK="${BIONIC_HOOKS_DIR}/watch.sh"
+WP_LIFE="$(wp_const WATCH_LIFE_MAX)"
+WH_BOUND=60
+wh_rec() { printf '%s/.bionic/tmp/watch-%s.state' "$1" "$SID"; }
+wh_field() { sed -n "s/^$2=//p" "$(wh_rec "$1")" 2>/dev/null | head -1; }
+wh_fast() { printf 'watch-interval: 1s\n' > "$1/.bionic/config.yaml"; }
+# wh_start <repo> [event] [env assignment...] -> WH_PID: the hook, started as the platform starts it
+wh_start() {
+  local repo="$1" ev="${2:-Stop}"; shift 2 2>/dev/null || shift $#
+  jq -nc --arg s "$SID" --arg c "$repo" --arg e "$ev" \
+    '{session_id:$s,cwd:$c,hook_event_name:$e,stop_hook_active:false} + (if $e == "SessionStart" then {source:"startup"} else {} end)' \
+    > "$TMPROOT/wh.in"
+  ( cd "$repo" && exec env -u CLAUDE_CODE_SESSION_ID "$@" bash "$WH_HOOK" < "$TMPROOT/wh.in" ) \
+    > "$TMPROOT/wh.out" 2> "$TMPROOT/wh.err" &
+  WH_PID=$!
+}
+# wh_wait [seconds] -> WH_RC (124 while it still runs), WH_OUT, WH_ERR
+wh_wait() {
+  local i=0 n="${1:-$WH_BOUND}"
+  while kill -0 "$WH_PID" 2>/dev/null && [ "$i" -lt $(( n * 10 )) ]; do sleep 0.1; i=$((i + 1)); done
+  if kill -0 "$WH_PID" 2>/dev/null; then WH_RC=124; else wait "$WH_PID" 2>/dev/null; WH_RC=$?; fi
+  WH_OUT="$(cat "$TMPROOT/wh.out")"; WH_ERR="$(cat "$TMPROOT/wh.err")"
+}
+wh_kill() { kill "$WH_PID" 2>/dev/null; wait "$WH_PID" 2>/dev/null; sleep 1; }
+# wh_passes <repo> <n> -> WH_SEEN: how many of <n> planted stamps a pass rewrote while the hook stayed up
+wh_passes() {
+  local repo="$1" n="$2" k i
+  WH_SEEN=0
+  for k in $(seq 1 "$n"); do
+    wp_old_stamp "$repo"; i=0
+    while [ "$(wp_stamp_at "$repo")" = "2000-01-01T00:00:00Z" ] && [ "$i" -lt $(( WH_BOUND * 10 )) ]; do
+      sleep 0.1; i=$((i + 1))
+    done
+    [ "$(wp_stamp_at "$repo")" != "2000-01-01T00:00:00Z" ] && kill -0 "$WH_PID" 2>/dev/null || return 0
+    WH_SEEN=$((WH_SEEN + 1))
+  done
+}
+
+section "§HOOK: the watcher is registered on the turn end and at session start, as a hook that can wake, for one day"
+expect_regex "H0 precondition: the library names the watch's day" '^[0-9]+$' "$WP_LIFE"
+for ev in Stop SessionStart; do
+  WH_REG="$(jq -c --arg e "$ev" '[.hooks[$e][]?.hooks[]? | select(.command | test("/hooks/watch\\.sh$"))]' \
+    "${BIONIC_HOOKS_DIR}/hooks.json" 2>/dev/null)"
+  expect_eq "H0.$ev hooks.json registers hooks/watch.sh on $ev, once" "1" "$(printf '%s' "$WH_REG" | jq 'length' 2>/dev/null)"
+  expect_eq "H0.$ev.a …as a hook that can wake (asyncRewake)" "true" "$(printf '%s' "$WH_REG" | jq -r '.[0].asyncRewake' 2>/dev/null)"
+  expect_eq "H0.$ev.b …with the watch's day as its time limit" "$WP_LIFE" "$(printf '%s' "$WH_REG" | jq -r '.[0].timeout' 2>/dev/null)"
+done
+
+section "§HOOK-WAKE: a pass that wakes ends the watcher with the wake code and the pass's line on stderr, and nothing else"
+RHW="$(make_repo wh-fill)"; new_roster "$RHW"; armed_ago "$RHW"; wh_fast "$RHW"
+sp_plan_at_step "$RHW" 4 \
+  "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+poke_bind "$RHW"
+wh_start "$RHW" Stop; wh_wait
+expect_eq "HW1 a ready row with room: the hook exits with the wake code" "$WP_WAKE" "$WH_RC"
+expect_eq "HW1.a …its stderr is one line" "1" "$(wp_lines "$WH_ERR")"
+expect_regex "HW1.b …the pass's own wake line, naming the row and the act" '^bionic watch: FILL T3 - .*dispatch' "$WH_ERR"
+expect_eq "HW1.c …and stdout is empty" "" "$WH_OUT"
+expect_eq "HW1.d the watch record says resting, because the wake ended it and the turn's end starts the next" \
+  "resting|woke" "$(wh_field "$RHW" state)|$(wh_field "$RHW" why)"
+wh_start "$RHW" Stop; wh_wait 4
+expect_eq "HW2 the next watcher over the same fill does not wake again: it is still watching" "124" "$WH_RC"
+expect_eq "HW2.a …and its record names it, watching" "watching|$WH_PID" "$(wh_field "$RHW" state)|$(wh_field "$RHW" pid)"
+expect_eq "HW2.b …with nothing said on either stream" "|" "$WH_OUT|$WH_ERR"
+wh_kill
+
+section "§HOOK-QUIET: over an unchanged run the watcher passes again and again and says nothing (AC-9.1, the suite's half)"
+plant_answer "$WP_TR" fresh "busy:running"
+RHQ="$(wp_quiet_world wh-quiet)"; wh_fast "$RHQ"
+wh_start "$RHQ" SessionStart
+wh_passes "$RHQ" 3
+expect_eq "HQ1 three passes, each moving the stamp, while the watcher stays up" "3" "$WH_SEEN"
+wh_wait 1
+expect_eq "HQ1.a …it is still running" "124" "$WH_RC"
+expect_eq "HQ1.b …and it said nothing on either stream" "|" "$WH_OUT|$WH_ERR"
+expect_eq "HQ2 the watch record says watching, naming the watcher's own process" \
+  "watching|$WH_PID" "$(wh_field "$RHQ" state)|$(wh_field "$RHQ" pid)"
+expect_eq "HQ2.a …and the start the one alive rule reads it by" \
+  "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$WH_PID" | awk '{$1=$1; print}')" "$(wh_field "$RHQ" start)"
+# AT MOST ONE A SESSION: a second watcher, as the next turn's end starts it, finds the first and ends silently.
+WH_FIRST="$WH_PID"
+wh_start "$RHQ" Stop; wh_wait 20
+expect_eq "HQ3 a second watcher while the first watches ends at once, quietly" "0|" "$WH_RC|$WH_OUT$WH_ERR"
+expect_eq "HQ3.a …and the record still names the first" "watching|$WH_FIRST" "$(wh_field "$RHQ" state)|$(wh_field "$RHQ" pid)"
+WH_PID="$WH_FIRST"; wh_kill
+# THE POSITIVE ON THE SAME EXTRACTOR: the same world, a request denied, and a new watcher wakes on it.
+gate_line w99-T9 leaves-the-machine "git push origin wave/99-q" >> "$(gate_of "$RHQ")"
+wh_start "$RHQ" Stop; wh_wait
+expect_eq "HQ4 the same world with a request denied: the watcher wakes" "$WP_WAKE" "$WH_RC"
+expect_regex "HQ4.a …with the gate's line on stderr" '^bionic watch: GATE ' "$WH_ERR"
+
+section "§HOOK-REST: a run that waits only on the person ends the watcher silently, its record saying why (AC-10.1, the suite's half)"
+wp_person_world wh-person
+RHP="$WP_R"; wh_fast "$RHP"
+wp_ask "$RHP" "$WP_PLAN" owed_open approve:step3 "approval: step3" "the plan is put to you"
+wh_start "$RHP" Stop; wh_wait
+expect_eq "HP1 the plan's approval put to the person and nothing else open: the watcher exits 0" "0" "$WH_RC"
+expect_eq "HP1.a …and says nothing on either stream" "|" "$WH_OUT|$WH_ERR"
+expect_eq "HP1.b …its record says resting, on the person" "resting|person" "$(wh_field "$RHP" state)|$(wh_field "$RHP" why)"
+gate_line w99-T9 leaves-the-machine "git push origin wave/99-p" >> "$(gate_of "$RHP")"
+wh_start "$RHP" Stop; wh_wait
+expect_eq "HP2 the same world with a request denied: the watcher wakes instead" "$WP_WAKE" "$WH_RC"
+expect_regex "HP2.a …its line on stderr" '^bionic watch: GATE ' "$WH_ERR"
+
+section "§HOOK-STAYS: with an agent or a detached run out and nothing changing, ten passes leave the watcher running (AC-10.4, the suite's half)"
+wp_person_world wh-stays-row
+RHA="$WP_R"; wh_fast "$RHA"
+wp_ask "$RHA" "$WP_PLAN" owed_open approve:step3 "approval: step3" "the plan is put to you"
+add_row "$RHA" name=busy deliverable="$RHA/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+plant_answer "$WP_TR" fresh "busy:running"
+poke "$RHA" tick >/dev/null
+wh_start "$RHA" Stop
+wh_passes "$RHA" 10
+expect_eq "HS1 one active row: ten passes, the watcher up through all of them" "10" "$WH_SEEN"
+wh_wait 1
+expect_eq "HS1.a …still running after the tenth, silent" "124||" "$WH_RC|$WH_OUT|$WH_ERR"
+wh_kill
+wp_person_world wh-stays-run
+RHD="$WP_R"; wh_fast "$RHD"
+wp_ask "$RHD" "$WP_PLAN" owed_open approve:step3 "approval: step3" "the plan is put to you"
+WH_RUNLOG="$RHD/.bionic/tmp/runs/regression@cccccccc.log"; mkdir -p "${WH_RUNLOG%/*}"; : > "$WH_RUNLOG"
+bash "$TMPROOT/shim/booked.sh" --run-log "$WH_RUNLOG" >/dev/null 2>&1 &
+WH_RUNPID=$!
+roster_row_fixture status=run session="$SID" name=regression@cccccccc agent_id= launched_at="$(iso_ago 60)" \
+  subagent_type=bionic:test-runner model= waiver="a whole run the tick started, not an agent: its log and its proof are its record" \
+  suites_allowed=run.sh suites_source=DECLARED tool_use_id= plan="$WP_PLAN" \
+  run_log="$WH_RUNLOG" run_pid="$WH_RUNPID" run_started_at="$(iso_ago 60)" >> "$(roster_of "$RHD")"
+poke "$RHD" tick >/dev/null
+wh_start "$RHD" Stop
+wh_passes "$RHD" 10
+expect_eq "HS2 no row but a live detached run: ten passes, the watcher up through all of them" "10" "$WH_SEEN"
+wh_wait 1
+expect_eq "HS2.a …still running after the tenth, silent" "124||" "$WH_RC|$WH_OUT|$WH_ERR"
+wh_kill
+kill "$WH_RUNPID" 2>/dev/null; wait "$WH_RUNPID" 2>/dev/null; printf '0\n' > "$WH_RUNLOG.rc"
+wh_start "$RHD" Stop; wh_wait
+expect_eq "HS2.b …and once the run has ended the next watcher rests" "0|resting|person" "$WH_RC|$(wh_field "$RHD" state)|$(wh_field "$RHD" why)"
+
+section "§HOOK-REFUSED: a pass the tick refuses ends the watcher silently and never wakes; a session bionic never engaged gets no watcher"
+RHR="$(make_repo wh-refused)"; wh_fast "$RHR"
+wh_start "$RHR" SessionStart; wh_wait
+expect_eq "HR1 engaged, never armed and no roster, so the tick refuses: the watcher exits 0" "0" "$WH_RC"
+expect_eq "HR1.a …saying nothing on either stream" "|" "$WH_OUT|$WH_ERR"
+expect_eq "HR1.b …its record says resting, on the refusal" "resting|refused" "$(wh_field "$RHR" state)|$(wh_field "$RHR" why)"
+rm -f "$(wh_rec "$RHR")"; unengage "$RHR"
+wh_start "$RHR" SessionStart; wh_wait
+expect_eq "HR2 the same project, the session not engaged: the watcher exits 0, silent" "0|" "$WH_RC|$WH_OUT$WH_ERR"
+expect_false "HR2.a …and leaves no watch record" test -e "$(wh_rec "$RHR")"
+engage "$RHR"
+printf '{}' > "$TMPROOT/wh.in"
+( cd "$RHR" && exec env -u CLAUDE_CODE_SESSION_ID bash "$WH_HOOK" < "$TMPROOT/wh.in" ) > "$TMPROOT/wh.out" 2> "$TMPROOT/wh.err"
+expect_eq "HR3 an input that names no session: exit 0, silent, no record" "0||no" \
+  "$?|$(cat "$TMPROOT/wh.out" "$TMPROOT/wh.err")|$([ -e "$(wh_rec "$RHR")" ] && echo yes || echo no)"
+
+section "§HOOK-DAY: near its day's end a watcher with an agent out wakes once so the turn's end replaces it; with none it rests"
+RHL="$(wp_quiet_world wh-day)"; wh_fast "$RHL"
+plant_answer "$WP_TR" fresh "busy:running"
+poke "$RHL" tick >/dev/null
+wh_start "$RHL" Stop BIONIC_WATCH_DEADLINE=3; wh_wait
+expect_eq "HL1 an open row and the day nearly spent: the watcher exits with the wake code" "$WP_WAKE" "$WH_RC"
+expect_regex "HL1.a …its one line says to end the turn so a new watch starts" '^bionic watch: RENEW .*turn' "$WH_ERR"
+expect_eq "HL1.b …one line, inside the ceiling" "1|yes" "$(wp_lines "$WH_ERR")|$([ "$(wp_len "$WH_ERR")" -le "$WP_MAX" ] && echo yes)"
+expect_eq "HL1.c …its record says resting, woken" "resting|woke" "$(wh_field "$RHL" state)|$(wh_field "$RHL" why)"
+wp_person_world wh-day-none
+RHN="$WP_R"; wh_fast "$RHN"
+wh_start "$RHN" Stop BIONIC_WATCH_DEADLINE=3; wh_wait
+expect_eq "HL2 no agent out and the day nearly spent: the watcher exits 0, silent" "0|" "$WH_RC|$WH_OUT$WH_ERR"
+expect_eq "HL2.a …its record says resting, at its limit" "resting|limit" "$(wh_field "$RHN" state)|$(wh_field "$RHN" why)"
+
+section "§HOOK-CLEARED: a watcher whose conversation was cleared ends silently; the new conversation's start brings its own"
+RHC="$(wp_quiet_world wh-cleared)"; wh_fast "$RHC"
+plant_answer "$WP_TR" fresh "busy:running"
+poke "$RHC" tick >/dev/null
+sleep 600 & WH_CLI=$!
+WH_CLI_START="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$WH_CLI" | awk '{$1=$1; print}')"
+mkdir -p "$WP_CFG/sessions"
+wh_cli() { jq -nc --argjson p "$WH_CLI" --arg s "$1" --arg st "$WH_CLI_START" --arg c "$RHC" \
+  '{pid:$p,sessionId:$s,procStart:$st,cwd:$c}' > "$WP_CFG/sessions/$WH_CLI.json"; }
+wh_cli "$SID"
+wh_start "$RHC" Stop
+wh_passes "$RHC" 2
+expect_eq "HC0 precondition: the CLI's file names this conversation, and the watcher passes" "2" "$WH_SEEN"
+wh_cli "a-new-conversation-0000"
+wh_wait 20
+expect_eq "HC1 the CLI's file now names another conversation: the watcher exits 0, silent" "0|" "$WH_RC|$WH_OUT$WH_ERR"
+expect_eq "HC1.a …its record says resting, cleared" "resting|cleared" "$(wh_field "$RHC" state)|$(wh_field "$RHC" why)"
+kill "$WH_CLI" 2>/dev/null; wait "$WH_CLI" 2>/dev/null; rm -f "$WP_CFG/sessions/$WH_CLI.json"
+
+# ============================================================
 finish

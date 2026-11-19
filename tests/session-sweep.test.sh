@@ -454,6 +454,17 @@ expect_contains "5.20t a sweep over a tick-run-only session counts it dead" "|de
 expect_false "5.20u a dead session's tick-run record is swept" test -e "$(f_of "$R5T" tick-run "$SID_DEAD")"
 expect_true "5.20v …and a live session's is kept" test -f "$(f_of "$R5T" tick-run "$SID_LIVE")"
 
+# THE watch CLASS. The watcher keeps its record in `watch-<sid>.state` (hooks/watch.sh); a dead session's copy is
+# residue the sweep removes, and a live session's is kept, so close-out's wipe spares it too.
+R5W="$(make_repo r5w)"
+live_home 5w "$SID_LIVE"; H5W="$CLAUDE_HOME"
+plant_session "$R5W" "$SID_LIVE" watch
+plant_session "$R5W" "$SID_DEAD" watch
+poke "$R5W" "$H5W" "$SID_SELF" sweep
+expect_contains "5.20w a sweep over a watch-only session counts it dead" "|dead=1|" "$OUT"
+expect_false "5.20x a dead session's watch record is swept" test -e "$(f_of "$R5W" watch "$SID_DEAD")"
+expect_true "5.20y …and a live session's is kept" test -f "$(f_of "$R5W" watch "$SID_LIVE")"
+
 # THE start-clock CLASS (wave-27 T68; review pass 47 S1, A-orch-137). hooks/execution-recorder.sh
 # writes one clock file per start, `start-clock-<sid>.<agent id>.state`; a dead session's go with
 # its other state, a live one's are kept, and a clock-named thing that is not a file the hook
