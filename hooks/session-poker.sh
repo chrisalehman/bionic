@@ -27,6 +27,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof naming the head its evidence read (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order event with the words in the bound run's log (record/orders.log with no run bound)
+#     bash <plugin-root>/hooks/session-poker.sh accept '<their words>' | abandon '<their words>'   the person's word on a run changed around the tool: sealed again as it stands, or ended (writes the run's log and its seal)
 #     bash <plugin-root>/hooks/session-poker.sh waive <question|all|AC-id> '<reply>'   the user's waiver of a review question, all three, or a criterion (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh regression-run   run the project's regression (its regression-command:, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add regression (writes a log under record/, never the plan)
@@ -384,6 +385,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh tick --watch   one pass of the tick with no model: exit ${WATCH_RC_QUIET} quiet; exit ${WATCH_RC_WAKE} with one line of at most ${WATCH_LINE_MAX} characters naming the act owed"
+  die "  bash ${HOOK_DIR}/session-poker.sh duty       the whole reason of the duty the turn-end hook last named in this session (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval --watch   the configured watch interval, in seconds (watch-interval:, default ${WATCH_INTERVAL_DEFAULT}s, refused above ${WATCH_INTERVAL_MAX}s)"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share (92 when none is set), the cores the person keeps (1 when none is set), the cores and the room; with <n> or reserve=<cores>, set it in the user-level file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt [--why '<reason>']   every open row a PREDECESSOR session left on this project's rosters, each adoption one hand event with its reason (the predecessor's clear when none is given)"
@@ -403,6 +405,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order event with the words in the bound run's log, else a line in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>' ['<why>']   record the user's approval <name> as one approval in the run's log: a name a row reads, plan at Step 3, or a T4 criterion the user confirms on words they typed"
+  die "  bash ${HOOK_DIR}/session-poker.sh accept '<their words>'   the person's word that the run, changed around the tool, is theirs as it stands: one approval line naming the words and the change, then the run sealed again"
+  die "  bash ${HOOK_DIR}/session-poker.sh abandon '<their words>'   the person's word that the bound run ends: one abandon line naming the words, and its seal removed"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh publish   the bound run's pull request, on the release approval at the working head and nothing else: the working branch pushed to origin and the request opened against the integration branch through gh, recorded as a published event of part pr; at a head already published it does nothing, at a new head it pushes and keeps the request; a failed push or request exits 4 with the cause and opens an ask for the user"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
@@ -744,6 +748,11 @@ case "$VERB" in
     esac
     AP_NAME="$1"; AP_REPLY="$2"; AP_WHY="${3:-}"
     ;;
+  # THE PERSON'S WORD ON A CHANGED RUN: one operand, their words as typed, holding something once blanks are gone.
+  accept|abandon)
+    [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ] || usage "$VERB takes one argument: the person's words, quoted, as they typed them."
+    SW_WORDS="$1"
+    ;;
   # THE USER'S ORDER. One operand: the user's words, which must hold something once blanks are gone,
   # or the word lift, which ends the open order.
   order)
@@ -856,6 +865,7 @@ $1"; shift ;;
   arm|disarm|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
+  duty) [ $# -eq 0 ] || usage "duty takes no arguments." ;;
   # THE MACHINE'S SHARE. No operand prints it; a share and `reserve=<cores>`
   # set theirs, together or one at a time. A value's own shape is the verb's refusal; a third operand, or the
   # same one twice, is the usage error.
@@ -2384,6 +2394,20 @@ PFC_OUT=""; PFC_ART=""
 
 case "$VERB" in
 
+  # THE DUTY'S WHOLE REASON. A turn-end refusal whose fix is the agent's shows the window one fixed line and keeps
+  # the refusal itself, line and detail, in the session's duty file (lib/refuse.sh `refuse_duty_path`); this prints
+  # it, byte for byte. The file is the duty the hook last named, so a session the hook never refused has none, and
+  # that is said rather than refused: there is nothing to mend. Read-only; a link at the file's name is no duty.
+  duty)
+    DUTY_ROOT="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)" || DUTY_ROOT=""
+    if DUTY_F="$(refuse_duty_path "$DUTY_ROOT" "${CLAUDE_CODE_SESSION_ID:-}")" && [ -f "$DUTY_F" ] && [ ! -L "$DUTY_F" ]; then
+      cat "$DUTY_F"
+      exit 0
+    fi
+    printf 'poker: no duty — the turn-end hook has named none in this session\n'
+    exit 0
+    ;;
+
   interval)
     if [ "${1:-}" = --watch ]; then
       SECS="$(poker_watch_interval_seconds)"; SECS_RC=$?
@@ -2532,6 +2556,8 @@ case "$VERB" in
   reply) poker_verb_reply "$@" ;;
   release-approval) poker_verb_release_approval "$@" ;;
   approve) poker_verb_approve "$@" ;;
+  accept) poker_verb_accept ;;
+  abandon) poker_verb_abandon ;;
   order) poker_verb_order "$@" ;;
   proof-add) poker_verb_proof_add "$@" ;;
   waive) poker_verb_waive "$@" ;;

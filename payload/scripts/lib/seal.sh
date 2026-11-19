@@ -4,7 +4,7 @@
 # WHAT IT OWNS. One plain record per open run, kept where the project's own tools do not reach: the
 # plan's canonical path and digest, the log's path, length and digest, and a state, clean or changed.
 # A run whose files no longer match their seal is a CHANGED run, and the seal names what changed (the
-# plan or the log) and how (gone, changed, shortened or added to). Four functions:
+# plan or the log) and how (gone, changed, shortened or added to). Five functions:
 #
 #   seal_verify <plan>
 #       prints ONE line and exits by it:
@@ -50,6 +50,15 @@
 #       sees a whole one, and a writer that acts on the answer is checked again under the lock by
 #       seal_write.
 #
+#   seal_vouched <plan>
+#       under the lock, prints the log as it was last vouched for: its first bytes, as many as were
+#       sealed clean, when they still hold the digest they were sealed with. 0 printed (nothing, for
+#       a log vouched for empty); 1 those bytes no longer stand (the log was cut, rewritten or
+#       removed), and nothing is printed; 2 no seal; 3 no home; 75 the lock could not be had. A
+#       caught change seals the files as they then stand, so without this the bytes the person last
+#       vouched for, and the sessions they bound, would be lost at the first catch: a line added by
+#       hand would read as the run's own once a commit had been refused.
+#
 #   AND THE BINDING, in the same home: which plan each session is bound to, written by
 #   lib/binding.sh `bind_plan` and believed by lib/run.sh `session_plan` (`seal_binding_*`, see
 #   THE BINDING below).
@@ -70,6 +79,7 @@
 #   state=clean|changed
 #   what=<plan|log>                              both empty while clean
 #   how=<gone|changed|shortened|added>
+#   vouched=<cksum crc> <bytes>                  only while changed: the log as last sealed clean
 #
 # A seal out of that shape, or one naming another plan, is read as no seal at all: removing the
 # seal has the same effect, and the seal is a trail, not a lock.
@@ -123,7 +133,7 @@ _seal_unlock() { rm -rf "$_SEAL_HOME/.reap"; }
 
 _seal_read() {  # <seal file> -> the _S_* fields; rc 1 when it is absent, out of shape, or another plan's
   local l head=""
-  _S_PLAN="" _S_PLAN_SUM="" _S_LOG="" _S_LOG_LEN="" _S_LOG_SUM="" _S_STATE="" _S_WHAT="" _S_HOW=""
+  _S_PLAN="" _S_PLAN_SUM="" _S_LOG="" _S_LOG_LEN="" _S_LOG_SUM="" _S_STATE="" _S_WHAT="" _S_HOW="" _S_VOUCHED=""
   [ -f "$1" ] || return 1
   while IFS= read -r l; do
     case "$l" in
@@ -136,6 +146,7 @@ _seal_read() {  # <seal file> -> the _S_* fields; rc 1 when it is absent, out of
       state=*)    _S_STATE="${l#state=}" ;;
       what=*)     _S_WHAT="${l#what=}" ;;
       how=*)      _S_HOW="${l#how=}" ;;
+      vouched=*)  _S_VOUCHED="${l#vouched=}" ;;
     esac
   done < "$1"
   [ -n "$head" ] && [ "$_S_PLAN" = "$_SEAL_PLAN" ] && [ -n "$_S_LOG" ] || return 1
@@ -198,7 +209,7 @@ seal_verify() {  # <plan> -> one line: clean | changed what= how= | none | nohom
 }
 
 seal_write() {  # [--vouch plan|run] <plan> <log> [<command> [<arg>…]] -> 0 clean, 1 changed, 2 none
-  local vouch="" plan log was state=clean what="" how="" psum lsum llen lpath tmp
+  local vouch="" plan log was state=clean what="" how="" psum lsum llen lpath tmp kept=""
   if [ "${1:-}" = --vouch ]; then
     [ "$#" -ge 2 ] || return 64
     vouch="$2"; shift 2
@@ -227,8 +238,11 @@ seal_write() {  # [--vouch plan|run] <plan> <log> [<command> [<arg>…]] -> 0 cl
   if [ "$was" = none ] && [ ! -f "$_SEAL_PLAN" ]; then
     _seal_unlock; return 2
   fi
+  # The log as last vouched for is carried through every changed seal: taken from the clean seal at
+  # the catch, kept from the changed one after it. Whether its bytes still stand is the reader's to ask.
   case "$was" in
-    changed*) state=changed; what="${was#*what=}"; what="${what%% *}"; how="${was##*how=}" ;;
+    changed*) state=changed; what="${was#*what=}"; what="${what%% *}"; how="${was##*how=}"
+      kept="$_S_VOUCHED"; [ "$_S_STATE" = changed ] || kept="$_S_LOG_SUM $_S_LOG_LEN" ;;
   esac
   psum=-
   [ ! -f "$_SEAL_PLAN" ] || psum="$(cksum < "$_SEAL_PLAN")"
@@ -239,8 +253,9 @@ seal_write() {  # [--vouch plan|run] <plan> <log> [<command> [<arg>…]] -> 0 cl
     llen=0; lsum="$_SEAL_EMPTY"
   fi
   tmp="$_SEAL_HOME/.new.$$.$RANDOM"
-  if ! printf 'seal/v1\nplan=%s\nplan_sum=%s\nlog=%s\nlog_len=%s\nlog_sum=%s\nstate=%s\nwhat=%s\nhow=%s\n' \
-       "$_SEAL_PLAN" "$psum" "$lpath" "$llen" "$lsum" "$state" "$what" "$how" > "$tmp" 2>/dev/null \
+  if ! printf 'seal/v1\nplan=%s\nplan_sum=%s\nlog=%s\nlog_len=%s\nlog_sum=%s\nstate=%s\nwhat=%s\nhow=%s\n%s' \
+       "$_SEAL_PLAN" "$psum" "$lpath" "$llen" "$lsum" "$state" "$what" "$how" "${kept:+vouched=$kept
+}" > "$tmp" 2>/dev/null \
      || ! mv -f "$tmp" "$_SEAL_FILE" 2>/dev/null; then
     rm -f "$tmp"; _seal_unlock; return 2
   fi
@@ -261,6 +276,24 @@ seal_stands() {  # <plan> -> 0 a seal stands, 1 none, 2 no home
   [ -n "${1:-}" ] || return 64
   _seal_place "$1" || return 2
   _seal_read "$_SEAL_FILE" || return 1
+}
+
+seal_vouched() {  # <plan> -> the log as last vouched for, on stdout: 0; 1 its bytes no longer stand; 2 none; 3 nohome
+  local v len pre
+  [ -n "${1:-}" ] || return 64
+  _seal_place "$1" || return 3
+  [ -f "$_SEAL_FILE" ] || return 2
+  _seal_lock || return 75
+  _seal_read "$_SEAL_FILE" || { _seal_unlock; return 2; }
+  # A changed seal with no bytes kept (one written before they were kept) vouches for none.
+  v="$_S_LOG_SUM $_S_LOG_LEN"; [ "$_S_STATE" = clean ] || v="${_S_VOUCHED:-$_SEAL_EMPTY 0}"
+  len="${v##* }"
+  case "$len" in ''|*[!0-9]*) _seal_unlock; return 1 ;; esac
+  pre="$_SEAL_EMPTY 0"
+  [ "$len" -eq 0 ] || pre="$(head -c "$len" < "$_S_LOG" 2>/dev/null | cksum)"
+  if [ "$pre" != "${v%% *} $len" ]; then _seal_unlock; return 1; fi
+  [ "$len" -eq 0 ] || head -c "$len" < "$_S_LOG"
+  _seal_unlock
 }
 
 # ─── THE BINDING: which plan a session is bound to, kept in the seal's home ───

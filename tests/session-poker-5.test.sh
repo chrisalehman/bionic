@@ -498,7 +498,7 @@ expect_contains "NR-2 the row reading the unruled D3 prints its WAIT, naming the
 expect_contains "NR-3 the row waiting on the open T2 prints its WAIT, naming it" "poker: WAIT T3 — waits for T2 (active)" "$OUT"
 expect_absent "NR-4 …and the tick prints no decline (NR-1 read this same output)" "decline" "$OUT"
 s31_stop "$RNR" "$(s31_transcript "$RNR" "carry on")"
-expect_eq "NR-5 the control: T4 ready and nothing launched, the wall refuses the turn" "block" "$(s31_decision)"
+expect_eq "NR-5 the control: T4 ready and nothing launched, the wall refuses the turn" "duty" "$(s31_decision)"
 expect_contains "NR-5b …naming T4 alone" "ready with room: T4 " "$(s31_reason)"
 
 # T4 launched: every row left waits, the tick offers none, and the wall ends the turn.
@@ -552,7 +552,7 @@ st_at 4; forget_digest "$RST"
 poke_pressure "$RST" 8192 1.0 tick
 expect_eq "ST-4 at current: 4 the same table fills" "poker: FILL T1" "$(nr_fill)"
 s31_stop "$RST" "$(s31_transcript "$RST" "carry on")"
-expect_eq "ST-5 …the wall refuses the turn that left it" "block" "$(s31_decision)"
+expect_eq "ST-5 …the wall refuses the turn that left it" "duty" "$(s31_decision)"
 expect_eq "ST-6 …and the table reader names T1" "T1" "$(st_ready)"
 
 # ============================================================

@@ -159,11 +159,11 @@ section "1 — the channel table is data, and every cell is the measurement's"
 expect_true "1a refuse.sh is on disk and parses" bash -n "$LIB"
 
 TBL_FIELDS="$(bash -c '. "$1"; printf "%s\n" "$BIONIC_REFUSE_TABLE"' _ "$LIB" | awk -F'|' '{print NF}' | sort -u | tr '\n' ' ')"
-expect_eq "1b every table row carries exactly ten fields" "10 " "$TBL_FIELDS"
+expect_eq "1b every table row carries exactly eleven fields" "11 " "$TBL_FIELDS"
 
 TBL_MODES="$(bash -c '. "$1"; printf "%s\n" "$BIONIC_REFUSE_TABLE"' _ "$LIB" | awk -F'|' '{print $1}' | tr '\n' ' ')"
-expect_eq "1c the five measured modes are all present, in measurement order" \
-  "exit2 deny systemmessage block additionalcontext " "$TBL_MODES"
+expect_eq "1c the five measured modes are all present, in measurement order, and the duty channel after them" \
+  "exit2 deny systemmessage block additionalcontext duty " "$TBL_MODES"
 
 cell() {  # <mode> <field> -> the cell, resolved by the library in a child shell
   bash -c '. "$1"; refuse_channel "$2" "$3"' _ "$LIB" "$1" "$2" 2>/dev/null
@@ -171,11 +171,11 @@ cell() {  # <mode> <field> -> the cell, resolved by the library in a child shell
 
 # (a) THE THREE REFUSAL CHANNELS. Each blocks, each was measured to deliver its
 # payload to the model in full.
-for _m in exit2 deny block; do
+for _m in exit2 deny block duty; do
   expect_eq "1d $_m is a refusal channel" "yes" "$(cell "$_m" refusal)"
   expect_eq "1e …and it blocks" "yes" "$(cell "$_m" blocks)"
 done
-expect_eq "1f refuse_modes lists exactly those three" "exit2 deny block " \
+expect_eq "1f refuse_modes lists exactly those four" "exit2 deny block duty " \
   "$(bash -c '. "$1"; refuse_modes' _ "$LIB" | tr '\n' ' ')"
 
 # (b) THE TWO THAT ARE NOT. `systemMessage` reached only a stream-json informational
@@ -316,7 +316,7 @@ expect_eq "2u …in one line" "1" "$DRV_ERR_LINES"
 
 drive "$LIB" nosuchmode "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
 expect_status "2w an unknown mode is refused, fail-closed" "2" "$DRV_RC"
-expect_contains "2x …naming the three that exist" "use exit2, deny or block" "$DRV_ERR_1"
+expect_contains "2x …naming where the modes that exist are listed" "pick one from refuse_modes" "$DRV_ERR_1"
 
 drive "$LIB" systemmessage "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
 expect_status "2y a measured-but-undelivered mode is refused too (A-13)" "2" "$DRV_RC"
@@ -511,7 +511,7 @@ section "5 — fail-closed: refuse exits, and no path out of it waves the action
 # action happens anyway. `refuse` owns the exit, and the scratch hook's FELL-THROUGH
 # line is how this section reads whether it ever gave it back.
 
-for _m in exit2 deny block; do
+for _m in exit2 deny block duty; do
   drive "$LIB" "$_m" "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
   expect_absent "5a $_m: refuse never returns to its call site" "FELL-THROUGH" "$DRV_ERR"
 done
@@ -858,6 +858,74 @@ expect_true "T47-i2 the first-line mutant parses" bash -n "$M_FIRST"
 DRV_STRICT=""; drive "$M_FIRST" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
 expect_regex "T47-i3 MUTANT without the fact in the detail the line is still cut (the mutant runs)" "$USER_LINE_RE" "$DRV_ERR_1"
 expect_absent "T47-i4 MUTANT …but the whole fact is nowhere on the wire (the first-line rows discriminate)" "$T47_ONE" "$DRV_ERR"
+
+# ============================================================
+section "§DUTY — whose fix a refusal is: the agent's goes out as one fixed line, the whole reason kept for the duty verb"
+# ============================================================
+# THE WINDOW'S LINE. The platform paints a Stop hook's context as one grey line, `Stop hook says: <text>`, and the
+# whole window line keeps to 80 columns only when the text keeps to 61.
+for _m in exit2 block; do expect_eq "D1 $_m: its refusals are the person's to fix" "person" "$(cell "$_m" whose)"; done
+for _m in deny duty; do expect_eq "D1b $_m: its refusals are the agent's to fix" "agent" "$(cell "$_m" whose)"; done
+for _m in systemmessage additionalcontext; do expect_eq "D1c $_m: no refusal, so nobody's" "n-a" "$(cell "$_m" whose)"; done
+expect_eq "D2 duty is model-only: the detail reaches the model through the verb, never the person" "yes|no" \
+  "$(cell duty model_only)|$(cell duty detail_to_user)"
+expect_contains "D2b …its interactive cell is the one the prototype saw: a grey line and no error" "no error" \
+  "$(cell duty user_interactive)"
+expect_contains "D2c …and its source names that record" "T1.md" "$(cell duty source)"
+DUTY_LINE_WANT="bionic: a duty is owed; run session-poker.sh duty"
+expect_eq "D3 the fixed line, from its one home" "$DUTY_LINE_WANT" \
+  "$(bash -c '. "$1"; printf %s "$BIONIC_REFUSE_DUTY_LINE"' _ "$LIB")"
+expect_true "D3b …and it keeps to 61 columns, so the window's line keeps to 80" \
+  bash -c '. "$1"; [ "$(bionic_cols "$BIONIC_REFUSE_DUTY_LINE")" -le 61 ]' _ "$LIB"
+
+DR="$(cd "$(mktemp -d "$SANDBOX/duty.XXXXXX")" && pwd -P)"; mkdir -p "$DR/.bionic/tmp"
+DUTY_F="$DR/.bionic/tmp/duty-s1.state"
+expect_eq "D4 the duty file's path, from its one builder" "$DUTY_F" \
+  "$(bash -c '. "$1"; refuse_duty_path "$2" s1' _ "$LIB" "$DR")"
+duty_drive() {  # <root or empty> <sid or empty> <lib> <refuse args...>
+  local r="$1" s="$2"; shift 2
+  env ${r:+BIONIC_ROOT="$r"} ${s:+BIONIC_SID="$s"} BIONIC_REFUSE_STRICT=1 BIONIC_WALL_VERBOSE= \
+    bash "$WALL" "$@" >"$SANDBOX/.out" 2>"$SANDBOX/.err"
+  DRV_RC=$?; DRV_OUT="$(cat "$SANDBOX/.out")"; DRV_ERR="$(cat "$SANDBOX/.err")"
+}
+duty_ctx() { printf '%s' "$DRV_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+DUTY_WHOLE="bionic: $FX_VERB refused — $FX_FACT_SHORT ($FX_FIX)
+
+$FX_DETAIL"
+duty_drive "$DR" s1 "$LIB" duty "$FX_VERB" "$FX_FACT_SHORT" "$FX_FIX" "$FX_DETAIL"
+expect_status "D5 a duty exits 0: the turn is held by the context, not by a status" "0" "$DRV_RC"
+expect_eq "D5b …its stdout is one Stop context object carrying the fixed line, and nothing else" \
+  "Stop|$DUTY_LINE_WANT|hookSpecificOutput" \
+  "$(printf '%s' "$DRV_OUT" | jq -r '[.hookSpecificOutput.hookEventName, .hookSpecificOutput.additionalContext, (keys | join(","))] | join("|")' 2>/dev/null)"
+expect_eq "D5c …the person's stream is empty: no error look, no line" "" "$DRV_ERR"
+expect_absent "D5d …and the reason is not in what the window is handed" "$FX_FACT_SHORT" "$DRV_OUT"
+expect_eq "D5e the duty file holds the whole refusal, the line and the detail, byte for byte" "$DUTY_WHOLE" "$(cat "$DUTY_F")"
+duty_drive "$DR" s1 "$LIB" duty "$FX_VERB" "a later duty" "$FX_FIX" "LATER-DETAIL"
+expect_eq "D6 a later duty replaces it: the file is the duty the hook last named" \
+  "bionic: $FX_VERB refused — a later duty ($FX_FIX)|LATER-DETAIL" "$(sed -n '1p' "$DUTY_F")|$(sed -n '3p' "$DUTY_F")"
+duty_drive "" "" "$LIB" duty "$FX_VERB" "$FX_FACT_SHORT" "$FX_FIX" "$FX_DETAIL"
+expect_eq "D7 no session to keep it under: the context carries the whole refusal, so nothing is lost" "$DUTY_WHOLE" "$(duty_ctx)"
+expect_eq "D7b …still exit 0 and nothing on the person's stream" "0|" "$DRV_RC|$DRV_ERR"
+DR2="$(cd "$(mktemp -d "$SANDBOX/duty.XXXXXX")" && pwd -P)"; mkdir -p "$DR2/.bionic/tmp"
+printf 'TARGET-UNTOUCHED\n' > "$SANDBOX/duty-target"; ln -s "$SANDBOX/duty-target" "$DR2/.bionic/tmp/duty-s1.state"
+duty_drive "$DR2" s1 "$LIB" duty "$FX_VERB" "$FX_FACT_SHORT" "$FX_FIX" "$FX_DETAIL"
+expect_eq "D8 a link at the file's path is not written through" "TARGET-UNTOUCHED" "$(cat "$SANDBOX/duty-target")"
+expect_eq "D8b …and the context carries the whole refusal instead" "$DUTY_WHOLE" "$(duty_ctx)"
+DR3="$(cd "$(mktemp -d "$SANDBOX/duty.XXXXXX")" && pwd -P)"
+duty_drive "$DR3" s1 "$LIB" duty "$FX_VERB" "$FX_FACT_SHORT" "$FX_FIX" "$FX_DETAIL"
+expect_eq "D9 no state directory: nothing is created, and the context carries the whole refusal" "no|$DUTY_WHOLE" \
+  "$( [ -e "$DR3/.bionic" ] && echo yes || echo no)|$(duty_ctx)"
+duty_drive "$DR" s1 "$LIB" duty "$FX_VERB" "$FX_FACT_SHORT" "add it to the Suites budget line" "$FX_DETAIL"
+expect_status "D10 the fix budget holds on the duty channel too: a seven-word fix is refused, exit 2" "2" "$DRV_RC"
+
+anchor file payload/scripts/lib/refuse.sh '_refuse_duty_keep "$model_out"'
+mutant m-dutykeep 's/_refuse_duty_keep "\$model_out"/false/'
+M_DK="$MUT_PATH"
+expect_true "D11 the keep mutant parses" bash -n "$M_DK"
+rm -f "$DUTY_F"
+duty_drive "$DR" s1 "$M_DK" duty "$FX_VERB" "$FX_FACT_SHORT" "$FX_FIX" "$FX_DETAIL"
+expect_status "D11b MUTANT the mutant still refuses on the duty channel (it runs)" "0" "$DRV_RC"
+expect_false "D11c MUTANT …but keeps no file (the D5e row discriminates)" test -e "$DUTY_F"
 
 section "§NEEDS — a refusal that needs a person is an event on the landing record"
 # fails-when: a `needs: ` fix under a bound plan appends nothing or not the one line carrying the verb;

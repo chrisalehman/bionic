@@ -37,6 +37,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 # The one bound-marker builder (wave-23-fixit-1810 T1): new_roster binds its session.
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 
@@ -393,6 +394,13 @@ run_gate() {  # <gate path> <payload json>
                                  -e '^patrol-revive: ' "$SANDBOX/gate.err" || true)"
 }
 
+# The Stop sweep's refusal is a duty (exit 0); `lg_verdict` tells a pass from a quiet refusal: pass, duty, exit2.
+lg_verdict() {
+  case "$RC|$(duty_ctx "$OUT_STDOUT")" in
+    2\|*) printf 'exit2' ;; "0|$DUTY_LINE") printf 'duty' ;; 0\|) [ -n "$OUT_STDOUT" ] && printf 'rc=0 %s' "$OUT_STDOUT" || printf 'pass' ;; *) printf 'rc=%s' "$RC" ;;
+  esac
+}
+
 # ================================================================= Section 1
 section "Section 1: a LANDED row with an unmet contract refuses the turn's end"
 
@@ -404,14 +412,15 @@ add_row "$R1" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never
 # landed/live discrimination (T4b §2.2: background_tasks answers "who is still running",
 # never "who ran and finished").
 run_gate "$GATE" "$(stop_payload "$R1" "$SID" false)"
-expect_status "1a: a landed UNMET contract refuses the stop (exit 2)" "2" "$RC"
-expect_empty "1a: the refusal goes to stderr, never stdout" "$OUT_STDOUT"
+expect_eq "1a: a landed UNMET contract refuses the stop, the orchestrator's duty" "duty" "$(lg_verdict)"
+expect_contains "1a: the whole refusal is kept for the duty verb, the row and what it lacks" \
+  "LANDING CONTRACT UNMET — w1-s5: missing=" "$(cat "$(duty_path "$R1" "$SID")")"
 
 # IDEMPOTENT. Stop fires once per orchestrator TURN and a landed row stays landed forever,
 # so a gate that re-verdicted would refuse every turn end for the rest of the session over
 # one agent's failure — the false-alarm shape this machinery exists to end.
 run_gate "$GATE" "$(stop_payload "$R1" "$SID" false)"
-expect_status "1b: the SAME row is not verdicted twice — the second Stop passes" "0" "$RC"
+expect_eq "1b: the SAME row is not verdicted twice — the second Stop passes" "pass" "$(lg_verdict)"
 expect_empty "1b: …and on stderr" "$OUT_STDERR"
 expect_contains "1b: …naming the agent id it closed" "agent_id=$AID_A" "$(swept_lines "$R1")"
 expect_contains "1b: …and the state it recorded" "state=UNMET" "$(swept_lines "$R1")"
@@ -422,7 +431,7 @@ R1B="$(make_wave_repo r1b)"
 add_row "$R1B" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R1B" "$SID" true)"
-expect_status "1c: stop_hook_active true passes the same unmet contract" "0" "$RC"
+expect_eq "1c: stop_hook_active true passes the same unmet contract" "pass" "$(lg_verdict)"
 expect_empty "1c: …silently" "$OUT_STDERR"
 
 # ================================================================= Section 2
@@ -434,7 +443,7 @@ add_row "$R2" name=met-row agent_id="$AID_A" deliverable=.bionic/docs/record/lan
 deliver "$R2" .bionic/docs/record/landed.md
 
 run_gate "$GATE" "$(stop_payload "$R2" "$SID" false)"
-expect_status "2a: a landed MET contract passes" "0" "$RC"
+expect_eq "2a: a landed MET contract passes" "pass" "$(lg_verdict)"
 expect_empty "2a: …silently — a met contract is not news" "$OUT_STDERR"
 expect_contains "2a: …recording the state the verb computed" "state=MET" "$(swept_lines "$R2")"
 
@@ -447,12 +456,12 @@ add_row "$R3" name=live-row agent_id="$AID_A" deliverable=.bionic/docs/record/ne
 
 # The agent is IN background_tasks: it has not landed, so there is nothing to hold it to yet.
 run_gate "$GATE" "$(stop_payload "$R3" "$SID" false "$AID_A")"
-expect_status "3a: a row still in background_tasks passes" "0" "$RC"
+expect_eq "3a: a row still in background_tasks passes" "pass" "$(lg_verdict)"
 expect_empty "3a: …silently" "$OUT_STDERR"
 
 # …and when it lands, the same roster is judged for the first time.
 run_gate "$GATE" "$(stop_payload "$R3" "$SID" false)"
-expect_status "3b: once it drops out of background_tasks it is judged, and refuses" "2" "$RC"
+expect_eq "3b: once it drops out of background_tasks it is judged, and refuses" "duty" "$(lg_verdict)"
 
 # A live sibling does not shield a landed row, and a landed sibling does not implicate a
 # live one: the discrimination is per row, by id.
@@ -462,7 +471,7 @@ add_row "$R3C" name=landed-one agent_id="$AID_A" deliverable=.bionic/docs/record
 add_row "$R3C" name=flying-one agent_id="$AID_B" deliverable=.bionic/docs/record/never2.md \
   launched_at="$(iso_ago 600)" tool_use_id=toolu_TWO
 run_gate "$GATE" "$(stop_payload "$R3C" "$SID" false "$AID_B")"
-expect_status "3c: one landed and one live — the landed one refuses" "2" "$RC"
+expect_eq "3c: one landed and one live — the landed one refuses" "duty" "$(lg_verdict)"
 
 # ================================================================= Section 4
 section "Section 4: relevance and ambiguity — every way out is silent"
@@ -478,27 +487,27 @@ add_row "$R4" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never
 # the marker this arm writes is what tells the sweep a row is answered for, and the sweep's
 # refusal is the one that reaches the orchestrator (Section 12's rationale).
 run_gate "$GATE" "$(substop_payload "$R4" "$SID" "$AID_A" general-purpose false)"
-expect_status "4a: a SubagentStop over a SUBAGENT row belongs to the sweep — pass" "0" "$RC"
+expect_eq "4a: a SubagentStop over a SUBAGENT row belongs to the sweep — pass" "pass" "$(lg_verdict)"
 expect_empty "4a: …silently" "$OUT_STDERR"
 
 run_gate "$GATE" "$(stop_payload "" "$SID" false)"
-expect_status "4b: no cwd — the repo is unresolvable, pass" "0" "$RC"
+expect_eq "4b: no cwd — the repo is unresolvable, pass" "pass" "$(lg_verdict)"
 
 run_gate "$GATE" "$(stop_payload "$SANDBOX/not-a-repo" "$SID" false)"
-expect_status "4c: a cwd outside any repo passes" "0" "$RC"
+expect_eq "4c: a cwd outside any repo passes" "pass" "$(lg_verdict)"
 
 run_gate "$GATE" "$(stop_payload "$R4" "" false)"
-expect_status "4d: no session key — no roster to scope to, pass" "0" "$RC"
+expect_eq "4d: no session key — no roster to scope to, pass" "pass" "$(lg_verdict)"
 
 run_gate "$GATE" "$(stop_payload "$R4" "$SID_B" false)"
-expect_status "4e: another session's Stop reads that session's (absent) roster, pass" "0" "$RC"
+expect_eq "4e: another session's Stop reads that session's (absent) roster, pass" "pass" "$(lg_verdict)"
 
 run_gate "$GATE" "not json at all"
 
 R4B="$(make_repo r4b)"
 plan_active "$R4B"
 run_gate "$GATE" "$(stop_payload "$R4B" "$SID" false)"
-expect_status "4g: no roster file at all passes" "0" "$RC"
+expect_eq "4g: no roster file at all passes" "pass" "$(lg_verdict)"
 
 # THE UNJOINABLE ROW. `agent_id=` is empty until hooks/execution-recorder.sh's roster arm
 # completes the launch row, and a row that never got one cannot be placed on either side of
@@ -524,8 +533,7 @@ add_row "$R4I" name=w4-t2mono status=identified agent_id="$AID_A" \
   deliverable=.bionic/docs/record/never-mono.md tool_use_id=toolu_MONO \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R4I" "$SID" false)"
-expect_status "4i: intended-then-identified — the LATER row's agent_id places it, and it refuses on its own contract" \
-  "2" "$RC"
+expect_eq "4i: intended-then-identified — the LATER row's agent_id places it, and it refuses on its own contract" "duty" "$(lg_verdict)"
 expect_contains "4i: …and the marker keys on the row that actually carries an id" \
   "agent_id=$AID_A" "$(swept_lines "$R4I")"
 
@@ -562,8 +570,7 @@ add_row "$R4I_MUT" name=w4-t2mono status=identified agent_id="$AID_A" \
   deliverable=.bionic/docs/record/never-mono.md tool_use_id=toolu_MONO \
   launched_at="$(iso_ago 600)"
 run_gate "$MONODIR/hooks/stop.sh" "$(stop_payload "$R4I_MUT" "$SID" false)"
-expect_status "4i-mut: with the guard inverted, the SAME genuinely-UNMET contract passes silently" \
-  "0" "$RC"
+expect_eq "4i-mut: with the guard inverted, the SAME genuinely-UNMET contract passes silently" "pass" "$(lg_verdict)"
 
 # ================================================================= Section 6
 section "Section 6: fail-open — every way the verdict can fail to answer"
@@ -577,13 +584,13 @@ add_row "$R6" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never
 
 NOSWEEP="$(plant_tree hooks-nosweeper)"
 run_gate "$NOSWEEP/hooks/stop.sh" "$(stop_payload "$R6" "$SID" false)"
-expect_status "6a: the sweeper script is absent — pass, do not block on a verdict we cannot take" "0" "$RC"
+expect_eq "6a: the sweeper script is absent — pass, do not block on a verdict we cannot take" "pass" "$(lg_verdict)"
 
 BADSWEEP="$(plant_tree hooks-badsweeper)"
 printf '#!/bin/bash\nexit 7\n' > "$BADSWEEP/hooks/session-sweeper.sh"
 chmod +x "$BADSWEEP/hooks/session-sweeper.sh"
 run_gate "$BADSWEEP/hooks/stop.sh" "$(stop_payload "$R6" "$SID" false)"
-expect_status "6b: the sweeper errors — pass" "0" "$RC"
+expect_eq "6b: the sweeper errors — pass" "pass" "$(lg_verdict)"
 
 QUIETSWEEP="$(plant_tree hooks-quietsweeper)"
 printf '#!/bin/bash\nexit 1\n' > "$QUIETSWEEP/hooks/session-sweeper.sh"
@@ -601,7 +608,7 @@ mkrow name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)" >> "$REAL_ROSTER"
 ln -s "$REAL_ROSTER" "$(roster_of "$R6B")"
 run_gate "$GATE" "$(stop_payload "$R6B" "$SID" false)"
-expect_status "6d: a symlinked roster — the gate passes, never blocks" "0" "$RC"
+expect_eq "6d: a symlinked roster — the gate passes, never blocks" "pass" "$(lg_verdict)"
 
 # ================================================================= Section 7
 section "Section 7: the join is by agent id — an UNNAMED dispatch is judged like any other"
@@ -614,7 +621,7 @@ R7="$(make_wave_repo r7)"
 add_row "$R7" name= agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R7" "$SID" false)"
-expect_status "7a: an unnamed dispatch still refuses on its own contract" "2" "$RC"
+expect_eq "7a: an unnamed dispatch still refuses on its own contract" "duty" "$(lg_verdict)"
 expect_contains "7a: …and the marker keys on the id, which is what it actually has" \
   "agent_id=$AID_A" "$(swept_lines "$R7")"
 
@@ -623,7 +630,7 @@ R7B="$(make_wave_repo r7b)"
 add_row "$R7B" name= agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R7B" "$SID" false "$AID_A")"
-expect_status "7b: …and is skipped while its id is still in background_tasks" "0" "$RC"
+expect_eq "7b: …and is skipped while its id is still in background_tasks" "pass" "$(lg_verdict)"
 
 # ================================================================= Section 8
 section "Section 8: the states the sweep must never refuse"
@@ -646,7 +653,7 @@ BG_PIDS="$BG_PIDS $MARKER_PID"
 add_row "$R8B" name=claimed-row agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   claims="$MARKER" launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R8B" "$SID" false)"
-expect_status "8b: a STILL-LIVE row passes" "0" "$RC"
+expect_eq "8b: a STILL-LIVE row passes" "pass" "$(lg_verdict)"
 expect_empty "8b: …silently" "$OUT_STDERR"
 kill -9 "$MARKER_PID" 2>/dev/null
 
@@ -658,7 +665,7 @@ add_row "$R8C" name=dup agent_id="$AID_A" deliverable=.bionic/docs/record/first.
 add_row "$R8C" name=dup agent_id="$AID_A" deliverable=.bionic/docs/record/second.md \
   tool_use_id=toolu_01SECOND launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R8C" "$SID" false)"
-expect_status "8c: an ambiguous name refuses nobody" "0" "$RC"
+expect_eq "8c: an ambiguous name refuses nobody" "pass" "$(lg_verdict)"
 expect_empty "8c: …silently, naming no artifact that may not be its job" "$OUT_STDERR"
 
 # ================================================================= Section 9
@@ -674,14 +681,14 @@ R9="$(make_wave_repo r9)"
 add_row "$R9" name=w2-s3 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R9" "$SID" false)"
-expect_status "9a: precondition — an unacked UNMET contract refuses" "2" "$RC"
+expect_eq "9a: precondition — an unacked UNMET contract refuses" "duty" "$(lg_verdict)"
 
 R9B="$(make_wave_repo r9b)"
 add_row "$R9B" name=w2-s3 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 ack_row "$R9B" w2-s3
 run_gate "$GATE" "$(stop_payload "$R9B" "$SID" false)"
-expect_status "9b: once acked, the same sweep passes" "0" "$RC"
+expect_eq "9b: once acked, the same sweep passes" "pass" "$(lg_verdict)"
 expect_empty "9c: …silently — the orchestrator already accounted for it" "$OUT_STDERR"
 
 # ================================================================= Section 11
@@ -699,7 +706,7 @@ roster_header > "$PLANTED"
 mkrow name=w1-s5 session="$SID_TRAVERSAL" agent_id="$AID_A" \
   deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)" >> "$PLANTED"
 run_gate "$GATE" "$(stop_payload "$R11" "$SID_TRAVERSAL" false)"
-expect_status "11b: a session key carrying path separators is not a session key — pass" "0" "$RC"
+expect_eq "11b: a session key carrying path separators is not a session key — pass" "pass" "$(lg_verdict)"
 expect_absent "11d: …and no marker is written into it" "landing-swept" "$(cat "$PLANTED")"
 
 # ================================================================= Section 12
