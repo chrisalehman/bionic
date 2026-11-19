@@ -1721,7 +1721,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
   # would leave the key blind to its changes. A fresh fold is still the run's facts, so that is not worth a word.
   deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
-  [ -z "$dir" ] || [ ! -f "$dir/run.log" ] || deps+=("$dir/run.log")
+  [ -z "$log" ] || [ ! -f "$log" ] || deps+=("$log")
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
   key="$plan $stamp facts+findings+inherited"
@@ -1875,8 +1875,8 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   # binds alone, and a stop event comes at every turn.
   deps=("$plan")
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" || stamp=""
-  if [ -n "$stamp" ] && [ -n "$dir" ] && [ -f "$dir/run.log" ]; then
-    f="$(reader_log_stamp "$dir/run.log")" && stamp="$stamp run.log less its stop events $f" || stamp=""
+  if [ -n "$stamp" ] && [ -n "$log" ] && [ -f "$log" ]; then
+    f="$(reader_log_stamp "$log")" && stamp="$stamp run.log less its stop events $f" || stamp=""
   fi
   key="$plan ${stamp//$'\n'/ } $_PROOF_PLACE_LIBS"
   # A step pending in an advance's own judgment is no place to keep: it is neither read from the held file nor kept in it.
@@ -2668,8 +2668,8 @@ proof_debt_record() {
   [ -n "$tree" ] || tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
   [ -n "$tree" ] || return 1
   _proof_roots_load
-  declare -F docs_root >/dev/null 2>&1 || return 1
-  printf '%s/record/%s/run.log' "$(docs_root "$tree")" "$slug"
+  declare -F docs_root >/dev/null 2>&1 && _proof_reader_load || return 1
+  printf '%s' "$(reader_log_in "$(docs_root "$tree")/record/$slug")"
 }
 
 # proof_plan_slug <plan> -> the plan's slug, the directory its run's records live in, `<docs-root>/record/<slug>/`:

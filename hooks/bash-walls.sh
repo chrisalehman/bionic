@@ -221,12 +221,6 @@ if [ "$_bw_sh" = 1 ] && _run_seal && seal_binding_warm "$BIONIC_ROOT" 2>/dev/nul
     case "$_bw_k" in W|D) write_gate_in_seal_home "$BIONIC_SEAL_HOME" "$_bw_k" "$_bw_p" && { BIONIC_SEAL_HIT="$_bw_p"; break; } ;; esac
   done <<< "$(grant_resolve_lines "$(cmd_effects "$COMMAND" "$BIONIC_CWD")")"
 fi
-wall_seal_home() {  # <event> -> 0 nothing · 2 block
-  [ -n "$BIONIC_SEAL_HIT" ] || return 0
-  write_gate_say seal-home "" "" command "$BIONIC_SEAL_HIT" "$BIONIC_SEAL_HOME"
-  fold_block exit2 write "$WG_FACT" "$WG_FIX" "$WG_DETAIL"
-  return 2
-}
 if [ -n "$BIONIC_SEAL_HIT" ]; then
   EVENT=$(bionic_jq .hook_event_name); [ -n "$EVENT" ] || EVENT="PreToolUse"
   bionic_fold "$EVENT" wall_seal_home; exit $?

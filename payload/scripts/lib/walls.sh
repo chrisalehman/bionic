@@ -449,6 +449,13 @@ EOF
   esac
 }
 
+wall_seal_home() {  # <event> -> 0 nothing · 2 block
+  [ -n "$BIONIC_SEAL_HIT" ] || return 0
+  write_gate_say seal-home "" "" command "$BIONIC_SEAL_HIT" "$BIONIC_SEAL_HOME"
+  fold_block exit2 write "$WG_FACT" "$WG_FIX" "$WG_DETAIL"
+  return 2
+}
+
 # ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
 #
 # HARD BLOCK: Prevents AI from pushing to main/master branches.

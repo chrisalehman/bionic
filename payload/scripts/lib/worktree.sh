@@ -1127,10 +1127,16 @@ _wt_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
   . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/proof.sh" 2>/dev/null
   declare -F proof_plan_slug >/dev/null 2>&1
 }
+_wt_reader_load() {  # -> 0 once lib/reader.sh, the log path's one home, is loaded
+  declare -F reader_log_in >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/reader.sh" 2>/dev/null
+  declare -F reader_log_in >/dev/null 2>&1
+}
 _wt_proofs_path() {  # <root> <plan> -> the record's path, the run's log
   local slug
-  _wt_proof_load && slug="$(proof_plan_slug "${2:-}")" || return 1
-  printf '%s/record/%s/run.log' "$(docs_root "$1")" "$slug"
+  _wt_proof_load && _wt_reader_load && slug="$(proof_plan_slug "${2:-}")" || return 1
+  printf '%s' "$(reader_log_in "$(docs_root "$1")/record/$slug")"
 }
 
 # The id of the first `## Tasks` row, in table order, whose `worktree` cell names <tree>; a
@@ -1235,13 +1241,14 @@ _wt_proofs_cut() {  # <record path> -> 0 cut, 1 not
   return 1
 }
 
-# A LANDING'S FACT GOES TO THE RUN'S LOG: `run.log` beside <record or log path>, through the log's one appender
+# A LANDING'S FACT GOES TO THE RUN'S LOG: the log in the directory of <record or log path>, through the log's one appender
 # (lib/log.sh `log_append`, whose write is `_wt_proofs_write`), and never to the landing record. RUN_LOG is set for
 # this one call and never exported, since the poker's globals use the name for a suite's output log.
 _wt_log_put() {  # <record or log path> <event type> <key=value>... -> 0 appended, 1 not (proofs=unwritten)
-  local log="${1%/*}/run.log"
-  shift
+  local log
   _WT_PROOFS_SAW=""
+  _wt_reader_load && log="$(reader_log_in "${1%/*}")" || { _WT_PROOFS_SAW="lib/reader.sh could not be loaded"; return 1; }
+  shift
   if ! declare -F log_append >/dev/null 2>&1; then
     # shellcheck source=/dev/null
     . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/log.sh" 2>/dev/null && declare -F log_append >/dev/null 2>&1 \
@@ -1825,8 +1832,8 @@ worktree_tree_event() {
   d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
   # shellcheck source=/dev/null
   declare -F log_append >/dev/null 2>&1 || . "$d/log.sh" >/dev/null 2>&1 || return 1
-  [ -n "$tree" ] || { RUN_LOG="${rec%/*}/run.log" log_append tree "row=$7" path= "branch=${5:-}" base= "by=${3:-}" why=removed; return; }
-  RUN_LOG="${rec%/*}/run.log" log_append tree "row=$7" "path=$(_wt_tree_rel "$root" "$tree")" "branch=${5:-}" "base=${6:-}" "by=${3:-}"
+  [ -n "$tree" ] || { RUN_LOG="$rec" log_append tree "row=$7" path= "branch=${5:-}" base= "by=${3:-}" why=removed; return; }
+  RUN_LOG="$rec" log_append tree "row=$7" "path=$(_wt_tree_rel "$root" "$tree")" "branch=${5:-}" "base=${6:-}" "by=${3:-}"
 }
 _wt_tree_rel() {  # <root> <abs tree> -> the tree from the root, as a tree event names it
   local rp tree="${2:-}"

@@ -265,13 +265,23 @@ _sitrep_lib() {  # -> the library directory: BIONIC_LIB, else the one beside thi
   done
   return 1
 }
+_sitrep_log_in() {  # <record directory> -> the run's log in it, as the reader names it; nothing when the reader cannot be loaded
+  local lib
+  declare -F reader_log_in >/dev/null 2>&1 || {
+    lib="$(_sitrep_lib)" || return 0
+    # shellcheck source=/dev/null
+    . "$lib/reader.sh" >/dev/null 2>&1 || return 0
+  }
+  reader_log_in "$1"
+}
 _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledger's run, one decision fact per round
-  local led="$1" log="${1%/*}/run.log" lib
+  local led="$1" log lib
   if ! declare -F reader_q_ledger >/dev/null 2>&1; then
     lib="$(_sitrep_lib)" || return 0
     # shellcheck source=/dev/null
     . "$lib/reader.sh" >/dev/null 2>&1 || return 0
   fi
+  log="$(_sitrep_log_in "${1%/*}")"
   [ -f "$log" ] && [ ! -L "$log" ] || return 0
   ( reader_events() { cat "$log"; }; reader_q_ledger "$led" )
 }
@@ -484,7 +494,8 @@ decisions_all() {
   local docs="$1" f slug out tab
   tab="$(printf '\t')"
   {
-    for f in "$docs"/record/*/run.log; do
+    for f in "$docs"/record/*/; do
+      f="$(_sitrep_log_in "${f%/}")"
       [ -f "$f" ] && [ ! -L "$f" ] || continue
       slug="${f%/*}"; slug="${slug##*/}"
       out="$(decisions_list "${f%/*}/design-ledger.md")"
@@ -2022,7 +2033,7 @@ sitrep_tick_line() {
             Decisions)
               if [ "$HO_MODE" != none ] && [ -n "$(decisions_list "$HO_LEDGER")" ]; then
                 handoff_render "$HO_COMP" Decisions | awk -F'\t' '$2 != "- none."'
-                HO_LOG="${HO_LEDGER%/*}/run.log"
+                HO_LOG="$(_sitrep_log_in "${HO_LEDGER%/*}")"
                 printf '2\t- every ruling of this run: session-poker.sh decisions prints them, from the run'"'"'s log, %s\n' "${HO_LOG#"$HO_ROOT"/}"
               else
                 handoff_render "$HO_COMP" Decisions
@@ -2273,7 +2284,7 @@ sitrep_tick_line() {
     fi
     DC_OUT="$(decisions_list "$DC_LEDGER")"
     if [ -z "$DC_OUT" ]; then
-      DC_LOG="${DC_LEDGER%/*}/run.log"
+      DC_LOG="$(_sitrep_log_in "${DC_LEDGER%/*}")"
       say "no ruling in the run's log, ${DC_LOG#"$REPO_REAL"/} — this run has recorded no ruling"
       exit 1
     fi
@@ -2416,7 +2427,7 @@ sitrep_tick_line() {
     rs_said recap
     RS_LEDGER="$RS_DOCS/record/$(proof_plan_slug "$RS_PLAN")/design-ledger.md"
     RS_SET=""
-    RS_SET="$(decisions_list "$RS_LEDGER")"; RS_LOG="${RS_LEDGER%/*}/run.log"
+    RS_SET="$(decisions_list "$RS_LEDGER")"; RS_LOG="$(_sitrep_log_in "${RS_LEDGER%/*}")"
     if [ -n "$RS_SET" ]; then printf '%s\n' "$RS_SET" | sed 's/^/settled: /'
     else printf 'settled: none — no ruling in the run'"'"'s log, %s\n' "${RS_LOG#"$REPO_REAL"/}"; fi
     RS_OWED="$( { bind_sessions "$RS_PLAN" 2>/dev/null; printf '%s\n' "$SESSION_ID"; } | awk 'NF && !s[$0]++' \
