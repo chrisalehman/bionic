@@ -4,7 +4,7 @@
 # Registered in hooks/hooks.json on Stop and on SessionStart with `asyncRewake: true` and a `timeout` of
 # WATCH_LIFE_MAX (lib/patrol.sh). The platform starts it at each turn's end and at the session's start and does not
 # wait for it. While it runs it costs no turn; exit 2 wakes the model with its stderr as the model's message; exit 0, a
-# kill and the timeout end it with nothing shown (.bionic/docs/record/wave-51-gaps-closed/prototype-wake.md, T1.md).
+# kill and the timeout end it with nothing shown.
 # THIS IS THE ONLY PROCESS THAT EXITS WITH THE WAKE CODE TO THE PLATFORM: the pass names the act, the hook decides
 # whether the model hears it.
 #

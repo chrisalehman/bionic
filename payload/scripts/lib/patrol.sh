@@ -1055,7 +1055,7 @@ WATCH_LINE_MAX=120
 WATCH_INTERVAL_DEFAULT=300
 WATCH_INTERVAL_MAX=1200
 # THE WATCHER'S DAY, in seconds: hooks/hooks.json registers hooks/watch.sh with this as its `timeout`, and the platform
-# ends the hook silently when it runs out (prototype-wake B1), so the watcher ends itself first. Its last pass comes
+# ends the hook silently when it runs out, so the watcher ends itself first. Its last pass comes
 # while at least WATCH_LIFE_MARGIN of the day is left, so a slow tick near the end is not cut off half way.
 WATCH_LIFE_MAX=86400
 WATCH_LIFE_MARGIN=600
@@ -1164,7 +1164,7 @@ watch_wake_line() {  # <tick print file>
 
 # ─── THE WATCH RECORD: WHETHER THIS SESSION IS WATCHED, AND THE WATCHER'S LOCK ──────────────────
 #
-# `<root>/.bionic/tmp/watch-<sid>.state`, written only by hooks/watch.sh, `key=value` lines:
+# `watch-<sid>.state` in the project's tmp directory, written only by hooks/watch.sh, `key=value` lines:
 #
 #   state=watching   pid=<the watcher's process>   start=<its start, lib/alive.sh `alive_since`>
 #   state=resting    why=<person|woke|refused|limit|cleared>
