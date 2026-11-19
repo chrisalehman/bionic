@@ -445,4 +445,48 @@ rm "$GP"
 expect_regex "the ask of the changed log is listed still, with the plan then removed" "$SA" "$(sitrep_asks)"
 gated "the plan removed, its commit refused, then put back" "$PC" 'cp "$GP" "$SB/keep"; rm "$GP"; gate "git commit -m x"; cp "$SB/keep" "$GP"'
 
+section "ACCEPT"
+. "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh"
+CFG="$SB/cfg/projects/$(printf '%s' "$G" | sed 's/[^a-zA-Z0-9]/-/g')"; FX="$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move"
+typed() {  # <sid> <prompt>... -> the session witnessed in the gate world, each prompt typed in its transcript
+  local s="$1" t; shift; mkdir -p "$CFG"; printf 'cwd=%s\n' "$G" > "$G/.bionic/tmp/loaded-$s.state"
+  cat "$FX/frame.jsonl" > "$CFG/$s.jsonl"; for t in "$@"; do jq -c --arg t "$t" '.message.content = $t' "$FX/typed.jsonl" >> "$CFG/$s.jsonl"; done
+}
+poke() { PRC=0; (cd "$G" && HOME="$SB/home" CLAUDE_CONFIG_DIR="$SB/cfg" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+  bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@") > "$SB/poke.out" 2>&1 || PRC=$?; }
+O=0a1b2c3d-4e5f-4061-8a7b-9c0d1e2f3a4b; W1="I accept the run as it stands"; ADD='printf "run/v1|ev=hand|what=note|why=by hand|at=z\n" >> "$GL"'
+other() { git -C "$G" config user.name T; typed "$SID" "a prompt of another matter"; typed "$O" "$W1"; bound_marker "$G" "$O" "$GP"; }
+gated "a bind line of another session added by hand" "$LA" 'other; printf "run/v1|ev=bind|by=engage|session=%s|at=z\n" "$O" >> "$GL"'
+poke accept "$W1"
+expect_status "accept on words only a session that line names typed: refused" 1 "$PRC"
+poke accept "a thing nobody typed at all"
+expect_status "accept on words no session typed: refused" 1 "$PRC"
+expect_eq "and the run stays changed" "changed what=log how=added" "$(seal_verify "$GP")"
+gated "a line added by hand, the other session's bind sealed" "$LA" 'other; bind_record_session "$GP" "$O" engage; eval "$ADD"'
+expect_regex "the ask stands before the word" "$SA" "$(sitrep_asks)"
+poke accept "$W1"
+expect_status "accept on words a session the sealed log binds typed: taken" 0 "$PRC"
+expect_eq "the run verifies clean" clean "$(seal_verify "$GP")"
+expect_eq "and its ask is closed" "" "$(sitrep_asks)"
+gate "git commit -m x"; expect_eq "the commit meets the run's own refusal" "$OWED" "$GLINE"
+expect_eq "the log holds one line, the word and what it accepted" 1 \
+  "$(/usr/bin/grep -c "^run/v1|ev=approval|key=seal|by=T|said=$W1|session=$O|what=log|how=added|at=" "$GL")"
+
+section "ABANDON"
+W2="abandon the run here, it is done"
+gated "a line added by hand" "$LA" "other; $ADD"
+poke abandon "$W2"
+expect_status "abandon on words no session typed: refused" 1 "$PRC"
+expect_true "and the seal stands" seal_stands "$GP"
+typed "$SID" "$W2"; poke abandon "$W2"
+expect_status "abandon on words typed in this session: taken" 0 "$PRC"
+expect_eq "the reader's step reads abandoned" state=abandoned "$(reader_main "$GP" step | tail -1)"
+expect_status "the seal is gone" 1 "$(seal_stands "$GP"; echo $?)"
+expect_eq "the log holds one abandon line, the word" 1 "$(/usr/bin/grep -c "^run/v1|ev=abandon|by=T|said=$W2|session=$SID|at=" "$GL")"
+gate "git commit -m x"; expect_status "and a commit is admitted as a closed run's" 0 "$GRC"
+gated "the plan removed" "$PG" "other; rm \"\$GP\"; typed \"\$SID\" \"\$W2\""
+poke abandon "$W2"
+expect_status "a run whose plan is gone is abandoned on the word" 0 "$PRC"
+gate "git commit -m x"; expect_status "and its commit is admitted" 0 "$GRC"
+
 finish
