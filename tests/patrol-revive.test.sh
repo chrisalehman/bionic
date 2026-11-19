@@ -41,6 +41,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 # The one bound-marker builder (wave-23-fixit-1810 T1), for engage_marker below.
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 # THE MERGED ENTRY POINT (epic-23 wave-11, T12). This monitor is a FUNCTION now —
 # `stop_patrol_revive` in payload/scripts/lib/stop.sh — and the process that runs it is
@@ -259,6 +260,7 @@ stdin_for() {  # <cwd> [session] [event] [stop_hook_active]
 PR_ERRFILE="$(mktemp)"
 HOOK_ERR_USER=""
 fire() {  # <cwd> [session] [event] [stop_hook_active]
+  FIRE_D="$1"; FIRE_SID="${2:-$SID}"
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="${2:-$SID}" bash "$HOOK" \
     <<< "$(stdin_for "$1" "${2:-$SID}" "${3:-Stop}" "${4:-false}")" 2>"$PR_ERRFILE")
   HOOK_RC=$?
@@ -272,8 +274,12 @@ fire_raw() {  # <stdin-json>
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$1" 2>/dev/null); HOOK_RC=$?
 }
 
-reason_of()   { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
-decision_of() { printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+# A dead or silent Patrol is the agent's to mend: read on the duty channel (tests/lib/duty-read.sh). From a
+# worktree cwd the duty file is under the main tree's root.
+FIRE_D=""; FIRE_SID="$SID"
+fire_root() { local m; m="$(git -C "$FIRE_D" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"; printf '%s' "${m:-$FIRE_D}"; }
+reason_of() { duty_reason "$HOOK_OUT" "$(duty_path "$(fire_root)" "$FIRE_SID")"; }
+decision_of() { duty_channel "$HOOK_OUT"; }
 
 expect_quiet() {  # <label>
   if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
@@ -283,17 +289,16 @@ expect_quiet() {  # <label>
   fi
 }
 
-# A block is the JSON decision payload on stdout with rc 0 — the channel
-# hooks/patrol-duties-gate.sh uses, and the one whose `reason` the CLI renders
-# into the operator's terminal. That rendering IS the notice AC-F6 asks for:
-# there is no second output surface here.
+# A refusal here is the duty on stdout with rc 0: one fixed line the window shows, and the whole
+# notice behind the duty verb. That line is the whole notice: there is no second output surface
+# here.
 expect_block() {  # <label>
   local d; d=$(decision_of)
   if [ "$HOOK_RC" -ne 0 ]; then
     no "$1" "rc=$HOOK_RC (a JSON block exits 0); stdout=<$HOOK_OUT>"; return
   fi
-  if [ "$d" != "block" ]; then
-    no "$1" "decision=<$d> expected block; stdout=<$HOOK_OUT>"; return
+  if [ "$d" != "duty" ]; then
+    no "$1" "decision=<$d> expected duty; stdout=<$HOOK_OUT>"; return
   fi
   ok "$1"
 }
@@ -631,7 +636,7 @@ D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 
 G7_BLOCKS=0
 for _t in 1 2 3 4 5; do
   fire "$D"
-  [ "$(decision_of)" = "block" ] && G7_BLOCKS=$((G7_BLOCKS + 1))
+  [ "$(decision_of)" = "duty" ] && G7_BLOCKS=$((G7_BLOCKS + 1))
 done
 if [ "$G7_BLOCKS" -eq 5 ]; then
   ok "30: a stale stamp blocks EVERY turn — five turns, five blocks (the notice is per-turn)"

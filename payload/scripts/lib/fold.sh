@@ -190,10 +190,19 @@ fold_update_input() {
   _BF_PEND_UPDATED_INPUT="${1:-}"
 }
 
+# fold_say <line> — stage one line for the PERSON on the quiet channel, then `return 1`: the
+# event's top-level `systemMessage`, which the platform paints as one grey line with no error
+# look and no turn for the model. It rides only a fold that blocked nothing: a refusal takes the
+# turn, and a line beside it would tell the person the turn ended quietly when it did not.
+fold_say() {
+  _BF_PEND_SAY="${_BF_PEND_SAY:-}${_BF_PEND_SAY:+
+}${1:-}"
+}
+
 _fold_clear_pending() {
   _BF_PEND_MODE=""; _BF_PEND_VERB=""; _BF_PEND_FACT=""
   _BF_PEND_FIX=""; _BF_PEND_DETAIL=""; _BF_PEND_ADVICE=""; _BF_PEND_CONTEXT=""
-  _BF_PEND_UPDATED_INPUT=""
+  _BF_PEND_UPDATED_INPUT=""; _BF_PEND_SAY=""
 }
 
 # _fold_emit_context <event> <context-text> [<updated-input-json>] — the one object, on
@@ -252,8 +261,10 @@ bionic_fold() {
   BIONIC_FOLD_CONTEXT=""
   BIONIC_FOLD_UPDATED_INPUT=""
   BIONIC_FOLD_LINES=""
+  BIONIC_FOLD_SAY=""
 
-  local _fn _rc _m _errf _out _rrc _ctx _bline
+  local _fn _rc _m _errf _out _rrc _ctx _bline _bi _own _i _pick
+  local -a _FB_MODE _FB_VERB _FB_FACT _FB_FIX _FB_DETAIL
   for _fn in "$@"; do
     _fold_clear_pending
     # THE CALL. Unquoted-by-name, in this shell, with the event as its one argument.
@@ -264,51 +275,18 @@ bionic_fold() {
       2)
         BIONIC_FOLD_BLOCKS=$((BIONIC_FOLD_BLOCKS + 1))
         BIONIC_FOLD_MODES="${BIONIC_FOLD_MODES}${BIONIC_FOLD_MODES:+ }${_BF_PEND_MODE}"
-        # THE FIRST BLOCKER OWNS THE LINE. Verb, fact and fix are already inside
-        # refuse's budgets because that function's own refusal was; composing new
-        # ones here would be this file inventing a sentence no wall wrote.
-        if [ -z "$BIONIC_FOLD_MODE" ]; then
-          BIONIC_FOLD_MODE="$_BF_PEND_MODE"
-          BIONIC_FOLD_VERB="$_BF_PEND_VERB"
-          BIONIC_FOLD_FACT="$_BF_PEND_FACT"
-          BIONIC_FOLD_FIX="$_BF_PEND_FIX"
-        fi
-        # EVERY BLOCKER AFTER THE FIRST BRINGS ITS OWN LINE (T23). The composed object
-        # keeps the FIRST blocker's verb, fact and fix, so without this the second
-        # wall's SENTENCE — not just its detail — would be gone: a push refused
-        # alongside a DROP would print the push and say nothing about the DROP, while
-        # the two processes this replaced printed both. The line is built exactly as
-        # `refuse` builds it, and it leads that blocker's own detail.
-        if [ "$BIONIC_FOLD_BLOCKS" -gt 1 ]; then
-          _bline="bionic: ${_BF_PEND_VERB} refused — ${_BF_PEND_FACT} (${_BF_PEND_FIX})"
-          BIONIC_FOLD_LINES="${BIONIC_FOLD_LINES}${BIONIC_FOLD_LINES:+
-}${_bline}"
-          if [ -n "$_BF_PEND_DETAIL" ]; then
-            _BF_PEND_DETAIL="${_bline}
-
-${_BF_PEND_DETAIL}"
-          else
-            _BF_PEND_DETAIL="$_bline"
-          fi
-        fi
         # ONE TRAILING NEWLINE IS NOT A PARAGRAPH BREAK. Several walls build `detail` by
         # appending `…\n` per row, so the value arrives with a newline already on it; the
-        # separator below would then read as two blank lines between reasons rather than
-        # one. The trim is of trailing newlines only — nothing inside the text moves.
+        # separator the composition puts between reasons would then read as two blank lines
+        # rather than one. The trim is of trailing newlines only — nothing inside the text moves.
         while [ -n "$_BF_PEND_DETAIL" ] && [ "${_BF_PEND_DETAIL%$'\n'}" != "$_BF_PEND_DETAIL" ]; do
           _BF_PEND_DETAIL="${_BF_PEND_DETAIL%$'\n'}"
         done
-        if [ -n "$_BF_PEND_DETAIL" ]; then
-          if [ -z "$BIONIC_FOLD_DETAIL" ]; then
-            BIONIC_FOLD_DETAIL="$_BF_PEND_DETAIL"
-          else
-            # A BLANK LINE BETWEEN REASONS. Each wall's detail is a paragraph or
-            # several; run together they would read as one wall's text.
-            BIONIC_FOLD_DETAIL="$BIONIC_FOLD_DETAIL
-
-$_BF_PEND_DETAIL"
-          fi
-        fi
+        # EACH BLOCKER IS KEPT WHOLE until every function has spoken, because which of them
+        # owns the line is decided by all of them together (below), never by arrival alone.
+        _bi=$((BIONIC_FOLD_BLOCKS - 1))
+        _FB_MODE[$_bi]="$_BF_PEND_MODE"; _FB_VERB[$_bi]="$_BF_PEND_VERB"
+        _FB_FACT[$_bi]="$_BF_PEND_FACT"; _FB_FIX[$_bi]="$_BF_PEND_FIX"; _FB_DETAIL[$_bi]="$_BF_PEND_DETAIL"
         ;;
       1) : ;;
       *) _fold_clear_pending ;;   # said nothing: its staged text is discarded
@@ -340,6 +318,10 @@ $_BF_PEND_CONTEXT"
       if [ -n "${_BF_PEND_UPDATED_INPUT:-}" ]; then
         BIONIC_FOLD_UPDATED_INPUT="$_BF_PEND_UPDATED_INPUT"
       fi
+      if [ -n "${_BF_PEND_SAY:-}" ]; then
+        BIONIC_FOLD_SAY="${BIONIC_FOLD_SAY}${BIONIC_FOLD_SAY:+
+}$_BF_PEND_SAY"
+      fi
     fi
   done
   _fold_clear_pending
@@ -351,10 +333,11 @@ $_BF_PEND_CONTEXT"
   # its `timeout` would repair a command the harness is about to refuse anyway — a
   # confusing wire nobody needs. `BIONIC_FOLD_BLOCKS -eq 0` here is that boundary.
   if [ "$BIONIC_FOLD_BLOCKS" -eq 0 ]; then
+    _out=""
     if [ -n "$BIONIC_FOLD_CONTEXT" ] || [ -n "$BIONIC_FOLD_UPDATED_INPUT" ]; then
       _out=$(_fold_emit_context "$_event" "$BIONIC_FOLD_CONTEXT" "$BIONIC_FOLD_UPDATED_INPUT")
       if [ -n "$_out" ]; then
-        printf '%s\n' "$_out"
+        :
       else
         # NO `jq`, SO NO OBJECT. A nudge degrades to a line a person can still read; a
         # repair has no such fallback and is simply not applied — the same unrepaired
@@ -364,24 +347,81 @@ $_BF_PEND_CONTEXT"
 }$BIONIC_FOLD_CONTEXT"
       fi
     fi
+    # THE PERSON'S LINE JOINS THE ONE OBJECT ON STDOUT: the platform reads one JSON document
+    # from a hook, so a context and a line are two keys of it, never two documents. With no
+    # `jq` there is no object, and the line degrades to the advisory stream like a nudge does.
+    if [ -n "$BIONIC_FOLD_SAY" ]; then
+      _ctx="$_out"; [ -n "$_ctx" ] || _ctx='{}'
+      _ctx=$(printf '%s' "$_ctx" | jq -c --arg s "$BIONIC_FOLD_SAY" '. + {systemMessage: $s}' 2>/dev/null)
+      if [ -n "$_ctx" ]; then
+        _out="$_ctx"
+      else
+        BIONIC_FOLD_ADVICE="${BIONIC_FOLD_ADVICE}${BIONIC_FOLD_ADVICE:+
+}$BIONIC_FOLD_SAY"
+      fi
+    fi
+    [ -n "$_out" ] && printf '%s\n' "$_out"
     [ -n "$BIONIC_FOLD_ADVICE" ] && printf '%s\n' "$BIONIC_FOLD_ADVICE" >&2
     return 0
   fi
 
-  # ── THE CHANNEL, when the blockers disagree about it ────────────────────────
+  # ── WHOSE LINE, AND WHICH CHANNEL ───────────────────────────────────────────
   #
-  # Asked only when there is something to compose. With one blocker the mode is
-  # already its own and the loop below re-selects the same value.
-  if [ "$BIONIC_FOLD_BLOCKS" -gt 1 ]; then
-    if [ "$(refuse_channel "$BIONIC_FOLD_MODE" model_only 2>/dev/null || echo no)" != "yes" ]; then
-      for _m in $BIONIC_FOLD_MODES; do
-        if [ "$(refuse_channel "$_m" model_only 2>/dev/null || echo no)" = "yes" ]; then
-          BIONIC_FOLD_MODE="$_m"
-          break
-        fi
-      done
-    fi
+  # THE PERSON'S REFUSAL WINS. refuse.sh's `whose` cell says whose fix each mode carries. When
+  # any blocker's fix is the person's, only those blockers can own the line and the channel, so
+  # the person's refusal reaches the person's stream on its own mode, and every agent's duty
+  # beside it rides the same composed detail, line and reason, so it still binds. With no
+  # person's blocker, every blocker is a candidate, which is the rule as it stood before the
+  # field existed.
+  #
+  # THE FIRST CANDIDATE OWNS THE LINE. Verb, fact and fix are already inside refuse's budgets
+  # because that function's own refusal was; composing new ones here would be this file
+  # inventing a sentence no wall wrote.
+  #
+  # THE CHANNEL is the line owner's mode unless that mode carries no detail to the model and
+  # there are several blockers: then it is the first candidate's mode whose `model_only` cell
+  # says it does, because composing onto a channel that drops `detail` would discard the very
+  # reasons the fold exists to keep. Read out of the table, never ranked here.
+  _own=""
+  for (( _i = 0; _i < BIONIC_FOLD_BLOCKS; _i++ )); do
+    if [ "$(refuse_channel "${_FB_MODE[$_i]}" whose 2>/dev/null)" = person ]; then _own="$_i"; break; fi
+  done
+  _pick=person; [ -n "$_own" ] || { _own=0; _pick=any; }
+  BIONIC_FOLD_MODE="${_FB_MODE[$_own]}"
+  BIONIC_FOLD_VERB="${_FB_VERB[$_own]}"
+  BIONIC_FOLD_FACT="${_FB_FACT[$_own]}"
+  BIONIC_FOLD_FIX="${_FB_FIX[$_own]}"
+  if [ "$BIONIC_FOLD_BLOCKS" -gt 1 ] \
+     && [ "$(refuse_channel "$BIONIC_FOLD_MODE" model_only 2>/dev/null || echo no)" != "yes" ]; then
+    for (( _i = 0; _i < BIONIC_FOLD_BLOCKS; _i++ )); do
+      [ "$_pick" = any ] || [ "$(refuse_channel "${_FB_MODE[$_i]}" whose 2>/dev/null)" = person ] || continue
+      if [ "$(refuse_channel "${_FB_MODE[$_i]}" model_only 2>/dev/null || echo no)" = "yes" ]; then
+        BIONIC_FOLD_MODE="${_FB_MODE[$_i]}"
+        break
+      fi
+    done
   fi
+
+  # EVERY BLOCKER BUT THE LINE'S OWNER BRINGS ITS OWN LINE. Without it the other walls'
+  # SENTENCES — not just their details — would be gone: a push refused alongside a DROP would
+  # print the push and say nothing about the DROP, while the two processes this replaced printed
+  # both. The line is built exactly as `refuse` builds it, and it leads that blocker's own
+  # detail; the details follow in the order the functions were named, a blank line apart.
+  for (( _i = 0; _i < BIONIC_FOLD_BLOCKS; _i++ )); do
+    _m="${_FB_DETAIL[$_i]}"
+    if [ "$_i" != "$_own" ]; then
+      _bline="bionic: ${_FB_VERB[$_i]} refused — ${_FB_FACT[$_i]} (${_FB_FIX[$_i]})"
+      BIONIC_FOLD_LINES="${BIONIC_FOLD_LINES}${BIONIC_FOLD_LINES:+
+}${_bline}"
+      _m="${_bline}${_m:+
+
+$_m}"
+    fi
+    [ -n "$_m" ] || continue
+    BIONIC_FOLD_DETAIL="${BIONIC_FOLD_DETAIL}${BIONIC_FOLD_DETAIL:+
+
+}$_m"
+  done
 
   # ── THE ONE RENDER, CAPTURED ────────────────────────────────────────────────
   #

@@ -52,7 +52,7 @@
 # two non-blocking modes were never driven interactively and still say `unverified`,
 # which is a gap named rather than a guess written.
 #
-# Ten fields, `|`-separated, one row per mode. No cell may contain a `|`.
+# Eleven fields, `|`-separated, one row per mode. No cell may contain a `|`.
 #
 #   1  mode              the key callers pass to `refuse`
 #   2  mechanism         what the hook actually does on the wire
@@ -65,6 +65,17 @@
 #   8  model_only        `yes` iff `detail` reaches the model and not the user
 #   9  detail_to_user    does THIS renderer also put `detail` on the user stream
 #   10 source            the measurement row every cell above is quoted from
+#   11 whose             whose fix a refusal on this mode is: `person`, `agent`, or `n-a`
+#                        for a mode that carries no refusal
+#
+# FIELD 11 DECIDES WHO IS INTERRUPTED. A refusal the person must act on (a permission, a
+# broken install) is painted where the person reads it, and a refusal whose fix is the agent's
+# goes to the agent alone. `duty` is the agent's channel at a turn end: the window gets one
+# fixed line on the platform's non-error feedback route, the model gets the same line as its
+# next instruction, and the whole refusal waits in the session's duty file for
+# `session-poker.sh duty`. When a person's refusal and an agent's arise at one turn end,
+# lib/fold.sh reads this field and the person's channel carries both, so the person's line is
+# never lost to the quieter one.
 #
 # FIELD 9 IS THE SWITCH, AND IT IS `yes` FOR `exit2` ONLY. It is why the table is data
 # rather than a `case`. On `deny` and `block` the split is real: `detail` rides the JSON
@@ -229,11 +240,12 @@ _refuse_fold_detail() {
 }
 
 # THE CHANNEL TABLE. Every cell quoted from record/wave-01-plugin-only/e1-measurement.md.
-BIONIC_REFUSE_TABLE='exit2|exit 2 with the text on stderr|yes|yes|none|the whole stderr painted in red as the error result of the refused tool call, about 12 lines then "+N lines", for every non-Bash tool; a Bash call collapses to "Ran N shell commands" at the default view until ctrl+o|the full stderr text, wrapped in a synthetic is_error tool_result prefixed "PreToolUse:<tool> hook error"|no|yes|e1-measurement.md channel table, mode 1 + D-2
-deny|PreToolUse JSON hookSpecificOutput.permissionDecision=deny with permissionDecisionReason, exit 0|yes|yes|none|nothing raw at the default view: "Ran 1 shell command" collapsed, then whatever the model says next; on a non-Bash tool the reason lands in the same is_error tool_result slot and is expected to paint as exit2 does — inferred, not measured|permissionDecisionReason verbatim, unwrapped, as a synthetic is_error tool_result|yes|no|e1-measurement.md channel table, mode 2 + D-2
-systemmessage|top-level JSON systemMessage, exit 0|no|no|none|unverified|nothing in the conversation: a stream-json system/informational event and no more|no|n-a|e1-measurement.md channel table, mode 3
-block|JSON decision=block with reason on stdout, exit 0|yes|yes|none|nothing raw, and on PreToolUse the command RAN anyway ("Ran 2 shell commands", then its output) — not a reliable interactive block, so PreToolUse block is off the table|reason verbatim: an is_error tool_result on PreToolUse, a synthetic user turn "Stop hook feedback" on Stop|yes|no|e1-measurement.md channel table, mode 4 + D-2
-additionalcontext|PreToolUse JSON hookSpecificOutput.additionalContext, exit 0|no|no|none|unverified|nothing: zero occurrences anywhere in the stream-json transcript|no|n-a|e1-measurement.md channel table, mode 5'
+BIONIC_REFUSE_TABLE='exit2|exit 2 with the text on stderr|yes|yes|none|the whole stderr painted in red as the error result of the refused tool call, about 12 lines then "+N lines", for every non-Bash tool; a Bash call collapses to "Ran N shell commands" at the default view until ctrl+o|the full stderr text, wrapped in a synthetic is_error tool_result prefixed "PreToolUse:<tool> hook error"|no|yes|e1-measurement.md channel table, mode 1 + D-2|person
+deny|PreToolUse JSON hookSpecificOutput.permissionDecision=deny with permissionDecisionReason, exit 0|yes|yes|none|nothing raw at the default view: "Ran 1 shell command" collapsed, then whatever the model says next; on a non-Bash tool the reason lands in the same is_error tool_result slot and is expected to paint as exit2 does — inferred, not measured|permissionDecisionReason verbatim, unwrapped, as a synthetic is_error tool_result|yes|no|e1-measurement.md channel table, mode 2 + D-2|agent
+systemmessage|top-level JSON systemMessage, exit 0|no|no|none|unverified|nothing in the conversation: a stream-json system/informational event and no more|no|n-a|e1-measurement.md channel table, mode 3|n-a
+block|JSON decision=block with reason on stdout, exit 0|yes|yes|none|nothing raw, and on PreToolUse the command RAN anyway ("Ran 2 shell commands", then its output) — not a reliable interactive block, so PreToolUse block is off the table|reason verbatim: an is_error tool_result on PreToolUse, a synthetic user turn "Stop hook feedback" on Stop|yes|no|e1-measurement.md channel table, mode 4 + D-2|person
+additionalcontext|PreToolUse JSON hookSpecificOutput.additionalContext, exit 0|no|no|none|unverified|nothing: zero occurrences anywhere in the stream-json transcript|no|n-a|e1-measurement.md channel table, mode 5|n-a
+duty|Stop JSON hookSpecificOutput.additionalContext holding one fixed line, exit 0; the whole refusal kept in the duty file of the session for session-poker.sh duty|yes|yes|none|one grey line "Stop hook says: <text>" under "Ran 1 stop hook", no error label and no hook error, and the turn continues|the fixed line as a system reminder, then the whole refusal when the model runs the duty verb|yes|no|record/wave-51-gaps-closed/T1.md Q2 variant ac (the window) and Q3 (stop_hook_active true after it)|agent'
 
 # refuse_channel <mode> <field> -> the cell on stdout; exit 1, silent, for an
 # unknown mode or field. The caller holds both names already, so a diagnostic here
@@ -251,6 +263,7 @@ refuse_channel() {
     model_only) idx=8 ;;
     detail_to_user) idx=9 ;;
     source) idx=10 ;;
+    whose) idx=11 ;;
     *) return 1 ;;
   esac
   # awk, not `grep | cut`: awk reads its whole input, so there is no early-exit
@@ -364,6 +377,37 @@ _refuse_log_need() {
   ) >/dev/null 2>&1 || :
 }
 
+# THE DUTY CHANNEL'S TWO PIECES. The line is the whole of what the window shows, so it is fixed:
+# the platform paints it as `Stop hook says: <line>`, and at 61 columns or fewer the window's line
+# keeps to 80. The reason it stands for is the session's duty file, one per session, replaced by
+# each duty, so it always holds the duty the turn-end hook last named.
+BIONIC_REFUSE_DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
+
+# refuse_duty_path <root> <sid> -> the session's duty file; rc 1 and nothing when either is missing
+# or the session id is not one lib/context.sh admits, so no value can steer the path elsewhere.
+refuse_duty_path() {
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  case "$2" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  printf '%s/.bionic/tmp/duty-%s.state' "$1" "$2"
+}
+
+# _refuse_duty_keep <text> -> rc 0 when the whole refusal is in the session's duty file. It writes
+# only into a state directory that is already there and is no link, never through a link at the
+# file's own name, and whole: a file beside it, renamed into place, so the duty verb never reads a
+# half-written reason. Any rc 1 sends the whole refusal down the context instead, so a duty with
+# nowhere to keep its reason still reaches the model whole.
+_refuse_duty_keep() {
+  local f d tmp
+  f="$(refuse_duty_path "${BIONIC_ROOT:-}" "${BIONIC_SID:-}")" || return 1
+  d="${f%/*}"
+  [ -d "$d" ] && [ ! -L "$d" ] && [ ! -L "${d%/*}" ] || return 1
+  [ -L "$f" ] && return 1
+  tmp="$(mktemp "$d/.duty.XXXXXX" 2>/dev/null)" || return 1
+  printf '%s\n' "${1:-}" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  [ -L "$f" ] && { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
+}
+
 # refuse <mode> <verb> <fact> <fix> <detail> — the whole interface. Exits.
 refuse() {
   if [ "$#" -ne 5 ]; then
@@ -376,7 +420,7 @@ refuse() {
   # to see WHY they are not options; neither was shown reaching the model, so
   # routing a refusal over one would drop it in silence.
   if [ "$(refuse_channel "$mode" refusal 2>/dev/null || echo no)" != "yes" ]; then
-    _refuse_selfrefuse "\"$mode\" is not a refusal channel" "use exit2, deny or block"
+    _refuse_selfrefuse "\"$mode\" is not a refusal channel" "pick one from refuse_modes"
   fi
 
   # (b) THE VERB is the regex's `[a-z-]+` and nothing else.
@@ -492,6 +536,15 @@ $(_refuse_fold_detail "$detail")"
     block)
       printf '{"decision":"block","reason":"%s"}\n' "$(_refuse_json_escape "$model_out")"
       printf '%s\n' "$user_out" >&2
+      exit 0
+      ;;
+    duty)
+      # NOTHING ON THE PERSON'S STREAM: the fixed line on the platform's feedback route is the
+      # only thing the window shows, and the context holds the turn as a block would, through the
+      # same `stop_hook_active` guard, so the duty binds once.
+      local ctx="$model_out"
+      if _refuse_duty_keep "$model_out"; then ctx="$BIONIC_REFUSE_DUTY_LINE"; fi
+      printf '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"%s"}}\n' "$(_refuse_json_escape "$ctx")"
       exit 0
       ;;
   esac
