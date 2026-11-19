@@ -38,6 +38,8 @@
 #   §SESSION    an order, a handoff and a session are the log's, each the last of its kind; a session counts once,
 #               by its first act.
 #   §HELD       the run's held place, its order and its sessions answer as the whole fold over every plan this suite built.
+#   §IDENTITY   the reader declares each event type's identifying fields once; a proof's is one line naming its kind,
+#               head, question, criterion and scope.
 #   §PR         the run's pull request is the newest published fact of part pr; a reviews part at the same commit is a
 #               fact of its own, and a run with no request answers nothing.
 #
@@ -669,6 +671,19 @@ hs_plant; HS_PL="$(/usr/bin/grep -x 'n=7' "$(hs_file)" 2>/dev/null)"
 printf 'run/v1|ev=stop|session=s1|turn=t2|at=2026-10-04T00:04:00Z\n' >> "$HL"
 expect_eq "HS3 a line in no stop event's shape drops the held place too" "n=7|5" "$HS_PL|$(hs_ask)"
 rm -rf "$HS" "$HT"
+
+section "IDENTITY"
+# fails-when: the reader declares a type's identity on two lines (the later silently overriding the earlier, so a reader
+# of the first line is misled), or the proof's one declaration lacks a field the fold needs to tell two proofs apart.
+RL="${READER%/*}/lib/reader.sh"
+id_decl() { awk '$1 == "reader_identity" { print $2 }' "$1"; }
+id_dups() { id_decl "$1" | sort | uniq -d | paste -sd' ' -; }
+expect_match "ID0 meta: the extractor reads the reader's declarations, proof among them" "* proof *" " $(id_decl "$RL" | paste -sd' ' -) "
+expect_eq "ID1 no type's identity is declared twice" "" "$(id_dups "$RL")"
+expect_eq "ID2 a proof is declared once, naming kind, head, question, criterion and scope" "1 reader_identity proof kind head question ac scope" \
+  "$(id_decl "$RL" | grep -c '^proof$') $(grep '^reader_identity proof ' "$RL")"
+ID_PLANT="$(mktemp -d)/reader.sh"; { cat "$RL"; echo 'reader_identity proof kind head question'; } > "$ID_PLANT"
+expect_eq "ID3 a second declaration planted for proof is found" "proof" "$(id_dups "$ID_PLANT")"
 
 section "PR"
 # fails-when: `pr` answers a request the log does not hold, answers an older one over the newest, prints its part or
