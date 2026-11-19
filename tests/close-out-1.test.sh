@@ -616,4 +616,23 @@ expect_eq "SEAL10: the same close under a dead holder's lock takes it over, lift
   "$CO_RC|$(seal_count "$PS4")|$([ -f "$PS4/$PLAN_REL" ] && echo yes || echo no)"
 
 
+# THE SESSION'S BINDING RECORD GOES WITH ITS ENGAGED MARKER. A session's binding is also a record beside the seal, and
+# that record outvotes the engaged file: left standing, a closed-out session would read bound to the plan it closed. After
+# the close the record is gone and the question of which run the session is in answers as it did before the record
+# existed, unbound. The marker removed by hand beforehand is the second road act_disengage takes: its record goes all the same.
+bind_read() {  # <project> <sid> -> "<session_plan rc>|<its answer>|<seal_binding_get rc>"
+  bash -c '. "$1/run.sh" && . "$1/seal.sh" || exit 9; v=$(session_plan "$2" "$3"); a=$?; seal_binding_warm "$2"; seal_binding_get "$2" "$3" >/dev/null; printf "%s|%s|%s" "$a" "$v" "$?"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$1" "$2" 2>/dev/null
+}
+for BS_ROAD in marker nomarker; do
+  PB="$(mk_fixture "seal-bind-$BS_ROAD")"; advance_to "$PB" 8; rm -f "$PB/$EPIC_REL"; BS_SID="closeout-bind-$BS_ROAD"
+  ( in_fixture "$PB" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PB" "$BS_SID" "$PB/$PLAN_REL" )
+  [ "$BS_ROAD" = marker ] || rm -f "$PB"/.bionic/tmp/engaged-"$BS_SID".state
+  expect_eq "SEAL11-$BS_ROAD: precondition: the session is bound, its record standing" "0|$PB/$PLAN_REL|0" "$(bind_read "$PB" "$BS_SID")"
+  run_close_as "$BS_SID" "$PB" run
+  expect_eq "SEAL12-$BS_ROAD: the close exits 0 and the session's record is gone: unbound, as before the record existed" "0|1||1" "$CO_RC|$(bind_read "$PB" "$BS_SID")"
+  expect_eq "SEAL13-$BS_ROAD: and the card's last line says the binding record was dropped" "yes" \
+    "$(printf '%s\n' "$CO_OUT" | tail -1 | /usr/bin/grep -q '^disengaged: .*binding record' && echo yes || echo no)"
+done
+
 finish

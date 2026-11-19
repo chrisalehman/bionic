@@ -1008,19 +1008,32 @@ $entry
 
 # act_disengage -> close-out's LAST act: this session's engaged marker (its binding) removed, after the continuation,
 # the epic row, the blocks, the archive and the notice, so any refusal before it left the session engaged (wave-36 T14).
+# The session's binding RECORD beside the seal outvotes the marker (lib/run.sh `session_plan`), so it goes with the
+# marker on every road that has a session key, the marker found or not: left standing, the closed-out session would read
+# as bound to the plan it closed. A record that survives its removal is a refusal, as the marker's is.
 act_disengage() {
-  local m
-  if [ -z "$CO_SID" ] || ! m="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)"; then
+  local m="" rec="" rc=0
+  if [ -z "$CO_SID" ]; then
     say "disengaged: no session key — no engaged marker to remove"
     return 0
   fi
+  seal_binding_drop "$ROOT" "$CO_SID" || rc=$?
+  case "$rc" in
+    0) rec=" and its binding record dropped" ;;
+    2) rec="" ;;
+    *) _co_refuse "the session's binding record could not be dropped (exit $rc)" ;;
+  esac
+  if ! m="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)"; then
+    say "disengaged: no engaged marker path for this session${rec:+ —$rec}"
+    return 0
+  fi
   if [ ! -e "$m" ] && [ ! -L "$m" ]; then
-    say "disengaged: this session holds no engaged marker — nothing to remove"
+    say "disengaged: this session holds no engaged marker — nothing to remove${rec:+;$rec}"
     return 0
   fi
   rm -f "$m" 2>/dev/null
   [ ! -e "$m" ] && [ ! -L "$m" ] || _co_refuse "the engaged marker $m survived its removal"
-  say "disengaged: $m removed — close-out's last act; this session is no longer engaged"
+  say "disengaged: $m removed${rec} — close-out's last act; this session is no longer engaged"
 }
 
 # ─── Act 4: the task list ────────────────────────────────────────────────────
