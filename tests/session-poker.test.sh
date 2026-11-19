@@ -158,6 +158,11 @@ expect_eq "an empty roster ticks quietly (exit 0)" "0" "$RC"
 expect_contains "…and decides DISARM" "decision=DISARM" "$OUT"
 expect_contains "…open=0" "open=0" "$OUT"
 expect_absent   "…never QUIET on the same tick" "decision=QUIET" "$OUT"
+# The pair: the same delivery, older than this session's binding, is the previous run's.
+R3P="$(make_repo s3-prior)"; new_roster "$R3P"; delivered_plan "$R3P"
+backdate "$(find "$R3P/.bionic/docs/plans" -name '*.plan.md' | head -1)" 3600
+poke "$R3P" tick
+expect_contains "a delivery older than the session's binding is the previous run's: QUIET, never DISARM" "decision=QUIET" "$OUT"
 
 # --- arm-shape row (progress + cadence, inside cadence) -> tick reads verdict -> QUIET ---
 R3A="$(make_repo s3-arm)"; new_roster "$R3A"
