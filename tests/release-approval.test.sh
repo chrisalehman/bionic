@@ -422,6 +422,30 @@ for fc_n in 6 7; do
   expect_eq "JUDGE-4c …and at $fc_n its gate exits as the whole wall's dry commit does, printing what it prints" \
     "$FC_WALL_RC|$FC_WALL" "$( [ "$FC_WALL_RC" = 0 ] && printf '0' || fc_gate_rc "$fc_ck")|$( [ "$FC_WALL_RC" = 0 ] && printf '%s' "$FC_WALL" || fc_gate_lines "$fc_ck")"
 done
+# The collector's two facts the gate reads only as it is handed them: the readings' derived results, and the open debts.
+fc_judge_gate() {  # <step> -> the judge's gate at <step> as `fc_wall_dry` reads the whole wall's: its exit, then its lines
+  local ck
+  eval "ck=\"\$JW_CK_$1\""
+  if [ "$(fc_gate_rc "$ck")" = "" ]; then printf '0|'; else printf '%s|%s' "$(fc_gate_rc "$ck")" "$(fc_gate_lines "$ck")"; fi
+}
+fc_plan "$FC_FAILR
+run/v1|ev=finding|ref=record/wave-x/adversarial-fail.md#1|to=defer|by=Dana Fixture|words=defer it to the next wave|why=the user ruled it|at=2026-10-12T12:30:00Z"
+fc_judge_world
+fc_wall_dry 6
+expect_eq "JUDGE-5 precondition: the failing reading's one finding moved to defer, the whole wall admits the dry commit at 6 on its derived result" \
+  "0|" "$FC_WALL_RC|$FC_WALL"
+expect_eq "JUDGE-5b …and so does the judge's gate, the derived result handed to it as the collector hands it" \
+  "0|" "$(fc_judge_gate 6)"
+expect_eq "JUDGE-5c …and asked directly the judge answers each step as the checked advance does" \
+  "same same same|same same same|same same same" "$(printf '%s\n' "$JW_ROWS" | sed '/^$/d' | awk '{ print $3, $4, $5 }' | paste -sd'|' -)"
+fc_plan "$FC_GOOD
+run/v1|ev=admitted|id=d1|row=T1|suite=a.test.sh|token=ext:gone|at=2026-10-12T14:30:00Z"
+fc_judge_world
+fc_wall_dry 6
+expect_eq "JUDGE-6 precondition: a debt the landing declared and nothing cleared, the whole wall refuses the dry commit at 6 naming its suite" \
+  "2|yes" "$FC_WALL_RC|$(fc_has "$FC_WALL" 'a.test.sh')"
+expect_eq "JUDGE-6b …and the judge's gate at 6 refuses it in the same lines, the debt handed to it as the collector hands it" \
+  "$FC_WALL_RC|$FC_WALL" "$(fc_judge_gate 6)"
 
 # ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"
