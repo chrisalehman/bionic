@@ -1056,6 +1056,8 @@ tick_watch_facts() {  # <file>
           [ -z "$TICK_GATE_KEYS" ] || printf 'gate=%s\n' "$TICK_GATE_KEYS"
           # THE RUNS (wave-30 T12): the full-run count and each live run of this roster, by name and id.
           [ -z "${TICK_RUNS_KEY:-}" ] || printf '%s\n' "$TICK_RUNS_KEY"
+          # Which arm names each NOTIFY row: a second arm naming a row already named is news.
+          [ -z "${TICK_NOTIFY_ARMS:-}" ] || printf 'arms=%s\n' "$TICK_NOTIFY_ARMS"
           printf '%s\n' "$VERDICT_OUT" | awk -F'|' '
             $1 == "landing-verdict/v1" {
               n = ""; st = ""; ak = ""
@@ -1339,7 +1341,7 @@ EOF
       exit "$VERDICT_RC"
     fi
 
-    TOTAL=0; OPEN=0; NOTIFY_ROWS=""; NOTIFY_DETAIL=""
+    TOTAL=0; OPEN=0; NOTIFY_ROWS=""; NOTIFY_DETAIL=""; TICK_NOTIFY_ARMS=""
     # THE CADENCE HALF OF THE NOTIFY DETAIL, kept apart from the duration half so each gets
     # the sentence that describes it and the machine line gets both (REQ-10 AC-10.1).
     QUIET_DETAIL=""
@@ -1500,6 +1502,7 @@ EOF
         if [ "$AGE" -gt "$DUR_S" ]; then
           ROW_OVERDUE=yes
           NOTIFY_ROWS="${NOTIFY_ROWS}${NOTIFY_ROWS:+,}$(clean "$RNAME")"
+          TICK_NOTIFY_ARMS="${TICK_NOTIFY_ARMS} $(clean "$RNAME"):overdue"
           NOTIFY_DETAIL="${NOTIFY_DETAIL}${NOTIFY_DETAIL:+; }$(clean "$RNAME"): $(line_field "$LINE" detail) (elapsed ${AGE}s past declared duration \"$DUR_RAW\" (${DUR_S}s))"
         fi
       fi
@@ -1511,6 +1514,7 @@ EOF
       if row_quiet "$ROW_LINE" "$(now_epoch)"; then
         [ "$ROW_OVERDUE" = yes ] \
           || NOTIFY_ROWS="${NOTIFY_ROWS}${NOTIFY_ROWS:+,}$(clean "$RNAME")"
+        TICK_NOTIFY_ARMS="${TICK_NOTIFY_ARMS} $(clean "$RNAME"):quiet"
         QUIET_DETAIL="${QUIET_DETAIL}${QUIET_DETAIL:+; }$(clean "$RNAME"): no line for ${TICK_QUIET_AGE}s against cadence ${TICK_QUIET_CAD}s (${TICK_QUIET_CHANNEL}, mtime ${TICK_QUIET_MTIME})"
       fi
     done <<EOF
@@ -1679,6 +1683,23 @@ TICK_RULING_ROWS
     # (ADR-003): it prints a line and the operator acts. The ENFORCEMENT is the dispatch
     # wall, which does refuse on a stale read, so the honest thing here is to say which
     # number this is and point at the gate that will insist.
+    # A PANEL OLDER THAN A DISPATCH SAYS NOTHING OF THE ROW IT NEVER SAW. An answer lists the agents that existed when
+    # it was recorded, and an Agent call after it starts one it cannot list. A row launched at or after the newest
+    # answer, the transcript holding a dispatch after that answer (lib/agents.sh `live_agents_since_answer`), is neither
+    # counted absent from the panel nor named GONE until an answer newer than its dispatch is read.
+    TICK_PANEL_AT=""
+    tick_panel_unseen() {  # <row name> -> 0 when the newest answer predates the row's dispatch
+      local t
+      if [ -z "$TICK_PANEL_AT" ]; then
+        TICK_PANEL_AT=-; t="${_LA_CACHE_ANS_TS%%.*}"
+        if [ -n "$t" ] && live_agents_since_answer "$TICK_TR" 2>/dev/null | grep -q '^dispatched'; then
+          TICK_PANEL_AT="$(iso_epoch "${t%Z}Z")"; [ -n "$TICK_PANEL_AT" ] || TICK_PANEL_AT=-
+        fi
+      fi
+      [ "$TICK_PANEL_AT" != - ] || return 1
+      t="$(iso_epoch "$(line_field "$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null | grep -F "|name=${1}|" | tail -1)" launched_at)")"
+      [ -n "$t" ] && [ "$t" -ge "$TICK_PANEL_AT" ]
+    }
     OPEN_ROSTER="$OPEN"
     TICK_LIVE_STATE=""
     # RESOLVED AT MOST ONCE PER TICK, by whichever arm needs it first: the trim below, or the
@@ -1711,7 +1732,7 @@ TICK_RULING_ROWS
           TICK_LERR=$( { live_row_open "$TICK_TR" "$TICK_NAME"; } 2>&1 ) || TICK_LRC=$?
           case "$TICK_LRC" in
             0) TICK_OPEN_LIVE=$(( TICK_OPEN_LIVE + 1 )) ;;
-            1) : ;;
+            1) ! tick_panel_unseen "$TICK_NAME" || TICK_OPEN_LIVE=$(( TICK_OPEN_LIVE + 1 )) ;;
             *) # 3 STALE / 4 NONE. Freshness is a property of the TRANSCRIPT, not of any
                # one name, so every remaining row would read the same way: stop asking.
                TICK_LIVE_STATE="${TICK_LERR#live-agents: }"
@@ -1991,6 +2012,7 @@ EOF
               ;;
             *)
               case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
+              ! tick_panel_unseen "$SD_NAME" || continue
               SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
               # THE ACK IS THE CLOSE (wave-19 T1; D2, ADR-034 d1). Skipped only for a name the
               # ledger already closed — the verdict walk records those in TICK_ACKED_NAMES —
@@ -2023,6 +2045,7 @@ EOF
         for SD_NAME in $SD_DUPS; do
           case "$SD_PANEL" in *"|${SD_NAME}|"*) continue ;; esac
           case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
+          ! tick_panel_unseen "$SD_NAME" || continue
           SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
           if SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
                        CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
@@ -2056,6 +2079,7 @@ EOF
         while IFS='|' read -r SD_GNAME SD_GSTATE SD_GDETAIL; do
           [ -n "$SD_GNAME" ] || continue
           case "$SD_PANEL" in *"|${SD_GNAME}|"*) continue ;; esac
+          ! tick_panel_unseen "$SD_GNAME" || continue
           SD_REFUSE=0
           SD_WHY=""
           SD_VERDICT="$SD_GSTATE"
@@ -2842,6 +2866,10 @@ EOF
   # ask, and with it open the run rests and nothing is fetched. BIONIC_WATCH_PR, when the watcher names it, is a file
   # this pass leaves holding `open` while the request is watched and empty otherwise, so the watcher's day's end can
   # count the request as something still out.
+  #
+  # A CAUSE TOLD IS NOT TOLD AGAIN: BIONIC_WATCH_TOLD, when the watcher names it, is the file of causes its record has
+  # told, which the line leaves out and the pass rewrites with the causes this print holds (lib/patrol.sh
+  # `watch_wake_line`). By hand, with no file, every cause in a full print is named.
   poker_verb_watch_pass() {
     local out err facts rc line iv_rc rest=no pr=no pr_root pr_plan
     out="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
@@ -2859,7 +2887,7 @@ EOF
          die "REFUSED — the tick refused (exit $rc); this pass decided nothing. Its refusal is printed above; mend what it names, then run again: bash $HOOK_DIR/session-poker.sh tick --watch"
          exit "$WATCH_RC_REFUSED" ;;
     esac
-    line="$(watch_wake_line "$out")"
+    line="$(watch_wake_line "$out" "${BIONIC_WATCH_TOLD:-}")"
     [ -n "$line" ] || line="$(watch_person_wake "$out" "$facts")"
     /usr/bin/grep -q '^watch-facts/v[0-9]*|rest=yes' "$facts" 2>/dev/null && rest=yes
     if /usr/bin/grep -q '^watch-facts/v[0-9]*|.*|pr=open' "$facts" 2>/dev/null; then

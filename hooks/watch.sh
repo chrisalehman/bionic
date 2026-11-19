@@ -20,6 +20,11 @@
 # needs is printed by the tick on every print, but an unchanged print wakes no pass, so nothing would ever say it
 # while the run stands still. The watcher wakes on it once, and `told=` on the record keeps it from saying it twice.
 #
+# A CAUSE IS SAID ONCE, on the wake path as on the quiet one. A print is in full whenever anything the tick hashes
+# moved, and a full print holds every cause still standing. Each pass reads the record's told causes from the file
+# BIONIC_WATCH_TOLD names (`watch_causes`), the pass's line leaves out what it lists (lib/patrol.sh `watch_wake_line`),
+# and the causes the print holds go back to the record as `woke=` (`watch_woke`), carried across watchers.
+#
 # ITS DAY. The platform ends the hook at its timeout without a word, so the watcher ends itself first: when the next
 # pass would come within WATCH_LIFE_MARGIN of the day's end, an agent still out, or the run's pull request still open
 # and watched for its merge, wakes the model once (the turn's end starts a fresh watcher), and with neither it rests at
@@ -91,7 +96,8 @@ case "$W_SPAN" in ''|*[!0-9]*) W_SPAN=$(( WATCH_LIFE_MAX - WATCH_LIFE_MARGIN )) 
 W_CLI="$(alive_holder "$W_SID" 2>/dev/null)" || W_CLI=""
 W_SLEEP=""
 W_PR="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pr.XXXXXX" 2>/dev/null)" || W_PR=""
-trap '[ -z "$W_PR" ] || rm -f "$W_PR"' EXIT
+W_TOLD="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-told.XXXXXX" 2>/dev/null)" || W_TOLD=""
+trap 'rm -f ${W_PR:+"$W_PR"} ${W_TOLD:+"$W_TOLD"}' EXIT
 trap '[ -z "$W_SLEEP" ] || kill "$W_SLEEP" 2>/dev/null; exit 143' TERM INT HUP
 
 w_rest() { watch_rest "$W_ROOT" "$W_SID" "$$" "$1" >/dev/null 2>&1; exit 0; }
@@ -127,8 +133,10 @@ while :; do
     [ -z "$W_NOW" ] || [ "$W_NOW" = "$W_SID" ] || w_rest cleared
   fi
 
-  W_LINE="$(BIONIC_WATCH_PR="$W_PR" bash "$W_POKER" tick --watch 2>/dev/null)"
+  [ -z "$W_TOLD" ] || watch_causes "$W_ROOT" "$W_SID" > "$W_TOLD" 2>/dev/null
+  W_LINE="$(BIONIC_WATCH_PR="$W_PR" BIONIC_WATCH_TOLD="$W_TOLD" bash "$W_POKER" tick --watch 2>/dev/null)"
   W_RC=$?
+  [ -z "$W_TOLD" ] || watch_woke "$W_ROOT" "$W_SID" "$$" "$W_TOLD" >/dev/null 2>&1
   case "$W_RC" in
     "$WATCH_RC_WAKE")
       W_LINE="${W_LINE%%$'\n'*}"

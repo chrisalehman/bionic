@@ -346,6 +346,11 @@ expect_match "WAT-1a …its one line tells the model to have the person restart"
 expect_eq "WAT-1b …one line, and nothing on stdout" "1|" "$(count_of "bionic watch" "$WERR")|$WOUT"
 run_watch BIONIC_WATCH_DEADLINE=3
 expect_eq "WAT-2 the next watcher over the same restart does not wake again: it ends at its limit, quietly" "0|" "$WRC|$WERR"
+printf 'gate/v1|at=2026-10-11T00:00:00Z|session=%s|asker=w99-T1|category=leaves-the-machine|head=git push origin wave/99-r\n' \
+  "$SID_LIVE" >> "${PROJ}/.bionic/tmp/gate-${SID_LIVE}.state"
+run_watch BIONIC_WATCH_DEADLINE=3
+expect_eq "WAT-2r the restart told, a request denied moves the print: the pass wakes on the request, its line not saying the told restart (yes) again" "2|no" \
+  "$WRC|$(printf '%s' "$WERR" | grep '^bionic watch: GATE ' | sed 's/.*restart.*/yes/; /^yes$/!s/.*/no/')"
 # THE WATCHER'S OWN READ. The tick's print is unchanged now, so no pass names the restart again; a watcher whose record
 # no longer carries what was told (the record wiped, as a predecessor's sweep or close-out wipes one) wakes on it from
 # its own read of the restart, once.

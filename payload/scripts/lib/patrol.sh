@@ -709,10 +709,21 @@ WATCH_LIFE_MARGIN=600
 # ONE LINE, ASCII, AT MOST WATCH_LINE_MAX: the leading kind with its subjects and its act, worded as an instruction,
 # then `; also` and the other kinds with their subjects. Subjects are cut to a share of the line before the line is,
 # and the line is cut last, so the act of the leading kind survives a long name.
-watch_wake_line() {  # <tick print file>
+#
+# A CAUSE IS SAID ONCE. The print is in full whenever anything the tick hashes moved, so a row still quiet would be
+# named again by every print some other fact moved. With <told file>, a cause it lists is left out of the line: a row
+# quiet past its cadence (`NOTIFY:quiet:<row>:<the mtime it went quiet at>`, so a row that wrote and went quiet again
+# is a new cause), a row past its duration (`NOTIFY:overdue:<row>`), a GONE or GONE? row (`<kind>:<row>`), and the
+# restart (`restart:<classes>|<reloaded-since>`, the watch record's told= key). The file is then rewritten with the
+# causes this print holds, told before or now, so a cause that leaves the print is told again when it comes back. An
+# unchanged print leaves the file as it was.
+watch_wake_line() {  # <tick print file> [<told file>]
   [ -f "${1:-}" ] || return 1
-  local line
-  line="$(LC_ALL=C awk -v em="—" -v max="$WATCH_LINE_MAX" '
+  local line tf="${2:-}"
+  { [ -n "$tf" ] && [ -f "$tf" ] && [ ! -L "$tf" ]; } || tf=""
+  line="$(LC_ALL=C awk -v em="—" -v max="$WATCH_LINE_MAX" -v tf="$tf" '
+    BEGIN { if (tf != "") { while ((getline l < tf) > 0) told[l] = 1; close(tf) } }
+    function cause(k) { have[k] = 1; return !(k in told) }
     function ascii(s) { gsub(/[^ -~]+/, "?", s); return s }
     function dash(s) { return index(s, em) == 1 && length(s) == length(em) }
     function add(k, s) {
@@ -740,13 +751,26 @@ watch_wake_line() {  # <tick print file>
     }
     $1 != "poker:" { next }
     $2 == "GATE" { s = $5; sub(/:$/, "", s); add("GATE", s); next }
-    $2 == "restart" && $3 == "needed" { mark("restart"); next }
-    $2 == "GOAL" { add("GOAL", $3); next }
-    $2 == "DUPLICATE-SESSION" || $2 == "DUPLICATE-START" || $2 == "GONE?" || $2 == "GONE" || $2 == "NOT-LANDED" {
-      add($2, $3); next
+    $2 == "restart" && $3 == "needed" {
+      s = substr($0, index($0, em) + length(em) + 1); r = "-"
+      if (i = index(s, ", or reloaded since ")) { r = substr(s, i + 20); r = substr(r, 1, index(r, " ") - 1) }
+      if (cause("restart:" substr(s, 1, index(s, " changed after ") - 1) "|" r)) mark("restart")
+      next
     }
+    $2 == "GOAL" { add("GOAL", $3); next }
+    $2 == "GONE?" || $2 == "GONE" { if (cause($2 ":" $3)) add($2, $3); next }
+    $2 == "DUPLICATE-SESSION" || $2 == "DUPLICATE-START" || $2 == "NOT-LANDED" { add($2, $3); next }
+    $2 == "NOTIFY" && $4 == "quieter" {
+      s = $0
+      while (match(s, /[^ ;]+: no line for [0-9]+s against cadence [0-9]+s [(]/)) {
+        r = substr(s, RSTART, RLENGTH); r = substr(r, 1, index(r, ": ") - 1); s = substr(s, RSTART + RLENGTH)
+        q[r] = substr(s, index(s, ", mtime ") + 8); q[r] = "NOTIFY:quiet:" r ":" substr(q[r], 1, index(q[r], ")") - 1)
+      }
+    }
+    $2 == "NOTIFY" && $4 == "past" && $5 == "declared" { dur = "; " substr($0, index($0, "duration: ") + 10) }
     $2 == "NOTIFY" {
       if (!dash($3)) add("NOTIFY", $3); else mark("NOTIFY")
+      if (!dash($3) || !($4 == "quieter" || ($4 == "past" && $5 == "declared"))) other = 1
       if (index($0, "quieter than the declared cadence")) why = "quiet past its cadence"
       else if (index($0, "past declared duration") && why == "") why = "past its duration"
       else if (index($0, "started without its checks") && why == "") why = "started without its checks"
@@ -759,7 +783,17 @@ watch_wake_line() {  # <tick print file>
     END {
       if (unchanged) exit
       if ("FILL" in seen && fill != "") { n = split(fill, w, ","); for (i = 1; i <= n; i++) add("FILL", w[i]) }
-      if ("NOTIFY" in seen && rows != "") { n = split(rows, w, ","); for (i = 1; i <= n; i++) add("NOTIFY", w[i]) }
+      if ("NOTIFY" in seen && rows != "") {
+        n = split(rows, w, ","); nq = 0; nd = 0
+        for (i = 1; i <= n; i++) {
+          a = (w[i] in q) ? cause(q[w[i]]) : 0; d = index(dur, "; " w[i] ": ") ? cause("NOTIFY:overdue:" w[i]) : 0
+          if (a || d || (!(w[i] in q) && !index(dur, "; " w[i] ": "))) add("NOTIFY", w[i])
+          nq += a; nd += d
+        }
+        if (nq) why = "quiet past its cadence"; else if (nd) why = "past its duration"
+        if (!("NOTIFY" in subj) && !other) delete seen["NOTIFY"]
+      }
+      if (tf != "") { printf "" > tf; for (k in have) print k > tf; close(tf) }
       act["GATE"] = "put it to the person as a gate act; never perform it"
       act["restart"] = "tell the person: exit claude and start it again"
       act["GOAL"] = "missed; put it to the person"
@@ -802,6 +836,7 @@ watch_wake_line() {  # <tick print file>
 #   at=<ISO, when this state was written>          told=<the restart it already woke for, when it did>
 #   lost=<the pid of a watcher that died without a word, whose record this one's claim replaced>
 #   said=<the lost pid the turn-end wall has already said is gone>
+#   woke=<the causes the passes have told, space-separated, in watch_wake_line's key shape>
 #
 # WATCHING IS A PROCESS, judged by lib/alive.sh's one rule, never by the file's age: a watcher killed from outside, or
 # by the platform at its time limit, leaves `watching` naming a dead process, and `watch_state` says `stopped`. A
@@ -813,22 +848,22 @@ watch_wake_line() {  # <tick print file>
 # holds it, so a session has at most one however many turn ends start one. The claim writes a whole file and links it
 # into place, or renames it over a record no live watcher holds; two claims racing over one dead record can both
 # rename, so the watcher asks `watch_holds` before every pass and the one the record does not name ends quietly.
-# `told=` is carried from record to record, so a restart is told once across watchers.
+# `told=` and `woke=` are carried from record to record, so a cause is told once across watchers.
 watch_record_path() {  # <project root> <session-id> -> absolute path, or nothing
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   case "$2" in *[!A-Za-z0-9_-]*) return 1 ;; esac
   printf '%s/.bionic/tmp/watch-%s.state' "$1" "$2"
 }
 
-_watch_read() {  # <record> — sets _WR_STATE _WR_PID _WR_START _WR_WHY _WR_TOLD _WR_LOST _WR_SAID; rc 1 when it is no record
+_watch_read() {  # <record> — sets _WR_STATE _WR_PID _WR_START _WR_WHY _WR_TOLD _WR_LOST _WR_SAID _WR_WOKE; rc 1 when no record
   local l
-  _WR_STATE=''; _WR_PID=''; _WR_START=''; _WR_WHY=''; _WR_TOLD=''; _WR_LOST=''; _WR_SAID=''
+  _WR_STATE=''; _WR_PID=''; _WR_START=''; _WR_WHY=''; _WR_TOLD=''; _WR_LOST=''; _WR_SAID=''; _WR_WOKE=''
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
   while IFS= read -r l; do
     case "$l" in
       state=*) _WR_STATE="${l#state=}" ;; pid=*) _WR_PID="${l#pid=}" ;; start=*) _WR_START="${l#start=}" ;;
       why=*) _WR_WHY="${l#why=}" ;; told=*) _WR_TOLD="${l#told=}" ;;
-      lost=*) _WR_LOST="${l#lost=}" ;; said=*) _WR_SAID="${l#said=}" ;;
+      lost=*) _WR_LOST="${l#lost=}" ;; said=*) _WR_SAID="${l#said=}" ;; woke=*) _WR_WOKE="${l#woke=}" ;;
     esac
   done < "$1"
   [ -n "$_WR_STATE" ]
@@ -865,7 +900,7 @@ watch_state() {
 # watch_claim <root> <sid> <pid> -> rc 0 the record names <pid>, watching; rc 1 a live watcher of the session holds it,
 # `<pid> <start>` on stdout; rc 2 it could not be written. The caller has judged the directory safe to write in.
 watch_claim() {
-  local f d start tmp held told='' lost='' said=''
+  local f d start tmp held told='' lost='' said='' woke=''
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 2
   case "${3:-}" in ''|*[!0-9]*) return 2 ;; esac
   [ -L "$f" ] && return 2
@@ -882,7 +917,7 @@ watch_claim() {
     esac
     # A WATCHER THAT DIED WITHOUT A WORD IS NOT FORGOTTEN BY ITS SUCCESSOR. The turn end starts this claim and the
     # turn-end wall together, in no fixed order, so the record keeps the dead pid until that wall has said it.
-    _watch_read "$f" && { told="$_WR_TOLD"; said="$_WR_SAID"; lost="$_WR_LOST"; }
+    _watch_read "$f" && { told="$_WR_TOLD"; said="$_WR_SAID"; lost="$_WR_LOST"; woke="$_WR_WOKE"; }
     case "$held" in stopped\ *) lost="${held#stopped }" ;; esac
   fi
   printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$3" "$start" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tmp" 2>/dev/null \
@@ -890,6 +925,7 @@ watch_claim() {
   [ -z "$told" ] || printf 'told=%s\n' "$told" >> "$tmp"
   [ -z "$lost" ] || printf 'lost=%s\n' "$lost" >> "$tmp"
   [ -z "$said" ] || printf 'said=%s\n' "$said" >> "$tmp"
+  [ -z "$woke" ] || printf 'woke=%s\n' "$woke" >> "$tmp"
   if [ ! -e "$f" ] && ln "$tmp" "$f" 2>/dev/null; then rm -f "$tmp"; return 0; fi
   if held="$(watch_state "$1" "$2")"; then
     case "$held" in watching\ *) rm -f "$tmp"; held="${held#watching }"; printf '%s\n' "$held"; return 1 ;; esac
@@ -913,17 +949,32 @@ watch_rest() {
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
   watch_holds "$1" "$2" "${3:-}" || return 1
   set -- "$f" "${f%/*}/.watch-$2.$3" "state=resting" "why=${4:-unsaid}" "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} ${_WR_SAID:+"said=$_WR_SAID"}
+    ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} ${_WR_SAID:+"said=$_WR_SAID"} ${_WR_WOKE:+"woke=$_WR_WOKE"}
   _watch_write "$@"
 }
 
 # watch_told <root> <sid> <pid> <key> -> `told=<key>` on the record <pid> holds: the restart it has woken for.
-watch_told() {
+# watch_woke <root> <sid> <pid> <told file> -> the causes a pass left in that file (watch_wake_line), the restart's
+# left out, kept on the record as `woke=`. watch_causes <root> <sid> -> the told file a pass reads: both, one a line.
+watch_told() { watch_holds "${1:-}" "${2:-}" "${3:-}" || return 1; _WR_TOLD="${4:-}"; _watch_keep "$1" "$2" "$3"; }
+watch_woke() {
+  local w
+  w="$(/usr/bin/grep -v '^restart:' "${4:-}" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ')"; w="${w% }"
+  watch_holds "${1:-}" "${2:-}" "${3:-}" || return 1
+  [ "$w" != "$_WR_WOKE" ] || return 0
+  _WR_WOKE="$w"; _watch_keep "$1" "$2" "$3"
+}
+_watch_keep() {  # <root> <sid> <pid> -> the watching record rewritten from the _WR_ fields watch_holds read
   local f
-  f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
-  watch_holds "$1" "$2" "${3:-}" || return 1
+  f="$(watch_record_path "$1" "$2")" || return 1
   _watch_write "$f" "${f%/*}/.watch-$2.$3" "state=watching" "pid=$_WR_PID" "start=$_WR_START" \
-    "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "told=${4:-}" ${_WR_LOST:+"lost=$_WR_LOST"} ${_WR_SAID:+"said=$_WR_SAID"}
+    "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} \
+    ${_WR_SAID:+"said=$_WR_SAID"} ${_WR_WOKE:+"woke=$_WR_WOKE"}
+}
+watch_causes() {
+  _watch_read "$(watch_record_path "${1:-}" "${2:-}")" || return 0
+  [ -z "$_WR_TOLD" ] || printf 'restart:%s\n' "$_WR_TOLD"
+  [ -z "$_WR_WOKE" ] || printf '%s\n' "$_WR_WOKE" | tr ' ' '\n'
 }
 
 # watch_told_key <root> <sid> -> the `told=` the session's record carries, or nothing.
