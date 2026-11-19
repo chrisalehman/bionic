@@ -84,9 +84,10 @@ cr_verbs() { /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z0-9-]*|`[a-z][a-z0-9-
 cr_skill_text() { cat "$BIONIC_SCRIPTS_DIR"/skills/*/SKILL.md "$BIONIC_SCRIPTS_DIR"/skills/canonical-sdlc/*.md "$BIONIC_SCRIPTS_DIR"/skills/canonical-sdlc/steps/*.md "$BIONIC_SCRIPTS_DIR"/agents/*.md 2>/dev/null; }
 cr_skill_verbs() { cr_skill_text | cr_verbs; }
 # cr_hook_verbs -> the poker verbs a hook or script a run executes calls: a call quotes the poker's path, `bash
-# "…session-poker.sh" <verb>` or `bash "$poker" <verb>`, where a sentence it prints names the path bare
-cr_hook_verbs() { /usr/bin/grep -rhoE 'bash "[^"]*(session-poker\.sh|\$\{?poker\}?)" +[a-z][a-z0-9-]*' "$BIONIC_SCRIPTS_DIR/hooks" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null \
-  | sed -E 's/^bash "[^"]*" +/session-poker.sh /' | cr_verbs; }
+# "…session-poker.sh" <verb>` or `bash "$poker" <verb>`, or goes through the card's own door, `_card_poke <verb>`,
+# where a sentence it prints names the path bare
+cr_hook_verbs() { /usr/bin/grep -rhoE '(bash "[^"]*(session-poker\.sh|\$\{?poker\}?)"|_card_poke) +[a-z][a-z0-9-]*' "$BIONIC_SCRIPTS_DIR/hooks" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null \
+  | sed -E 's/^(bash "[^"]*"|_card_poke) +/session-poker.sh /' | cr_verbs; }
 # cr_called -> each poker verb a command of the run calls
 cr_called() { cr_names < "$CR_LOG" | cut -d'|' -f2 | sed -n 's/^session-poker\.sh \([a-z][a-z0-9-]*\).*/\1/p' | LC_ALL=C sort -u; }
 # cr_marks <tag> -> the text of each `# <tag>: ` line in the replay's part
@@ -473,8 +474,8 @@ section "§SESSION: a session's own bookkeeping stays out of the log"
 CS_ACTS="$(cr_all_rcs | awk -F'|' '$2 ~ /^the skill is invoked|, tick [0-9]+$|^the Patrol is disarmed/ { print NR "|" $2 }')"
 # cs_added <n> -> the lines the command numbered <n> added to the run's log, from the logs kept on each side of it
 cs_added() { local b="$CR_DIR/logs/$(($1 - 1)).log"; [ "$1" -gt 1 ] || b=/dev/null; diff "$b" "$CR_DIR/logs/$1.log" 2>/dev/null | sed -n 's/^> //p'; }
-expect_eq "CS-1 the run engages (which arms the Patrol), ticks and disarms, each a command of the run" "yes|yes|yes" \
-  "$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q '|the skill is invoked' && echo yes)|$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q ', tick [0-9]*$' && echo yes)|$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q '|the Patrol is disarmed' && echo yes)"
+expect_eq "CS-1 the run engages (which arms the Patrol) and ticks, each a command of the run, and has no command that disarms" "yes|yes|yes" \
+  "$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q '|the skill is invoked' && echo yes)|$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q ', tick [0-9]*$' && echo yes)|$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q '|the Patrol is disarmed' || echo yes)"
 CS_TICKS="$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep ', tick [0-9]*$' | while IFS='|' read -r n l; do cs_added "$n"; done)"
 expect_eq "CS-2 what a tick adds is the run's own facts, the regression row it landed among them, never a stop or a line of its own" "yes|" \
   "$(/usr/bin/grep -q '^run/v1|ev=published|row=T3|' <<< "$CS_TICKS" && echo yes)|$(/usr/bin/grep -E -v '^run/v1\|ev=[a-z]+\|' <<< "$CS_TICKS"; /usr/bin/grep '^run/v1|ev=stop|' <<< "$CS_TICKS")"
