@@ -51,6 +51,7 @@ pah_world() {
   PAH_F="$(fixture_git "$p" rev-parse wave/01-fixture)"
   log="$p/$LOG_REL"
   sed '/|ev=proof|kind=regression|/d' "$log" > "$log.n" && mv "$log.n" "$log"
+  seal_fixture "$plan" "$log"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
     LOG_AT=2026-10-04T12:00:00Z proof_event "$2" kind=regression "head=$3" "evidence=record/wave-01-fixture/regression-run-$3.log" ${4:+"owed=$4"}' \
     _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" || return 1
@@ -75,11 +76,13 @@ pah_world() {
     } >> "$log"
     k=$((k + 1))
   done
+  seal_fixture "$plan" "$log"
   PAH_H="$(fixture_git "$p" rev-parse wave/01-fixture)"
   if [ "$n" -gt 0 ]; then
     fixture_git "$p" merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1 || return 1
     # The landings cover the head and no pass ran at it, so the merge close-out delivers is the person's word at H.
     sed "s/|ev=proof|kind=review|head=$PAH_F|/|ev=proof|kind=review|head=$PAH_H|/" "$log" > "$log.n" && mv "$log.n" "$log"
+    seal_fixture "$plan" "$log"
     bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
       LOG_AT=2026-10-04T14:00:00Z proof_approval_event "$2" merge-unproved by=fixture "head=$3" "said=merge it"' \
       _ "$PAH_LIB" "$plan" "$PAH_H" || return 1
