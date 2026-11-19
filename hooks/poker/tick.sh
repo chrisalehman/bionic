@@ -2918,3 +2918,47 @@ EOF
     tick_decision_line "$TICK_DECISION" "$TOTAL" "$OPEN" "" "" "$SCHED_FILL" "$LEASE_TREES"
     exit 0
   }
+
+  # ---------------------------------------------------------------- the watcher's pass
+  #
+  # ONE PASS OF THE TICK WITH NO MODEL. The tick runs whole, in a process of its own, exactly as the Patrol runs it:
+  # it stamps, lands, orders, opens asks and writes its digest, so the walls that read any of those read a watched
+  # session as they read a patrolled one. What the pass adds is the reading of its print, which the Patrol's prompt
+  # left to the model: `watch_wake_line` (lib/patrol.sh) names the act a print owes, if any, and the pass exits with
+  # that library's codes, a wake printing its one line on stdout and nothing else. The tick's own stderr is passed
+  # through, so a warning is still a warning.
+  #
+  # A TICK THAT REFUSED IS A REFUSED PASS, never a quiet one: a watcher that read a refusal as "nothing to do" would
+  # watch nothing and say so to no one. The tick's own exits are 0, and 1 for NOTIFY; any other is its refusal.
+  #
+  # THE INTERVAL IS ASKED ON EVERY PASS THAT HAS NO ACT TO NAME, so a period above the ceiling is said by the watch
+  # that would have taken it rather than by nothing: the pass wakes with the line that names the fix.
+  poker_verb_watch_pass() {
+    local out err rc line iv_rc
+    out="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
+      && err="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" || {
+      die "REFUSED — no scratch file for the tick's print; the pass did not run."
+      exit "$WATCH_RC_REFUSED"
+    }
+    bash "$HOOK_DIR/${0##*/}" tick > "$out" 2> "$err"
+    rc=$?
+    cat "$err" >&2
+    case "$rc" in
+      0|1) ;;
+      *) rm -f "$out" "$err"
+         die "REFUSED — the tick refused (exit $rc); this pass decided nothing."
+         exit "$WATCH_RC_REFUSED" ;;
+    esac
+    line="$(watch_wake_line "$out")"
+    rm -f "$out" "$err"
+    if [ -z "$line" ]; then
+      poker_watch_interval_seconds >/dev/null; iv_rc=$?
+      [ "$iv_rc" -eq 0 ] \
+        || line="bionic watch: watch-interval refused - set watch-interval: to $((WATCH_INTERVAL_MAX / 60))m or less in .bionic/config.yaml"
+    fi
+    if [ -n "$line" ]; then
+      printf '%s\n' "$line"
+      exit "$WATCH_RC_WAKE"
+    fi
+    exit "$WATCH_RC_QUIET"
+  }

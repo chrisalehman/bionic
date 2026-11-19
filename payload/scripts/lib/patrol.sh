@@ -948,3 +948,130 @@ tick_digest_field() {  # <digest file> <key>
   [ -f "$1" ] && [ ! -L "$1" ] || return 0
   sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
 }
+
+# ─── THE WATCHER'S PASS: ITS EXITS, ITS LINE AND ITS INTERVAL ────────────────────────────────
+#
+# ONE HOME FOR EVERY NUMBER THE WATCH IS BUILT ON. `session-poker.sh tick --watch` is one pass of the tick with no
+# model; the hook that loops it, the walls that judge it and the suites that drive it read these names, never the
+# digits, so a code that moves moves for all of them at once.
+#
+# THE EXITS. Quiet: nothing in the tick's print asks for an act, and nothing is printed. Wake: an act is owed, and
+# stdout is one line saying it. Rest: the run waits only on the person and the watch should end. Refused: the pass
+# could not run the tick (no session key, a tick that refused), its reason on stderr. WAKE is 2 because 2 is the code
+# an `asyncRewake` hook wakes the model on (prototype-wake: the only exit that re-invokes the model; 0, a kill and a
+# timeout end silently), so the hook passes a wake through unchanged. REST is 3, distinct from every code bash itself
+# uses for a failed command (1, 2, 126, 127, 128+n). Any other code reads as refused.
+WATCH_RC_QUIET=0
+WATCH_RC_REFUSED=1
+WATCH_RC_WAKE=2
+WATCH_RC_REST=3
+# THE WAKE LINE'S CEILING, in characters. The model receives it as the whole of a hook's message, so it carries the
+# act and its subject and nothing else; the line is plain ASCII, so a character is a byte.
+WATCH_LINE_MAX=120
+# THE WATCH INTERVAL, in seconds: a pass every five minutes unless `watch-interval:` in .bionic/config.yaml says
+# otherwise, and never less often than every twenty minutes, the Patrol's own period, so the watch is never a slower
+# eye than the clock it replaces. Read and refused by `session-poker.sh interval --watch`.
+WATCH_INTERVAL_DEFAULT=300
+WATCH_INTERVAL_MAX=1200
+
+# watch_wake_line <tick print file> -> the one wake line on stdout and rc 0, or nothing and rc 1.
+#
+# THE WOKEN KINDS ARE THE LINES THAT ASK FOR AN ACT, OF THE MODEL OR OF THE PERSON, AND NO OTHERS. In the order the
+# line leads with them, the person's first: GATE (a denied reserved request, put to the person), restart, GOAL,
+# DISARM, DUPLICATE-SESSION and DUPLICATE-START, GONE? and GONE, NOTIFY, STANDDOWN, NOT-LANDED, FILL (IDLE rides it),
+# RECONCILE, and the re-arm note. Advice (HELD, LEDGER, FINDING, SPLIT, RANGE), what the tick did itself (LANDED,
+# regression-run, RUNNING) and the quiet lines (QUIET, WAITING, no FILL, the gate share) wake nothing.
+#
+# AN UNCHANGED PRINT WAKES NOTHING. The tick's digest already says whether anything it decided moved; a print that
+# ends `unchanged since` was told in full before, so the standing holds and the restart line it re-prints were seen.
+#
+# ONE LINE, ASCII, AT MOST WATCH_LINE_MAX: the leading kind with its subjects and its act, worded as an instruction,
+# then `; also` and the other kinds with their subjects. Subjects are cut to a share of the line before the line is,
+# and the line is cut last, so the act of the leading kind survives a long name.
+watch_wake_line() {  # <tick print file>
+  [ -f "${1:-}" ] || return 1
+  local line
+  line="$(LC_ALL=C awk -v em="—" -v max="$WATCH_LINE_MAX" '
+    function ascii(s) { gsub(/[^ -~]+/, "?", s); return s }
+    function dash(s) { return index(s, em) == 1 && length(s) == length(em) }
+    function add(k, s) {
+      if (!(k in seen)) { seen[k] = 1 }
+      s = ascii(s); if (s == "" || ((k, s) in has)) return
+      has[k, s] = 1; subj[k] = subj[k] (subj[k] == "" ? "" : " ") s
+    }
+    function mark(k) { seen[k] = 1 }
+    function cap(s, n,   w, i, c, out, more) {
+      c = split(s, w, " "); out = ""; more = 0
+      for (i = 1; i <= c; i++) {
+        if (length(out) + length(w[i]) + 1 > n && out != "") { more = c - i + 1; break }
+        out = out (out == "" ? "" : " ") (length(w[i]) > n ? substr(w[i], 1, n - 3) "..." : w[i])
+      }
+      return out (more ? " +" more : "")
+    }
+    /^poker: unchanged since / { unchanged = 1 }
+    /^[a-z-]+\/v[0-9]+[|]/ && index($0, "|decision=") {
+      c = split($0, f, "|")
+      for (i = 1; i <= c; i++) {
+        if (index(f[i], "fill=") == 1) fill = substr(f[i], 6)
+        else if (index(f[i], "rows=") == 1) rows = substr(f[i], 6)
+      }
+      next
+    }
+    $1 != "poker:" { next }
+    $2 == "GATE" { s = $5; sub(/:$/, "", s); add("GATE", s); next }
+    $2 == "restart" && $3 == "needed" { mark("restart"); next }
+    $2 == "GOAL" { add("GOAL", $3); next }
+    $2 == "DISARM" { mark("DISARM"); next }
+    $2 == "DUPLICATE-SESSION" || $2 == "DUPLICATE-START" || $2 == "GONE?" || $2 == "GONE" || $2 == "NOT-LANDED" {
+      add($2, $3); next
+    }
+    $2 == "NOTIFY" {
+      if (!dash($3)) add("NOTIFY", $3); else mark("NOTIFY")
+      if (index($0, "quieter than the declared cadence")) why = "quiet past its cadence"
+      else if (index($0, "past declared duration") && why == "") why = "past its duration"
+      else if (index($0, "started without its checks") && why == "") why = "started without its checks"
+      next
+    }
+    $2 == "STANDDOWN" { if (!dash($3)) add("STANDDOWN", $3); else mark("STANDDOWN"); next }
+    $2 == "FILL" { if (!dash($3)) for (i = 3; i <= NF; i++) add("FILL", $i); else mark("FILL"); next }
+    $2 == "IDLE" { mark("FILL"); next }
+    $2 == "RECONCILE" { mark("RECONCILE"); next }
+    $2 == "note:" && $3 == "re-arm" { mark("re-arm"); next }
+    END {
+      if (unchanged) exit
+      if ("FILL" in seen && fill != "") { n = split(fill, w, ","); for (i = 1; i <= n; i++) add("FILL", w[i]) }
+      if ("NOTIFY" in seen && rows != "") { n = split(rows, w, ","); for (i = 1; i <= n; i++) add("NOTIFY", w[i]) }
+      act["GATE"] = "put it to the person as a gate act; never perform it"
+      act["restart"] = "tell the person: exit claude and start it again"
+      act["GOAL"] = "missed; put it to the person"
+      act["DISARM"] = "the run is delivered: CronDelete the Patrol job"
+      act["DUPLICATE-SESSION"] = "ListAgents and look at it; never stop it silently"
+      act["DUPLICATE-START"] = "ListAgents and look at it; never stop it silently"
+      act["GONE?"] = "ListAgents; close its row only if it is gone"
+      act["GONE"] = "close its row with stop-orders.sh stopped"
+      act["NOTIFY"] = (why == "" ? "needs a look" : why) ": ListAgents and message the agent"
+      act["STANDDOWN"] = "met: TaskStop it, or keep it up with the hold verb"
+      act["NOT-LANDED"] = "its landing waits: read the refusal the tick prints and repair it"
+      act["FILL"] = "ready with room: dispatch each row now"
+      act["RECONCILE"] = "TaskList and bring the task list in line with the plan"
+      act["re-arm"] = "replace the Patrol job with the prompt verb output, then arm"
+      k = split("GATE restart GOAL DISARM DUPLICATE-SESSION DUPLICATE-START GONE? GONE NOTIFY STANDDOWN NOT-LANDED FILL RECONCILE re-arm", order, " ")
+      lead = ""; tail = ""
+      for (i = 1; i <= k; i++) {
+        if (!(order[i] in seen)) continue
+        if (lead == "") {
+          s = cap(subj[order[i]], 40)
+          lead = "bionic watch: " order[i] (s == "" ? "" : " " s) " - " act[order[i]]
+        } else {
+          s = cap(subj[order[i]], 16)
+          tail = tail (tail == "" ? "; also " : ", ") order[i] (s == "" ? "" : " " s)
+        }
+      }
+      if (lead == "") exit
+      out = ascii(lead tail)
+      if (length(out) > max) out = substr(out, 1, max - 3) "..."
+      print out
+    }' "$1" 2>/dev/null)"
+  [ -n "$line" ] || return 1
+  printf '%s\n' "$line"
+}
