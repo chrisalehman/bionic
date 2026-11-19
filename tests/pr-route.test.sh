@@ -341,6 +341,7 @@ done
 printf 'whole\n' > "$GA_REC/reg.log"
 printf 'run/v1|ev=%s|at=2026-10-04T01:31:00Z\n' "proof|kind=regression|head=$GA_H|evidence=record/wave-x/reg.log" 'waiver|question=walk|by=f|said=yes' >> "$L"
 printf 'run/v1|ev=published|row=T3|commit=%s|kind=close|by=close-out|why=merged|at=2026-10-04T02:00:00Z\n' "$(prr_origin)" >> "$L"
+seal_fixture "$P" "$L"
 prr_gate
 expect_eq "GA-1 a landing at origin/main's tip while the request is open: the gate owes Step 8's merge, with no merge read" "yes" \
   "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -q "Step 8's merge: the integrate row's landing, with no merge read" && echo yes)"
@@ -374,6 +375,7 @@ prr_owed() {  # -> every fact the run owes at the working head, each a passing p
   printf 'the walk\n' > "$rec/walk.md"
   printf 'run/v1|ev=proof|%s|at=2026-10-04T12:01:00Z\n' "ac=AC-1.1|evidence=record/wave-x/walk.md|auditor=a" \
     "kind=walk|head=$h|evidence=record/wave-x/walk.md" >> "$L"
+  seal_fixture "$P" "$L"
 }
 prr_watch_world() {  # <name> [bare] -> §OPEN-ONLY's fixture armed and published; with `bare`, nothing the steps owe
   prr_case8 "$1"

@@ -974,6 +974,10 @@ watch_lost_said() {
 # when the turn-end hooks have run; one dated after the engagement means the turn-end hook ran on an engaged session and
 # started no watch. When that cannot be read (no transcript, no engagement instant, an engagement older than the scanned
 # window, no jq), the answer is `never`: the wall refuses what it cannot prove watched.
+#
+# THE SCANNED WINDOW IS A LINE COUNT, not a clock: a long session's transcript reaches tens of megabytes, and the
+# stop library reads the same 2000-line tail for a turn's facts.
+PATROL_VERDICT_SCAN_LINES=2000
 watch_verdict() {
   local s at tr="${4:-}" ae n out
   if s="$(watch_state "${1:-}" "${2:-}")"; then
