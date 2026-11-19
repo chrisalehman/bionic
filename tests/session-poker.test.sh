@@ -3,8 +3,8 @@
 # needs a nudge.
 #
 # Governing design: .bionic/docs/specs/epic-16-landing-contract/
-# wave-02-fact-based-supervision.spec.md §Design ("Poker"). Serves AC-7 (arm/tick/noop/
-# disarm at an accelerated clock) and AC-6's arrival half (a dead agent is reported at the
+# wave-02-fact-based-supervision.spec.md §Design ("Poker"). Serves AC-7 (tick/noop/
+# DISARM at an accelerated clock) and AC-6's arrival half (a dead agent is reported at the
 # next wake with no watcher process ever having existed) — this suite proves the REPORTING
 # side of AC-6; the "no watcher process at any point" process-table bracket is AC-6's own
 # live T3 arc and is not hermetic.
@@ -418,22 +418,11 @@ R5B="$(make_repo s5-no-roster)"
 # absent-file case, deliberately distinct from the header-only roster Section 3's "empty
 # roster" case plants.
 poke "$R5B" tick
-expect_eq "an ABSENT roster REFUSES rather than silently DISARMing (exit 2)" "2" "$RC"
-expect_absent "…never prints a decision line for a roster it never found" "decision=" "$OUT"
+expect_eq "an ABSENT roster on an engaged session is QUIET, nothing dispatched yet (exit 0)" "0" "$RC"
+expect_contains "…and never DISARMs over a roster it never found" "decision=QUIET" "$OUT"
 
-# ---------- the refusal SHOWS ITS WALK (2.4, AC-13) ----------
-#
-# The refusal above has always said "an absent roster usually means the wrong project root
-# was resolved" and then left the reader to re-derive the walk by hand — which is the one
-# question they cannot answer from the message, because the answer is a property of the
-# filesystem above their cwd. `project_root_candidates` is that walk, one line per ancestor
-# with the reason it was passed over, and the chosen one marked.
-#
-# THE TOPOLOGY THAT MAKES IT MATTER is a git repo nested inside a plain workspace that holds
-# the `.bionic` tree — the shape the eight old resolvers got wrong by asking git first and
-# so answering the nested repo, which owns no roster and never will. Here the walk starts at
-# the cwd, passes the repo as a candidate, and chooses the workspace above it: two lines,
-# and the operator can see which one their roster should be under.
+# THE NESTED TOPOLOGY: a git repo inside a plain workspace that holds the `.bionic` tree. The walk
+# passes the repo and chooses the workspace, where the session engaged, so the tick reads that root.
 R5C="$TMPROOT/s5-candidates"
 mkdir -p "$R5C/.bionic/tmp"
 engage "$R5C"
@@ -441,131 +430,24 @@ R5CN="$R5C/nested-repo"
 mkdir -p "$R5CN"
 ( cd "$R5CN" && git init -q . ) >/dev/null 2>&1
 poke "$R5CN" tick
-expect_eq "the nested-repo topology still REFUSES on an absent roster (exit 2)" "2" "$RC"
-expect_contains "…and prints the walk it took" "$R5CN" "$OUT"
-R5C_CHOSEN="$(printf '%s\n' "$OUT" | grep -F "chosen")"
-expect_contains "…marking the workspace that holds the .bionic tree as the chosen root" \
-  "$R5C	chosen" "$R5C_CHOSEN"
-R5C_NESTED="$(printf '%s\n' "$OUT" | grep -F "$R5CN")"
-expect_contains "…while the nested repo appears as an ancestor that was considered" \
-  "candidate" "$R5C_NESTED"
-expect_absent "…and the walk is not mistaken for a decision" "decision=" "$OUT"
+expect_eq "the nested-repo topology reads the workspace's root: QUIET on an absent roster (exit 0)" "0|1" \
+  "$RC|$(printf '%s\n' "$OUT" | grep -c 'QUIET — engaged, nothing dispatched yet')"
 
 
 # ============================================================
-section "Section 6: the Patrol stamp — the arm verb, and stamp-before-decide on every tick"
+section "Section 6: a keyless tick refuses and writes nothing"
 # ============================================================
-#
-# WHAT THE STAMP MEASURES, and the whole reason it is written where it is written.
-# The stamp is the Patrol's liveness signal: a session-keyed file beside the roster whose
-# AGE says how long ago the Patrol last fired. hooks/dispatch-preflight.sh refuses a
-# dispatch when it is absent (never armed) or older than 2x the poker-interval
-# (armed-but-dead). That makes WHEN the stamp is written a correctness property, not a
-# detail: it is written the MOMENT the machinery runs, before the roster is read and
-# before any decision is reached. A stamp written only on a successful decision would
-# measure decisions-succeeding rather than firings-landing — and this wave's own
-# orchestrator session produced 10+ healthy-but-REFUSED pre-roster ticks during one long
-# interview, every one of which would have aged the stamp toward a false refusal of the
-# next dispatch.
-#
-# `arm` exists for the other end of the same asymmetry: arming precedes dispatch by
-# design (doctrine: arm at engagement, never on dispatch), so the first stamp cannot come
-# from a tick that has a roster to read. Without the verb the wall is a chicken-and-egg.
-
-# `stamp_of`, `armed_of` and `bound_ago` are defined with the other fixture builders above:
-# Section 3's DISARM cases need them, and a definition here would be too late for those.
 mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
-
-# ---------- the arm verb ----------
-R6="$(make_repo s6-arm)"
-# Deliberately NO new_roster: arming happens at engagement, before anything is dispatched.
-poke "$R6" arm
-expect_eq "arm succeeds with no roster in existence at all (exit 0)" "0" "$RC"
-if [ -f "$(stamp_of "$R6")" ]; then
-  ok "arm writes the session-keyed stamp beside the roster"
-else
-  no "arm writes the session-keyed stamp beside the roster" "no file at $(stamp_of "$R6")"
-fi
-S6_BODY="$(cat "$(stamp_of "$R6")" 2>/dev/null)"
-expect_contains "the stamp carries its own schema" "patrol-stamp/v1" "$S6_BODY"
-expect_contains "…and names the session it answers for" "session=$SID" "$S6_BODY"
-expect_contains "…and records which verb wrote it" "verb=arm" "$S6_BODY"
-
-# The stamp is machine-local state under .bionic/tmp, exactly like the roster and the
-# attestation, and gets the same mode.
-expect_eq "the stamp is owner-only, like every other .bionic/tmp record" "600" \
-  "$(stat -f '%OLp' "$(stamp_of "$R6")" 2>/dev/null || stat -c '%a' "$(stamp_of "$R6")" 2>/dev/null)"
-
-OUT="$( cd "$R6" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" arm 2>&1 )"; RC=$?
-expect_eq "arm without a session key refuses (exit 3) — a stamp answers for ONE session" "3" "$RC"
-
-# ---------- stamp-before-decide: the REFUSED tick still stamps ----------
-#
-# The no-roster refusal (Section 5's ap review A-1 case) is the strongest available
-# witness for ordering: the tick exits 2 having decided nothing, so a stamp on disk
-# afterwards can only have been written before the roster was reached.
-R6B="$(make_repo s6-refused-tick)"
-poke "$R6B" tick
-expect_eq "a pre-roster tick still REFUSES (exit 2)" "2" "$RC"
-if [ -f "$(stamp_of "$R6B")" ]; then
-  ok "…and it stamped anyway: liveness is firings landing, not decisions succeeding"
-else
-  no "…and it stamped anyway: liveness is firings landing, not decisions succeeding" \
-      "no file at $(stamp_of "$R6B")"
-fi
-expect_contains "the refused tick's stamp records the verb that wrote it" "verb=tick" \
-  "$(cat "$(stamp_of "$R6B")" 2>/dev/null)"
-
-# A tick refused for a DIFFERENT reason stamps too — the no-session-key refusal is the one
-# exception, and it is the right one: without the key there is no stamp path to write.
 R6C="$(make_repo s6-nokey)"
 OUT="$( cd "$R6C" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" tick 2>&1 )"; RC=$?
 expect_eq "a keyless tick refuses (exit 3)" "3" "$RC"
-# THE PROBE NAMES THE STAMP rather than counting files: `.bionic/tmp` is not empty before
-# the tick runs any more, because the engagement marker lives there. What the assertion
-# always meant — no session-keyed file was written by a run that had no session key — is
-# what it now asks.
+# `.bionic/tmp` holds the engagement marker before the tick runs: no other file may appear.
 R6C_WROTE="$(ls "$R6C/.bionic/tmp/" 2>/dev/null | /usr/bin/grep -v "^engaged-$SID.state$" || true)"
 if [ -n "$R6C_WROTE" ]; then
-  no "…and writes no stamp: a session-keyed file needs a session key" \
+  no "…and writes nothing: a session-keyed file needs a session key" \
       "wrote: $R6C_WROTE"
 else
-  ok "…and writes no stamp: a session-keyed file needs a session key"
-fi
-
-# ---------- a healthy tick REFRESHES a stale stamp ----------
-R6D="$(make_repo s6-refresh)"; new_roster "$R6D"
-add_row "$R6D" name=live-one deliverable=out.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-poke "$R6D" arm
-backdate "$(stamp_of "$R6D")" 4000
-poke "$R6D" tick
-S6_AGE=$(( $(date +%s) - $(mtime_of "$(stamp_of "$R6D")") ))
-if [ "$S6_AGE" -lt 120 ]; then
-  ok "a tick refreshes the stamp it found stale"
-else
-  no "a tick refreshes the stamp it found stale" "age is still ${S6_AGE}s"
-fi
-
-# ---------- the stamp follows the PINNED root, exactly as the roster does ----------
-# Same worktree hazard Section 5 drove for the roster: a stamp written under a worktree
-# root while dispatch-preflight reads the main repository's would make the wall refuse a
-# perfectly live Patrol, permanently and silently.
-R6E="$(make_repo s6-worktree)"
-( cd "$R6E" && git add -A 2>/dev/null; git -c user.email=t@e -c user.name=T commit -qm seed --allow-empty ) >/dev/null 2>&1
-R6EWT="$TMPROOT/s6-worktree-wt"
-( cd "$R6E" && git worktree add -q -b s6-wt "$R6EWT" ) >/dev/null 2>&1
-if [ -d "$R6EWT" ]; then
-  poke "$R6EWT" arm
-  if [ -f "$(stamp_of "$R6E")" ]; then
-    ok "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp"
-  else
-    no "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp" \
-        "not at $(stamp_of "$R6E"); worktree has: $(ls "$R6EWT/.bionic/tmp" 2>/dev/null)"
-  fi
-  ( cd "$R6E" && git worktree remove --force "$R6EWT" ) >/dev/null 2>&1
-else
-  ok "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp (skipped: no worktree)"
+  ok "…and writes nothing: a session-keyed file needs a session key"
 fi
 
 # HOISTED to tests/session-poker.prelude.sh: fake_config_dir — Sections 41 and 43–45 build config dirs with it.
@@ -575,7 +457,7 @@ section "Section 7: window — the roster's own birth, read by the Patrol librar
 # ============================================================
 #
 # lib/patrol.sh `patrol_window <repo> <sid>` dates THIS roster's own record of the session for doctor's counters: the
-# roster's creation instant, else the Patrol stamp's when no roster is there, else nothing. BIRTH, NEVER MTIME: the
+# roster's creation instant, else nothing. BIRTH, NEVER MTIME: the
 # roster is append-only, so an mtime a day ahead must not move the answer. The mtime is advanced, never backdated: on
 # APFS `touch -t` to an instant before a file's birth lowers `st_birthtime` with it, so a backdating probe would move
 # the very quantity it holds still. The expected instant is recomputed here, never read through the code under test.
@@ -596,11 +478,8 @@ else
   expect_ne "the mtime really did move a day off the birth instant" "$S7B_EXPECT" \
     "$(date -u -r "$(mtime_of "$(roster_of "$R7B")")" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$(mtime_of "$(roster_of "$R7B")")" +%Y-%m-%dT%H:%M:%SZ)"
   expect_eq "…and the window does not move with it: the roster is append-only" "$S7B_EXPECT" "$(s7_win "$R7B" "$SID")"
-  R7E="$(make_repo s7-stamp-only)"; poke "$R7E" arm
-  expect_eq "no roster, an armed stamp: the window is the stamp's creation instant" \
-    "0|$(s7_birth_iso "$(stamp_of "$R7E")")" "$RC|$(s7_win "$R7E" "$SID")"
   R7F="$(make_repo s7-nothing)"
-  expect_eq "neither roster nor stamp: no window, and nothing written beside the engagement" "|" \
+  expect_eq "no roster: no window, and nothing written beside the engagement" "|" \
     "$(s7_win "$R7F" "$SID")|$(ls "$R7F/.bionic/tmp" 2>/dev/null | /usr/bin/grep -v "^engaged-$SID.state$")"
 fi
 
