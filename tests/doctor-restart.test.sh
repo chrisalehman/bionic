@@ -336,11 +336,19 @@ run_watch() {  # [env assignment...] -> WRC, WERR (stderr), WOUT; bounded at 60 
   if kill -0 "$p" 2>/dev/null; then kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; WRC=124; else wait "$p" 2>/dev/null; WRC=$?; fi
   WOUT="$(cat "$TMP/watch.out")"; WERR="$(cat "$TMP/watch.err")"
 }
+# THE RUN SETTLES FIRST, with no restart owed: the session runs its checkout in place, which did not move. Watchers run
+# until one ends quietly at its limit, so the print the next pass reads is unchanged and only the watcher's own read of
+# the restart can wake it.
 write_installed_plugins "$NEW"
-write_record "$SID_LIVE" "$OLD"
-expect_match "WAT-0 precondition: the reader names this session's restart" "*${SID_LIVE}*skills*" "$(run_lines)"
+write_record "$SID_LIVE" "$OLD" "0123456789abcdef0123456789abcdef01234567"
+expect_empty "WAT-0 precondition: no restart owed yet" "$(run_lines)"
 TICK6="$(run_tick)"
-expect_match "WAT-0b …and the tick prints it, so the next print over the same run is unchanged" "*restart needed*" "$TICK6"
+expect_match "WAT-0a …the tick ran in the fixture" "*poker-tick/v1|*" "$TICK6"
+for _w in 1 2 3; do run_watch BIONIC_WATCH_DEADLINE=3; [ "$WRC|$WERR" = "0|" ] && break; done
+expect_eq "WAT-0b …and a watcher over the settled run ends quietly at its limit" "0|" "$WRC|$WERR"
+write_record "$SID_LIVE" "$OLD"
+expect_match "WAT-0c now the session loaded the installed 1.0.0 and the registry names 1.1.0: a restart is owed" \
+  "*${SID_LIVE}*skills*" "$(run_lines)"
 run_watch
 expect_eq "WAT-1 a restart needed and nothing else moving: the watcher exits with the wake code" "2" "$WRC"
 expect_match "WAT-1a …its one line tells the model to have the person restart" "bionic watch: restart - *exit claude*" "$WERR"
