@@ -410,4 +410,15 @@ expect_eq "19a the reader finds the one missing suite a header names, and not th
   "$(hd_missing "$HD_PLANT" "$REPO")"
 expect_eq "19b this suite's own header names no suite that is missing" "" "$(hd_missing "$REPO/tests/render.test.sh" "$REPO")"
 
+section "20 — the method names the watcher and no timed job, and step 8 lists the library's state classes"
+W_ALL="$(cd "$REPO" && cat skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/dispatch.md skills/canonical-sdlc/steps/*.md agents-src/blocks/orchestrator-dispatch.md agents-src/templates/skills/canonical-sdlc/*.tmpl agents-src/templates/skills/canonical-sdlc/steps/*.tmpl)"
+expect_contains "20a the pages are read, and name the watcher's hook" "hooks/watch.sh" "$W_ALL"
+expect_eq "20b …and none tells anyone to create, stamp or delete a timed job" "0" \
+  "$(printf '%s\n' "$W_ALL" | grep -cE 'Cron(Create|Delete|List)|bionic-patrol|re-arm|session-poker\.sh (arm|disarm)|[Pp]atrol stamp|the stamp|arming wall')"
+W_CLS="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$REPO/payload/scripts/lib/patrol.sh" | tr ' ' '\n' | sed 's/.*/`&`/' | paste -sd/ -)"
+expect_nonempty "20c the library's class list is read" "$W_CLS"
+for _w_f in skills/canonical-sdlc/steps/8.md agents-src/templates/skills/canonical-sdlc/steps/8.md.tmpl; do
+  expect_contains "20d $_w_f lists the classes as the library does" "$W_CLS" "$(cat "$REPO/$_w_f")"
+done
+
 finish

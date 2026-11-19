@@ -1719,11 +1719,11 @@ EOF
           continue
         fi
         # A SYMLINK IS NOT A FILE THIS SCRIPT WROTE, so it is refused rather than followed
-        # and left in place rather than unlinked — the identical posture `remove_patrol_stamp`
-        # takes, and for the identical reason: every reader in the fleet already treats a
-        # symlinked state file as absent, so there is nothing to clear, and a hostile repo
-        # must not gain a delete through a path it aimed. Everything else is queued for the
-        # ONE bulk delete below, never removed here one fork at a time.
+        # and left in place rather than unlinked, for the reason every reader in the fleet
+        # shares: a symlinked state file is already treated as absent, so there is
+        # nothing to clear, and a hostile repo must not gain a delete through a path it
+        # aimed. Everything else is queued for the ONE bulk delete below, never removed
+        # here one fork at a time.
         if [ -L "$SWEEP_F" ]; then
           SWEEP_REFUSED=$((SWEEP_REFUSED + 1))
           SWEEP_LINES="${SWEEP_LINES}  refused (symlink or not a file, left alone): $SWEEP_F
