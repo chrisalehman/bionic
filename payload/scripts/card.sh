@@ -2371,10 +2371,8 @@ _card_stem() {  # <path> -> the name without `.<kind>.md`: wave-01-x.plan.md -> 
 # the runner inherits it, and a fixture's card would then open nothing for any writer who ran that suite.
 # A render that reopened any of these put "Blocked on you" on the sitrep for an answer already given.
 _card_writer() {  # -> 0 when the working tree is a linked tree marked with a dispatched writer's name
-  local out common gitdir
-  out="$(git rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 1
-  { IFS= read -r common; IFS= read -r gitdir; } <<< "$out"
-  [ -n "$gitdir" ] && [ "$gitdir" != "$common" ] && [ -s "$gitdir/bionic-agent" ]
+  local gitdir
+  gitdir="$(git_linked_dir "$PWD")" && [ -s "$gitdir/bionic-agent" ]
 }
 _card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or the renderer is a writer
   local facts

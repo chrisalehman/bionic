@@ -1305,7 +1305,11 @@ _proof_read_dirty() {  # <evidence> <dirty count>
 _proof_records() {
   local co="$1" rec="${2:-}" gd f
   _proof_fields || return 0
-  gd="$(cd "$co" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
+  gd=""
+  if [ -d "$co" ]; then
+    declare -F git_common_dir >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/root.sh" >/dev/null 2>&1
+    gd="$(git_common_dir "$co" 2>/dev/null)"
+  fi
   { if [ -n "$rec" ]; then line_lines "$rec"; fi
     if [ -n "$gd" ]; then for f in "$gd/bionic-stamps" "$gd"/worktrees/*/bionic-stamps; do
       [ -f "$f" ] && cat "$f"; done; fi; } 2>/dev/null | awk -F'|' "$_LINE_FIELDS_AWK"'

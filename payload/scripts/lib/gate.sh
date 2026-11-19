@@ -456,6 +456,15 @@ _gate_holder() {
   } > "$_GD/requests/.$1.tmp" && mv "$_GD/requests/.$1.tmp" "$f"
 }
 
+# _gate_common_dir <dir> — the repository's common git directory, from lib/root.sh's one resolver, which this
+# library loads the first time it is asked; rc 1 and nothing for a <dir> that is no directory or sits in no
+# repository, as a `cd` into it and a `git` there answered.
+_gate_common_dir() {
+  [ -d "${1:-}" ] || return 1
+  declare -F git_common_dir >/dev/null 2>&1 || . "$_GATE_LIB_DIR/root.sh" >/dev/null 2>&1 || return 1
+  git_common_dir "$1"
+}
+
 # _gate_project [<dir>] — the project key of the checkout at <dir> (default: here), eight hex
 # digits (wave-33 T1; D4, AC-8.6): the POSIX `cksum` of the repository's common git directory,
 # resolved, so the main checkout and every worktree of one repository are one project and keep
@@ -466,7 +475,7 @@ _gate_holder() {
 _gate_project() {
   local d="${1:-}" c crc
   [ -n "$d" ] || d="$(pwd -P)"
-  c="$(cd "$d" 2>/dev/null && g="$(git rev-parse --git-common-dir 2>/dev/null)" && cd "$g" 2>/dev/null && pwd -P)" || c=''
+  c="$(_gate_common_dir "$d")" || c=''
   [ -n "$c" ] || c="$(cd "$d" 2>/dev/null && pwd -P)" || c=''
   [ -n "$c" ] || c="$d"
   crc="$(printf '%s' "$c" | cksum)"; crc="${crc%%[!0-9]*}"
@@ -951,17 +960,18 @@ _gate_store() {  # sets _GD and makes the store; rc 2, one line, when it cannot 
 # set, else the marker of the tree the ask is made in, else `main`. The main checkout's git directory
 # is the common one, which no writer owns, so a marker there is never read.
 #
-# ONE GIT CALL AN ASK, AT MOST. The common directory (where the roster is), the tree's own git
-# directory (the marker) and its top level (the request's tree=) come from one `git rev-parse`,
-# asked when one of them is first needed and kept for the rest of the ask, so the call that always
-# named the request's tree now names who asks as well.
+# ONE PLACE AN ASK, AT MOST. The common directory (where the roster is) is lib/root.sh's `git_common_dir`;
+# the tree's own git directory (the marker) and its top level (the request's tree=) come from one
+# `git rev-parse`. All are asked when one of them is first needed and kept for the rest of the ask, so the
+# call that always named the request's tree now names who asks as well.
 _GATE_PLACED=0 _GATE_COMMON="" _GATE_GITDIR="" _GATE_TREE="" _GATE_AGENT=""
 _gate_place() {  # once an ask: _GATE_COMMON, _GATE_GITDIR, _GATE_TREE, each empty where git cannot say
   local out
   [ "$_GATE_PLACED" != 1 ] || return 0
   _GATE_PLACED=1 _GATE_COMMON="" _GATE_GITDIR="" _GATE_TREE=""
-  out="$(git rev-parse --path-format=absolute --git-common-dir --git-dir --show-toplevel 2>/dev/null)"
-  { IFS= read -r _GATE_COMMON; IFS= read -r _GATE_GITDIR; IFS= read -r _GATE_TREE; } <<< "$out"
+  _GATE_COMMON="$(_gate_common_dir "$PWD")" || _GATE_COMMON=""
+  out="$(git rev-parse --path-format=absolute --git-dir --show-toplevel 2>/dev/null)"
+  { IFS= read -r _GATE_GITDIR; IFS= read -r _GATE_TREE; } <<< "$out"
   return 0
 }
 _gate_who() {  # sets _GATE_AGENT: the name carried, else the tree's marker, else main

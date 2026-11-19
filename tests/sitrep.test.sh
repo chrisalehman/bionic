@@ -681,6 +681,35 @@ expect_eq "WA5 no note counts what it leaves out (WA1 read the notes of the same
   "$(sr_tasks_f note | /usr/bin/grep -cE ' \+[0-9]+$')"
 
 # ============================================================
+section "§PR-WAIT: with the pull request open and no landing, the sheet names it as what the run waits on and the reader's ready set is empty"
+# ============================================================
+# fails-when: the sheet of a run whose request stands says nothing of it, or the reader still offers the integrate row
+# as ready. Every row but the integrate row has landed, step 8 is current, the regression and the reviews stand, so with
+# no request the integrate row is ready and with one it is not.
+SR_REPLY_R="$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh"
+sr_world prwait "6 6 12 12"
+for sr_i in 5 6 7 8 9 10 11 12 13 14 15 16 17; do sr_state "T$sr_i" landed; done
+awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | 10 | REQ-1 | lib/t18.sh | — |"; next } { print }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=step|n=8|at=2026-10-06T21:00:00Z"
+sr_ev "ev=proof|kind=regression|head=$SR_C1|rc=0|at=2026-10-06T21:10:00Z"
+sr_ev "ev=proof|kind=review|head=$SR_C1|rc=0|result=pass|at=2026-10-06T21:11:00Z"
+sr_ready() { bash "$SR_REPLY_R" "$SR_PLAN" stop 2>&1 | sed -n 's/^ready=//p'; }
+sr_run "$SR_PLAN"
+expect_eq "PW0 control: no request is recorded, so the reader offers the integrate row and the sheet's note names no pull request" "T18|0" \
+  "$(sr_ready)|$(sr_f "$(sr_task T18)" note | /usr/bin/grep -c 'pull request')"
+sr_ev "ev=published|part=pr|url=https://example.invalid/pull/1|branch=wave/02-fx|commit=$SR_C1|base=main|by=publish|at=2026-10-06T21:30:00Z"
+sr_run "$SR_PLAN"
+expect_eq "PW1 the request open: the sheet's integrate row names it, and the merge as the person's" \
+  "waits on your merge of the pull request https://example.invalid/pull/1" "$(sr_f "$(sr_task T18)" note)"
+expect_eq "PW2 …the reader's ready set is empty (PW0 read it through the same question)" "" "$(sr_ready)"
+expect_eq "PW3 …and the row has not landed: the sheet counts it open, pending" "pending" "$(sr_f "$(sr_task T18)" state)"
+sr_ask_ev "key=pr-closed:wave:02-fx|sent=-|title=the pull request was closed unmerged|at=2026-10-06T21:40:00Z"
+sr_run "$SR_PLAN"
+expect_eq "PW4 the host closed it unmerged (its ask open): the sheet no longer says the run waits on that request (PW1 named it before)" "0" \
+  "$(sr_f "$(sr_task T18)" note | /usr/bin/grep -c 'pull request')"
+
+# ============================================================
 section "§KINDS: an unruled matrix row (row:) and an unread ruling (ruling:) open on the register are asks on the sheet"
 # ============================================================
 # fails-when: either is open and missing from the sheet.
