@@ -255,6 +255,7 @@ mk_fixture() {
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
   )
   co_page15 "$p"
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   plant_facts "$p"
   seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"

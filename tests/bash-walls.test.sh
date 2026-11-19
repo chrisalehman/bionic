@@ -689,6 +689,9 @@ aw_put() {  # <current> <rigor> -> AW_P, the run at 15 bound to this session, it
   sed -i.bak -e "s/^rigor: .*/rigor: $2/" -e "s/^base-sha: .*/base-sha: $H_AW\\
 adrs: none — no decision this run/" -e 's/| AC-1\.1 | hermetic |/| AC-1.1 | human |/' "$AW_P"
   rm -f "$AW_P.bak"
+  # The rewrite is the world as planted, made after plan_fixture sealed it: sealed here, or the appender's first
+  # proof line keeps it as a changed plan.
+  seal_fixture "$AW_P"
   aw_ev kind=regression "head=$H_AW" evidence=record/floor.log
   for q in evidence:piece adversarial:piece structure:piece adversarial:whole structure:whole; do
     aw_ev kind=review "head=$H_AW" evidence=record/generic-evidence.md "question=${q%:*}" reader=w-read result=pass "scope=${q#*:}"

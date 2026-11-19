@@ -41,6 +41,7 @@ inh_place "$PINH" "$(inh_line a.test.sh "$INH_H")"
 inh_place "$PINH" "$(inh_line b.test.sh "$INH_H")"
 awk '/^## Tasks/ { print "```"; print "inherited: fenced.test.sh base=0123456789ab head=0123456789ab at=x evidence=y"; print "```"; print "" } { print }' \
   "$PINH/$PLAN_REL" > "$PINH/$PLAN_REL.f" && mv "$PINH/$PLAN_REL.f" "$PINH/$PLAN_REL"
+seal_fixture "$PINH/$PLAN_REL" "$PINH/$LOG_REL"
 run_close "$PINH" run
 expect_eq "INH-1 run closes the plan (rc 0)" "0" "$CO_RC"
 expect_eq "INH-2b …the section is the run's two debts, in order, and not the fenced line" \
@@ -119,6 +120,7 @@ gov_at() {
   case "$1" in "$SANDBOX"/*) : ;; *) echo "gov_at: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   awk -v h="run/v1|$2|" -v a="$3" 'index($0, h) == 1 { sub(/\|at=[^|]*/, "|at=" a) } { print }' "$1/$LOG_REL" > "$1/gov.log" \
     && mv "$1/gov.log" "$1/$LOG_REL"
+  seal_fixture "$1/$PLAN_REL" "$1/$LOG_REL"
 }
 gov_section() { awk '/^## / { s = ($0 == "## Governed by"); next } s && NF && !/^```/ { print }' "$1"; }
 gov_card() { printf '%s\n' "$CO_OUT" | /usr/bin/grep '^governed-by: '; }
@@ -213,6 +215,7 @@ roster_row_fixture status=identified session="$HK_PRED" name=w-ad agent_id=ad pl
 { printf 'run/v1|ev=published|row=T9|commit=%s|kind=hand|by=Chris|why=no Lands-on could be read|at=2026-10-06T10:40:00Z\n' "$(printf 'd%.0s' $(seq 40))"
   for r in r1 r2; do printf 'run/v1|ev=hand|by=Chris|name=w-%s|run=%s|what=stop-run|why=hung on a closed pipe|at=2026-10-06T10:5%s:00Z\n' "$r" "$r" "${r#r}"; done
 } >> "$HK_P/.bionic/docs/record/wave-01-fixture/run.log"
+seal_fixture "$HK_PLAN" "$HK_P/$LOG_REL"
 hk_poke() { ( in_fixture "$HK_P" || exit 9; HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
   CLAUDE_CODE_SESSION_ID="$HK_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" ) >> "$SANDBOX/hk-poker" 2>&1; HK_RC="$HK_RC$?"; }
 hk_poke amend w1 --files+ lib/z.sh --reason 'the brief missed lib/z.sh'; hk_poke hold w1 'kept for a second pass'
@@ -221,6 +224,7 @@ expect_regex "HK-0 precondition: amend, hold and extend exit 0, adopt 0 or 1 (op
 # a move to fixed is placed against its row's first landing that names its kind, as every landing the line writes does
 awk -v c="$(printf 'e%.0s' $(seq 40))" 'index($0, "run/v1|ev=published|row=T1|at=") == 1 { sub(/\|at=/, "|commit=" c "|kind=queue|by=-|why=-|at=") } { print }' \
   "$HK_P/.bionic/docs/record/wave-01-fixture/run.log" > "$HK_P/hk.log" && mv "$HK_P/hk.log" "$HK_P/.bionic/docs/record/wave-01-fixture/run.log"
+seal_fixture "$HK_PLAN" "$HK_P/$LOG_REL"
 bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; LOG_AT=2026-10-06T14:00:00Z proof_finding_event "$2" ref=record/wave-01-fixture/rev.md#1 to=fixed row=T1 "by=Chris Lehman"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$HK_PLAN"
 # the run has landed build rows, so the count is over the window from the last of them, and says what it left out
@@ -314,6 +318,7 @@ lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (ste
   release_approved "$1"
   awk '{ print } /^\| T2 \|/ { print "| T3 | 8 | integrate | merge the wave into main | — | 10 | AC-1 | none | — |"
     print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-1 | none | — |" }' "$plan" > "$plan.l" && mv "$plan.l" "$plan"
+  seal_fixture "$plan" "$1/$LOG_REL"
 }
 LP_OUT=""; LP_RC=0
 lands_poker() {  # <project> <sid> <verb> [<operand>…] -> LP_OUT (stdout and stderr), LP_RC
@@ -338,6 +343,7 @@ lands_pub() {  # <project> <id> -> the row's published events in its run's log, 
 LA_SID="closeout-lands-sid"
 PLA="$(mk_fixture lands)"; advance_to "$PLA" 8; lands_rows "$PLA"
 awk '{ print } /^\| T4 \|/ { print "| T5 | 8 | integrate | a second merge | — | 10 | AC-1 | none | — |" }' "$PLA/$PLAN_REL" > "$PLA/t5" && mv "$PLA/t5" "$PLA/$PLAN_REL"
+seal_fixture "$PLA/$PLAN_REL" "$PLA/$LOG_REL"
 LA_MAIN="$(fixture_git "$PLA" rev-parse --verify -q main)"
 lands_bind "$PLA" "$LA_SID"
 expect_eq "LANDS-0 precondition: the session is bound (the verb said so), and T3 and T4 read pending" "0|pending|pending" \
@@ -410,6 +416,7 @@ park_fixture() {
     fenced) printf '\n```\n## Wake Note\n\nwaits\n```\n' >> "$p/$PLAN_REL" ;;
     title) printf '\n## Wake Note — %s\n' "$PK_WHY" >> "$p/$PLAN_REL" ;;
   esac
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"
 }
 # pk_handoff <project> -> the handoff document the run's log names
@@ -577,6 +584,7 @@ sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals
       bash -c '. "$1/run.sh" && . "$1/owed.sh" && if [ "$2" = 1791287281 ]; then owed_open approve:release "approval: release" "approve release"; else owed_close approve:release "release approval reply"; fi' \
       _ "$REPO_ROOT/payload/scripts/lib" "$e"
   done
+  seal_fixture "$plan" "$rec/run.log"
 }
 SC_TAIL='human-wait minutes: 12 · no target (the user'"'"'s)'
 PSC="$(mk_fixture scorecard1)"; advance_to "$PSC" 8
@@ -616,7 +624,7 @@ section "§APPROVED-HEAD — in the release order, close-out refuses a working h
 PAH="$(mk_fixture approved-head)"; awk '{ print } /^\| T2 \|/ { print "| T3 | 5 | test | the whole regression | — | 10 | AC-1 | — | — |"; print "| T4 | 7 | doc | the release | — | 10 | AC-1 | CHANGELOG.md | — |" }' "$PAH/$PLAN_REL" > "$PAH/$PLAN_REL.r" && mv "$PAH/$PLAN_REL.r" "$PAH/$PLAN_REL"
 printf 'run/v1|ev=published|row=%s|at=2026-10-04T12:30:00Z\n' T3 T4 >> "$PAH/$LOG_REL"; advance_to "$PAH" 8
 AH_B="$(fixture_git "$PAH" rev-parse wave/01-fixture)"; AH_A="$(fixture_git "$PAH" rev-parse wave/01-fixture^)"
-ah_appr() { printf 'run/v1|ev=approval|key=release|by=Dana Fixture|head=%s|said=Ship it.|at=2026-10-12T14:0%s:00Z\n' "$1" "$2" >> "$PAH/$LOG_REL"; }
+ah_appr() { printf 'run/v1|ev=approval|key=release|by=Dana Fixture|head=%s|said=Ship it.|at=2026-10-12T14:0%s:00Z\n' "$1" "$2" >> "$PAH/$LOG_REL"; seal_fixture "$PAH/$PLAN_REL" "$PAH/$LOG_REL"; }
 ah_appr "$AH_A" 0; AH_CK0="$(cksum < "$PAH/$PLAN_REL")"; run_close "$PAH" run
 expect_eq "AH-C1 approved at A, the working head B with code past A: run refuses (rc 2) naming both heads, the plan unchanged" \
   "2|yes|$AH_CK0" "$CO_RC|$(contains "$CO_OUT" "the working head ${AH_B:0:12} is not the head the user approved for release, ${AH_A:0:12}")|$(cksum < "$PAH/$PLAN_REL")"
@@ -689,6 +697,7 @@ rv_fixture() {  # <name> <yes|no: the entry carries a hand-written ### The revie
   wt="$p-wave"
   awk '{ print } /^adrs: none$/ && !d { print "release: 9.9.9"; d = 1 }' "$p/$PLAN_REL" > "$p/$PLAN_REL.r" \
     && mv "$p/$PLAN_REL.r" "$p/$PLAN_REL"
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   {
     printf '# Changelog\n\n## 9.9.9 — 2026-10-22\n\nThe prose a person wrote.\n\n'
     [ "$2" = no ] || printf '### The reviews\n\n- a hand-written line the render replaces\n\n'
@@ -832,6 +841,7 @@ printf 'release-check: bash tests/lib/release-check.sh\n' >> "$PBP/.bionic/confi
 rv_event "$PBP" proof_event 2026-10-05T10:00:00Z kind=check "head=$BP_H" evidence=record/wave-01-fixture/release-check.log
 printf '# T3: the pull request\n\n    gh pr create --base main --head wave/01-fixture --fill\n' > "$BP_REC/T3-pr.md"
 sed -i '' -E '/^\| T3 \|/s#\| none \|#| .bionic/docs/record/wave-01-fixture/T3-pr.md |#' "$PBP/$PLAN_REL"
+seal_fixture "$PBP/$PLAN_REL" "$PBP/$LOG_REL"
 BP_ROW="$(/usr/bin/grep '^| T3 |' "$PBP/$PLAN_REL")"
 expect_eq "BP-0 precondition: the session is bound, the integrate row names its record, and the judge reads the check at the release head" \
   "0|pending|0|covered" "$LP_RC|$(lands_state "$PBP" T3)|$(bp_judge "$PBP" "$BP_H")"
@@ -904,6 +914,7 @@ tl_world() {  # <name> -> the project built as above, echoed
   printf 'run/v1|ev=finding|ref=record/wave-01-fixture/structure-flag.md#1|to=fixed|row=T1|by=Fixture|at=2026-10-06T14:00:00Z\n' >> "$p/$LOG_REL"
   printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=a.log|admitted=-|width=1|at=2026-10-06T10:20:00Z\n' "$h" \
     >> "$p/$LOG_REL"
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"
 }
 run_close "$(tl_world two-lines)" check
@@ -927,6 +938,7 @@ printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$RO
 printf '# page\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=%s|decisions=1\n' "$RO_PLAN" "$RO_C" "$(ro_ago 10)" > "$RO_REC/release-approval-eeeeeeee.md"
 printf 'run/v1|ev=stop|session=fixture|turn=|current=8|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|at=%s\n' "$(ro_ago 5)" >> "$RO_REC/run.log"
 printf 'run/v1|ev=hand|by=fixture|name=w-ro|what=amend|why=widen the files|at=%s\n' "$(ro_ago 5)" >> "$RO_REC/run.log"
+seal_fixture "$RO_PLAN" "$RO_REC/run.log"
 expect_contains "RO-0 precondition: before close-out a window opening before both acts reads them" \
   "declines=1 · lifts=0 · amends=1 " "$(hh_report "$RO_P" --hand-holds --since "$(ro_ago 15)" | grep '^hand-holds: ')"
 run_close "$RO_P" run
@@ -995,7 +1007,7 @@ oc_rows() {  # <project> -> the page gains T4 (step 9, close) and two Eval desig
     sec == "Eval design" && /^\| .* \| AC-1 \|/ { print $0 " — |"
       print "| — | fixture | AC-2 | T3 | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero | T4 |"
       print "| — | fixture | AC-3 | T0 | the continuation names the release | the continuation is missing | 9 |"; next }
-    { print }' "$plan" > "$plan.o" && mv "$plan.o" "$plan" && lands_bind "$1" "$OC_SID"
+    { print }' "$plan" > "$plan.o" && mv "$plan.o" "$plan" && seal_fixture "$plan" "$1/$LOG_REL" && lands_bind "$1" "$OC_SID"
 }
 oc_after() { find "$1/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1; }   # the plan where the close left it
 oc_ask() { bash "$REPO_ROOT/payload/scripts/reader.sh" "$@" 2>/dev/null; }   # <plan> <question> [args] -> the reader's answer
@@ -1041,6 +1053,7 @@ POB="$(mk_fixture owed-close-above)"; advance_to "$POB" 8; oc_rows "$POB"
 OB_REC="$POB/.bionic/docs/record/wave-01-fixture"
 printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$(printf 'e%.0s' $(seq 40))" "$(ro_ago 20)" >> "$OB_REC/run.log"
 printf 'run/v1|ev=hand|by=fixture|name=w-oc|what=amend|why=widen the files|at=%s\n' "$(ro_ago 5)" >> "$OB_REC/run.log"
+seal_fixture "$POB/$PLAN_REL" "$OB_REC/run.log"
 OB_EV0="$(oc_eval "$POB/$PLAN_REL")"
 run_close_as "$OC_SID" "$POB" run
 OB_LINE="$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
