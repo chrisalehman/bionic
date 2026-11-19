@@ -319,6 +319,32 @@ project_root() {
   return 0
 }
 
+# git_common_dir [dir] -> the repository's common git directory, absolute and symlink-resolved;
+# rc 1 and nothing printed when <dir> is in no repository.
+#
+# THE ONE RESOLVER of that directory. The common directory is the one every linked worktree of a
+# repository shares (`<main>/.git`), so a record kept there is seen alike from the main checkout
+# and from every tree, and no wipe of a project's own state reaches it. A tree's OWN git
+# directory (`<main>/.git/worktrees/<name>`) is the wrong answer for anything shared, and this
+# never gives it.
+#
+# A <dir> that does not exist yet is asked from its nearest existing ancestor, as
+# `_bionic_root_abs` resolves it, so a caller holding the path of a file already removed still
+# finds the repository it lived in. `--path-format=absolute` needs git 2.31; an older git either
+# refuses it or echoes it back as a line of its own, and either way the second ask, without it,
+# answers relative to <dir>.
+git_common_dir() {
+  local d c
+  d="$(_bionic_root_abs "${1:-$PWD}")"
+  c="$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || c=""
+  case "$c" in *$'\n'*) c="" ;; esac
+  if [ -z "$c" ]; then
+    c="$(git -C "$d" rev-parse --git-common-dir 2>/dev/null)" || return 1
+    case "$c" in ''|*$'\n'*) return 1 ;; /*) ;; *) c="$d/$c" ;; esac
+  fi
+  _bionic_root_abs "$c"
+}
+
 # ─── THE AUDIT STREAM: where a project's findings land, and who writes one ───
 #
 # ONE DEFINITION EACH, HERE, SINCE epic-23 wave-12-fixit-171 (REQ-8, spec D6). `audit_path`

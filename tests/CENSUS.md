@@ -1348,6 +1348,12 @@ run-predicate.test.sh | §R5 | keep | payload/scripts/lib/run.sh run_open: the s
 run-predicate.test.sh | §R6 | keep | payload/scripts/lib/run.sh open_runs: the ordering keyed on the discovery index instead of the mtime, so three open plans print in walk order; (R6g) goes red | none (searched 'open_runs' in tests/; engage.test.sh §E9 reads only the count and line 1 of two)
 run-predicate.test.sh | §R7 | keep | payload/scripts/lib/run.sh session_plan: the `none` arm deleted, so plan=none is reported as a binding to a plan named none; ("session_plan: plan=none -> exit 1") goes red | none (searched 'session_plan' in tests/; hook-adoption.test.sh greps engage.sh for the call)
 
+## run-seal.test.sh
+
+run-seal.test.sh | §HOME | keep | payload/scripts/lib/root.sh git_common_dir: `--git-dir` asked in place of `--git-common-dir`, so a linked worktree answers its own git directory and a seal written there is seen from one tree only (four rows go red) | none (searched 'git-common-dir' and 'git_common_dir' in tests/)
+run-seal.test.sh | §SEAL | keep | payload/scripts/lib/seal.sh seal_write: the check before the write deleted, so an honest write over a hand change seals it clean and the change is laundered (six rows go red); seal_verify: a road of a change misnamed, so the refusal says the wrong what or how | none (searched 'seal_' and 'bionic-seal' in tests/)
+run-seal.test.sh | §LOCK | keep | payload/scripts/lib/seal.sh _seal_lock: the lock deleted, so a held lock turns nothing away and eight racing appends leave the run read as changed (six rows go red) | none (searched '.reap' and 'seal_' in tests/; slots.test.sh drives the reap lock's take-over, not a wait bound)
+
 ## run.test.sh
 
 run.test.sh | §ORDER | keep | tests/run.sh: the check that asks the gate for the bound run's open order deleted, so a suite starts with an order standing (O2, O3, O6); lib/gate.sh gate_order_plan reading the plan's text, so an order the log alone holds starts it (O6); hooks/poker/plan.sh poker_verb_order writing the plan, so its sum moves (O1, O4) | none (searched 'order lift' and 'ev=order' in tests/; landing-line-1.test.sh drives the landing door's order, not the runner's)
