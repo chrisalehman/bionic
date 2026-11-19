@@ -939,38 +939,25 @@ expect_eq "CARRY-9b reply all default answers the page (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_absent "CARRY-10 the reply closes the answered finding (CARRY-8b read it open)" "$FC_FK" "$(fc_owed)"
 expect_contains "CARRY-10b …the register says the reply closed it" "|key=$FC_FK|state=closed|by=release approval reply|" "$(fc_reg)"
-# The carried count is the log's: a finding the card counts as carried has its deferral in the run's log, and one the
-# records alone carry is named, apart, in one line. FIXTURE FIDELITY: the five readings each carry one S3 the severity
-# table defers; three of them have the registration's deferral in the log (`proof_finding_event … to=deferred`, as
-# lib/proof.sh writes it), the evidence and adversarial pieces' have none, as a review registered before the writer
-# held them. fails-when: the card counts five carried and says nothing of the difference, or a line is written to the
-# log to make them agree.
+# Five readings carry an S3 each; the log holds the registration's deferral (lib/proof.sh's line) of three. fails-when:
+# the card counts five carried, says nothing of the two the records alone carry, or writes the log to make them agree.
 for fc_ck in evidence:evidence:piece adversarial:adversarial:piece structure:structure:piece adversarial-whole:adversarial:whole structure-whole:structure:whole; do
-  IFS=: read -r fc_n fc_q fc_s <<< "$fc_ck"
-  fc_record "$fc_n" "$fc_q" "$fc_s" "finding: 1 S3 off lib/x.sh:1 the $fc_n reading's wording could be clearer"
-done
-fc_ck_def() { printf 'run/v1|ev=finding|ref=record/wave-x/%s.md#1|severity=S3|reach=off|to=deferred|title=the %s wording|at=2026-10-12T12:10:00Z\n' "$1" "$1"; }
+  IFS=: read -r fc_n fc_q fc_s <<< "$fc_ck"; fc_record "$fc_n" "$fc_q" "$fc_s" "finding: 1 S3 off lib/x.sh:1 the $fc_n reading's wording could be clearer"; done
 fc_plan "$FC_GOOD
-$(fc_ck_def structure)
-$(fc_ck_def adversarial-whole)
-$(fc_ck_def structure-whole)"
-FC_CK_LOG="$(cat "$FC_REC/run.log")"
-expect_eq "CARRY-11 precondition: the reader lists three deferrals in the log" "3" \
-  "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" findings | /usr/bin/grep -c 'to=deferred')"
-fc_page --preview
+$(for fc_n in structure adversarial-whole structure-whole; do printf 'run/v1|ev=finding|ref=record/wave-x/%s.md#1|severity=S3|reach=off|to=deferred|title=the %s wording|at=2026-10-12T12:10:00Z\n' "$fc_n" "$fc_n"; done)"
+FC_CK_LOG="$(cat "$FC_REC/run.log")"; FC_CK_N="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" findings | /usr/bin/grep -c 'to=deferred')"
+fc_page --preview; FC_CK_H="$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Findings — ')"
 FC_CK_F="$(printf '%s\n' "$FC_OUT" | sed -n '/^Findings/,/^Decisions$/p' | fc_flat)"
-FC_CK_ONE="$(printf '%s\n' "$FC_OUT" | sed -n '/^Findings/,/^Decisions$/p' | /usr/bin/grep -F 'record/wave-x/evidence.md#1' | /usr/bin/grep -F 'record/wave-x/adversarial.md#1')"
-expect_eq "CARRY-12 the card renders (exit 0) and its Findings line counts the five and the log's three carried" "0|Findings — 5: 3 carried" \
-  "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Findings — ' | sed 's/ · .*//')"
-expect_absent "CARRY-12b …never five carried (CARRY-12 read the same line)" "5 carried" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Findings — ')"
-expect_eq "CARRY-13 one line names the two the records alone carry" "1" "$(printf '%s\n' "$FC_CK_ONE" | /usr/bin/grep -c .)"
-expect_contains "CARRY-13b …and says their standing is the records', with no deferral in the log" "no deferral in the run's log" "$FC_CK_ONE"
+FC_CK_ONE="$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oE "[A-Z][^:]*no deferral in the run's log: record/wave-x/(evidence|adversarial)\.md#1 and record/wave-x/(evidence|adversarial)\.md#1")"
+expect_eq "CARRY-11 the reader lists three deferrals; the card renders (exit 0) and counts five findings and the log's three carried" \
+  "3|0|Findings — 5: 3 carried" "$FC_CK_N|$FC_RC|${FC_CK_H%% · *}"
+expect_absent "CARRY-12 …never five carried (CARRY-11 read the same line)" "5 carried" "$FC_CK_H"
+expect_eq "CARRY-13 one line names the two the records alone carry, each named once in the section" "1|1|1" \
+  "$(printf '%s\n' "$FC_CK_ONE" | /usr/bin/grep -c .)|$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oF 'record/wave-x/evidence.md#1' | /usr/bin/grep -c .)|$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oF 'record/wave-x/adversarial.md#1' | /usr/bin/grep -c .)"
+expect_contains "CARRY-13b …and says their standing is their records', not the log's" "by their records alone" "$FC_CK_ONE"
 expect_contains "CARRY-13c …while a finding the log defers is still listed carried" "the structure reading's wording could be clearer" "$FC_CK_F"
-expect_eq "CARRY-14 the render wrote no line to the log to make the counts agree" "same" \
-  "$([ "$(cat "$FC_REC/run.log")" = "$FC_CK_LOG" ] && echo same || echo changed)"
-fc_record evidence evidence piece
-fc_record adversarial-whole adversarial whole
-fc_record structure-whole structure whole
+expect_eq "CARRY-14 the render wrote no line to the log to make the counts agree" "same" "$([ "$(cat "$FC_REC/run.log")" = "$FC_CK_LOG" ] && echo same || echo changed)"
+fc_record evidence evidence piece; fc_record adversarial-whole adversarial whole; fc_record structure-whole structure whole
 fc_typed "$FC_WD" "$FC_WR"
 fc_record structure structure piece
 fc_record adversarial adversarial piece "$FC_S3"
@@ -1106,19 +1093,14 @@ fc_owed_later T1
 fc_page --preview
 expect_contains "OL-4 control: the same row whose task is the Step-4 row is put under Decisions" "AC-1.3" "$(fc_under Decisions)"
 expect_absent "OL-4b …and the line names nothing owed by the close" "owed by the close" "$(fc_acc)"
-# The bottom line says every criterion is proved or waived only when the reader answers each one discharged: a row
-# owed by the close is pending, so the line names it as owed and speaks of the others alone. FC_GOOD with the row owed
-# by the close and the unrun row waived, so nothing is missed and the waived arm is the one the line would take.
-# fails-when: the bottom line reads "Every criterion is proved or waived by you." while the reader answers AC-1.3 pending,
-# or it does not name AC-1.3 as owed, here or beside a criterion not proved.
+# fails-when: the bottom line reads "Every criterion is proved or waived by you." while the reader answers AC-1.3, owed by
+# the close, pending, or it does not name AC-1.3 as owed, beside a criterion not proved or beside one waived.
 fc_owed_later T4
-fc_page --preview
-FC_OL_BL="$(fc_under 'Bottom line' | fc_flat)"
+fc_page --preview; FC_OL_BL="$(fc_under 'Bottom line' | fc_flat)"
 expect_contains "OL-5 beside a criterion not proved, the bottom line names the row owed by the close" "1 criterion owed by the close: AC-1.3." "$FC_OL_BL"
 fc_plan "$FC_GOOD
 run/v1|ev=waiver|ac=AC-1.2|evidence=record/generic-evidence.md|by=Dana Fixture|said=waive AC-1.2|at=2026-10-12T13:30:00Z" "" fc_ol_rows
-fc_page --preview
-FC_OL_BL="$(fc_under 'Bottom line' | fc_flat)"
+fc_page --preview; FC_OL_BL="$(fc_under 'Bottom line' | fc_flat)"
 expect_eq "OL-6 precondition: AC-1.2 waived, AC-1.3 owed by the close, and the reader answers AC-1.3 pending" \
   "0|1 waived by you, 1 owed by the close|waived|pending" "$FC_RC|$(fc_acc | sed 's/^.*; //')|$(fc_row AC-1.2)|$(fc_row AC-1.3)"
 expect_contains "OL-6b the bottom line names the criterion owed by the close" "1 criterion owed by the close: AC-1.3." "$FC_OL_BL"
