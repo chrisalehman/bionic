@@ -1344,6 +1344,55 @@ printed a reason above this line, that is the cause. The commit is still refused
   return 0
 }
 
+# wall_gate_judge <repo> <session> <step> <command> -> the evidence gate's verdict on <command>, a Bash call of
+# <session> run in <repo>, with <step> pending in the run's facts (BIONIC_DRY_STEP), judged in a subshell of the caller:
+# on stderr what hooks/bash-walls.sh prints on stderr for that call, and its exit. 0 when the gate admits it or the
+# session is not one the walls judge; 2 when it refuses. A caller that asks whether an advance would pass asks this in
+# place of feeding the whole wall a synthetic payload, so the fold its shell already holds (lib/proof.sh
+# `_proof_facts`) is read again by nothing, and no process is started for the ask.
+# THE FACTS ARE THE COLLECTOR'S. hooks/bash-walls.sh gathers what the gate reads (the context, the event, the open
+# debts and the readings' derived results of the bound plan) before it folds the walls; this sets each the same way
+# from the same predicates, in the same order, and nothing else. A fact gathered here and not there, or there and not
+# here, would be a second judgment of one commit: tests/release-approval.test.sh §ASKED holds this verdict to the whole
+# wall's for one dry commit, line for line. Only the gate is folded: the other walls judge a push, a database, a
+# suite, a memory path or a writer's ruling, and a `git commit` with no agent behind it is none of those.
+# The libraries the collector loads (context, fold, git-argv, refuse, root, run, session, units and this file) are
+# the caller's to load, in the subshell it asks from, so the caller's own state is not changed by the ask.
+wall_gate_judge() {
+  ( set -o pipefail
+    cd "$1" 2>/dev/null || exit 2
+    export BIONIC_DRY_STEP="$3" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$2" BIONIC_WALL_VERBOSE=1
+    COMMAND="$4"
+    BIONIC_INPUT="$(jq -n --arg s "$2" --arg cwd "$1" --arg c "$4" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+        tool_input: {command: $c}, tool_use_id: "toolu_planverb"}')" || exit 2
+    unset _BIONIC_JQ_STATE
+    bionic_context 2>/dev/null || exit 0
+    [ "$BIONIC_ENGAGED" = 1 ] || exit 0
+    EVENT=$(bionic_jq .hook_event_name)
+    [ -n "$EVENT" ] || EVENT="PreToolUse"
+    BIONIC_MEM_PROJECTS=""; BIONIC_WRITE_TARGETS=""
+    BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_ORIGIN=""; BIONIC_DEBTS_OPEN=""; BIONIC_READINGS=""
+    case "$COMMAND" in
+      *commit*)
+        if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ] && [ "$_EG_CWD_SRC" != moving ]; then
+          BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
+          BIONIC_DEBTS_ORIGIN="$BIONIC_DEBTS_PLAN"
+          if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_readings_derived >/dev/null 2>&1 && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"; then
+            BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" 2>/dev/null)" || BIONIC_READINGS=""
+          fi
+          local _wg_rec
+          if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_debt_record >/dev/null 2>&1 \
+             && _wg_rec="$(proof_debt_record "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT")"; then
+            BIONIC_DEBTS_OPEN="$(proof_debts_read "$_wg_rec")"
+          fi
+        fi ;;
+    esac
+    BIONIC_RULINGS_UNREAD=""; BIONIC_RULINGS_WRITER=""
+    bionic_fold "$EVENT" wall_evidence_gate >/dev/null
+  )
+}
+
 # Per-tier required evidence keys — ONE POINTER PER MATRIX ROW (wave-31 T6; REQ-5, D5). Every tier owes
 # `evidence:`, the AC block's proof path under record/; a T4 row owes `user-confirmed:` as well, the one thing
 # only a user can write. The per-tier readings that used to ride beside the pointer were written by the agent that

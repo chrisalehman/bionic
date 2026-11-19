@@ -261,6 +261,28 @@ current_admit() {
     *) plan_verb_dry current "current: $PV_KEY" "$PV_KEY" ;;
   esac
 }
+
+# advance_judge <step> -> whether an advance to <step> would pass, the one answer every asker reads: the checked advance
+# (`current <N> --check`), the judge asked for several steps at once (`judge <N>…`, which the release approval card's
+# early facts ask, and through them the tick and the release card). It runs current_admit, the advance's own path up to
+# its append, in a subshell, and prints its verdict above whatever that path printed: `current <N> --check: would
+# advance` on stdout, or `… would refuse` on stderr, then the path's lines on the same stream. Its rc is the advance's;
+# it appends nothing. The gate inside it is asked in this process (`plan_verb_dry`), so steps asked one after another in
+# one shell read the one fold this shell holds. Reads PV_* as `plan_verb_open` set them; PV_CHECK is set for it.
+advance_judge() {
+  local out rc PV_KEY="$1" PV_CHECK=1
+  out="$(current_admit 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    say "current $PV_KEY --check: would advance"
+    [ -z "$out" ] || printf '%s\n' "$out"
+    [ "$PV_CUR" != "$PV_KEY" ] || say "current — the run already stands at step $PV_KEY; the advance would append nothing."
+  else
+    die "current $PV_KEY --check: would refuse"
+    [ -z "$out" ] || printf '%s\n' "$out" >&2
+  fi
+  return "$rc"
+}
+
   # THE STEP MOVE. A step is an event in the run's log and nothing writes it into the plan: the advance asks what a
   # commit at the step it moves to would be asked (current_admit), then appends the step through its one writer
   # (lib/proof.sh `proof_step_event`). The plan's bytes are the same before and after. Step 9 is close-out's.
@@ -275,19 +297,11 @@ current_admit() {
       die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold), so the advance is judged from no step; nothing was appended. run again: session-poker.sh current $PV_KEY, once the fold's own line above is mended."
       exit 2
     fi
-    # THE CHECK-ONLY ADVANCE: `current <N> --check` runs current_admit, the advance's own path up to its append, in a
-    # subshell, and prints its verdict above whatever that path printed; it exits as the advance would and appends nothing.
+    # THE CHECK-ONLY ADVANCE: `current <N> --check` is the judge's answer for that step (`advance_judge`); it exits as
+    # the advance would and appends nothing.
     if [ -n "$PV_CHECK" ]; then
-      PV_CK_OUT="$(current_admit 2>&1)"; PV_CK_RC=$?
-      if [ "$PV_CK_RC" -eq 0 ]; then
-        say "current $PV_KEY --check: would advance"
-        [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT"
-        [ "$PV_CUR" != "$PV_KEY" ] || say "current — the run already stands at step $PV_KEY; the advance would append nothing."
-      else
-        die "current $PV_KEY --check: would refuse"
-        [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT" >&2
-      fi
-      exit "$PV_CK_RC"
+      advance_judge "$PV_KEY"
+      exit $?
     fi
     current_admit
     if [ "$PV_CUR" = "$PV_KEY" ]; then
@@ -300,5 +314,28 @@ current_admit() {
     fi
     say "current — step $PV_KEY appended to the run's log (was ${PV_CUR:-none}); $PV_PLAN is unchanged; $PV_HOW."
     exit 0
+  }
+
+  # THE JUDGE ASKED DIRECTLY. `judge <N>…` asks advance_judge for each step in turn, in this one process, and closes each
+  # step's answer with `judged <N> exit <rc>` on stdout, so a caller that asks several steps at once reads each answer
+  # as that step's checked advance prints it. It appends nothing; it exits 0 when every step would advance, else the
+  # highest exit a step gave.
+  poker_verb_judge() {
+    local n rc worst=0
+    # Opened and refused as the checked advance of its first step is, in the same words, so a caller that asked the
+    # judge in place of that check reads the refusal the check would have given.
+    plan_verb_open current
+    if [ -n "${PV_CUR_UNREAD:-}" ]; then
+      die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold), so the advance is judged from no step; nothing was appended. run again: session-poker.sh current $PV_KEY, once the fold's own line above is mended."
+      exit 2
+    fi
+    # The fold is taken here, once, so every step's ask in a subshell below inherits it.
+    ! declare -F _proof_facts >/dev/null 2>&1 || _proof_facts "$PV_PLAN" >/dev/null 2>&1 || :
+    for n in "$@"; do
+      advance_judge "$n"; rc=$?
+      say "judged $n exit $rc"
+      [ "$rc" -le "$worst" ] || worst="$rc"
+    done
+    exit "$worst"
   }
 
