@@ -356,6 +356,10 @@ cmd_create() {
     # shellcheck source=/dev/null
     tree_row="$( . "$LIB_WORKTREE" 2>/dev/null && worktree_tree_row "$main_root" "$sid" "$name" )"
     [ $? -ne 2 ] || _wt_refuse "brief-unrendered row=${tree_row} name=${name} — render the brief first: session-poker.sh brief ${tree_row%%,*} ${name}, then create again"
+    # An integrate row lands as a record, by the tick, so a tree would hold its landing for good.
+    # shellcheck source=/dev/null
+    [ -z "$tree_row" ] || [ "$( . "$LIB_WORKTREE" 2>/dev/null && worktree_row_kind "$(_wt_workspace_plan "$main_root" "$sid")" "$tree_row" )" != integrate ] \
+      || _wt_refuse "integrate-row row=${tree_row} kind=integrate name=${name} — an integrate row takes no tree: dispatch ${name} with none (no spawn-worktree.sh create), and the tick lands its record"
   fi
 
   local base_sha
@@ -496,6 +500,8 @@ cmd_remove() {
 
   local root; root="$(worktree_root "$wt_abs")"
   [ -n "$root" ] || _wt_refuse repo-root-unresolvable
+  # The run the tree's own record names, read before the removal takes the record with the tree.
+  local plan; plan="$( . "$LIB_WORKTREE" 2>/dev/null && _wt_tree_record_plan "$wt_abs" )"
 
   # THE ALIAS (D7) — the one `create` planted, or a legacy link an older
   # bionic left — is untracked as far as git is concerned and would refuse to
@@ -509,6 +515,12 @@ cmd_remove() {
   if ! git -C "$root" worktree remove "$wt_abs" >/dev/null 2>&1; then
     _wt_refuse worktree-remove-refused
   fi
+
+  # The row's tree goes with it: a row still reading a removed tree is skipped by the tick's landing for good.
+  local sid; sid="$( . "${LIB_WORKTREE%/*}/session.sh" 2>/dev/null && session_id 2>/dev/null )" || sid=""
+  # shellcheck source=/dev/null
+  ( . "$LIB_WORKTREE" 2>/dev/null && worktree_tree_gone "$root" "$sid" "$wt_abs" "$plan" ) >/dev/null 2>&1 \
+    || _wt_refuse "tree-event-unwritten path=${wt_abs} branch=${wt_branch} kept=yes — the tree is removed, but its row's tree event could not be written to the run's log, so the row still reads the tree: run /bionic:doctor for why the log refused it"
 
   # kept=yes is not a status field, it is the contract: the merge decision
   # belongs to the orchestrator, so the branch outlives its tree.
