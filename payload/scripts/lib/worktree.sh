@@ -1714,13 +1714,10 @@ worktree_record_workspace() {  # <root> <sid> <name> <abs tree> <branch> <base s
 # carried. Written beside and renamed over, so a reader never meets half a name. Silent rc 0, or
 # the reason on stdout and rc 1.
 worktree_mark() {  # <tree> <name>
-  local tree="${1:-}" name="${2:-}" out common="" gd=""
+  local tree="${1:-}" name="${2:-}" gd
   _wt_workspace_value_bad "$name" && { printf 'invalid-name'; return 1; }
-  out="$(git -C "$tree" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" \
-    || { printf 'not-a-tree'; return 1; }
-  { IFS= read -r common; IFS= read -r gd; } <<< "$out"
-  [ -n "$gd" ] && [ -d "$gd" ] || { printf 'not-a-tree'; return 1; }
-  [ "$gd" != "$common" ] || { printf 'not-a-linked-worktree'; return 1; }
+  gd="$(git_linked_dir "$tree")"
+  case $? in 0) ;; 2) printf 'not-a-linked-worktree'; return 1 ;; *) printf 'not-a-tree'; return 1 ;; esac
   printf '%s\n' "$name" > "$gd/bionic-agent.$$" 2>/dev/null \
     && mv -f "$gd/bionic-agent.$$" "$gd/bionic-agent" 2>/dev/null \
     || { rm -f "$gd/bionic-agent.$$"; printf 'marker-unwritable'; return 1; }
@@ -1747,10 +1744,8 @@ worktree_marker() {  # <tree>
 TREE_RECORD_SCHEMA="tree/v1"
 
 _wt_tree_record_file() {  # <tree> -> <its own git-dir>/bionic-tree; rc 1 when <tree> is no linked tree
-  local out common="" gd=""
-  out="$(git -C "${1:-}" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 1
-  { IFS= read -r common; IFS= read -r gd; } <<< "$out"
-  [ -n "$gd" ] && [ -d "$gd" ] && [ "$gd" != "$common" ] || return 1
+  local gd
+  gd="$(git_linked_dir "${1:-}")" || return 1
   printf '%s/bionic-tree' "$gd"
 }
 
