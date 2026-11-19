@@ -237,7 +237,8 @@ world_verbs() {
 # git: `main` with tests/a.test.sh and tests/b.test.sh (both green); the working branch
 # `wave/x` checked out; the bound plan under the project's docs plans directory, a run at 15
 # (`working-branch: wave/x` in its header, rows T1 and T2 in nine cells) with the run's log beside it holding
-# steps 1 to 4, the plan's approval and each row's dispatch and tree, and WORLD_SID's engaged marker;
+# steps 1 to 4, the plan's approval and each row's dispatch and tree, the two sealed as written
+# (tests/lib/seal-fixture.sh), and WORLD_SID's engaged marker;
 # a roster at .bionic/tmp/roster-<WORLD_SID>.state with rows wx-T1 and wx-T2; and two row trees,
 # .worktrees/T1 on `wt/T1` and .worktrees/T2 on `wt/T2`, each cut from wave/x with one
 # commit of its own (T1.txt, T2.txt) and a .bionic link to the root's, as spawn-worktree
@@ -283,6 +284,7 @@ PLAN
     # shellcheck source=/dev/null
     . "${BIONIC_SCRIPTS_DIR}/tests/lib/bound-marker.sh" || exit 1
   fi
+  seal_fixture "$plan" "$root/.bionic/docs/record/wave-x/run.log"
   bound_marker "$root" "$WORLD_SID" "$plan" || exit 1
   if ! type -t roster_row_fixture >/dev/null 2>&1; then
     # shellcheck source=/dev/null

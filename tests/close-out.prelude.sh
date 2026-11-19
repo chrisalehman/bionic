@@ -33,6 +33,8 @@
 # dry-run, and it is why the dry-run is not silently inert.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+# shellcheck source=/dev/null
+declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
 SCRIPT="$REPO_ROOT/payload/scripts/close-out.sh"
 RUN_LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
@@ -254,6 +256,7 @@ mk_fixture() {
   )
   co_page15 "$p"
   plant_facts "$p"
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"
 }
 
@@ -445,6 +448,7 @@ PLAN_CENSUS
     git commit -q -m "seed" >/dev/null 2>&1
   )
   co_page15 "$p"
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"
 }
 
@@ -485,14 +489,16 @@ co_step_answer() {
 release_approved() {
   local wb; wb="$(sed -n 's/^working-branch: //p' "$1/$PLAN_REL" | head -1)"
   printf 'run/v1|ev=approval|key=release|by=Dana Fixture|head=%s|said=Ship it.|at=2026-10-04T12:30:00Z\n' \
-    "$(fixture_git "$1" rev-parse --verify -q "refs/heads/$wb")" >> "$1/$LOG_REL"
+    "$(fixture_git "$1" rev-parse --verify -q "refs/heads/$wb")" >> "$1/$LOG_REL" || return
+  seal_fixture "$1/$PLAN_REL" "$1/$LOG_REL"
 }
 
 # advance_to <project> <N> -> the run stood at step N: one step event appended to its log, as the `current` verb
 # appends it. §E2E drives the verb.
 advance_to() {
   case "$1" in "$SANDBOX"/*) : ;; *) echo "advance_to: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
-  printf 'run/v1|ev=step|n=%s|at=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$1/$LOG_REL"
+  printf 'run/v1|ev=step|n=%s|at=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$1/$LOG_REL" || return
+  seal_fixture "$1/$PLAN_REL" "$1/$LOG_REL"
 }
 
 # ---------- drivers ----------
@@ -621,6 +627,7 @@ mk_task_pr_fixture() {
     git checkout -q main
   )
   plant_facts "$p"
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"
 }
 
@@ -673,7 +680,8 @@ set_plan_keys() {
     NR == 1 { fm = 1 }
     fm && NR > 1 && /^---$/ { fm = 0 }
     { for (i = 1; i <= n; i++) if (fm && index($0, d[i] ":") == 1) next }
-    { print } /^walk:/ { printf "%s", ENVIRON["EXTRA"] }' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+    { print } /^walk:/ { printf "%s", ENVIRON["EXTRA"] }' "$p" > "$p.tmp" && mv "$p.tmp" "$p" || return
+  seal_fixture "$p" "$1/$LOG_REL"
 }
 
 CARRY_REC="record/wave-01-fixture/rev.md"
@@ -686,7 +694,8 @@ carry_plant() {
   printf '%s\n' "$@" | awk '/^deferred: / { s = substr($0, 11); split(s, w, " "); t = substr(s, index(s, "\"") + 1)
     r = substr(t, index(t, "\"") + 1); t = substr(t, 1, index(t, "\"") - 1); o = "|ref=" w[1] "|severity=" w[2] "|reach=" w[3] "|to=deferred|title=" t
     if (match(r, /stated="[^"]*"/) && !index(r, "|")) o = o "|stated=" substr(r, RSTART + 8, RLENGTH - 9)
-    print "run/v1|ev=finding" o "|at=2026-10-04T12:00:00Z" }' >> "$proj/$LOG_REL"
+    print "run/v1|ev=finding" o "|at=2026-10-04T12:00:00Z" }' >> "$proj/$LOG_REL" || return
+  seal_fixture "$proj/$PLAN_REL" "$proj/$LOG_REL"
 }
 
 # carry_section <continuation> -> what stands under the heading `## Deferrals`, up to the next `## `,
@@ -720,7 +729,8 @@ debt_plant() {  # <project> -> the run's debts, as the debt verb's events: three
   printf 'run/v1|ev=debt|%s|at=2026-10-04T12:00:00Z\n' \
     'concept=tree_count|kind=duplicate|sites=lib/a.sh:1, lib/b.sh:2|raised-by=record/wave-01-fixture/critic-structure.md|touches=4' \
     'concept=log_shim|kind=one-case-abstraction|sites=lib/c.sh:3|raised-by=record/wave-01-fixture/critic-structure.md|touches=1|burned=T3' \
-    'concept=pair_x|kind=unpinned-pair|sites=lib/d.sh:9|raised-by=record/wave-01-fixture/critic-adversarial.md|touches=0' >> "$d/run.log"
+    'concept=pair_x|kind=unpinned-pair|sites=lib/d.sh:9|raised-by=record/wave-01-fixture/critic-adversarial.md|touches=0' >> "$d/run.log" || return
+  seal_fixture "$1/$PLAN_REL" "$d/run.log"
 }
 
 require_helpers in_fixture fixture_git contains fixture_plan_text fixture_epic_text mk_fixture \

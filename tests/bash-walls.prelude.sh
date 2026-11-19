@@ -190,6 +190,7 @@ eg6_world() {
     printf 'run/v1|ev=proof|ac=%s|evidence=%s|at=2026-10-04T01:00:01Z\n' "$ac" "${EG6_EVIDENCE:-record/generic-evidence.md}"
     [ "$#" -eq 0 ] || printf '%s\n' "$@"
     [ -z "$asks" ] || printf '%s\n' "$asks"; } >> "$(plan_fixture_log "$EG6_PAGE")"
+  seal_fixture "$EG6_PAGE" "$(plan_fixture_log "$EG6_PAGE")"
   git -C "$repo" branch -f wave/01-fixture HEAD >/dev/null 2>&1
 }
 R_EG6="$(mk_repo eg6)"
