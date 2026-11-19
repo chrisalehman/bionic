@@ -20,7 +20,9 @@
 #   §4  a SubagentStop payload         -> only the landing arm can speak
 #   §7  the real tick's turn, judged by the wall's own ready set
 #   §8  an amended Files: is the one the landing reads
-#   §9  the fill refusal's headline names only the rows the turn left out
+#   §9  the fill refusal's headline names only the rows the turn left out; the duty's quiet shape, and the
+#       duty verb that prints the whole refusal
+#   §PERSON  a refusal only the person can act on keeps its channel, alone and beside a duty
 #   §GAP     one width fact and one refusal: the wall asks the gate as the tick does, and names
 #            every unanswered row once
 #   §LOAD    over the line, the tick stands down the newest unlanded writer, one a tick
@@ -176,6 +178,7 @@ fire() {  # <project> <event> <stop_hook_active> [extra JSON object]
   payload=$(jq -nc --arg c "$d" --arg t "$t" --arg s "$SID" --arg e "$ev" \
                    --argjson a "$sha" --argjson x "$extra" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:$e,stop_hook_active:$a,background_tasks:[]} + $x')
+  STOP_D="$d"; STOP_SID="$SID"
   STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
     BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
     bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
@@ -183,9 +186,26 @@ fire() {  # <project> <event> <stop_hook_active> [extra JSON object]
   STOP_ERR=$(cat "$STOP_ERRFILE" 2>/dev/null)
 }
 
-reason_of() {
-  printf '%s' "$STOP_OUT" | jq -r '.reason // ""' 2>/dev/null
+# WHOSE FIX DECIDES THE CHANNEL. A refusal the person must act on is a JSON block; one the agent acts on is a
+# duty: the fixed line in a Stop context, the whole refusal in the session's duty file. Every row below reads
+# the refusal through these, so a row that asserted a refused turn still asserts it, on the channel it rides.
+STOP_D=""; STOP_SID="$SID"
+DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
+duty_file() { printf '%s/.bionic/tmp/duty-%s.state' "${1:-$STOP_D}" "${2:-$STOP_SID}"; }
+verdict_of() {  # -> block, duty, or nothing: the channel the turn end was refused on
+  local d
+  d="$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
+  [ -z "$(printf '%s' "$STOP_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" ] || printf 'duty'
 }
+duty_ctx() { printf '%s' "$STOP_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+reason_of() {  # -> the whole refusal the agent receives: a block's reason, or the duty the duty verb prints
+  case "$(verdict_of)" in
+    block) printf '%s' "$STOP_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
+    duty)  if [ "$(duty_ctx)" = "$DUTY_LINE" ]; then cat "$(duty_file)" 2>/dev/null; else duty_ctx; fi ;;
+  esac
+}
+headline_of() { reason_of | /usr/bin/grep -m1 '^bionic: ' || true; }
 
 # offset_in_reason <needle> — where the needle sits in the composed reason, or -1.
 # ORDER IS ASSERTED BY POSITION, which is the whole content of "blocks before
@@ -202,7 +222,7 @@ refusal_lines() {
 }
 
 require_helpers roster_header roster_row_fixture mkfix unmet_row stale_stamp usage_tx fire reason_of \
-                offset_in_reason refusal_lines
+                offset_in_reason refusal_lines verdict_of duty_ctx duty_file headline_of
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "1: TWO verdicts block on one Stop — both reasons, blocks first"
@@ -220,8 +240,8 @@ expect_contains "1b: the LANDING reason is in the composed verdict" \
 expect_true "1d: …and in the manifest's order, landing before patrol, by offset" \
   test "$(offset_in_reason 'LANDING CONTRACT UNMET')" -lt \
        "$(offset_in_reason 'Patrol dead')"
-expect_eq "1e: the user stream carries exactly ONE rendered refusal, not two" \
-  "1" "$(refusal_lines)"
+expect_eq "1e: the two compose into ONE duty, and the person's stream carries no refusal line" \
+  "duty|0" "$(verdict_of)|$(refusal_lines)"
 
 # A BOUND SESSION HEARS NO UNBOUND ADVISORY (wave-23-fixit-1810, REQ-1, D1). This session
 # is bound to the run it is in, which is what lets the Patrol verdict reach the stamp at all;
@@ -236,12 +256,11 @@ section "2: one block and one advisory"
 # always did, and lib/run.sh's one advisory is the non-blocking verdict that rides beside it.
 D=$(mkfix); unmet_row "$D"; unbound_marker "$D" "$SID" empty
 fire "$D"
-expect_status "2a: a lone landing block exits 2, the channel that verdict has always used" \
-  "2" "$STOP_RC"
-expect_eq "2c: exactly one rendered refusal" "1" "$(refusal_lines)"
-expect_true "2e: …after the refusal" \
-  test "$(awk '/^bionic: /{print NR; exit}' <<<"$STOP_ERR")" -lt \
-       "$(awk '/^run resolved by newest-plan fallback/{print NR; exit}' <<<"$STOP_ERR")"
+expect_eq "2a: a lone landing refusal at the turn end is the orchestrator's duty: exit 0, the duty's shape" \
+  "0|duty" "$STOP_RC|$(verdict_of)"
+expect_eq "2c: exactly one refusal, its one line opening the reason" "1" "$(reason_of | /usr/bin/grep -c '^bionic: ')"
+expect_contains "2e: …and the advisory still reaches the person's stream" "run resolved by newest-plan fallback" "$STOP_ERR"
+expect_eq "2e2: …which carries no refusal line" "0" "$(refusal_lines)"
 rm -f "$D/.bionic/tmp/engaged-$SID.state"; fire "$D"
 expect_eq "2f: …and the same fixture with no engagement marker: a bystander's turn end exits 0, saying nothing" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
 
@@ -362,8 +381,9 @@ s7_fire() {  # <project> <transcript>
   local home
   home=$(cd "$(mktemp -d)" && pwd -P)
   local payload
-  payload=$(jq -nc --arg c "$1" --arg t "$2" --arg s "$SID" \
-    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')
+  payload=$(jq -nc --arg c "$1" --arg t "$2" --arg s "$SID" --argjson a "${S7_ACTIVE:-false}" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:$a,background_tasks:[]}')
+  STOP_D="$1"; STOP_SID="$SID"
   STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
     BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
     bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
@@ -379,6 +399,13 @@ s7_fire "$S7_D" "$S7_TX"
 expect_contains "7d: an undispatched ready row refuses the real tick's turn" \
   "ready with room:" "$(reason_of)"
 expect_contains "7e: …naming the task the tick asked for" "T13" "$(reason_of)"
+# THE DUTY STILL BINDS, ONCE (fails-when: the turn with a ready row and room is not refused to the agent, the
+# refusal shows the person anything but the fixed line, or the next end of the same turn is refused again).
+expect_eq "7h: the refusal is the agent's: the window is handed the fixed line alone, exit 0, nothing on the person's stream" \
+  "$DUTY_LINE|0|" "$(duty_ctx)|$STOP_RC|$STOP_ERR"
+S7_ACTIVE=true; s7_fire "$S7_D" "$S7_TX"; S7_ACTIVE=false
+expect_eq "7i: …and it binds once: the next end of that turn, stop_hook_active true, passes in silence" "0||" \
+  "$STOP_RC|$STOP_OUT|$STOP_ERR"
 
 # THE PAIRED POSITIVE, or 7d passes against a wall that refuses every Patrol turn. A dispatch
 # is two facts on disk the wall reads — the roster row the dispatch wall writes at launch, and
@@ -431,7 +458,7 @@ s8_fixture() {  # -> a git project, on main, with a delivered row whose tree tou
 
 D=$(s8_fixture)
 fire "$D"
-expect_status "8a: the control — a tree touching a file outside Files: refuses the stop" "2" "$STOP_RC"
+expect_eq "8a: the control — a tree touching a file outside Files: refuses the stop, a duty" "duty" "$(verdict_of)"
 expect_contains "8b: …naming the file" "undeclared/two.sh" "$STOP_ERR$(reason_of)"
 
 # 8b2 (wave-24 T27; critic I2, AC-6.5): the printed amend is pasteable from a plugin root whose
@@ -461,7 +488,7 @@ expect_eq "8c: amend --files+ on the writer's row exits 0" "0" "$S8_RC"
 fire "$D"
 expect_absent "8d: AC-4.1 after the amend the same diff is inside Files: — no landing refusal" \
   "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
-expect_status "8e: …and the stop is admitted" "0" "$STOP_RC"
+expect_eq "8e: …and the stop is admitted" "0|" "$STOP_RC|$(verdict_of)"
 
 # 8f (wave-27 T49; review pass 19 should-fix 1): a Files: path written in quotes is recorded without
 # them, so the stop wall counts the file INSIDE the contract. The row's files= is built by the real
@@ -495,13 +522,13 @@ S8F_FILES=$(bash -c '. "$1" || exit 9; brief_field "$(brief_contract "$2")" file
 expect_eq "8f precondition: the reader records Files: \"lib/a.sh\" as lib/a.sh" "lib/a.sh" "$S8F_FILES"
 D=$(s8f_fixture '"lib/a.sh"')
 fire "$D"
-expect_status "8f0: the control — the quoted value the reader used to record refuses the diff" "2" "$STOP_RC"
+expect_eq "8f0: the control — the quoted value the reader used to record refuses the diff" "duty" "$(verdict_of)"
 expect_contains "8f0: …naming lib/a.sh" "lib/a.sh" "$STOP_ERR$(reason_of)"
 D=$(s8f_fixture "$S8F_FILES")
 fire "$D"
 expect_absent "8f: the stop wall counts lib/a.sh inside a contract declared as \"lib/a.sh\"" \
   "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
-expect_status "8f: …and the stop is admitted" "0" "$STOP_RC"
+expect_eq "8f: …and the stop is admitted" "0|" "$STOP_RC|$(verdict_of)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "9: the fill refusal's headline names only the rows the turn left out (wave-20 T11b; review R4; wave-36 T32)"
@@ -543,7 +570,7 @@ s9_transcript() {  # <file> [agent name]...
     done
   } > "$f"
 }
-s9_headline() { printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ' || true; }
+s9_headline() { headline_of; }
 # THE TURN'S RECORD: the stop events of the run's log in <record directory>, one per Stop.
 stop_led() { /usr/bin/grep '^run/v1|ev=stop|' "$1/run.log" 2>/dev/null; }
 require_helpers s9_fixture s9_transcript s9_headline stop_led
@@ -581,6 +608,22 @@ S9_D0="$(s9_fixture)"
 S9_TX0="$(mktemp)"; s9_transcript "$S9_TX0"
 s7_fire "$S9_D0" "$S9_TX0"
 expect_contains "9h: a turn that launched nothing names both ready rows" "ready with room: T13 T14 (" "$(s9_headline)"
+# THE QUIET CHANNEL'S SHAPE, AND THE VERB THAT PRINTS THE REST (fails-when: the hook's stdout is anything but one Stop
+# context holding the fixed line; a decision rides it; the person's stream carries a word; the fixed line outgrows the
+# window's 80 columns; the duty verb prints anything but the whole refusal the hook kept; the reason reaches the window).
+expect_eq "9u: the hook's output is one Stop context holding the fixed line, no decision, exit 0, nothing for the person" \
+  "Stop|$DUTY_LINE|hookSpecificOutput|0|" \
+  "$(printf '%s' "$STOP_OUT" | jq -r '[.hookSpecificOutput.hookEventName, .hookSpecificOutput.additionalContext, (keys | join(","))] | join("|")' 2>/dev/null)|$STOP_RC|$STOP_ERR"
+expect_true "9v: …the fixed line keeps to 61 columns, so the window's line under the platform's label keeps to 80" \
+  test "$(printf '%s' "$(duty_ctx)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 61
+S9_DUTY="$(cd "$S9_D0" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$S7_POKER" duty 2>&1)"; S9_DUTY_RC=$?
+expect_eq "9w: session-poker.sh duty prints the whole refusal the hook kept, exit 0" "0|$(cat "$(duty_file "$S9_D0")")" "$S9_DUTY_RC|$S9_DUTY"
+expect_contains "9x: …its headline" "bionic: stop refused — ready with room: T13 T14 (dispatch, or make each wait)" "$S9_DUTY"
+expect_contains "9y: …and the dispatch line" "dispatch T13,T14, or make each wait by one of three forms:" "$S9_DUTY"
+expect_absent "9z: …which the window is never handed" "dispatch T13,T14" "$STOP_OUT$STOP_ERR"
+S9_NONE="$(cd "$S9_D0" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="a-session-never-refused-0000" bash "$S7_POKER" duty 2>&1)"
+expect_eq "9w2: a session the hook never refused has no duty, and the verb says so" \
+  "poker: no duty — the turn-end hook has named none in this session" "$S9_NONE"
 
 # The ledger line ends with `idle=` and `room=`, the ready rows no launch
 # covered while a slot was free, and the free slots at that moment. Positive on the same
@@ -607,8 +650,8 @@ S9_TX8="$(mktemp)"; s9_transcript "$S9_TX8"
 # 80 under a load of 1.0 owe five; these rows test the line budget over eight owed rows, so the
 # machine is 16 cores (12.8).
 BIONIC_PROBE_CORES=16 s7_fire "$S9_D8" "$S9_TX8"
-expect_eq "9j: eight ready rows still refuse through the JSON block, not a refuse-call error" "block" \
-  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_eq "9j: eight ready rows still refuse through the duty, not a refuse-call error" "duty" \
+  "$(verdict_of)"
 expect_true "9l: …and keeps to 100 columns" test "$(printf '%s' "$(s9_headline)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 100
 expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
 
@@ -627,6 +670,30 @@ expect_absent "9s: …and the wall refuses no fill" "ready with room:" "$(reason
 expect_contains "9t: the same fixture with room records state=ok (9q discriminates)" "|state=ok|" \
   "$S9_LED0"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "PERSON: a refusal only the person can act on reaches the person, alone and beside a duty at the same turn end"
+# fails-when: the unreadable plan's refusal is not a block, or its line is not on the person's stream, alone or beside
+# the landing duty; beside it the duty's line or detail leaves the model's reason; the person's stream carries a
+# second refusal line; the same landing fixture with the plan readable is anything but a duty.
+if [ "$(id -u)" -ne 0 ]; then
+  PS_LINE="bionic: stop refused — the bound plan cannot be read (restore read access to the plan)"
+  D=$(mkfix); chmod 000 "$D/.bionic/docs/plans/wave-01.plan.md"; fire "$D"; chmod 644 "$D/.bionic/docs/plans/wave-01.plan.md"
+  expect_eq "PERSON1 the unreadable plan alone: a block, its line on the person's stream" "block|$PS_LINE" \
+    "$(verdict_of)|$(printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+  expect_contains "PERSON1b …the model's reason names the plan" "cannot be read: $D/.bionic/docs/plans/wave-01.plan.md" "$(reason_of)"
+  D=$(mkfix); unmet_row "$D"; chmod 000 "$D/.bionic/docs/plans/wave-01.plan.md"; fire "$D"; chmod 644 "$D/.bionic/docs/plans/wave-01.plan.md"
+  expect_eq "PERSON2 beside the landing duty at the same turn end: still a block, its line the person's" "block|$PS_LINE" \
+    "$(verdict_of)|$(printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+  expect_eq "PERSON2a …the one refusal line on the person's stream" "1" "$(refusal_lines)"
+  expect_contains "PERSON2b …while the duty still binds: its line rides the model's reason" \
+    "bionic: stop refused — a dispatched agent's contract is unmet (write the named artifacts)" "$(reason_of)"
+  expect_contains "PERSON2c …with its detail" "LANDING CONTRACT UNMET" "$(reason_of)"
+  D=$(mkfix); unmet_row "$D"; fire "$D"
+  expect_eq "PERSON3 the same fixture with the plan readable: the landing refusal is a duty" "duty" "$(verdict_of)"
+else
+  printf 'SKIPPED: the unreadable-plan case needs a non-root uid (root reads mode 000)\n' >&2
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "GAP: one width fact and one refusal — the wall asks the gate as the tick does, and names every unanswered row once (wave-36 T32; D13, AC-7.1)"
@@ -685,7 +752,7 @@ GAP_X1="$(mktemp)"; s7_transcript "$GAP_X1" "$GAP_T1"
 BIONIC_PROBE_BUSY_CORES=8.0 BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$GAP_D1" "$GAP_X1"
 expect_contains "GAP1b meta: the wall read the turn — its stop event is there" "run/v1|ev=stop|" "$(gap_led "$GAP_D1" | tail -1)"
 expect_contains "GAP1c …recording the gate's hold, three rows ready, none free" "|state=hold|" "$(gap_led "$GAP_D1" | tail -1)"
-expect_eq "GAP1d the tick's no-room turn passes at stop" "" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_eq "GAP1d the tick's no-room turn passes at stop" "" "$(verdict_of)"
 
 # GAP2: ROOM FOR ONE, THREE READY. The tick on the reading offers one row; the wall refuses once,
 # naming all three.
@@ -697,7 +764,7 @@ expect_absent "GAP2a2 …and only one" "poker: FILL T13 T14" "$GAP_T2"
 GAP_X2="$(mktemp)"; s7_transcript "$GAP_X2" "$GAP_T2"
 BIONIC_PROBE_BUSY_CORES=6.0 BIONIC_PROBE_BUSY_CORES_5M=6.0 s7_fire "$GAP_D2" "$GAP_X2"
 expect_contains "GAP2b meta: the wall's ledger counts one free slot on the same reading" "|free=1|" "$(gap_led "$GAP_D2" | tail -1)"
-expect_eq "GAP2c the turn is refused" "block" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_eq "GAP2c the turn is refused, a duty" "duty" "$(verdict_of)"
 GAP_LINE="$(s9_headline)"
 expect_true "GAP2e …under 100 columns" \
   test "$(printf '%s' "$GAP_LINE" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -lt 100
@@ -725,7 +792,7 @@ BIONIC_PROBE_BUSY_CORES=6.0 BIONIC_PROBE_BUSY_CORES_5M=6.0 s7_fire "$GAP_D2" "$G
 expect_contains "GAP3d meta: the wall read the next turn, its ledger line is that turn's" "|turn=u-gap3|" "$(gap_led "$GAP_D2" | tail -1)"
 expect_contains "GAP3e …and no row ready" "|ready=|" "$(gap_led "$GAP_D2" | tail -1)"
 expect_eq "GAP3f the rows wait on the ruling: the turn passes" "" \
-  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+  "$(verdict_of)"
 
 # GAP4: A WAITING REQUEST ALONE LEAVES ROOM (wave-38 T5; D21, ADR-060). The gate's room reads its
 # admitted runs and the owed count, never its queue: a landing run waiting at the gate used to answer
@@ -871,6 +938,7 @@ ub_fire() {  # <root> <sid> — an ordinary turn that dispatched nothing, ended 
   jq -nc '{type:"user",uuid:"u-ub",isSidechain:false,timestamp:"2026-10-02T19:40:00Z",message:{role:"user",content:"scope wave 21"}}' > "$tx"
   payload=$(jq -nc --arg c "$1" --arg t "$tx" --arg s "$2" \
     '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')
+  STOP_D="$1"; STOP_SID="$2"
   STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$2" \
     BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
     bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
@@ -901,9 +969,9 @@ UB_LINE="run resolved by newest-plan fallback (session unbound) — $UB_P1; bind
 
 # UB2 (AC-1.2): the BOUND session, same root, same turn shape, T5 untouched -> refused.
 ub_fire "$UB_D" "$UB_SID_A"
-expect_eq "UB2: A (bound to p1) is refused — the fill gate's JSON block" "block" \
-  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
-expect_contains "UB2b: …naming T5 as not launched" "ready with room: T5" "$STOP_ERR"
+expect_eq "UB2: A (bound to p1) is refused — the fill duty" "duty" \
+  "$(verdict_of)"
+expect_contains "UB2b: …naming T5 as not launched" "ready with room: T5" "$(headline_of)"
 expect_absent "UB2c: …and A hears no unbound advisory" "session unbound" "$STOP_ERR"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
@@ -951,7 +1019,7 @@ wait15() {  # <events, one a line, or ""> <row>... -> the project
   printf '%s' "$d"
 }
 wait_led() { stop_led "$1/.bionic/docs/record/wave-09-wait"; }
-wait_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+wait_decision() { verdict_of; }
 require_helpers wait_fixture wait15 wait_fire wait_led wait_decision s7_fire reason_of sp_at15
 
 WT_READY='| T13 | 4 | build | ready | — | 15m | REQ-x | a.sh | — |'
@@ -962,14 +1030,14 @@ WT_REC='.bionic/docs/record/wave-09-wait/T12-held.md'
 # WAIT1: THE REFUSAL NAMES THE THREE FORMS. One ready row, room, nothing launched.
 W_D1="$(wait15 "" "$WT_READY")"
 wait_fire "$W_D1"
-expect_eq "WAIT1 a ready row with room and nothing launched is refused" "block" "$(wait_decision)"
+expect_eq "WAIT1 a ready row with room and nothing launched is refused" "duty" "$(wait_decision)"
 W_R="$(reason_of)"
 expect_contains "WAIT1b the refusal names the first form, a dependency: an edit adding the row's id to the deps cell" "a dependency: edit ID's deps cell in the plan to add RID" "$W_R"
 expect_contains "WAIT1d the second, a read of a ruling, the same edit adding the decision" "a read of a ruling: edit ID's deps cell in the plan to add approval:DN" "$W_R"
 expect_contains "WAIT1f the third, an order" "an order: bash " "$W_R"
 expect_contains "WAIT1g …the order verb with what the user said" "order 'WORDS'" "$W_R"
 expect_absent "WAIT1h …and no decline anywhere in the refusal" "decline" "$W_R$STOP_ERR"
-expect_contains "WAIT1i the line the user reads names the row and the fix" "ready with room: T13 (dispatch, or make each wait)" "$STOP_ERR"
+expect_contains "WAIT1i the refusal's line names the row and the fix" "ready with room: T13 (dispatch, or make each wait)" "$(headline_of)"
 
 # WAIT2: A READ OF AN UNRULED DECISION. The row reads D3, which no approved: line rules.
 W_D2="$(wait15 "" "$WT_D3")"
@@ -979,8 +1047,8 @@ expect_contains "WAIT2b …and the row reading the unruled D3 is not ready" "|re
 expect_eq "WAIT2c the turn ends: no refusal" "" "$(wait_decision)"
 W_D2R="$(wait15 "" "$WT_D3")"; bash -c '. "$1/proof.sh" && proof_approval_event "$2" D3 by=fixture said=go' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$W_D2R/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
 wait_fire "$W_D2R"
-expect_eq "WAIT2d the control: D3 ruled, the same row is ready and refused" "block" "$(wait_decision)"
-expect_contains "WAIT2e …naming it" "ready with room: T13" "$STOP_ERR"
+expect_eq "WAIT2d the control: D3 ruled, the same row is ready and refused" "duty" "$(wait_decision)"
+expect_contains "WAIT2e …naming it" "ready with room: T13" "$(headline_of)"
 
 # WAIT3: A DEPENDENCY ON AN OPEN ROW. T13 waits on T12, which writes the record, and T12 is active.
 WT_T12="| T12 | 4 | build | the open row | — | 15m | REQ-x | $WT_REC, z.sh | — |"
@@ -993,8 +1061,8 @@ expect_eq "WAIT3c the turn ends: no refusal" "" "$(wait_decision)"
 W_D3L="$(wait15 'dispatch|row=T12|name=w9-T12
 published|row=T12' "$WT_T12" "$WT_T13")"
 wait_fire "$W_D3L"
-expect_eq "WAIT3d the control: T12 landed, T13 is ready and refused" "block" "$(wait_decision)"
-expect_contains "WAIT3e …naming it" "ready with room: T13" "$STOP_ERR"
+expect_eq "WAIT3d the control: T12 landed, T13 is ready and refused" "duty" "$(wait_decision)"
+expect_contains "WAIT3e …naming it" "ready with room: T13" "$(headline_of)"
 
 # WAIT4: THE USER'S ORDER. An open order makes no row ready; the order lifted, the row is owed again.
 W_D4="$(wait15 'order|act=given|said=hold the fleet while I read' "$WT_READY")"
@@ -1005,8 +1073,8 @@ expect_eq "WAIT4c the turn ends: no refusal" "" "$(wait_decision)"
 W_D4L="$(wait15 'order|act=given|said=hold the fleet while I read
 order|act=lifted|said=hold the fleet while I read' "$WT_READY")"
 wait_fire "$W_D4L"
-expect_eq "WAIT4d the control: the order lifted, the row is ready and refused" "block" "$(wait_decision)"
-expect_contains "WAIT4e …naming it" "ready with room: T13" "$STOP_ERR"
+expect_eq "WAIT4d the control: the order lifted, the row is ready and refused" "duty" "$(wait_decision)"
+expect_contains "WAIT4e …naming it" "ready with room: T13" "$(headline_of)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "GONE: no verb records a wait in prose: decline is an unknown verb, nothing writes a decline or a lapse, and the Patrol prompt names none"
@@ -1039,7 +1107,7 @@ PT_SAY="Patrol re-armed: the session's cron table was empty, so I created the re
 D=$(mkfix); stale_stamp "$D"
 fire "$D"
 PT_R1="$(reason_of)"
-expect_eq "PATROL0 meta: the dead-clock fixture is refused" "block" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_eq "PATROL0 meta: the dead-clock fixture is refused, a duty" "duty" "$(verdict_of)"
 expect_contains "PATROL1 the reason names the verdict" "Patrol dead" "$PT_R1"
 expect_true "PATROL1d …naming CronList, then CronCreate, then arm" \
   test "$(offset_in_reason 'CronList')" -ge 0 -a "$(offset_in_reason 'CronList')" -lt "$(offset_in_reason 'CronCreate')" \
@@ -1105,11 +1173,11 @@ LOG_D2="$(log_fixture "${LOG_FACTS[@]}" 'run/v1|ev=order|act=given|said=hold the
 s7_fire "$LOG_D2" "$LOG_TX"
 expect_contains "LOG2 meta: under the order the wall read a live ledger and found no row ready" "|ready=|" \
   "$(stop_led "$LOG_D2/.bionic/docs/record/wave-09-fixture" | tail -1)"
-expect_eq "LOG3 …so the turn ends: the order the log alone holds stands" "" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_eq "LOG3 …so the turn ends: the order the log alone holds stands" "" "$(verdict_of)"
 printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-01T00:00:03Z\n' >> "$LOG_D1/.bionic/docs/record/wave-09-fixture/run.log"
 s7_fire "$LOG_D1" "$LOG_TX"
 expect_eq "LOG4 a cancel the log appends after LOG1's approval leaves no row ready: the turn ends unrefused" "|" \
-  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)|$(s9_headline)"
+  "$(verdict_of)|$(s9_headline)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "ONE: a stop is one event: the turn's end the hook records is the run's stop event, the reader's answer at 15, and a log it cannot write changes nothing the hook says"
@@ -1404,13 +1472,13 @@ rn_world() {
 rn_fire() { fire "$D" Stop false "$(jq -nc --arg t "$RN_TX" '{transcript_path:$t}')"; }
 
 rn_world; rn_fire
-expect_eq "RUN1 the control: with no tick record the marker turn that ran no tick is refused" "block" \
-  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_eq "RUN1 the control: with no tick record the marker turn that ran no tick is refused" "duty" \
+  "$(verdict_of)"
 expect_contains "RUN1b …for the tick" "Patrol tick not run" "$(reason_of)"
 
 rn_world; rn_record "$D" "$RN_LIVE" "$RN_LIVE_START"; rn_fire
 expect_eq "RUN2 with a live tick record for the session the same turn end is not refused" "0|" \
-  "$STOP_RC|$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+  "$STOP_RC|$(verdict_of)"
 
 rn_world; rn_record "$D" "$RN_DEAD" "$RN_LIVE_START"; rn_fire
 expect_contains "RUN3 a record whose process is dead holds nothing off: the duty stands" "Patrol tick not run" "$(reason_of)"
