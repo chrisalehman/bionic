@@ -184,6 +184,8 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #   tick-run     hooks/poker/tick.sh           the running tick's process, while it runs (`tick_running`
 #                                              below); not `tick-<sid>`, whose class glob would read every
 #                                              `tick-digest-` file as a session named `digest-<sid>`
+#   watch        hooks/watch.sh                the watch record: the watcher's process while it watches, or
+#                                              why it rests (`watch_state` below)
 #
 # THE OWNER IS THE NAME UP TO ITS FIRST DOT, FOR EVERY CLASS (wave-27 T68; review pass 47 S1,
 # A-orch-137). A session id holds no dot (lib/context.sh admits `[A-Za-z0-9_-]` only) and an
@@ -198,7 +200,7 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 # so no id derived here can address one. A non-session file added later is safe on
 # arrival for the same reason. (`stop-check.state` was a third of these until
 # epic-23 wave-15 deleted the observation record itself — ADR-028.)
-PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock owed tick-run"
+PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders tick-digest workspaces gate start-clock owed tick-run watch"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
 # EVERY SESSION ID WITH STATE HERE, each once, in class-then-name order. Symlinks
@@ -1052,6 +1054,11 @@ WATCH_LINE_MAX=120
 # eye than the clock it replaces. Read and refused by `session-poker.sh interval --watch`.
 WATCH_INTERVAL_DEFAULT=300
 WATCH_INTERVAL_MAX=1200
+# THE WATCHER'S DAY, in seconds: hooks/hooks.json registers hooks/watch.sh with this as its `timeout`, and the platform
+# ends the hook silently when it runs out (prototype-wake B1), so the watcher ends itself first. Its last pass comes
+# while at least WATCH_LIFE_MARGIN of the day is left, so a slow tick near the end is not cut off half way.
+WATCH_LIFE_MAX=86400
+WATCH_LIFE_MARGIN=600
 
 # watch_wake_line <tick print file> -> the one wake line on stdout and rc 0, or nothing and rc 1.
 #
@@ -1153,4 +1160,137 @@ watch_wake_line() {  # <tick print file>
     }' "$1" 2>/dev/null)"
   [ -n "$line" ] || return 1
   printf '%s\n' "$line"
+}
+
+# ─── THE WATCH RECORD: WHETHER THIS SESSION IS WATCHED, AND THE WATCHER'S LOCK ──────────────────
+#
+# `<root>/.bionic/tmp/watch-<sid>.state`, written only by hooks/watch.sh, `key=value` lines:
+#
+#   state=watching   pid=<the watcher's process>   start=<its start, lib/alive.sh `alive_since`>
+#   state=resting    why=<person|woke|refused|limit|cleared>
+#   at=<ISO, when this state was written>          told=<the restart it already woke for, when it did>
+#
+# WATCHING IS A PROCESS, judged by lib/alive.sh's one rule, never by the file's age: a watcher killed from outside, or
+# by the platform at its time limit, leaves `watching` naming a dead process, and `watch_state` says `stopped`. A
+# watcher that ends on purpose says why first: the run waits only on the person (`person`), a wake ended it and the
+# turn's end starts the next (`woke`), the tick refused its pass (`refused`), its day ran out with no agent out
+# (`limit`), or its conversation was cleared and the new one starts its own (`cleared`).
+#
+# THE RECORD IS THE LOCK. A watcher claims it before its first pass and ends at once when a live watcher of the session
+# holds it, so a session has at most one however many turn ends start one. The claim writes a whole file and links it
+# into place, or renames it over a record no live watcher holds; two claims racing over one dead record can both
+# rename, so the watcher asks `watch_holds` before every pass and the one the record does not name ends quietly.
+# `told=` is carried from record to record, so a restart is told once across watchers.
+watch_record_path() {  # <project root> <session-id> -> absolute path, or nothing
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  case "$2" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  printf '%s/.bionic/tmp/watch-%s.state' "$1" "$2"
+}
+
+_watch_read() {  # <record> — sets _WR_STATE _WR_PID _WR_START _WR_WHY _WR_TOLD; rc 1 when it is no record
+  local l
+  _WR_STATE=''; _WR_PID=''; _WR_START=''; _WR_WHY=''; _WR_TOLD=''
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  while IFS= read -r l; do
+    case "$l" in
+      state=*) _WR_STATE="${l#state=}" ;; pid=*) _WR_PID="${l#pid=}" ;; start=*) _WR_START="${l#start=}" ;;
+      why=*) _WR_WHY="${l#why=}" ;; told=*) _WR_TOLD="${l#told=}" ;;
+    esac
+  done < "$1"
+  [ -n "$_WR_STATE" ]
+}
+
+_watch_write() {  # <record> <tmp name> <lines...> — the whole record beside it, then moved in; rc 1 not written
+  local f="$1" tmp="$2"; shift 2
+  [ -L "$f" ] && return 1
+  printf '%s\n' "$@" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  [ -L "$f" ] && { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
+}
+
+# watch_state <root> <sid> -> one line and rc 0: `watching <pid> <start>` while the recorded watcher lives, `stopped
+# <pid>` when the record says watching and its process is gone (or lib/alive.sh is not loaded to say), `resting <why>`;
+# rc 1 and nothing when the session has no record, which is a session whose watcher never ran.
+watch_state() {
+  local f
+  f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
+  _watch_read "$f" || return 1
+  case "$_WR_STATE" in
+    watching)
+      case "$_WR_PID" in ''|*[!0-9]*) printf 'stopped %s\n' "$_WR_PID"; return 0 ;; esac
+      if [ -n "$_WR_START" ] && declare -F alive_run >/dev/null 2>&1 && alive_run "$_WR_PID" "$_WR_START"; then
+        printf 'watching %s %s\n' "$_WR_PID" "$_WR_START"
+      else
+        printf 'stopped %s\n' "$_WR_PID"
+      fi ;;
+    resting) printf 'resting %s\n' "${_WR_WHY:-unsaid}" ;;
+    *) printf 'stopped %s\n' "$_WR_PID" ;;
+  esac
+}
+
+# watch_claim <root> <sid> <pid> -> rc 0 the record names <pid>, watching; rc 1 a live watcher of the session holds it,
+# `<pid> <start>` on stdout; rc 2 it could not be written. The caller has judged the directory safe to write in.
+watch_claim() {
+  local f d start tmp held told=''
+  f="$(watch_record_path "${1:-}" "${2:-}")" || return 2
+  case "${3:-}" in ''|*[!0-9]*) return 2 ;; esac
+  [ -L "$f" ] && return 2
+  declare -F alive_since >/dev/null 2>&1 || return 2
+  start="$(alive_since "$3")"
+  [ -n "$start" ] || return 2
+  d="${f%/*}"
+  [ -d "$d" ] || mkdir -p "$d" 2>/dev/null || return 2
+  tmp="$d/.watch-$2.$3"
+  if held="$(watch_state "$1" "$2")"; then
+    case "$held" in
+      "watching $3 "*) return 0 ;;
+      watching\ *) held="${held#watching }"; printf '%s\n' "$held"; return 1 ;;
+    esac
+    _watch_read "$f" && told="$_WR_TOLD"
+  fi
+  printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$3" "$start" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; return 2; }
+  [ -z "$told" ] || printf 'told=%s\n' "$told" >> "$tmp"
+  if [ ! -e "$f" ] && ln "$tmp" "$f" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  if held="$(watch_state "$1" "$2")"; then
+    case "$held" in watching\ *) rm -f "$tmp"; held="${held#watching }"; printf '%s\n' "$held"; return 1 ;; esac
+  fi
+  [ -L "$f" ] && { rm -f "$tmp"; return 2; }
+  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 2; }
+  return 0
+}
+
+# watch_holds <root> <sid> <pid> -> rc 0 while the record says <pid> is watching; a watcher asks before every pass.
+watch_holds() {
+  local f
+  f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
+  _watch_read "$f" && [ "$_WR_STATE" = watching ] && [ "$_WR_PID" = "${3:-}" ]
+}
+
+# watch_rest <root> <sid> <pid> <why> -> the record rewritten resting with <why>, its `told=` kept; only while it names
+# <pid>, so a watcher that lost the record never overwrites the one that holds it.
+watch_rest() {
+  local f
+  f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
+  watch_holds "$1" "$2" "${3:-}" || return 1
+  set -- "$f" "${f%/*}/.watch-$2.$3" "state=resting" "why=${4:-unsaid}" "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    ${_WR_TOLD:+"told=$_WR_TOLD"}
+  _watch_write "$@"
+}
+
+# watch_told <root> <sid> <pid> <key> -> `told=<key>` on the record <pid> holds: the restart it has woken for.
+watch_told() {
+  local f
+  f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
+  watch_holds "$1" "$2" "${3:-}" || return 1
+  _watch_write "$f" "${f%/*}/.watch-$2.$3" "state=watching" "pid=$_WR_PID" "start=$_WR_START" \
+    "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "told=${4:-}"
+}
+
+# watch_told_key <root> <sid> -> the `told=` the session's record carries, or nothing.
+watch_told_key() {
+  local f
+  f="$(watch_record_path "${1:-}" "${2:-}")" || return 0
+  _watch_read "$f" && printf '%s' "$_WR_TOLD"
+  return 0
 }
