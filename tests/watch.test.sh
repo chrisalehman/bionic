@@ -1,7 +1,7 @@
 #!/bin/bash
 # Tests for the watcher's pass: `session-poker.sh tick --watch`, one pass of the tick with no model.
 #
-# THE PASS'S CONTRACT. It runs the tick once, refreshes the stamp as every tick does, and then says one of two
+# THE PASS'S CONTRACT. It runs the tick once, which writes its digest as every tick does, and then says one of two
 # things by its exit code: quiet (nothing in the tick's print asks for an act) or wake (an act is owed), in which
 # case its stdout is exactly one line of at most 120 characters, worded as the instruction the model acts on. The
 # codes, the line's ceiling and the watch interval's bounds are named once, in payload/scripts/lib/patrol.sh, and
@@ -13,7 +13,7 @@
 # shape. The pass is the shipped hooks/session-poker.sh, never a copy.
 #
 # ANTI-VACUITY. Every quiet pass's empty stdout sits beside a wake on the same extractor in the same world, and
-# every "tick ran" claim reads the stamp the tick rewrote and the digest it left.
+# every "tick ran" claim reads the digest the tick rewrote.
 #
 # Usage: bash tests/watch.test.sh
 
@@ -49,10 +49,10 @@ wp_pass() {
   else wait "$p" 2>/dev/null; WP_RC=$?; fi
   WP_OUT="$(cat "$TMPROOT/wp.out")"; WP_ERR="$(cat "$TMPROOT/wp.err")"
 }
-# wp_old_stamp <repo> -> the stamp is a year-2000 arm stamp, so a pass that rewrites it is seen to.
-wp_old_stamp() { printf 'patrol-stamp/v1|at=2000-01-01T00:00:00Z|session=%s|verb=arm\n' "$SID" > "$(stamp_of "$1")"; }
-wp_stamp_at() { sed -n 's/^.*|at=\([^|]*\)|.*$/\1/p' "$(stamp_of "$1")" 2>/dev/null | head -1; }
-wp_stamp_verb() { sed -n 's/^.*|verb=\([^|]*\).*$/\1/p' "$(stamp_of "$1")" 2>/dev/null | head -1; }
+# wp_old_stamp <repo> -> the tick's digest is a year-2000 one with no decision in it, so a pass whose tick rewrites
+# it is seen to: every tick that decides writes its digest whole, `at=` the instant it was written.
+wp_old_stamp() { printf 'patrol-digest/v1\nat=2000-01-01T00:00:00Z\n' > "$(digest_of "$1")"; }
+wp_stamp_at() { sed -n 's/^at=//p' "$(digest_of "$1")" 2>/dev/null | head -1; }
 wp_lines() { [ -n "$1" ] || { printf '0'; return; }; printf '%s\n' "$1" | awk 'END { print NR }'; }
 wp_bare() { printf '%s\n' "$1" | grep -c '^[0-9][0-9]*$' | tr -d ' '; }
 wp_len() { printf '%s' "$1" | LC_ALL=C awk '{ n += length($0) } END { print n + 0 }'; }
@@ -82,7 +82,7 @@ expect_regex "precondition: …and the line's ceiling, the default interval and 
   '^[0-9]+ [0-9]+ [0-9]+ [0-9]+ [0-9]+$' "$WP_QUIET $WP_REST $WP_MAX $WP_IV_DEF $WP_IV_MAX"
 
 # ============================================================
-section "§QUIET: three passes over an unchanged run exit quiet, and each moves the stamp (AC-9.1, the hermetic half)"
+section "§QUIET: three passes over an unchanged run exit quiet, and each moves the digest (AC-9.1, the hermetic half)"
 # ============================================================
 plant_answer "$WP_TR" fresh "busy:running"
 RQ="$(wp_quiet_world wp-quiet)"
@@ -91,8 +91,7 @@ for n in 1 2 3; do
   wp_pass "$RQ"
   expect_eq "Q$n pass $n exits quiet" "$WP_QUIET" "$WP_RC"
   expect_eq "Q$n.a …prints nothing on stdout" "" "$WP_OUT"
-  expect_regex "Q$n.b …and the stamp moved off the planted one to a fresh tick stamp" "^20[0-9][0-9]-.*\|tick$" \
-    "$(wp_stamp_at "$RQ")|$(wp_stamp_verb "$RQ")"
+  expect_regex "Q$n.b …and the digest moved off the planted one to a fresh tick's" "^20[0-9][0-9]-" "$(wp_stamp_at "$RQ")"
   expect_ne "Q$n.c …not the planted instant" "2000-01-01T00:00:00Z" "$(wp_stamp_at "$RQ")"
 done
 expect_contains "Q4 the tick behind the passes left its digest: the second and third passes read an unchanged run" \
@@ -287,7 +286,7 @@ wp_old_stamp "$RP"
 wp_pass "$RP"
 expect_eq "OP1 the plan's approval put to the person and nothing else open: the pass exits with the rest code" "$WP_REST" "$WP_RC"
 expect_eq "OP1.a …and prints nothing on stdout" "" "$WP_OUT"
-expect_ne "OP1.b …the tick ran behind it: the stamp moved off the planted one" "2000-01-01T00:00:00Z" "$(wp_stamp_at "$RP")"
+expect_ne "OP1.b …the tick ran behind it: the digest moved off the planted one" "2000-01-01T00:00:00Z" "$(wp_stamp_at "$RP")"
 wp_pass "$RP"
 expect_eq "OP2 the next pass over the same resting state, its print unchanged, rests again" "$WP_REST|" "$WP_RC|$WP_OUT"
 expect_eq "OP2.a …and the tick's facts say rest" "rest" "$(wp_why "$RP")"
@@ -370,8 +369,8 @@ expect_eq "ST3 …and once the run has ended the same world rests" "$WP_REST" "$
 # ============================================================
 # THE HOOK: hooks/watch.sh, the shipped file, run as the platform runs it: the event's JSON on stdin, the session's id
 # in that JSON alone (CLAUDE_CODE_SESSION_ID is removed from its environment), the project as its cwd. Each world sets
-# `watch-interval: 1s`, so a pass comes as fast as a tick runs. A pass is seen by the stamp it moves: the suite plants
-# a year-2000 stamp and waits for the next pass to rewrite it.
+# `watch-interval: 1s`, so a pass comes as fast as a tick runs. A pass is seen by the digest it moves: the suite plants
+# a year-2000 digest and waits for the next pass to rewrite it.
 # ============================================================
 WH_HOOK="${BIONIC_HOOKS_DIR}/watch.sh"
 WP_LIFE="$(wp_const WATCH_LIFE_MAX)"
@@ -397,7 +396,7 @@ wh_wait() {
   WH_OUT="$(cat "$TMPROOT/wh.out")"; WH_ERR="$(cat "$TMPROOT/wh.err")"
 }
 wh_kill() { kill "$WH_PID" 2>/dev/null; wait "$WH_PID" 2>/dev/null; sleep 1; }
-# wh_passes <repo> <n> -> WH_SEEN: how many of <n> planted stamps a pass rewrote while the hook stayed up
+# wh_passes <repo> <n> -> WH_SEEN: how many of <n> planted digests a pass rewrote while the hook stayed up
 wh_passes() {
   local repo="$1" n="$2" k i
   WH_SEEN=0
@@ -445,7 +444,7 @@ plant_answer "$WP_TR" fresh "busy:running"
 RHQ="$(wp_quiet_world wh-quiet)"; wh_fast "$RHQ"
 wh_start "$RHQ" SessionStart
 wh_passes "$RHQ" 3
-expect_eq "HQ1 three passes, each moving the stamp, while the watcher stays up" "3" "$WH_SEEN"
+expect_eq "HQ1 three passes, each moving the digest, while the watcher stays up" "3" "$WH_SEEN"
 wh_wait 1
 expect_eq "HQ1.a …it is still running" "124" "$WH_RC"
 expect_eq "HQ1.b …and it said nothing on either stream" "|" "$WH_OUT|$WH_ERR"
@@ -617,9 +616,9 @@ wh_start "$RHD" Stop; wh_wait
 expect_eq "HS2.b …and once the run has ended the next watcher rests" "0|resting|person" "$WH_RC|$(wh_field "$RHD" state)|$(wh_field "$RHD" why)"
 
 section "§HOOK-REFUSED: a pass the tick refuses ends the watcher silently and never wakes; a session bionic never engaged gets no watcher"
-RHR="$(make_repo wh-refused)"; wh_fast "$RHR"
+RHR="$(make_repo wh-refused)"; wh_fast "$RHR"; ln -s /dev/null "$(roster_of "$RHR")"
 wh_start "$RHR" SessionStart; wh_wait
-expect_eq "HR1 engaged, never armed and no roster, so the tick refuses: the watcher exits 0" "0" "$WH_RC"
+expect_eq "HR1 engaged, its roster a link the sweeper refuses, so the tick refuses: the watcher exits 0" "0" "$WH_RC"
 expect_eq "HR1.a …saying nothing on either stream" "|" "$WH_OUT|$WH_ERR"
 expect_eq "HR1.b …its record says resting, on the refusal" "resting|refused" "$(wh_field "$RHR" state)|$(wh_field "$RHR" why)"
 rm -f "$(wh_rec "$RHR")"; unengage "$RHR"
