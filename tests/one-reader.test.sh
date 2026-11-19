@@ -29,6 +29,7 @@
 #                 the tree holds none. The tree event is folded in the reader alone: a second fold planted in a
 #                 script is found beside it, and the checkout holds the reader's one.
 #   §DEAD         a planted name of a removed landing function is found by its line; the checkout names neither.
+#   §LOGPATH      the run log's path is joined in the reader alone: a planted second join is found by its line.
 #   §GITHOME      a second resolution of the common git directory planted in a hook is found by its file; the checkout holds
 #                 none beside the root library's `git_common_dir`.
 #   §LOADER      the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
