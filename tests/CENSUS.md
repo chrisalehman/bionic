@@ -1428,8 +1428,8 @@ runner-width.test.sh | §GRANT a whole run starts no more jobs than the gate pro
 ## scale-profile.test.sh
 
 scale-profile.test.sh | §CELL | keep | payload/scripts/lib/scale.sh scale_cell: the unknown-scale arm exits 0, so "C.u1 a scale the table does not hold exits 1" goes red; a changed cell is also caught by §TASK's writer cap | none (searched 'scale_cell' and 'use task, wave or epic' in tests/)
-scale-profile.test.sh | §TASK | keep | payload/scripts/lib/walls.sh: the budget wall's cap read from a default instead of the task scale's cell, so the fourth writer is admitted and the refusal no longer names "the task scale's writer cap" (T.w2, T.w4); or hooks/engage.sh arms a Patrol stamp at task scale (T.e2) | none (searched "task scale's writer cap" and 'scale: task' in tests/; close-out-1.test.sh records the PR command on run, not check)
-scale-profile.test.sh | §TABLE | duplicate | payload/scripts/lib/scale.sh: a cell changed, so the doctrine's table no longer matches the library; an edit to SKILL.md's table is a document, not the program; SP_BYTES is computed and never asserted | scale-profile.test.sh §CELL
+scale-profile.test.sh | §TASK | keep | payload/scripts/lib/walls.sh: the budget wall's cap read from a default instead of the task scale's cell, so the fourth writer is admitted and the refusal no longer names "the task scale's writer cap" (T.w2, T.w4); or hooks/engage.sh arms a Patrol stamp at task scale (T.e2) | none (searched "task scale's writer cap" and 'scale: task' in tests/; close-out-1.test.sh's ANY-BRANCH holds the run on an unmerged branch)
+scale-profile.test.sh | §TABLE | keep | payload/scripts/lib/scale.sh SCALE_TABLE: an integrate cell reading `merge` again, so the library's cell and the doctrine's differ (B.wave.pr, B.epic.pr) and the cell names a merge (B.wave.m, B.epic.m); or the skill's table or the step-8 template naming a local merge, so the rendered pages carry it (B.m2, B.m3) | none (searched 'local merge' and 'integrate=' in tests/; §CELL pins the library's cells only and render.test.sh pins the pages equal to their templates, not what they say)
 
 ## seam-resolution.test.sh
 
@@ -2126,7 +2126,6 @@ run-predicate.test.sh §R3 — duplicate
 run-predicate.test.sh §R4 — gone with translate.sh
 runner-roster.test.sh §1 the roster is the directory — duplicate
 runner-width.test.sh §NO-RETRY a suite red once stays red in the log, run once (wave-35 T2; D11, AC-2.4) — duplicate
-scale-profile.test.sh §TABLE — duplicate
 seam-resolution.test.sh §Group 1 — duplicate
 seam-resolution.test.sh §Group 4 — duplicate
 session-poker-2.test.sh §Section 35 — gone with fill-report
