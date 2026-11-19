@@ -906,9 +906,14 @@ expect_eq "(tv7) …and nothing is made: no tree, no branch, no event" "0|0|1" \
 # Removing the tree is the row's tree event with an empty path, its run found from the tree's own record, no session's.
 tr_status() { bash "$REPO/payload/scripts/reader.sh" "$TRPLAN" status "$1" | grep '^tree='; }
 expect_eq "(tv8) before the removal the reader answers T2's tree" "tree=.worktrees/45-T6" "$(tr_status T2)"
-expect_match "(tv9) remove writes T2's tree event with an empty path" "REMOVED *|run/v1|ev=tree|row=T2|path=|branch=wt/45-T6|base=|by=w45-T6|why=removed|at=*" \
+expect_match "(tv9) remove writes T2's tree event with an empty path" "spawn-worktree: REMOVED *|run/v1|ev=tree|row=T2|path=|branch=wt/45-T6|base=|by=w45-T6|why=removed|at=*" \
   "$( cd "$TR" && env -u CLAUDE_CODE_SESSION_ID bash "$SPAWN" remove "$(ws_path "$TROUT6")" 2>/dev/null )|$(tr_trees | tail -n1)"
 expect_eq "(tv10) …and the reader answers no tree for the row" "" "$(tr_status T2)"
+# The stop's removal of a landed row's tree (lib/worktree.sh `worktree_remove_landed`) writes the same event.
+printf '<!-- brief: rendered from row T1 for w45-T9; sum %064d; render it again to change it, never edit it -->\nRow: T1\n' 0 > "$TRREC/briefs/w45-T9.md"
+TRT9="$(ws_path "$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T9 --for w45-T9)")"; TRS9="$(tr_status T1)"
+( . "$WSLIB" && worktree_remove_landed "$TR" "$TRT9" "$TRBASE" )
+expect_eq "(tv11) the stop's removal takes T1's tree from the reader too" "tree=.worktrees/45-T9|" "$TRS9|$(tr_status T1)"
 
 section "§REFUSALS: a tree is refused for an integrate row, naming the kind; nothing is made"
 # fails-when: create makes a tree, a branch or a tree event for a brief whose row is the integrate row.
