@@ -394,4 +394,46 @@ expect_absent "the recorder writes no record for a run that showed no evidence" 
   "typed=worker|log=" "$E4_STATE"
 
 # ============================================================
+section "BR — one bound session, its engaged file rewritten to a decoy: the shell wall, the write hook and the context library name the bound run"
+# ============================================================
+#
+# The run a session is in is its binding, recorded beside the seal by `bind_plan`, and every
+# reader takes it from `session_run` (lib/run.sh). One world: SID_A bound to a plan through the
+# one writer, then its engaged file rewritten to name an open decoy. The bound plan is made
+# unreadable, because that is the verdict all three readers SAY: the commit gate refuses naming
+# it, the write hook announces it, and the context library hands it over as a value. Had any of
+# them believed the engaged file, it would have judged the decoy, which is open and readable.
+# fails-when: one reader names the decoy, or names no run.
+BRR=$(new_repo "bound-run")
+BRP="$BRR/.bionic/docs/plans/epic-99/wave-01.plan.md"
+BRQ="$BRR/.bionic/docs/plans/epic-98/wave-02.plan.md"
+plan_fixture --current 4 "$BRP" wave >/dev/null
+plan_fixture --current 4 "$BRQ" wave >/dev/null
+git -C "$BRR" -c user.name=f -c user.email=f@x.invalid -c commit.gpgsign=false commit -q --allow-empty -m seed
+bound_marker "$BRR" "$SID_A" "$BRP"
+printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$BRQ" > "$BRR/.bionic/tmp/engaged-$SID_A.state"
+br_context() {  # <sid> -> "<word> <plan>" from bionic_context, asked for the verdict
+  printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PreToolUse"}' "$1" "$BRR" \
+    | ( cd "$BRR" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$1" BIONIC_CONTEXT_WANT_RUN=1 bash -c '
+        . "$1" >/dev/null 2>&1 || exit 9; bionic_context >/dev/null 2>&1; printf "%s %s" "$BIONIC_RUN_WORD" "$BIONIC_RUN_PLAN"' \
+        _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib/context.sh" )
+}
+bound_marker "$BRR" "$SID_B" "$BRQ"
+expect_eq "BR: the decoy is an open run the context library reads for a session bound to it (non-vacuity)" \
+  "bound-open $BRQ" "$(br_context "$SID_B")"
+chmod 000 "$BRP"
+BR_CTX=$(br_context "$SID_A")
+BR_GATE=$(jq -n --arg c "git commit -m x" --arg cwd "$BRR" --arg s "$SID_A" '{session_id:$s, hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:$c}, cwd:$cwd}' \
+  | ( cd "$BRR" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID_A" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" 2>&1 ); printf '|rc=%s' "$?")
+BR_WRITE=$(jq -n --arg f "$BRR/.bionic/docs/notes.md" --arg cwd "$BRR" --arg s "$SID_A" '{session_id:$s, hook_event_name:"PreToolUse", tool_name:"Write", tool_input:{file_path:$f, content:"x\n"}, cwd:$cwd}' \
+  | ( cd "$BRR" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh" 2>&1 ))
+chmod 600 "$BRP"
+expect_eq "BR context library: the bound run, unreadable, and never the decoy" "bound-unreadable $BRP" "$BR_CTX"
+expect_contains "BR shell wall: the commit is refused (exit 2)" "|rc=2" "$BR_GATE"
+expect_contains "…naming the bound plan as the plan it cannot read" "Bound plan:    $BRP" "$BR_GATE"
+expect_absent "…and judging nothing against the decoy" "$BRQ" "$BR_GATE"
+expect_contains "BR write hook: the bound run is the run it announces" "governing-skill: bound plan unreadable — $BRP" "$BR_WRITE"
+expect_absent "…and the decoy is not" "$BRQ" "$BR_WRITE"
+
+# ============================================================
 finish

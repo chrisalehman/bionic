@@ -47,6 +47,10 @@
 #       sees a whole one, and a writer that acts on the answer is checked again under the lock by
 #       seal_write.
 #
+#   AND THE BINDING, in the same home: which plan each session is bound to, written by
+#   lib/binding.sh `bind_plan` and believed by lib/run.sh `session_plan` (`seal_binding_*`, see
+#   THE BINDING below).
+#
 # WHERE IT LIVES. `<common git dir>/bionic-seal/`, the common directory as lib/root.sh's
 # `git_common_dir` resolves it from the plan's own directory: the same directory from the main
 # checkout and from every linked worktree, outside every tree's files and outside the project's state
@@ -252,4 +256,95 @@ seal_stands() {  # <plan> -> 0 a seal stands, 1 none, 2 no home
   [ -n "${1:-}" ] || return 64
   _seal_place "$1" || return 2
   _seal_read "$_SEAL_FILE" || return 1
+}
+
+# ─── THE BINDING: which plan a session is bound to, kept in the seal's home ───
+#
+# The engaged file in the project's state folder is where any tool can remove, link or rewrite
+# it, so the plan a session is bound to is also recorded here, beside the seals, and the one
+# question of which run a session is in (lib/run.sh `session_plan`) believes this record over
+# that file. lib/binding.sh `bind_plan` is its one writer, on every binding it makes, to `none`
+# too. A session with no record (one that never bound, or a synthetic dry session that writes an
+# engaged file and never calls `bind_plan`) is answered from its engaged file, as before.
+#
+#   seal_binding_put  <root> <sid> <plan|none>  0 written · 1 not written · 2 no home · 64 out of shape
+#   seal_binding_get  <root> <sid>              the plan or `none` on stdout, 0; 1 when no record stands
+#   seal_binding_drop <root> <sid>              0 removed or none stood · 1 not removed · 2 no home
+#   seal_binding_warm <root>                    resolves the root's home once, in the caller's shell
+#
+# ONE FILE A SESSION AND STATE FOLDER: `<home>/<sid>.<cksum of the state folder, crc-length>.binding`,
+#
+#   binding/v1
+#   session=<sid>
+#   state=<the root's .bionic, symlinks resolved>
+#   plan=<canonical plan path | none>
+#
+# KEYED BY THE STATE FOLDER, RESOLVED, and not by the root's spelling: a writer's tree links its
+# `.bionic` to the main checkout's, so the main checkout and every linked tree read one record for
+# a session, and a dispatched agent, which carries its parent's session id, is answered on its
+# parent's run. Two roots of one repository with state folders of their own hold two records. A
+# record out of shape, or naming another session or state folder, is no record.
+#
+# NO LOCK. Each record has one writer at a time (the session's own binding act) and is written as a
+# temporary file and moved, so a reader never sees half of one; the seals' lock is not waited on.
+#
+# THE HOME IS RESOLVED ONCE A SHELL. `git_common_dir` is a git fork; the hooks ask this question
+# several times a call, so the answer for the last root asked is kept in _SB_ROOT/_SB_COMMON/_SB_STATE
+# and `seal_binding_warm` fills it where command substitutions below inherit it.
+
+seal_binding_warm() {  # <root> -> 0 when the root has a home; the cache filled in this shell
+  local root="${1:-}" c s
+  [ -n "$root" ] || return 1
+  # Only a found home that still stands is kept: a root asked before its repository exists, or
+  # made again without one, is asked again.
+  [ "${_SB_ROOT:-}" = "$root" ] && [ -n "${_SB_COMMON:-}" ] && [ -d "$_SB_COMMON" ] && return 0
+  c="$(git_common_dir "$root")" || c=""
+  s="$(cd "$root/.bionic" 2>/dev/null && pwd -P)" \
+    || s="$(cd "$root" 2>/dev/null && pwd -P)/.bionic" || s="$root/.bionic"
+  _SB_ROOT="$root" _SB_COMMON="$c" _SB_STATE="$s"
+  [ -n "$c" ]
+}
+
+_seal_binding_place() {  # <root> <sid> -> _SB_FILE (and the warm cache); 1 no home, 64 a sid out of shape
+  local sum
+  case "${2:-}" in ''|unknown|*[!A-Za-z0-9_-]*) return 64 ;; esac
+  seal_binding_warm "$1" || return 1
+  sum="$(printf '%s' "$_SB_STATE" | cksum)"
+  _SB_FILE="$_SB_COMMON/$SEAL_HOME_NAME/$2.${sum// /-}.binding"
+}
+
+seal_binding_put() {  # <root> <sid> <plan|none>
+  local value="${3:-}" tmp rc=0
+  case "$value" in ''|*$'\n'*|*$'\r'*) return 64 ;; none|/*) ;; *) return 64 ;; esac
+  _seal_binding_place "$1" "${2:-}" || { rc=$?; [ "$rc" -eq 64 ] && return 64; return 2; }
+  mkdir -p "${_SB_FILE%/*}" 2>/dev/null || return 1
+  tmp="${_SB_FILE%/*}/.new.$$.$RANDOM"
+  if ! printf 'binding/v1\nsession=%s\nstate=%s\nplan=%s\n' "$2" "$_SB_STATE" "$value" > "$tmp" 2>/dev/null \
+     || ! mv -f "$tmp" "$_SB_FILE" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null; return 1
+  fi
+}
+
+seal_binding_get() {  # <root> <sid>
+  local l head="" ses="" st="" plan="" have=""
+  _seal_binding_place "${1:-}" "${2:-}" || return 1
+  [ -f "$_SB_FILE" ] && [ ! -L "$_SB_FILE" ] || return 1
+  while IFS= read -r l || [ -n "$l" ]; do
+    case "$l" in
+      binding/v1) head=1 ;;
+      session=*)  ses="${l#session=}" ;;
+      state=*)    st="${l#state=}" ;;
+      plan=*)     plan="${l#plan=}"; have=1 ;;
+    esac
+  done < "$_SB_FILE"
+  [ -n "$head" ] && [ -n "$have" ] && [ "$ses" = "$2" ] && [ "$st" = "$_SB_STATE" ] || return 1
+  case "$plan" in none|/*) ;; *) return 1 ;; esac
+  case "$plan" in *$'\r'*) return 1 ;; esac
+  printf '%s\n' "$plan"
+}
+
+seal_binding_drop() {  # <root> <sid>
+  _seal_binding_place "${1:-}" "${2:-}" || return 2
+  [ -e "$_SB_FILE" ] || [ -L "$_SB_FILE" ] || return 0
+  rm -f "$_SB_FILE" 2>/dev/null
 }

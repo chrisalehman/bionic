@@ -69,6 +69,16 @@
 #     5 not-an-open-run     the plan resolves and is not a member of `open_runs "$root"`
 #     6 write-failed        the write itself failed — status 2, a broken tree and not a
 #                           refusal, which is why it is numbered with them and not among them
+#     7 record-failed       the marker was written and the binding record beside the seal
+#                           could not be (status 2; THE RECORD, below)
+#
+# THE RECORD BESIDE THE SEAL (the seal holds the binding). Every binding this function writes,
+# `none` included, is also recorded in the seal's home (lib/seal.sh `seal_binding_put`), the
+# one place lib/run.sh `session_plan` believes over the marker: the marker can be removed,
+# linked or rewritten by any tool in the tree, the record cannot. A root in no repository has
+# no home and keeps no record, and its marker answers as before. The record is written after
+# the marker; one that cannot be written is taken away, so a stale record never outvotes the
+# marker just written, and the call returns 2.
 #
 # THE RUN'S SESSIONS (wave-36 T9; spec D10, design ledger Δ3 "D5 1"; AC-4.2). A `/clear`
 # re-keys the session, so a reader keyed by the live session id loses what the session before
@@ -235,12 +245,32 @@ bind_plan() {
   ( umask 077; printf 'plan=%s\nengaged_at=%s\n' "$value" "$stamp" > "$path" ) 2>/dev/null \
     || { BIND_REFUSAL="write-failed"; return 2; }
   chmod 600 "$path" 2>/dev/null || :
+  _bind_record "$root" "$sid" "$value" || { BIND_REFUSAL="record-failed"; return 2; }
   # THE RUN'S SESSIONS: after the marker, so a bind event never stands for a binding that was
   # not written. Its outcome rides in BIND_SESSION; the binding's status is the marker's.
   if [ -n "$act" ] && [ "$value" != "none" ]; then
     bind_record_session "$value" "$sid" "$act" || :
   fi
   return 0
+}
+
+# _bind_record <root> <sid> <canonical plan|none> -> 0 recorded beside the seal, or no home (or
+# no seal library) to record in; 1 the record could not be written (and a record standing from before is removed,
+# so the marker just written answers). lib/seal.sh is loaded, beside this file, the first time.
+_bind_record() {
+  local rc=0
+  if ! declare -F seal_binding_put >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/seal.sh" >/dev/null 2>&1
+    # No library to record with is no record for the reader to believe either: the marker answers.
+    declare -F seal_binding_put >/dev/null 2>&1 || return 0
+  fi
+  seal_binding_put "$1" "$2" "$3" || rc=$?
+  case "$rc" in
+    0|2) return 0 ;;
+  esac
+  seal_binding_drop "$1" "$2" || :
+  return 1
 }
 
 # BIND_SESSION_ACTS — the acts that bind, and so the only words a session line's `by` carries.
@@ -336,6 +366,8 @@ bind_holders() {  # <root> <sid> <plan>
   mine=$(engaged_marker_path "$root" "$self") || return 1
   want=$(_bind_resolve "$plan") || return 1
   dir=$(dirname "$mine")
+  # Each `session_plan` below asks the binding record first; its home is resolved once, here.
+  { _run_seal && seal_binding_warm "$root"; } >/dev/null 2>&1 || :
   for f in "$dir"/engaged-*.state; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
     base="${f##*/}"; osid="${base#engaged-}"; osid="${osid%.state}"

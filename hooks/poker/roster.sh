@@ -1929,6 +1929,12 @@ EOF
       esac
       exit 0
     else
+      if [ "$BIND_RC" -ge 2 ] && [ "${BIND_REFUSAL:-}" = record-failed ]; then
+        die "REFUSED — the binding record could not be written"
+        die "The marker names $BIND_PATH, and the record beside the seal could not be written."
+        die "Bind again once the git directory of the repository is writable."
+        exit 2
+      fi
       if [ "$BIND_RC" -ge 2 ]; then
         die "REFUSED — marker write failed"
         die "The binding was valid; the marker could not be written. Check that"
