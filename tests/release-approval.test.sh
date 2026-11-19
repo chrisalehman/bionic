@@ -432,7 +432,7 @@ expect_eq "REG-6 the register holds four finding asks and the release approval, 
 expect_contains "REG-6b …and the card owes five decisions" "You owe 5 decisions" "$(fc_under 'Bottom line' | fc_flat)"
 expect_eq "REG-6c …numbering exactly the asks that wait on the person" "$(fc_uasks)" "$(fc_regkeys | LC_ALL=C sort | fc_flat)"
 expect_eq "REG-6d …each finding under Findings naming its decision" "4" "$(fc_under Findings | /usr/bin/grep -cE 'defect [1-4] \(decision [1-4]\)$')"
-expect_absent "REG-6e …and none of them an aside besides" "needs a ruling" "$(fc_under 'Bottom line' | fc_flat)"
+expect_absent "REG-6e …and none of them an aside besides" "the person's: fix it" "$(fc_under 'Bottom line' | fc_flat)"
 fc_record adversarial adversarial piece "$FC_S3"
 
 # ============================================================
