@@ -28,7 +28,8 @@
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none. The tree event is folded in the reader alone: a second fold planted in a
 #                 script is found beside it, and the checkout holds the reader's one.
-#   §LOADER       the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
+#   §DEAD         a planted name of a removed landing function is found by its line; the checkout names neither.
+#   §LOADER      the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
 #                 tree; a copy planted in a hook file is listed and counted.
 #   §REPORT       with the plants the check exits 1, refusing each finding of the four kinds once; a loader copy
 #                 alone refuses nothing; it ends on the seven count lines, in their order.
@@ -270,6 +271,12 @@ TF="$S/tree-fold/payload/scripts"; mkdir -p "$TF/lib"; cp "${BIONIC_SCRIPTS_DIR}
 printf '%s\n' "planted_trees() { awk -F'|' 'ev() == \"tree\" { t[line_kv(\"row\")] = \$0 }'; }" > "$TF/planted-tree.sh"
 expect_eq "a fold of the tree event planted in a script is found beside the reader's" "payload/scripts/lib/reader.sh payload/scripts/planted-tree.sh" "$(tree_folds "$S/tree-fold")"
 expect_eq "the checkout folds the tree event once, in the reader" "payload/scripts/lib/reader.sh" "$(tree_folds "$BIONIC_SCRIPTS_DIR")"
+
+section "DEAD"
+dead() { ( cd "$1" && /usr/bin/grep -rnwE 'worktree_land|worktree_land_for_session' payload hooks skills agents-src agents 2>/dev/null | cut -d: -f1,2 | tr '\n' ' ' | sed 's/ $//' ); }
+mkdir -p "$S/dead/payload/scripts"; printf '%s\n' 'f() { :; }' '# worktree_land_for_session lands a tree' > "$S/dead/payload/scripts/p.sh"
+expect_eq "a planted comment naming a removed landing function is found by its file and line" "payload/scripts/p.sh:2" "$(dead "$S/dead")"
+expect_eq "the checkout's code, hooks, skills and agents name neither removed landing function" "" "$(dead "$BIONIC_SCRIPTS_DIR")"
 
 section "LOADER"
 expect_eq "the loader block's mark is found in one file, the loader's own" "payload/scripts/lib/loader.sh" \

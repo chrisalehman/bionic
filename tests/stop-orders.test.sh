@@ -367,7 +367,7 @@ section "Section 6: standdown LANDS NOTHING; a row is stoppable by its roster ma
 # ============================================================
 #
 # THE LANDING IS THE LINE'S (wave-28 T6; D7). Until 1.13.0 standdown merged each discharged row's
-# tree (bionic 1.4.0, AC-28, C1) through `worktree_land_for_session`. A row now lands through `ready`
+# tree itself. A row now lands through `ready`
 # (the line's one publish), which marks its roster line `landed=<40-hex> landed_at=<ISO-UTC>`, and
 # the writer's tree goes at `stopped <name>` (§TREE). So standdown merges nothing, removes
 # nothing and moves no ref: it reports each tree as it stands. A row carrying the mark is stoppable
@@ -712,7 +712,7 @@ expect_contains "under a stale panel the acked-gone row keeps its address" \
 # ---------- standdown ENDS THE LEASE of an acked-and-gone row too (wave-19 T1b, R2) ----------
 #
 # `continue`-ing out of the acked-and-gone branch before the LANDED/REFUSED block runs
-# means the common path — land, stop, tick ack — never reaches worktree_land for that row:
+# means the common path — land, stop, tick ack — never reaches the landing for that row:
 # the tree stands until someone runs `spawn-worktree.sh land` by hand, which undoes spec
 # AC-28 (1.4.0, "standing an agent down is where the lease ends"). The row stays out of
 # READY — an ack already closed it and there is nobody left to stop — but its lease still

@@ -1838,8 +1838,13 @@ _proof_keep_sweep() {  # <dir> <n> -> the newest <n> files of <dir> are left, th
 # held after the three, each line led by `order.` or `sessions.`: the same log holds them, so one fold answers all,
 # and the runner asks the order at every suite's start and every engagement the sessions (`proof_order_held`,
 # `proof_sessions_held`).
+#
+# A CALLER THAT DECIDES A COMMIT sets _PROOF_PLACE_FRESH, and for it the held file is never read: it is a cache under
+# $TMPDIR, and a cache rewritten by hand must not move the gate. Its place is folded from the log, then served again in
+# that shell and its subshells from this shell's memory alone, under the same key, so one hook folds the run once. It
+# neither reads nor writes the held file, which stays the other hooks' own.
 _PROOF_STEP_KEEP=128
-_PROOF_PLACE_LIBS=""; _PROOF_PLACE_DIR=""
+_PROOF_PLACE_LIBS=""; _PROOF_PLACE_DIR=""; _PROOF_PLACE_MEMO_KEY=""; _PROOF_PLACE_MEMO=""
 proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|abandoned, approved=1|0; exit 2, one line on stderr, when the fold fails
   # The answer is also left in _PROOF_PLACE, so a caller in this shell reads it with no subshell.
   local plan="${1:-}" log="" dir="" f stamp key held="" got ev tmp k rc=0 IFS=$' \t\n'
@@ -1876,9 +1881,12 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   key="$plan ${stamp//$'\n'/ } $_PROOF_PLACE_LIBS"
   # A step pending in an advance's own judgment is no place to keep: it is neither read from the held file nor kept in it.
   ! _proof_dry_refused || return 2
-  if [ -n "$stamp" ] && [ -n "$_PROOF_PLACE_LIBS" ] && [ -n "$_PROOF_PLACE_DIR" ] && [ -z "$_PROOF_DRY" ]; then
+  if [ -n "$stamp" ] && [ -n "$_PROOF_PLACE_LIBS" ] && [ -n "$_PROOF_PLACE_DIR" ] && [ -z "$_PROOF_DRY" ] && [ -z "${_PROOF_PLACE_FRESH:-}" ]; then
     held="${plan//[^A-Za-z0-9._-]/%}"; [ "${#held}" -le 200 ] || { held="$(cksum <<< "$plan")"; held="${held%% *}"; }
     held="$_PROOF_PLACE_DIR/$held"
+  fi
+  if [ -n "${_PROOF_PLACE_FRESH:-}" ] && [ -n "$stamp" ] && [ "$_PROOF_PLACE_MEMO_KEY" = "$key|$_PROOF_DRY" ]; then
+    _proof_place_split "$_PROOF_PLACE_MEMO"; printf '%s\n' "$_PROOF_PLACE"; return 0
   fi
   if [ -n "$held" ] && [ -f "$held" ] && { IFS= read -r k; got=""; while IFS= read -r f; do got="$got$f"$'\n'; done; } < "$held" \
      && [ "$k" = "$key" ] && [ -n "$got" ]; then
@@ -1896,6 +1904,7 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
     printf '%s\n%s\n' "$key" "$got" > "$tmp" && mv -f "$tmp" "$held" 2>/dev/null || rm -f "$tmp"
     _proof_keep_sweep "$_PROOF_PLACE_DIR" "$_PROOF_STEP_KEEP"
   fi
+  [ -z "${_PROOF_PLACE_FRESH:-}" ] || [ -z "$stamp" ] || { _PROOF_PLACE_MEMO_KEY="$key|$_PROOF_DRY"; _PROOF_PLACE_MEMO="$got"; }
   _proof_place_split "$got"; printf '%s\n' "$_PROOF_PLACE"
 }
 _proof_place_split() {  # <held lines> -> _PROOF_PLACE, the place's lines, _PROOF_PLACE_ORDER and _PROOF_PLACE_SESSIONS, unled

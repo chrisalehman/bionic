@@ -30,6 +30,8 @@
 #   §TOOLS    the same roads by Write and Edit through the write hook, then the commit.
 #   §CHANGED  a caught change: the refusal names the log and both replies, the ask it opens is in the log
 #             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
+#   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
+#             log and binding untouched: the commit's refusal is the one before, word for word.
 #   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
 #             and one line names the word and the change. §ABANDON: abandon on typed words ends the run.
 #
@@ -446,6 +448,21 @@ ROWS
 rm "$GP"
 expect_regex "the ask of the changed log is listed still, with the plan then removed" "$SA" "$(sitrep_asks)"
 gated "the plan removed, its commit refused, then put back" "$PC" 'cp "$GP" "$SB/keep"; rm "$GP"; gate "git commit -m x"; cp "$SB/keep" "$GP"'
+section "KEPT"
+. "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh"
+export TMPDIR="$SB/kept"
+kept() {  # <place|facts> -> each kept file of that kind made to read step 9, delivered, its key kept; then what it serves
+  local f b; for f in "$TMPDIR/bionic-$1-"*/*; do
+    b="$(sed '2,$ { s/^n=5$/n=9/; s/|n=5|/|n=9|/; s/^state=open$/state=delivered/; }' "$f")" && printf '%s\n' "$b" > "$f"; done
+  if [ "$1" = place ]; then proof_step_held "$GP"; else _proof_ask "$GP" reader_q_step "$GP"; fi
+}
+for k in place facts 'place facts'; do
+  rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world; gate "git commit -m x"; gate "git commit -m x"; E0="$(cat "$SB/gate.err")"
+  expect_eq "the run as sealed, its kept $k written by the gate: refused" "$OWED" "$GLINE"
+  for f in $k; do expect_contains "the kept $f rewritten by hand serves delivered" state=delivered "$(kept "$f")"; done
+  gate "git commit -m x"
+  expect_eq "with the kept $k read delivered, the refusal is the one before, word for word" "$E0" "$(cat "$SB/gate.err")"
+done
 
 section "ACCEPT"
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh"
