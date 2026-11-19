@@ -517,11 +517,14 @@ if cr_reached "CN-0"; then
   CN_P="$CR_ROOT/$DOOR_PLAN_REL"; CN_L="$CR_REC/run.log"; mkdir -p "${CN_P%/*}" && cp "$CR_PLAN" "$CN_P"
   { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/reader.sh" && reader_events "$CN_P" )
     printf 'run/v1|ev=cancel|of=step|n=9|at=2099-01-01T00:00:00Z\n'; } > "$WORLD_ROOT/cn.log" && mv "$WORLD_ROOT/cn.log" "$CN_L"
+  # The plan put back and its log rewritten are the world as this section plants it, over a run sealed before its close.
+  seal_fixture "$CN_P" "$CN_L"
   cn_facts() { door_run "$CR_ROOT" env HOME="$CR_DIR/home" BIONIC_CLAUDE_HOME="$CR_DIR/home/.claude" \
     bash "$CR_ROOT/payload/scripts/close-out.sh" "$CN_P" check; printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -m1 '^facts: '; }
   expect_eq "CN-1 reopened at Step 8, close-out reads the release approved: every fact holds at the branch's head" \
     "facts: every fact the run owes holds at $(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/$DOOR_BRANCH")" "$(cn_facts)"
   printf 'run/v1|ev=cancel|of=approval|key=release|at=2099-01-01T00:00:01Z\n' >> "$CN_L"
+  seal_fixture "$CN_P" "$CN_L"
   expect_contains "CN-2 …and with that approval cancelled in the log, it reads the release as not approved" \
     "no approved: release line names a head" "$(cn_facts)"
   rm -f "$CN_L" "$CN_P"
