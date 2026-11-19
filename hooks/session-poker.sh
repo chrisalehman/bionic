@@ -12,8 +12,6 @@
 # It is invoked ON DEMAND, one question per invocation, and holds no process open:
 #
 #     bash <plugin-root>/hooks/session-poker.sh tick       one decision over this roster (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh arm        stamp the Patrol as alive, at engagement
-#     bash <plugin-root>/hooks/session-poker.sh disarm     remove that stamp — this Patrol was ended on purpose
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh tick --watch   one pass of the tick for the watcher: quiet, or one wake line
 #     bash <plugin-root>/hooks/session-poker.sh interval --watch   the configured watch interval, seconds
@@ -27,18 +25,18 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof naming the head its evidence read (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order event with the words in the bound run's log (record/orders.log with no run bound)
+#     bash <plugin-root>/hooks/session-poker.sh accept '<their words>' | abandon '<their words>'   the person's word on a run changed around the tool: sealed again as it stands, or ended (writes the run's log and its seal)
 #     bash <plugin-root>/hooks/session-poker.sh waive <question|all|AC-id> '<reply>'   the user's waiver of a review question, all three, or a criterion (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh regression-run   run the project's regression (its regression-command:, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add regression (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share, the reserve the person keeps, the cores and the room, or set the share to <n>, 1 to 100, and the reserve to <cores> (the set writes the user-level files)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>' ['<changelog sentence>']   move a finding across the line on words the user typed in this session, a deferral with its sentence (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the run's log)
-#     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet for the model, or the Patrol's one-line status (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card, drawn from the sheet and the model's judgment, or every reason it is refused (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--machine <caller>] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event unless a machine caller stops it)
 #     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, one handoff event names it (writes the file, and the run's log when bound)
-#     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, the stamp, this session's roster and the recap)
+#     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, this session's roster and the recap)
 #     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register: this run's rulings from record/<wave>/design-ledger.md and its log, or every run's with the ADRs (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>'   a decision put: one round in the run's log, and the wait line it prints
 #     bash <plugin-root>/hooks/session-poker.sh decisions rule D<n> '<reply>'   a decision ruled on the user's reply: its round in the run's log and its ask closed, in one act
@@ -47,29 +45,15 @@
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
 # the CLI substitutes that variable inside registered command files and nowhere else. The
-# root is resolved ONCE PER SESSION, at Patrol arming, out of the CLI's own registry
+# root is resolved ONCE PER SESSION, at engagement, out of the CLI's own registry
 # (`installed_plugins.json`, via `detect_plugin_root` in scripts/lib/detect.sh) and the
 # resolved absolute path is baked into the session's own text from there on. The old
 # `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}` fallback is retired: it silently resolved to a
 # bootstrap-era `~/.claude` copy that could be an older build than the installed plugin.
 #
-# WHAT IT IS. The poker is the decision brain of THE PATROL, not a resident process
-# (spec R1). The doctrine that ARMS it lives in skills/canonical-sdlc/SKILL.md
-# §Dispatch, and the mechanism is a session-scoped cron job: One clock per run, and only one.
-# Arm it at engagement — never on dispatch, never one per unit — and then
-# `CronDelete` the job at run close WITH `disarm` beside it, which removes the stamp: the
-# cron half stops the firing and the stamp half is what says the stop was deliberate, and a
-# `CronDelete` alone leaves a Patrol that every reader — hooks/patrol-revive.sh loudest —
-# has to read as a death (critic C-2, epic-19 w1).
-# Wakeups are recurring, never date-pinned: a one-shot
-# `CronCreate` pinned to a wall-clock minute is banned, because
-# a busy minute DROPS the tick rather than queuing it — so a one-shot whose single match
-# minute finds the session working dies silently and never fires again. A run that needs a
-# wake creates a SHORT RECURRING job and `CronDelete`s it on its first fire.
-# Each Patrol tick delivers the patrol prompt, whose FIRST duty is `tick` and whose LAST is
-# to continue the run's actual work rather than report on it; THIS SCRIPT DECIDES, the cron
-# schedules. (Epic-17 W4 superseded the earlier mechanism, a harness self-wake primitive
-# that slept `interval` seconds between calls; `interval` survives it as the cron's period.)
+# WHAT IT IS. The poker is the decision brain of the watch, not a resident process
+# (spec R1). The watcher (hooks/watch.sh, which the turn-end hook starts) runs `tick --watch`
+# between turns and wakes the model only when a pass names an act; THIS SCRIPT DECIDES.
 # `tick` is exactly ONE `verdict` read over the whole roster, plus — for any UNMET row only —
 # a direct roster lookup of that one row's own `duration=`/`launched_at=` fields (verdict's
 # own output carries neither). Never a per-row verdict call, never a second judgment of
@@ -77,40 +61,9 @@
 # spec §Design) and this script only consumes it.
 #
 # WHAT IT NEVER DOES. It never stops, kills, or notifies on its own authority. The
-# decision is printed on stdout as ONE machine-readable line, and the caller (the patrol
-# prompt the Patrol delivers) is what turns a NOTIFY line into an actual push. Zero
+# decision is printed on stdout as ONE machine-readable line, and the caller (the watch
+# pass, and the model it wakes) is what turns a NOTIFY line into an actual push. Zero
 # authority, exactly like `verdict` (ADR-003).
-#
-# THE ONE THING IT DOES RECORD IS THAT IT RAN. Every invocation of `tick` and every `arm`
-# writes a session-keyed Patrol stamp beside the roster — `.bionic/tmp/patrol-<sid>.state`,
-# schema `patrol-stamp/v1` — and hooks/dispatch-preflight.sh refuses a dispatch when that
-# stamp is absent (the Patrol was never armed) or older than 2x the poker-interval (it was
-# armed and has stopped firing). Two properties make that wall honest, and both are pinned
-# by tests/session-poker.test.sh §6:
-#
-#   THE STAMP IS WRITTEN BEFORE ANYTHING IS DECIDED — before the sibling sweeper is even
-#   located, before the roster is read, before any exit path branches. What it attests is
-#   FIRINGS LANDING, not decisions succeeding. A stamp written on success would measure the
-#   wrong thing: this wave's own orchestrator session produced 10+ healthy-but-REFUSED
-#   pre-roster ticks across one long interview, and stamp-on-success would have aged the
-#   stamp into a false refusal of the wave's first dispatch. The single exception is a tick
-#   with no session key at all, which has no stamp path to write.
-#
-#   `arm` EXISTS BECAUSE ARMING PRECEDES DISPATCH. The doctrine arms at engagement, never on
-#   dispatch, so the first stamp cannot come from a tick that has a roster to read; without
-#   this verb the wall is a chicken-and-egg that refuses every first dispatch of a run.
-#   `arm` therefore needs no roster and asks for none.
-#
-#   `disarm` EXISTS BECAUSE A DELIBERATE STOP HAS TO BE READABLE. It removes the stamp, and
-#   nothing else in production ever did — so an aging stamp meant "the Patrol died" and
-#   "the run ended its own Patrol" indistinguishably, and hooks/patrol-revive.sh reported
-#   the second as the first on EVERY remaining turn of the session (critic C-2, epic-19 w1).
-#   Its two callers are the two deliberate stops there are: the run-close ritual in
-#   skills/canonical-sdlc/SKILL.md §Dispatch, beside the `CronDelete`, and the DISARM
-#   decision below, which takes it as the last act of its own tick.
-#
-# The stamp is a LIVENESS signal, not an authority: it says the Patrol fired, and it cannot
-# say the CLI's cron table still holds the job. That honest limit is the wall's too.
 #
 # AN ACKED ROW IS CLOSED HERE, exactly as it is for the other three consumers of the
 # verdict line (`stop_landing_gate` and `stop_guard` in lib/stop.sh, hooks/stop-orders.sh): it is
@@ -122,9 +75,8 @@
 #            roster" invariant, literally) generalizes here to the roster having nothing
 #            open at all: every row MET, WAIVED or ACKED is the same "nothing left to wait
 #            for" as no rows existing, so all read DISARM (S2 design decision plus epic-16
-#            w2 Step-6 remediation R4, both logged to the plan). A DISARM tick REMOVES this
-#            session's stamp as its last act — the decision is terminal, so the disk record
-#            that a Patrol runs here has to stop saying so.
+#            w2 Step-6 remediation R4, both logged to the plan). The run must also say it
+#            is delivered, in a delivery newer than this session's binding (`run_state`).
 #   NOTIFY   at least one UNACKED UNMET row's elapsed time (now − launched_at) exceeds its own
 #            declared `duration=`, read by the same parser `verdict` uses for `cadence=`
 #            (hooks/session-sweeper.sh's parse_seconds, duplicated below — see that file's
@@ -232,8 +184,8 @@ fi
 # THE ONE PREDICATE FOR "TOO QUIET" (REQ-10 AC-10.1, D9; ADR-028). `observe_class` classifies
 # a dispatched row `delivered`/`alive`/`idle` from two mtimes against the cadence the row's
 # own brief declared. Both readers in this file — the tick's row loop and `adopt`'s liveness
-# verdict — ask it, so the fleet holds two staleness arithmetics (a stamp against its fire
-# window, a row against its cadence) where it held four: this verb used to multiply a cadence
+# verdict — ask it, so the fleet holds one staleness arithmetic (a row against its cadence)
+# where it held four: this verb used to multiply a cadence
 # by a second multiplier of its own and the tick measured no cadence at all.
 #
 # THIS FILE'S OWN `file_mtime`, `line_field` and `parse_seconds` are defined BELOW this line
@@ -242,8 +194,8 @@ fi
 # reads.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/observe.sh"
-# THE PASTED POKER PATH (wave-24 T29; critic I2, A-T27.8). The Patrol prompt, the STANDDOWN
-# line and the re-arm note print this script's path for a reader to paste; it is ONE shell
+# THE PASTED POKER PATH. The STANDDOWN line and the
+# refusals print this script's path for a reader to paste; it is ONE shell
 # word, so a plugin root with a space pastes whole. refuse.sh's `refuse_shell_word` owns the rule.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
@@ -284,38 +236,11 @@ POKER_INTERVAL_DEFAULT="${PATROL_INTERVAL_DEFAULT}s"
 # in-process constant from.
 SWEPT_SCHEMA="landing-swept/v1"
 
-# The Patrol stamp — schema, and the two halves of its per-session filename. Read back by
-# hooks/dispatch-preflight.sh's arming wall; the two spellings are held together by
-# tests/cross-gate-agreement.test.sh §P, so a rename on one side cannot go quiet on the other.
-PATROL_STAMP_SCHEMA="patrol-stamp/v1"
-PATROL_STAMP_PREFIX="patrol-"
-PATROL_STAMP_SUFFIX=".state"
-
-# THE ARMING RECORD — a sibling of the stamp, whose MTIME is the instant this session armed.
-# It is a second file rather than a field inside the stamp because the stamp is rewritten
-# whole by every tick: a field would have to be read back and re-emitted on each of them, and
-# one silent read-back failure would erase the session's arming instant for good. The marker
-# is written once, by `arm`, and removed with the stamp — nothing else touches it, so it
-# cannot drift. Its mtime carries full filesystem resolution, which is what lets the
-# comparison below be `-nt` (the selection block's own primitive) rather than a
-# whole-second arithmetic that ties.
-#
-# NO OTHER READER SEES IT: every consumer of the stamp addresses the exact
-# `patrol-<sid>.state` path (hooks/dispatch-preflight.sh, hooks/patrol-revive.sh,
-# scripts/lib/patrol.sh) — none of them globs — so a `patrol-<sid>.state.armed` beside it
-# changes nothing they read, and the stamp's own shape, which the arming wall ages, is
-# untouched.
-PATROL_ARMED_SCHEMA="patrol-armed/v1"
-PATROL_ARMED_SUFFIX=".armed"
-
-# THE TICK DIGEST AND THE PROMPT VERSION (wave-24 T7, REQ-4; D4, D5; ADR-041). The digest file
+# THE TICK DIGEST. The digest file
 # holds what one tick carries to the next: a hash of what the tick decided (no timestamp enters
-# it), when that answer was first given, the decision band, whether the turn's task list is behind
+# it), when that answer was first given, the decision band, and whether the turn's task list is behind
 # (`duty=owed|none`: advice since wave-31 T32, D6, which deleted the stop wall's task-list duty;
-# no wall reads it), and the Patrol prompt version
-# `arm` recorded. A tick whose hash matches the file's prints one line. The prompt version is
-# bumped whenever the prompt's wording changes what a tick turn is asked to do, so a Patrol armed
-# under an older one is told to re-arm.
+# no wall reads it). A tick whose hash matches the file's prints one line.
 PATROL_DIGEST_SCHEMA="patrol-digest/v1"
 # THE HOLD'S REASON, AS EVERY FIX LINE PRINTS IT (wave-24 T27; critic I4): a quoted
 # placeholder, so a line pasted as printed is one argument and never a redirect from a file
@@ -323,27 +248,6 @@ PATROL_DIGEST_SCHEMA="patrol-digest/v1"
 # (payload/scripts/lib/stop.sh `STANDDOWN_HOLDS`); tests/session-poker-2.test.sh §HOLD-fix pins
 # the three sites.
 HOLD_REASON_SLOT="'why it stays up'"
-# v=3 (wave-25 T5; D7): the prompt says what the decision line's `gate=` field asks of the turn,
-# so a Patrol armed under v=2 does not know it and the tick's re-arm note asks for the new job.
-# v=4 (wave-26 T15; D16): an `unchanged` or a WAITING tick ends the turn's duties, the task-list
-# refresh is asked only on a change, and "continue" only when something is ready or changed.
-# v=5 (wave-26 T32; review-6 F2): the refresh is asked only when the tick printed its RECONCILE
-# line, which it prints whenever the duty is owed (v=4 asked on a change the tick never printed),
-# and a FILL asks for the dispatch alone: the launch records the row and its ledger line.
-# v=6 (wave-27 T34; REQ-15, D24): a FILL left unfilled is answered by the `decline` verb, which records
-# the decline on disk, and no longer by a line in the reply the user reads.
-# v=7: the decline is gone, so a session armed under v=6 asks for a verb that answers unknown. A FILL
-# is answered by its dispatch; a row that should wait is made not ready instead, by the forms the stop
-# wall prints, and the tick's re-arm note asks for the new job.
-# v=8: the prompt carries the one sentence the orchestrator says after re-arming, and no other
-# instruction about what to say there, so a session armed under v=7 lacks it and the tick's re-arm
-# note asks for the new job.
-PATROL_PROMPT_VERSION=8
-
-# THE ONE SENTENCE THE ORCHESTRATOR SAYS AFTER RE-ARMING A PATROL, kept in one double-quoted literal
-# because it holds an apostrophe. The dispatch rules (agents-src/blocks/orchestrator-dispatch.md) carry
-# the same words, and tests/stop.test.sh §PATROL pins both sites to this one.
-PATROL_REARM_SAY="Patrol re-armed: the session's cron table was empty, so I created the recurring <interval> job and stamped it. Next fire is <time>."
 
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
@@ -380,10 +284,9 @@ usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
   die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
-  die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh tick --watch   one pass of the tick with no model: exit ${WATCH_RC_QUIET} quiet; exit ${WATCH_RC_WAKE} with one line of at most ${WATCH_LINE_MAX} characters naming the act owed"
+  die "  bash ${HOOK_DIR}/session-poker.sh duty       the whole reason of the duty the turn-end hook last named in this session (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval --watch   the configured watch interval, in seconds (watch-interval:, default ${WATCH_INTERVAL_DEFAULT}s, refused above ${WATCH_INTERVAL_MAX}s)"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share (92 when none is set), the cores the person keeps (1 when none is set), the cores and the room; with <n> or reserve=<cores>, set it in the user-level file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt [--why '<reason>']   every open row a PREDECESSOR session left on this project's rosters, each adoption one hand event with its reason (the predecessor's clear when none is given)"
@@ -404,6 +307,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order event with the words in the bound run's log, else a line in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>' ['<why>']   record the user's approval <name> as one approval in the run's log: a name a row reads, plan at Step 3, or a T4 criterion the user confirms on words they typed"
+  die "  bash ${HOOK_DIR}/session-poker.sh accept '<their words>'   the person's word that the run, changed around the tool, is theirs as it stands: one approval line naming the words and the change, then the run sealed again"
+  die "  bash ${HOOK_DIR}/session-poker.sh abandon '<their words>'   the person's word that the bound run ends: one abandon line naming the words, and its seal removed"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh publish   the bound run's pull request, on the release approval at the working head and nothing else: the working branch pushed to origin and the request opened against the integration branch through gh, recorded as a published event of part pr; at a head already published it does nothing, at a new head it pushes and keeps the request; a failed push or request exits 4 with the cause and opens an ask for the user"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
@@ -417,7 +322,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh regression-run [--starter tick|orchestrator|person] [--reason '<why>']   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite; --starter names who started it, written as starter= on its run line (orchestrator by default), and person needs --reason"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>' ['<changelog sentence>']   move a finding across the line on words the user typed in this session, a deferral with its one changelog sentence, as a finding event in the run's log"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the review or after it, as a finding event in the run's log"
-  die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sheet's pace, correctness and waste (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh release-note [--at <commit>] [--on <ISO-UTC>] [<plan>]   the release entry's ### The landing numbers block: landing-report --rows over the landing record as it stood at the instant, naming the working head (read-only)"
@@ -427,7 +331,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
   die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document, .bionic/docs/record/handoffs/<date>-<slug>.md, bound or not: the kind line, the title, Summary, Goal, State (computed), Findings, Decisions, Ruled out, Open, Suggested skills and Next (composed, on stdin), the resume line last; prints the path and the resume line; bound, one handoff event in the run's log names the file, and the plan is never written"
-  die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt and tick; print the run in a dozen lines (bound, step, agents running, landed since, owed now, patrol) and the path of the recap file holding the rest (task-list:, settled:, open:, the Patrol job). A closed or no-run file binds nothing"
+  die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, adopt and tick; print the run in a dozen lines (bound, step, agents running, landed since, owed now, watch) and the path of the recap file holding the rest (task-list:, settled:, open:, the step file). A closed or no-run file binds nothing"
   die "  bash ${HOOK_DIR}/session-poker.sh promote <adr|design|requirement> <path>   copy one durable record into the project's tracked home (docs-tracked: in .bionic/config.yaml, docs/ when absent) as <home>/<kind>s/<name>, the run number dropped from the name; a plan, a log or a run record is refused and nothing is copied"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions [--all]   the bound run's rulings, D<n> · \"<reply>\" · <who> <date> · <title>, from record/<wave>/design-ledger.md and the run's log as one list; --all: every run's, keyed by wave, with the ADRs (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>'   during a run, append the decision's put to the run's log and print its wait line: what an hour's wait moves, from the tasks that read approval:D<n> and the longest chain"
@@ -756,6 +660,11 @@ case "$VERB" in
     esac
     AP_NAME="$1"; AP_REPLY="$2"; AP_WHY="${3:-}"
     ;;
+  # THE PERSON'S WORD ON A CHANGED RUN: one operand, their words as typed, holding something once blanks are gone.
+  accept|abandon)
+    [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ] || usage "$VERB takes one argument: the person's words, quoted, as they typed them."
+    SW_WORDS="$1"
+    ;;
   # THE USER'S ORDER. One operand: the user's words, which must hold something once blanks are gone,
   # or the word lift, which ends the open order.
   order)
@@ -865,9 +774,7 @@ $1"; shift ;;
   tick|interval)
     [ $# -eq 0 ] || { [ $# -eq 1 ] && [ "$1" = --watch ]; } || usage "$VERB takes no arguments, or --watch."
     ;;
-  arm|disarm|prompt)
-    [ $# -eq 0 ] || usage "$VERB takes no arguments."
-    ;;
+  duty) [ $# -eq 0 ] || usage "duty takes no arguments." ;;
   # THE MACHINE'S SHARE. No operand prints it; a share and `reserve=<cores>`
   # set theirs, together or one at a time. A value's own shape is the verb's refusal; a third operand, or the
   # same one twice, is the usage error.
@@ -1239,26 +1146,14 @@ poker_watch_interval_seconds() {
 # each other both ways; each keeps the text that explained it where it was written.
 
 #
-# One session-keyed file beside the roster, at the SAME pinned root the roster uses — a
-# stamp written under a worktree root while the wall reads the main repository's would
-# refuse a perfectly live Patrol, silently and for the rest of the run (the exact shape of
-# the worktree bug ap review A-1 fixed for the roster read, epic-16 w2).
-#
-# Never fatal to a tick. A tick that could not stamp has still decided, and turning a
-# stamp-write failure into a refused tick would hand the arming wall a second way to say
-# "dead" about a Patrol that is firing fine. `arm` is the exception and checks the return:
-# arming is an explicit act whose whole product is the stamp, so a silent no-op there would
-# leave the operator believing a wall is satisfied when it is not.
-#
-# Symlinks are refused rather than followed, the same posture every other .bionic/tmp
-# writer takes: a hostile repo may make this fail, and must not gain a write through a path
-# it aims.
-patrol_stamp_file() {  # <session-id> -> absolute path, or empty
-  local repo real
-  repo="$(project_root "$PWD")"
-  real="$(cd "$repo" 2>/dev/null && pwd -P)"
+# The physical root of this cwd's project: the one the roster, the digest and the running tick's
+# record sit under, so a tick inside a worktree writes beside the main repository's roster, never
+# beside a copy of its own.
+tick_state_root() {  # -> absolute path, or rc 1
+  local real
+  real="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
   [ -n "$real" ] || return 1
-  printf '%s/.bionic/tmp/%s%s%s' "$real" "$PATROL_STAMP_PREFIX" "$1" "$PATROL_STAMP_SUFFIX"
+  printf '%s' "$real"
 }
 
 epoch_iso() {  # <epoch seconds> -> UTC ISO-8601, the shape the CLI stamps entries with
@@ -1339,10 +1234,10 @@ session_transcript() {  # <session-id> -> path on stdout, nonzero if none
 #
 # FAIL DIRECTION IS `open`, without exception. No project root, no docs root, no plan, an
 # unreadable plan, a plan whose `current:` will not parse, a `current: 9` with no
-# `delivered:`, a delivery this session cannot place in time (no arming record), and a
-# delivery that PREDATES this session's arming — every one of them answers `open`, and `open`
-# never DISARMs. A wrong `open` costs a Patrol that keeps ticking over a finished run, which
-# one `disarm` ends; a wrong `delivered` costs the silent, terminal end of supervision over a
+# `delivered:`, a delivery this session cannot place in time (no binding record), and a
+# delivery that PREDATES this session's binding — every one of them answers `open`, and `open`
+# never DISARMs. A wrong `open` costs a watch that keeps passing over a finished run until its
+# day ends; a wrong `delivered` costs the silent, terminal end of supervision over a
 # live wave, which nothing recovers. The asymmetry is the whole design.
 
 # CRLF and CR-only line endings TRANSLATED, never deleted: a deleted CR would join two
@@ -1444,8 +1339,24 @@ resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RU
   return 0
 }
 
-run_state() {  # <project root> <arming-record path, may be empty> <session id> -> "delivered|<why>" or "open|<why>"
-  local repo="$1" armed="${2:-}" sid="${3:-}" droot plan current
+# run_dated_by <root> <sid> -> the path of the record whose mtime is the instant this session bound
+# its run, or rc 1. THE BINDING BESIDE THE SEAL FIRST: since the binding moved beside the seal, the
+# walls believe that record over the engaged file, and a hand cannot rewrite it under the git home
+# the way it can rewrite a file in the state directory, so a touch cannot turn a delivery undelivered or the
+# reverse. A session with no record there (a root with no git home) is dated by its engaged file,
+# which the same binding act writes.
+run_dated_by() {  # <root> <sid>
+  local f
+  if _run_seal && seal_binding_warm "$1" && seal_binding_get "$1" "$2" >/dev/null 2>&1 \
+     && _seal_binding_place "$1" "$2" && [ -f "$_SB_FILE" ] && [ ! -L "$_SB_FILE" ]; then
+    printf '%s' "$_SB_FILE"; return 0
+  fi
+  f="$(engaged_marker_path "$1" "$2")" && [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  printf '%s' "$f"
+}
+
+run_state() {  # <project root> <session id> -> "delivered|<why>" or "open|<why>"
+  local repo="$1" sid="${2:-}" droot plan current dated
   if [ -z "$repo" ] || [ ! -d "$repo" ]; then
     printf 'open|no project root resolved, so no plan could be read'
     return 0
@@ -1463,7 +1374,7 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
   # A BOUND PLAN THAT IS GONE. `session_run` reports a missing binding as `bound-closed`, so
   # the path can name a file no longer on disk — and every read below would then be an awk
   # error on stderr and an empty answer. DOUBT IS `open` (ADR-002 §3), which is the same
-  # answer the no-plan arm above gives, so the Patrol keeps its stamp rather than stopping
+  # answer the no-plan arm above gives, so the watch keeps passing rather than stopping
   # on a file nobody can read.
   if [ ! -f "$plan" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
     printf 'open|%s is this session'"'"'s bound plan and it is not on disk' "$plan"
@@ -1499,27 +1410,24 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
   esac
 
   # WHOSE DELIVERY IS IT? A `delivered:` on the newest plan says a run finished; it does not
-  # say THIS run finished. A session that closes run W and then starts W+1 arms at Step 0 —
-  # SKILL.md §Dispatch, "at engagement" — while W+1's plan, and the `## SDLC State` that
-  # would answer for it, does not exist until Step 1-3. Through that whole window the newest
-  # SDLC-State plan is W's, its Step-9 line still records `delivered:`, and the roster is
-  # empty because nothing has been dispatched yet: the tick DISARMed, removed the stamp, and
-  # the arming wall refused the new run's first dispatch (critic C-4, wave-1.3.2 Step 6).
+  # say THIS run finished. A session that closes run W and then engages for W+1 at Step 0 is
+  # bound to no plan while W+1's plan, and the `## SDLC State` that would answer for it, does
+  # not exist until Step 1-3; through that whole window the newest SDLC-State plan is W's, its
+  # Step-9 line still records `delivered:`, and the roster is empty because nothing has been
+  # dispatched yet.
   #
-  # So a delivery counts only if it POSTDATES this Patrol's arming, and the arming instant is
-  # the mtime of the record `arm` wrote. `-nt` rather than a seconds comparison: it is the
-  # same primitive the selection block above uses, it carries whatever resolution the
-  # filesystem has, and it resolves a tie as NOT newer — which is the fail direction this
-  # whole function already takes everywhere else.
+  # So a delivery counts only if it POSTDATES this session's binding, dated by `run_dated_by`.
+  # `-nt` rather than a seconds comparison: it carries whatever resolution the filesystem has,
+  # and it resolves a tie as NOT newer, the fail direction this function takes everywhere else.
   #
-  # NO RECORD IS DOUBT, AND DOUBT IS `open` (ADR-002 §3). A tick in a session that never
-  # armed cannot place the delivery in time at all.
-  if [ -z "$armed" ] || [ ! -f "$armed" ]; then
-    printf 'open|%s records delivered:, but this session has no arming record to date it against' "$plan"
+  # NO RECORD IS DOUBT, AND DOUBT IS `open`.
+  dated="$(run_dated_by "$repo" "$sid")" || dated=""
+  if [ -z "$dated" ]; then
+    printf 'open|%s records delivered:, but this session has no binding record to date it against' "$plan"
     return 0
   fi
-  if [ ! "$plan" -nt "$armed" ]; then
-    printf 'open|%s records delivered:, but it was delivered before this Patrol armed — that is the previous run' "$plan"
+  if [ ! "$plan" -nt "$dated" ]; then
+    printf 'open|%s records delivered:, but it was delivered before this session bound its run — that is the previous run' "$plan"
     return 0
   fi
   # THE LIBRARY'S SECOND OPINION, as a CONJUNCT and never as a replacement. `lib/run.sh` is
@@ -2399,6 +2307,20 @@ PFC_OUT=""; PFC_ART=""
 
 case "$VERB" in
 
+  # THE DUTY'S WHOLE REASON. A turn-end refusal whose fix is the agent's shows the window one fixed line and keeps
+  # the refusal itself, line and detail, in the session's duty file (lib/refuse.sh `refuse_duty_path`); this prints
+  # it, byte for byte. The file is the duty the hook last named, so a session the hook never refused has none, and
+  # that is said rather than refused: there is nothing to mend. Read-only; a link at the file's name is no duty.
+  duty)
+    DUTY_ROOT="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)" || DUTY_ROOT=""
+    if DUTY_F="$(refuse_duty_path "$DUTY_ROOT" "${CLAUDE_CODE_SESSION_ID:-}")" && [ -f "$DUTY_F" ] && [ ! -L "$DUTY_F" ]; then
+      cat "$DUTY_F"
+      exit 0
+    fi
+    printf 'poker: no duty — the turn-end hook has named none in this session\n'
+    exit 0
+    ;;
+
   interval)
     if [ "${1:-}" = --watch ]; then
       SECS="$(poker_watch_interval_seconds)"; SECS_RC=$?
@@ -2476,36 +2398,6 @@ case "$VERB" in
     exit 0
     ;;
 
-  # THE CANONICAL PATROL PROMPT (wave-20 REQ-6, AC-6.1; D6). Report #1: a Patrol job created
-  # with a composed prompt — the bare tick command, or the marker without the tick — produced
-  # turns the stop wall never saw as ticks, or ticks that never ran. The prompt is a fact of
-  # the session and of this poker's own path, so it is printed rather than composed: the
-  # marker `bionic-patrol session=<sid[0:8]>` FIRST (the stop wall's TICK_MARK, and the prefix
-  # the resume ritual deletes stray jobs by), then the tick by this script's absolute path.
-  # One line, because it is a CronCreate prompt. READ-ONLY and outside the engagement gate,
-  # like `interval`: it decides nothing.
-  #
-  # IT ASKS ONLY FOR WHAT THE TICK PRINTED (wave-24 T7, REQ-4; D5). Through 1.8.10 it asked for a
-  # reason in prose on every tick, and all 29 of that run answered nothing a wall had asked. A FILL
-  # is answered by its dispatch alone: a row that should wait is made not ready by a fact the tick
-  # judges, never answered ready by a sentence, and the prompt names no verb for it. Each answer is now conditional on the line that owes it, ListAgents on an open
-  # row, the task-list refresh only on a change of a row's status or the ready set (wave-26 T15;
-  # D16), which the tick prints as its RECONCILE line (T32), nothing at all after `unchanged` or
-  # WAITING, and `v=` after the
-  # marker names the prompt's version so `arm` can record it and a later tick can ask for a
-  # re-arm when the poker has moved on.
-  prompt)
-    SESSION_ID="$(session_id)" || SESSION_ID=""
-    if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
-      die "The prompt carries THIS session's marker, so without the key there is no prompt to print."
-      exit 3
-    fi
-    printf 'bionic-patrol session=%s v=%s — Patrol tick. ListAgents only when the roster has an open row, then run: bash %s tick — the tick decides per row. If it printed only "unchanged", or a "poker: WAITING" line, the run is waiting on its agents and this turn owes nothing more: end it. Answer a FILL only if a "poker: FILL" line printed: dispatch every row it names (its launch records the row active and its ledger line: write neither by hand); a row that should wait is made not ready instead, by one of the three forms the stop wall prints. Answer a STANDDOWN only if a "poker: STANDDOWN" line printed: TaskStop it, or keep it up with the hold line it prints: bash %s hold NAME %s, NAME as printed and the reason inside the quotes. A gate= field on the decision line means a reserved request was denied: put each "poker: GATE" line to the human as a gate act, through the human'"'"'s own notify channel, and do not perform it. TaskList and reconcile only if a "poker: RECONCILE" line printed. After you re-arm this Patrol, say exactly: "%s" Continue the run toward its goal until a wall only when something is ready or changed.\n' \
-      "${SESSION_ID:0:8}" "$PATROL_PROMPT_VERSION" "$POKER_WORD" "$POKER_WORD" "$HOLD_REASON_SLOT" "$PATROL_REARM_SAY"
-    exit 0
-    ;;
-
 esac
 
 # ---------------------------------------------------------------- the parts
@@ -2528,8 +2420,6 @@ poker_part_missing() {  # <part> -> exits as loader_fail_open does, naming the p
 { [ -r "$HOOK_DIR/poker/judge.sh" ] && . "$HOOK_DIR/poker/judge.sh"; } || poker_part_missing judge
 
 case "$VERB" in
-  arm) poker_verb_arm "$@" ;;
-  disarm) poker_verb_disarm "$@" ;;
   adopt) poker_verb_adopt "$@" ;;
   sweep) poker_verb_sweep "$@" ;;
   bind) poker_verb_bind "$@" ;;
@@ -2548,6 +2438,8 @@ case "$VERB" in
   reply) poker_verb_reply "$@" ;;
   release-approval) poker_verb_release_approval "$@" ;;
   approve) poker_verb_approve "$@" ;;
+  accept) poker_verb_accept ;;
+  abandon) poker_verb_abandon ;;
   order) poker_verb_order "$@" ;;
   proof-add) poker_verb_proof_add "$@" ;;
   waive) poker_verb_waive "$@" ;;

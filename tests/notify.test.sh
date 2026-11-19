@@ -349,7 +349,7 @@ gate_line() {  # <asker> <category> <head>
   printf 'gate/v1|at=2026-10-11T00:00:00Z|session=%s|asker=%s|category=%s|head=%s\n' "$SID" "$1" "$2" "$3"
 }
 nt_world() {  # <label> -> a repo: armed, one open row inside its duration (the QUIET world)
-  local r; r="$(make_repo "$1")"; new_roster "$r"; armed_ago "$r"
+  local r; r="$(make_repo "$1")"; new_roster "$r"; bound_ago "$r"
   add_row "$r" name=busy deliverable="$r/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
   printf '%s' "$r"
 }

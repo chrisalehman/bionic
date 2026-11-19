@@ -7,23 +7,25 @@
 # every site reads its cell. "The next property of a scale is a column, never a check."
 #
 #   §CELL   the table: every cell, and the refusal of a scale or column it does not hold
-#   §TASK   a task-scale fixture at every reader: engagement arms no Patrol; `facts_owed
-#           single task` deals one critic; the dispatch wall refuses the fourth writer and
-#           not for a Patrol; close-out accepts `fix/x` and its integrate act is a PR
+#   §TASK   a task-scale fixture at every reader: engagement binds the run; `facts_owed
+#           single task` deals one critic; the dispatch wall refuses the fourth writer;
+#           close-out accepts `fix/x` and holds on it until the PR merges
+#   §TABLE  SKILL.md's scale table cell for cell against the library; no integrate cell, and
+#           no page of the method, names a merge as a route
 #
-# fails-when: a patrol armed at task scale, two readers dealt unflagged, a branch refused, or a
-# fourth writer admitted with no person's cap.
+# fails-when: two readers dealt unflagged, a branch refused, a fourth writer admitted with no
+# person's cap, a cell of the doctrine table differing from the library, or a merge named as a
+# route.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The engagement and
 # close-out roots are SYNTHESIZED: a plan carrying only the keys its reader asks (`scale:`, and
 # for close-out the two branches in its header and its log at step 8), each a page at 15, in a real git
 # repository for close-out. The dispatch fixtures are the wall's own shards' (make_repo and the
-# roster rows of tests/dispatch-preflight.prelude.sh), with the plan's `scale:` line rewritten
-# and the Patrol stamp make_repo plants removed, so the wall reads the cell, not the fixture.
+# roster rows of tests/dispatch-preflight.prelude.sh), with the plan's `scale:` line rewritten,
+# so the wall reads the cell, not the fixture. §TABLE reads the shipped SKILL.md and the step-8 page.
 #
 # ANTI-VACUITY (the rule of that name). Every absence sits beside a positive on the same
-# output: no stamp beside the binding the same engagement wrote; no Patrol refusal beside the
-# budget wall's line in the same reason; no shape refusal beside the merge line in the same
+# output: no shape refusal beside the merge line in the same
 # check. Each task-scale row has a wave-scale pair whose answer moves. The table extractor is
 # proved to find the three rows before a cell is compared.
 #
@@ -43,7 +45,8 @@ set -uo pipefail
 
 SP_REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 SP_LIB="$SP_REPO/payload/scripts/lib"
-SP_TMPL="$SP_REPO/agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl"
+SP_SKILL="$SP_REPO/skills/canonical-sdlc/SKILL.md"
+SP_STEP8="$SP_REPO/skills/canonical-sdlc/steps/8.md"
 SP_ENGAGE="${BIONIC_HOOKS_DIR}/engage.sh"
 SP_CLOSE="$SP_REPO/payload/scripts/close-out.sh"
 
@@ -63,8 +66,8 @@ section "§CELL — one table, three rows, seven columns, one reader (D25)"
 
 SP_COLUMNS="patrol rigor writers regression branch integrate dealing"
 SP_WANT_task="no single 3 no any pr piece"
-SP_WANT_wave="yes double uncapped yes wave/<NN>-<slug> merge piece+whole"
-SP_WANT_epic="yes double uncapped no epic/<NN>-<slug> merge piece"
+SP_WANT_wave="yes double uncapped yes wave/<NN>-<slug> pr piece+whole"
+SP_WANT_epic="yes double uncapped no epic/<NN>-<slug> pr piece"
 for sp_s in task wave epic; do
   eval "sp_want=\$SP_WANT_$sp_s"
   set -- $sp_want
@@ -90,9 +93,8 @@ expect_empty "C.u5 …and prints no cell" "$SP_OUT"
 section "§TASK — a task-scale fixture at every reader (AC-5.1)"
 # ============================================================================
 
-# (1) ENGAGEMENT ARMS NO PATROL AT TASK SCALE. A planless root holding one live task-scale run:
-# the engagement binds it (the positive on the marker) and writes no stamp; the same root shape
-# at wave scale writes one (the pair, so the absence is the scale's and not the fixture's).
+# (1) ENGAGEMENT BINDS THE RUN AT EITHER SCALE. A planless root holding one live run: the engagement
+# binds it.
 sp_engage_root() {  # <name> <scale> -> root holding one fresh open plan at that scale
   local r p
   mkdir -p "$SANDBOX/engage-$1/.bionic/tmp" "$SANDBOX/engage-$1/.bionic/docs/plans"
@@ -116,11 +118,9 @@ SP_ESID="5ca1e0e1-1111-2222-3333-444444444444"
 SP_ET="$(sp_engage_root etask task)"
 sp_engage "$SP_ESID" "$SP_ET"
 expect_eq "T.e1 engagement at scale: task binds the task-scale run" "$SP_ET/.bionic/docs/plans/etask.plan.md" "$(sp_plan_of "$SP_ET" "$SP_ESID")"
-expect_false "T.e2 …and writes no Patrol stamp" test -e "$SP_ET/.bionic/tmp/patrol-$SP_ESID.state"
 SP_EW="$(sp_engage_root ewave wave)"
 sp_engage "$SP_ESID" "$SP_EW"
 expect_eq "T.e3 the pair: engagement at scale: wave binds its run" "$SP_EW/.bionic/docs/plans/ewave.plan.md" "$(sp_plan_of "$SP_EW" "$SP_ESID")"
-expect_true "T.e4 …and arms the stamp, as today" test -f "$SP_EW/.bionic/tmp/patrol-$SP_ESID.state"
 
 # (2) THE DEALING: `facts_owed single task` deals one critic — every question to bionic:critic, a
 # piece read each and no whole read; at wave the code questions owe a whole read too.
@@ -135,16 +135,14 @@ SP_OD="$(sp_owed double task)"
 expect_eq "T.d5 a flag that raises task to double is still dealt: the auditor takes evidence" "bionic:auditor" "$(printf '%s\n' "$SP_OD" | awk -F'\t' '$2 == "evidence" { print $3 }')"
 expect_eq "T.d6 a scale the profile does not hold deals nothing" "" "$(sp_owed single sprint)"
 
-# (3) THE WALL: a task-scale plan with no person's cap holds three writers. No Patrol stamp is
-# planted: at task scale the arming wall does not apply, so the admissions below are the budget
-# wall's verdict alone. The wave-scale pair with the same missing stamp is refused for it.
-sp_task_repo() {  # <name> -> make_repo's plan at scale: task, its Patrol stamp removed
+# (3) THE WALL: a task-scale plan with no person's cap holds three writers; the admissions below
+# are the budget wall's verdict alone.
+sp_task_repo() {  # <name> -> make_repo's plan at scale: task
   local r p
   r="$(make_repo "$1" yes)"
   write_attestation "$r" "$SID_A"
   p="$r/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   sed 's/^scale: wave$/scale: task/' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
-  rm -f "$r/.bionic/tmp/patrol-$SID_A.state"
   printf '%s' "$r"
 }
 SP_NONE="$SANDBOX/.sp-none.jsonl"
@@ -156,7 +154,7 @@ expect_eq "T.w0 the fixture really is task-scale" "yes" \
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_roster_row "$REPO" "$SID_A" "W-TWO"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "W-THREE" "claude-sonnet-5" "$SP_NONE" "implementor")"
-expect_eq "T.w1 two writers open at task scale, no stamp → the third is ADMITTED (no arming wall)" "allow" "$GATE_VERDICT"
+expect_eq "T.w1 two writers open at task scale → the third is ADMITTED" "allow" "$GATE_VERDICT"
 REPO="$(sp_task_repo sp-w4)"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 s22_roster_row "$REPO" "$SID_A" "W-TWO"
@@ -165,24 +163,15 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "W-FOUR" "claude-son
 expect_eq "T.w2 three writers open at task scale → the fourth is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "T.w3 …by the budget wall, at the scale's cap" "writers: budget=3 open=3 with-this-dispatch=4" "$GATE_VERR"
 expect_contains "T.w4 …which names the cap's source, the scale profile" "the task scale's writer cap" "$GATE_VERR"
-expect_absent "T.w5 …and never for a Patrol stamp" "no Patrol stamp exists" "$GATE_VERR"
 s22_set_budget "$REPO" "writers=5 source=user"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "W-FOUR" "claude-sonnet-5" "$SP_NONE" "implementor")"
 expect_eq "T.w6 a person's writers=5 line overrides the cell: the fourth is ADMITTED" "allow" "$GATE_VERDICT"
-REPO="$(make_repo sp-wave-nostamp yes)"
-write_attestation "$REPO" "$SID_A"
-rm -f "$REPO/.bionic/tmp/patrol-$SID_A.state"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "W-ONE" "claude-sonnet-5" "$SP_NONE" "implementor")"
-expect_eq "T.w7 the pair: at wave scale the same missing stamp REFUSES" "deny" "$GATE_VERDICT"
-expect_contains "T.w8 …for the Patrol" "no Patrol stamp exists" "$GATE_VERR"
 
-# (4) CLOSE-OUT: a task-scale plan on `fix/x`, not yet merged. `check` refuses no branch shape,
-# and its integrate act is the PR: the merge line carries the `gh pr create` command for the
-# working branch against the integration branch, and nothing is merged. The wave-scale pair on
-# the same branch is refused for its shape, on a page at 14: the shape only scopes the census of a
-# table with no tree column and a log with no tree fact, and a page at 15 has its trees in its log.
-# `run` recording the command is close-out-1.test.sh's ANY-BRANCH section (its fixtures carry the
-# facts a close needs).
+# (4) CLOSE-OUT: a task-scale plan on `fix/x`, not yet merged. `check` refuses no branch shape, and
+# its merge act is a readback, never a merge: the line holds on the branch, names that no pull
+# request is recorded, and the integration branch does not move. The wave-scale pair on the same
+# branch holds the same way, since every scale's integrate act is the pull request. `run` holding
+# is close-out-1.test.sh's ANY-BRANCH section (its fixtures carry the facts a close needs).
 sp_co_root() {  # <name> <scale> [<version>, 15] -> a repository with main and an unmerged fix/x, and a plan at Step 8
   local d="$SANDBOX/co-$1" p
   mkdir -p "$d"
@@ -206,12 +195,47 @@ SP_CO_RC=$?
 expect_eq "T.c1 close-out check on a task-scale fix/x exits 0" "0" "$SP_CO_RC"
 expect_contains "T.c2 …and reaches its merge line" "merge: " "$SP_CO_OUT"
 expect_absent "T.c3 …with no branch-shape refusal" "shaped" "$SP_CO_OUT"
-expect_contains "T.c4 the integrate act is a PR: the line carries the command" "gh pr create --base main --head fix/x" "$SP_CO_OUT"
-expect_absent "T.c5 …and does not refuse the unmerged branch" "WOULD REFUSE — fix/x" "$SP_CO_OUT"
+expect_contains "T.c4 the unmerged branch holds the merge: it is not reachable from the integration branch" "merge: WOULD REFUSE — fix/x @ " "$SP_CO_OUT"
+expect_contains "T.c5 …and the line names the pull request that is not recorded" "is not reachable from main (no pull request of fix/x against main is recorded)" "$SP_CO_OUT"
 expect_eq "T.c6 …and merges nothing" "$SP_MAIN0" "$(git -C "$SP_CT" rev-parse main)"
 SP_CW="$(sp_co_root wave wave)"
+SP_MAINW="$(git -C "$SP_CW" rev-parse main)"
 SP_CO_OUT="$(cd "$SP_CW" && bash "$SP_CLOSE" "$SP_CW/.bionic/docs/plans/epic-99-test/fix-x.plan.md" check 2>&1)"
 expect_absent "T.c7 the pair: at wave scale fix/x is not refused for its shape either" "shaped" "$SP_CO_OUT"
-expect_contains "T.c8 …the same check reaches its merge line" "merge: " "$SP_CO_OUT"
+expect_contains "T.c8 …and the same check holds the merge the same way" "is not reachable from main (no pull request of fix/x against main is recorded)" "$SP_CO_OUT"
+expect_eq "T.c9 …and merges nothing" "$SP_MAINW" "$(git -C "$SP_CW" rev-parse main)"
+
+# ============================================================================
+section "§TABLE — the doctrine's scale table is the library's rows, and no route is a merge (AC-13.5)"
+# ============================================================================
+
+# sp_table <file> -> one line per table row, `<scale>\t<col>=<cell>\t…`, the header's labels
+# lowercased as the column names and backticks stripped from each cell.
+sp_table() {
+  awk -F'|' '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); gsub(/`/, "", s); return s }
+    /^\| Scale \|/ { for (i = 2; i < NF; i++) h[i] = tolower(trim($i)); n = NF; inT = 1; next }
+    inT && /^\|---/ { next }
+    inT && /^\|/ { s = trim($2); line = s; for (i = 3; i < n; i++) line = line "\t" h[i] "=" trim($i); print line; next }
+    inT { exit }' "$1"
+}
+SP_ROWS="$(sp_table "$SP_SKILL")"
+expect_eq "B.0 the extractor finds the three rows before a cell is compared" "3" "$(printf '%s\n' "$SP_ROWS" | grep -c .)"
+for sp_s in task wave epic; do
+  sp_row="$(printf '%s\n' "$SP_ROWS" | awk -F'\t' -v s="$sp_s" '$1 == s')"
+  for sp_c in $SP_COLUMNS; do
+    sp_doc="$(printf '%s\n' "$sp_row" | tr '\t' '\n' | sed -n "s/^$sp_c=//p")"
+    sp_lib="$(sp_cell "$sp_s" "$sp_c")"
+    # Two empties are not agreement: each side names its own absence.
+    expect_eq "B.$sp_s.$sp_c — the doctrine's cell is the library's" "${sp_lib:-<no library cell>}" "${sp_doc:-<no doctrine cell>}"
+  done
+  # The positive beside the absence: both integrate cells read `pr`, so "names no merge" is a cell that says the route.
+  expect_eq "B.$sp_s.pr — the integrate cell is the pull request, in the library and in the doctrine" "pr pr" \
+    "$(sp_cell "$sp_s" integrate) $(printf '%s\n' "$sp_row" | tr '\t' '\n' | sed -n 's/^integrate=//p')"
+  expect_absent "B.$sp_s.m — …and neither names a merge" "merge" "$(sp_cell "$sp_s" integrate) $(printf '%s\n' "$sp_row" | tr '\t' '\n' | sed -n 's/^integrate=//p')"
+done
+expect_contains "B.p the step-8 page names the pull request as the route" "pull request" "$(cat "$SP_STEP8")"
+expect_eq "B.m2 …and names no local merge" "0" "$(grep -c 'local merge' "$SP_STEP8")"
+expect_eq "B.m3 the skill's page names no local merge" "0" "$(grep -c 'local merge' "$SP_SKILL")"
 
 finish

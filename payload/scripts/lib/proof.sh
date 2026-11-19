@@ -1305,7 +1305,11 @@ _proof_read_dirty() {  # <evidence> <dirty count>
 _proof_records() {
   local co="$1" rec="${2:-}" gd f
   _proof_fields || return 0
-  gd="$(cd "$co" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
+  gd=""
+  if [ -d "$co" ]; then
+    declare -F git_common_dir >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/root.sh" >/dev/null 2>&1
+    gd="$(git_common_dir "$co" 2>/dev/null)"
+  fi
   { if [ -n "$rec" ]; then line_lines "$rec"; fi
     if [ -n "$gd" ]; then for f in "$gd/bionic-stamps" "$gd"/worktrees/*/bionic-stamps; do
       [ -f "$f" ] && cat "$f"; done; fi; } 2>/dev/null | awk -F'|' "$_LINE_FIELDS_AWK"'
@@ -1721,7 +1725,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
   # would leave the key blind to its changes. A fresh fold is still the run's facts, so that is not worth a word.
   deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
-  [ -z "$dir" ] || [ ! -f "$dir/run.log" ] || deps+=("$dir/run.log")
+  [ -z "$log" ] || [ ! -f "$log" ] || deps+=("$log")
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
   key="$plan $stamp facts+findings+inherited"
@@ -1838,8 +1842,13 @@ _proof_keep_sweep() {  # <dir> <n> -> the newest <n> files of <dir> are left, th
 # held after the three, each line led by `order.` or `sessions.`: the same log holds them, so one fold answers all,
 # and the runner asks the order at every suite's start and every engagement the sessions (`proof_order_held`,
 # `proof_sessions_held`).
+#
+# A CALLER THAT DECIDES A COMMIT sets _PROOF_PLACE_FRESH, and for it the held file is never read: it is a cache under
+# $TMPDIR, and a cache rewritten by hand must not move the gate. Its place is folded from the log, then served again in
+# that shell and its subshells from this shell's memory alone, under the same key, so one hook folds the run once. It
+# neither reads nor writes the held file, which stays the other hooks' own.
 _PROOF_STEP_KEEP=128
-_PROOF_PLACE_LIBS=""; _PROOF_PLACE_DIR=""
+_PROOF_PLACE_LIBS=""; _PROOF_PLACE_DIR=""; _PROOF_PLACE_MEMO_KEY=""; _PROOF_PLACE_MEMO=""
 proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|abandoned, approved=1|0; exit 2, one line on stderr, when the fold fails
   # The answer is also left in _PROOF_PLACE, so a caller in this shell reads it with no subshell.
   local plan="${1:-}" log="" dir="" f stamp key held="" got ev tmp k rc=0 IFS=$' \t\n'
@@ -1870,15 +1879,18 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   # binds alone, and a stop event comes at every turn.
   deps=("$plan")
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" || stamp=""
-  if [ -n "$stamp" ] && [ -n "$dir" ] && [ -f "$dir/run.log" ]; then
-    f="$(reader_log_stamp "$dir/run.log")" && stamp="$stamp run.log less its stop events $f" || stamp=""
+  if [ -n "$stamp" ] && [ -n "$log" ] && [ -f "$log" ]; then
+    f="$(reader_log_stamp "$log")" && stamp="$stamp run.log less its stop events $f" || stamp=""
   fi
   key="$plan ${stamp//$'\n'/ } $_PROOF_PLACE_LIBS"
   # A step pending in an advance's own judgment is no place to keep: it is neither read from the held file nor kept in it.
   ! _proof_dry_refused || return 2
-  if [ -n "$stamp" ] && [ -n "$_PROOF_PLACE_LIBS" ] && [ -n "$_PROOF_PLACE_DIR" ] && [ -z "$_PROOF_DRY" ]; then
+  if [ -n "$stamp" ] && [ -n "$_PROOF_PLACE_LIBS" ] && [ -n "$_PROOF_PLACE_DIR" ] && [ -z "$_PROOF_DRY" ] && [ -z "${_PROOF_PLACE_FRESH:-}" ]; then
     held="${plan//[^A-Za-z0-9._-]/%}"; [ "${#held}" -le 200 ] || { held="$(cksum <<< "$plan")"; held="${held%% *}"; }
     held="$_PROOF_PLACE_DIR/$held"
+  fi
+  if [ -n "${_PROOF_PLACE_FRESH:-}" ] && [ -n "$stamp" ] && [ "$_PROOF_PLACE_MEMO_KEY" = "$key|$_PROOF_DRY" ]; then
+    _proof_place_split "$_PROOF_PLACE_MEMO"; printf '%s\n' "$_PROOF_PLACE"; return 0
   fi
   if [ -n "$held" ] && [ -f "$held" ] && { IFS= read -r k; got=""; while IFS= read -r f; do got="$got$f"$'\n'; done; } < "$held" \
      && [ "$k" = "$key" ] && [ -n "$got" ]; then
@@ -1896,6 +1908,7 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
     printf '%s\n%s\n' "$key" "$got" > "$tmp" && mv -f "$tmp" "$held" 2>/dev/null || rm -f "$tmp"
     _proof_keep_sweep "$_PROOF_PLACE_DIR" "$_PROOF_STEP_KEEP"
   fi
+  [ -z "${_PROOF_PLACE_FRESH:-}" ] || [ -z "$stamp" ] || { _PROOF_PLACE_MEMO_KEY="$key|$_PROOF_DRY"; _PROOF_PLACE_MEMO="$got"; }
   _proof_place_split "$got"; printf '%s\n' "$_PROOF_PLACE"
 }
 _proof_place_split() {  # <held lines> -> _PROOF_PLACE, the place's lines, _PROOF_PLACE_ORDER and _PROOF_PLACE_SESSIONS, unled
@@ -2659,8 +2672,8 @@ proof_debt_record() {
   [ -n "$tree" ] || tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
   [ -n "$tree" ] || return 1
   _proof_roots_load
-  declare -F docs_root >/dev/null 2>&1 || return 1
-  printf '%s/record/%s/run.log' "$(docs_root "$tree")" "$slug"
+  declare -F docs_root >/dev/null 2>&1 && _proof_reader_load || return 1
+  printf '%s' "$(reader_log_in "$(docs_root "$tree")/record/$slug")"
 }
 
 # proof_plan_slug <plan> -> the plan's slug, the directory its run's records live in, `<docs-root>/record/<slug>/`:

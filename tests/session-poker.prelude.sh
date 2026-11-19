@@ -247,7 +247,6 @@ bind_marker() {  # <repo> <plan path|none> [sid]
   bound_marker "$1" "${3:-$SID}" "$2"
 }
 
-stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
 
 # THE TICK DIGEST (wave-24 T7, REQ-4; D4). A tick over the same facts as the last one prints one
 # `unchanged` line, so a case that ticks the SAME world twice to read the second tick's full
@@ -256,20 +255,15 @@ stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
 digest_of() { printf '%s/.bionic/tmp/tick-digest-%s.state' "$1" "${2:-$SID}"; }
 forget_digest() { rm -f "$(digest_of "$1")"; }
 
-# THE ARMING RECORD — the sibling of the stamp whose mtime `arm` sets and the tick compares a
-# delivery against (R-13). Spelled out here the way stamp_of spells the stamp: one place in
-# this suite knows the layout, and a rename on the writer's side shows up as a failure rather
-# than as a fixture that quietly stops describing anything.
-armed_of() { printf '%s%s' "$(stamp_of "$@")" ".armed"; }
-
-# A DISARM FIXTURE DESCRIBES A PATROL THAT ARMED BEFORE THE RUN DELIVERED, and from 1.3.2
-# that ordering is what the tick reads — so it is fixture DATA, set by arming through the
-# real verb and dating the record back, exactly as `backdate` sets staleness and as
-# tests/cross-gate-agreement.test.sh §S.3 sets "newest". Nothing here sleeps, and nothing is
-# left to a same-second tie.
-armed_ago() {  # <repo> [seconds ago, default 3600]
-  poke "$1" arm
-  backdate "$(armed_of "$1")" "${2:-3600}"
+# THE RECORD THAT DATES A DELIVERY (`run_dated_by`, hooks/session-poker.sh): the binding beside the
+# seal, else the engaged file. A DISARM fixture describes a session bound before its run delivered,
+# so it is dated back, as `backdate` sets staleness. Nothing here sleeps.
+bound_ago() {  # <repo> [seconds ago, default 3600]
+  local f
+  for f in "$(marker_of "$1")" "$(bash -c '. "$1/run.sh" && . "$1/seal.sh" && seal_binding_warm "$2" && _seal_binding_place "$2" "$3" && printf %s "$_SB_FILE"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1" "$SID" 2>/dev/null)"; do
+    [ -f "$f" ] && backdate "$f" "${2:-3600}"
+  done
+  return 0
 }
 
 # ---------- running the poker (same watchdog shape as tests/session-sweeper.test.sh) ----------
@@ -542,6 +536,7 @@ s31_transcript() {  # <repo> <text>... -> the transcript path
   printf '%s' "$tr"
 }
 s31_stop() {  # <repo> <transcript> -> sets S31_OUT, S31_RC
+  S31_D="$1"
   S31_OUT="$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$S31_STOP_HOOK" <<EOF 2>/dev/null
 $(jq -nc --arg t "$2" --arg c "$1" --arg s "$SID" \
    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}')
@@ -549,8 +544,11 @@ EOF
 )"
   S31_RC=$?
 }
-s31_reason() { printf '%s' "$S31_OUT" | jq -r '.reason // ""' 2>/dev/null; }
-s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+# The refusal on the channel it rides (tests/lib/duty-read.sh): block, duty, or nothing for a turn that ends.
+. "${BASH_SOURCE[0]%/*}/lib/duty-read.sh"
+S31_D=""
+s31_decision() { duty_channel "$S31_OUT"; }
+s31_reason() { duty_reason "$S31_OUT" "$(duty_path "$S31_D" "$SID")"; }
 
 # ── hoisted from Section 34: s34_plan — Sections 37, 42, 49, 51 and §ROW-LABEL build the gate-admitted plan with it. ──
 s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the session is bound to it

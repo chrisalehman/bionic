@@ -16,6 +16,10 @@
 #   §OPEN-ONLY with the request open and unmerged, close-out holds and lands nothing; check reads a merge commit and a
 #             squash on origin/main after its own fetch; a request closed unmerged holds the run with the ask open.
 #   §GATE     step 8's gate owes the merge while a landing stands over a merge the remote does not hold.
+#   §WAIT     the watcher's pass over an open request fetches and stays quiet, wakes on the merge, and rests with no
+#             fetch once the request is closed unmerged and the person's ask is open.
+#   §MERGE    the pass that sees the merge closes the run: the integrate row lands at the merge, the run reads delivered,
+#             and a close that holds wakes once.
 #   §WALL     publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
 #
 # FIXTURE FIDELITY. Each case is a copy of one door fixture (tests/lib/door.sh): a real repository on its working branch
@@ -337,6 +341,7 @@ done
 printf 'whole\n' > "$GA_REC/reg.log"
 printf 'run/v1|ev=%s|at=2026-10-04T01:31:00Z\n' "proof|kind=regression|head=$GA_H|evidence=record/wave-x/reg.log" 'waiver|question=walk|by=f|said=yes' >> "$L"
 printf 'run/v1|ev=published|row=T3|commit=%s|kind=close|by=close-out|why=merged|at=2026-10-04T02:00:00Z\n' "$(prr_origin)" >> "$L"
+seal_fixture "$P" "$L"
 prr_gate
 expect_eq "GA-1 a landing at origin/main's tip while the request is open: the gate owes Step 8's merge, with no merge read" "yes" \
   "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -q "Step 8's merge: the integrate row's landing, with no merge read" && echo yes)"
@@ -344,6 +349,133 @@ prr_gh pr merge "$PRR_URL1" --merge; prr_seen --fetch
 prr_gate
 expect_eq "GA-2 …once origin/main holds the merge the gate owes no merge, and still owes what close-out gives the step" "|yes" \
   "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "Step 8's merge" | head -1)|$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -q "owed at 15: Step 8's cleanup" && echo yes)"
+
+# THE WATCHER'S PASS OVER A RUN WAITING ON ITS MERGE. The world is §OPEN-ONLY's Step-8 fixture as a run reaches it once
+# every row has landed: the session armed on an empty roster, the request published, and what the earlier steps owe held
+# at the working head (`prr_owed`), so the close itself has nothing left to refuse once the merge is there. The pass is
+# the shipped `session-poker.sh tick --watch`, run from the project with the stand-in its only gh and a home of the
+# world's; its codes are read from their one home, lib/patrol.sh. No fetch is typed in these sections: the pass makes it.
+prr_watch_rc() { bash -c '. "$1/patrol.sh" >/dev/null 2>&1 && eval "printf %s \"\${$2:-}\""' _ "$PRR_LIB" "$1"; }
+PRR_QUIET="$(prr_watch_rc WATCH_RC_QUIET)"; PRR_WAKE="$(prr_watch_rc WATCH_RC_WAKE)"; PRR_REST="$(prr_watch_rc WATCH_RC_REST)"
+PRR_LINE_MAX="$(prr_watch_rc WATCH_LINE_MAX)"
+prr_owed() {  # -> every fact the run owes at the working head, each a passing proof with its evidence on disk
+  local rec="$R/.bionic/docs/record/wave-x" h
+  h="$(prr_head)"
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    facts_owed "$(plan_frontmatter_get "$2" rigor)" "$(plan_frontmatter_get "$2" scale)" "$4" \
+      | while IFS="	" read -r k q role scope; do
+          case "$k" in
+            regression) printf "whole\n" > "$5/reg.log"; l="$(proof_line regression "$3" 2026-10-04T12:00:00Z record/wave-x/reg.log)" ;;
+            review) : > "$5/$q-$scope.md"; l="$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-x/$q-$scope.md" "$q" r pass "$scope")" ;;
+            check) printf "ok\n" > "$5/check.log"; l="$(proof_line check "$3" 2026-10-04T12:00:00Z record/wave-x/check.log)" ;;
+            *) echo "prr_owed: no proof planted for $k" >&2; exit 1 ;;
+          esac
+          f="${l#proved: }"; LOG_AT=2026-10-04T12:00:00Z proof_event "$2" ${f/ at=2026-10-04T12:00:00Z/}
+        done' _ "$PRR_LIB" "$P" "$h" "$R" "$rec"
+  printf 'the walk\n' > "$rec/walk.md"
+  printf 'run/v1|ev=proof|%s|at=2026-10-04T12:01:00Z\n' "ac=AC-1.1|evidence=record/wave-x/walk.md|auditor=a" \
+    "kind=walk|head=$h|evidence=record/wave-x/walk.md" >> "$L"
+  seal_fixture "$P" "$L"
+}
+prr_watch_world() {  # <name> [bare] -> §OPEN-ONLY's fixture armed and published; with `bare`, nothing the steps owe
+  prr_case8 "$1"
+  : > "$R/.bionic/tmp/roster-$WORLD_SID.state"
+  prr_approve "$(prr_head)"; prr_publish
+  [ "${2:-}" = bare ] || prr_owed
+}
+# prr_pass -> PASS_OUT (the pass's stdout alone), PASS_RC: one watcher pass from the case's project
+prr_pass() {
+  door_run "$R" env PATH="$RH_GHPATH" HOME="$WORLD_ROOT/$(basename "$R")-home" BIONIC_CLAUDE_HOME="$WORLD_ROOT/$(basename "$R")-home/.claude" \
+    bash -c 'bash "$1" tick --watch 2>/dev/null; echo "rc=$?"' _ "$DOOR_POKER"
+  PASS_RC="$(printf '%s\n' "$DOOR_OUT" | sed -n '$s/^rc=//p')"; PASS_OUT="$(printf '%s\n' "$DOOR_OUT" | sed '$d')"
+}
+prr_side() {  # <name> -> one commit of someone else's on the bare remote's main, pushed from a clone of its own
+  local c="$WORLD_ROOT/side-$1"
+  git clone --quiet "$B" "$c" && printf '%s\n' "$1" > "$c/side-$1.txt" && git -C "$c" add -A \
+    && git -C "$c" -c user.name=side -c user.email=side@example.invalid commit --quiet -m "someone else's change" \
+    && git -C "$c" push --quiet origin HEAD:main
+}
+prr_bare_main() { git -C "$B" rev-parse --verify -q refs/heads/main; }
+# prr_log_step -> the reader's step answer over the run's log alone, `n=<step> state=<state>`: the close moves the plan
+# into the archive
+prr_log_step() {
+  bash -c '. "$1/reader.sh" || exit 9; f="$(cat "$2")"; reader_facts() { printf "%s\n" "$f"; }; reader_q_step - | /usr/bin/grep -E "^(n|state)=" | paste -sd" " -' \
+    _ "$PRR_LIB" "$L" 2>/dev/null
+}
+prr_close_out() { cat "$R/.bionic/tmp/close-${WORLD_SID:0:8}.out" 2>/dev/null; }
+
+# ============================================================
+section "§WAIT: while the pull request is open each pass fetches and stays quiet, and the merge wakes it (AC-10.5)"
+# ============================================================
+# fails-when: a pass wakes or rests while the request is open and unmerged; a pass makes no fetch, so origin/main stays
+# behind the remote; the pass after the merge stays quiet; a request closed unmerged keeps the watch passing instead of
+# resting on the person's ask; or a pass fetches while the request is closed.
+prr_watch_world wait
+WT_MAIN="$(prr_main)"
+expect_eq "WT-0 precondition: the request open on the stand-in, origin/main never fetched, the run at step 8" "OPEN -||n=8 state=open" \
+  "$(door_run "$R" env PATH="$RH_GHPATH" gh pr view "$PRR_URL1" --json state,mergeCommit --jq '.state + " " + (.mergeCommit.oid // "-")'; printf '%s' "$DOOR_OUT")|$(prr_origin)|$(prr_log_step)"
+prr_pass
+expect_eq "WT-1 the request open: the pass is quiet and prints nothing" "$PRR_QUIET|" "$PASS_RC|$PASS_OUT"
+expect_eq "WT-1b …it fetched: origin/main is the remote's main, and the local main where it was" "$(prr_bare_main)|$WT_MAIN" "$(prr_origin)|$(prr_main)"
+prr_side wait
+prr_pass
+expect_eq "WT-2 someone else's change on the remote's main, the request still open: the next pass is quiet too" "$PRR_QUIET|" "$PASS_RC|$PASS_OUT"
+expect_eq "WT-2b …and it fetched again: origin/main follows the remote's main" "$(prr_bare_main)" "$(prr_origin)"
+expect_eq "WT-3 …nothing is landed, and the run is still at step 8" "0|n=8 state=open" "$(prr_landed)|$(prr_log_step)"
+# The watcher itself, hooks/watch.sh, as the platform starts it, its day cut to a second: the request is still out.
+door_run "$R" env PATH="$RH_GHPATH" HOME="$WORLD_ROOT/wait-home" BIONIC_CLAUDE_HOME="$WORLD_ROOT/wait-home/.claude" BIONIC_WATCH_DEADLINE=1 \
+  bash -c 'printf "{\"session_id\":\"%s\",\"cwd\":\"%s\",\"hook_event_name\":\"Stop\"}" "$2" "$3" | bash "$1" 2>&1 >/dev/null; echo "rc=$?"' \
+  _ "$BIONIC_SCRIPTS_DIR/hooks/watch.sh" "$WORLD_SID" "$R"
+expect_eq "WT-3c the watcher's day ends with nothing on the roster and the request open: it wakes once to be renewed" "rc=$PRR_WAKE|yes" \
+  "$(printf '%s\n' "$DOOR_OUT" | tail -1)|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q '^bionic watch: RENEW - .*pull request open' && echo yes)"
+prr_gh pr merge "$PRR_URL1" --merge
+prr_pass
+expect_eq "WT-4 merged by a merge commit: the next pass wakes, with one line" "$PRR_WAKE|1" "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | awk 'END { print NR }')"
+expect_regex "WT-4b …the line is the watcher's, naming the delivered run" '^bionic watch: DELIVERED - ' "$PASS_OUT"
+expect_eq "WT-4c …within the line's ceiling" "yes" "$([ "${#PASS_OUT}" -le "$PRR_LINE_MAX" ] && echo yes)"
+
+prr_watch_world wait-closed
+prr_gh pr close "$PRR_URL1"
+prr_pass
+expect_eq "WT-5 the request closed unmerged: the pass that reads it is quiet, and opens the person's ask" "$PRR_QUIET||yes" \
+  "$PASS_RC|$PASS_OUT|$([ -n "$(prr_ask pr-closed:wave:01-x)" ] && echo yes)"
+WT_SEEN="$(prr_origin)"
+prr_side wait-closed
+prr_pass
+expect_eq "WT-6 …the next pass rests: the run waits only on the person, who rules on the closed request" "$PRR_REST|" "$PASS_RC|$PASS_OUT"
+expect_eq "WT-6b …and makes no fetch: origin/main stays where the last look left it, behind the remote's main" "$WT_SEEN|no" \
+  "$(prr_origin)|$([ "$(prr_origin)" = "$(prr_bare_main)" ] && echo yes || echo no)"
+
+# ============================================================
+section "§MERGE: the pass that sees the merge lands the integrate row and the run reads delivered (AC-14.2)"
+# ============================================================
+# fails-when: after the stand-in merges into the bare remote, the next pass leaves the integrate row unlanded or the run
+# at step 8; lands it at a commit the remote's main does not hold; moves the local main; leaves close-out's account
+# unwritten; or, with the close held, wakes on every pass over the same hold.
+prr_watch_world merge
+MG_MAIN="$(prr_main)"
+prr_pass
+expect_eq "MG-0 precondition: the request open, the pass quiet, nothing landed" "$PRR_QUIET|0" "$PASS_RC|$(prr_landed)"
+prr_gh pr merge 1 --squash; MG_TIP="$(prr_bare_main)"
+prr_pass
+expect_eq "MG-1 merged by a squash: the next pass wakes, naming the delivered run" "$PRR_WAKE|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: DELIVERED - ' && echo yes)"
+expect_contains "MG-2 …the log holds the integrate row's landing as merged, at the host's merge commit" \
+  "|ev=published|row=T3|commit=$MG_TIP|kind=close|by=close-out|why=merged|" "$(cat "$L")"
+expect_eq "MG-3 …and the run reads delivered" "n=9 state=delivered" "$(prr_log_step)"
+expect_eq "MG-4 …origin/main is the remote's main, the local main where it was" "$MG_TIP|$MG_MAIN" "$(prr_origin)|$(prr_main)"
+expect_eq "MG-5 …the line names the account close-out wrote, which says the run was delivered" "yes|yes" \
+  "$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -qF ".bionic/tmp/close-${WORLD_SID:0:8}.out" && echo yes)|$(prr_close_out | /usr/bin/grep -q '^step9: delivered: ' && echo yes)"
+
+prr_watch_world merge-held bare
+prr_gh pr merge "$PRR_URL1" --merge
+prr_pass
+expect_eq "MG-6 merged with the close's facts not held: the pass wakes, saying close-out held" "$PRR_WAKE|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - close-out held (exit [0-9]*): ' && echo yes)"
+expect_eq "MG-6b …nothing landed, the run still at step 8, close-out's refusal in its account" "0|n=8 state=open|yes" \
+  "$(prr_landed)|$(prr_log_step)|$(prr_close_out | /usr/bin/grep -q 'close-out refused' && echo yes)"
+prr_pass
+expect_eq "MG-7 …the next pass over the same hold is quiet: the hold was told once" "$PRR_QUIET|" "$PASS_RC|$PASS_OUT"
 
 # ============================================================
 section "§WALL: publish is the orchestrator's verb"

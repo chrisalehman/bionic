@@ -124,17 +124,12 @@ make_world() {
   printf '{}\n' > "$cfg/projects/$slug/$SID_B.jsonl"
   case "$wave" in
     yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
-               # A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). The arming wall refuses a
-               # dispatch whose session carries no fresh Patrol stamp, and every start-gate
-               # row below rides an active world — so an unarmed fixture would rewrite this
-               # whole table to one answer. The unarmed direction gets its OWN row
-               # (start|patrol-unarmed), driven against a world built without this.
+               # A LIVE WAVE IS WATCHED. Every start-gate row below rides an active world, so each
+               # session's watch rested on purpose, which the dispatch wall admits as it admits a
+               # live one. The unwatched direction gets its OWN row (start|watch-stopped).
                mkdir -p "$repo/.bionic/tmp"
                for _psid in "$SID_A" "$SID_B"; do
-                 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
-                   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" \
-                   > "$repo/.bionic/tmp/patrol-$_psid.state"
-                 chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+                 printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$repo/.bionic/tmp/watch-$_psid.state"
                  # A LIVE WAVE HAS AN ENGAGED SESSION (task-engaged-session). Both gates
                  # ask `engaged_session` before anything else, so an unmarked world would
                  # rewrite this whole table to one answer — open, silent — exactly the way
@@ -433,15 +428,14 @@ fd_live "$L_TR" worker
 mkdir -p "$L_REPO/.bionic/tmp"
 ln -s "$SANDBOX/elsewhere.state" "$L_REPO/.bionic/tmp/stop-check.state"
 
-# AN ATTESTED ACTIVE WORLD WHOSE PATROL WAS NEVER ARMED (epic-17 W5 4/4, spec AC-6). The
-# environment is sound and the brief is well-formed; what is missing is the clock that would
-# notice the dispatched agent dying. Its direction is REFUSE, LOUD — the second surviving
-# refusal on this path, and the only one that is not about the environment.
-IFS='|' read -r Q_REPO Q_TR Q_SUB <<< "$(make_world patrol-unarmed yes)"
+# AN ATTESTED ACTIVE WORLD WHOSE WATCHER DIED. The environment is sound and the brief is
+# well-formed; what is missing is the watch that would notice the dispatched agent dying. Its
+# direction is REFUSE, LOUD — the only surviving refusal on this path not about the environment.
+IFS='|' read -r Q_REPO Q_TR Q_SUB <<< "$(make_world watch-stopped yes)"
 mkdir -p "$Q_REPO/.bionic/tmp"
 printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
   > "$Q_REPO/.bionic/tmp/preflight-$SID_A.state"
-rm -f "$Q_REPO"/.bionic/tmp/patrol-*.state
+printf 'state=watching\npid=999999\nstart=Thu Jan  1 00:00:00 2026\nat=2026-01-01T00:00:00Z\n' > "$Q_REPO/.bionic/tmp/watch-$SID_A.state"
 Q_SLUG=$(printf '%s' "$Q_REPO" | sed 's/[^a-zA-Z0-9]/-/g')
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/$Q_SLUG"
 printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$Q_SLUG/$SID_A.jsonl"
@@ -476,8 +470,7 @@ current: 4
 - Step 4: tasks in flight
 A2PLAN
 # Its own project root, so it needs its own engagement marker — `make_world` planted none
-# here (task-engaged-session). NO Patrol stamp, deliberately: this row's refusal IS the
-# arming wall, and a stamp would make it pass.
+# here (task-engaged-session).
 : > "$A2_ROOT/.bionic/tmp/engaged-$SID_A.state"
 A2_SCRATCH="$A2_ROOT/scratch/deep"
 mkdir -p "$A2_SCRATCH"
@@ -504,7 +497,7 @@ drive() {  # <condition>
     start:attested)         p=$(payload Agent "$SID_A" "$T_TR" "$T_REPO" -) ;;
     start:attested-unbound) p=$(payload Agent "$SID_A" "$TU_TR" "$TU_REPO" -) ;;
     start:probe-refuses)    p=$(payload Agent "$SID_A" "$U_TR" "$U_REPO" -) ;;
-    start:patrol-unarmed)   p=$(payload Agent "$SID_A" "$Q_TR" "$Q_REPO" -) ;;
+    start:watch-stopped)    p=$(payload Agent "$SID_A" "$Q_TR" "$Q_REPO" -) ;;
     # --- stop gate ----------------------------------------------------------
     stop:irrelevant-tool)   p=$(payload Read "$SID_A" "$A_TR" "$A_REPO" -) ;;
     stop:empty-cwd)         p=$(payload TaskStop "$SID_A" "$A_TR" "" worker) ;;
@@ -591,7 +584,7 @@ start|foreign-attestation|0|silent-with-announce|Start gate — R5 attestation n
 start|attested|0|silent|Start gate — the positive pair: pass in silence
 start|attested-unbound|deny|loud|Start gate — engaged but UNBOUND session: the newest-plan fallback is announced and never acted on (wave-23-fixit-1810 D1), so the writer is REFUSED with the bind instruction
 start|probe-refuses|2|loud|Start gate — one of two surviving refusals under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
-start|patrol-unarmed|deny|loud|Start gate — the arming wall: environment sound, brief well-formed, but no Patrol has stamped this session, so nothing would notice the dispatched agent dying — REFUSED with both re-arm commands named
+start|watch-stopped|deny|loud|Start gate — the watch wall: environment sound, brief well-formed, but the session watcher died, so nothing would notice the dispatched agent dying — REFUSED
 stop|irrelevant-tool|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|empty-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent

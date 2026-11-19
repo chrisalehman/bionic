@@ -345,6 +345,19 @@ git_common_dir() {
   _bionic_root_abs "$c"
 }
 
+# git_linked_dir [dir] -> the tree's OWN git directory (`<main>/.git/worktrees/<name>`), absolute, on stdout, where
+# a linked worktree keeps what belongs to that tree alone. rc 1 when <dir> is no directory or in no repository, rc 2 with nothing
+# printed when it is the main checkout, whose own git directory is the common one `git_common_dir` answers.
+git_linked_dir() {
+  local d gd common
+  [ -d "${1:-$PWD}" ] || return 1
+  d="$(_bionic_root_abs "${1:-$PWD}")"
+  gd="$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null)" && [ -d "$gd" ] || return 1
+  common="$(git_common_dir "$d")" || return 1
+  [ "$gd" != "$common" ] || return 2
+  printf '%s\n' "$gd"
+}
+
 # ─── THE AUDIT STREAM: where a project's findings land, and who writes one ───
 #
 # ONE DEFINITION EACH, HERE, SINCE epic-23 wave-12-fixit-171 (REQ-8, spec D6). `audit_path`

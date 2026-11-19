@@ -147,7 +147,7 @@ wg_home() {  # [<record the walk proof names>] -> a sandbox at 15, current 5, th
   p=$(eg_page "$h" 5 "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-24T00:00:00Z" \
     "run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-24T00:00:01Z" \
     ${1:+"run/v1|ev=proof|kind=walk|head=$EG_HEAD|evidence=record/w/$1|at=2026-10-24T00:00:02Z"})
-  awk '!/^walk: exempt$/' "$p" > "$p.t" && mv "$p.t" "$p"; printf '%s' "$h"
+  awk '!/^walk: exempt$/' "$p" > "$p.t" && mv "$p.t" "$p"; seal_fixture "$p"; printf '%s' "$h"
 }
 expect_block "26a a discharged criterion with no walk proof is refused for the walk" "$(wg_home)" 'git commit -m "x"' "no walk recorded"
 expect_block "26c a walk proof naming an absent record is refused for it" "$(wg_home other.md)" 'git commit -m "x"' "record/w/other.md"
@@ -176,7 +176,7 @@ expect_block "27b …and with its spec gone is refused for that file, named" "$(
 wv_home() {  # [requirements: yes|no] -> a wave at 15, current 3, rigor double, multi_agent true, Step 2 approved
   local h p; h=$(make_home); eg_head_repo "$h"
   p=$(eg_page "$h" 3 'run/v1|ev=approval|key=step2|by=fixture|said=approved|at=2026-10-04T00:30:00Z')
-  sed -i '' -e 's/^rigor: .*/rigor: double/' -e 's/^multi_agent: .*/multi_agent: true/' "$p"
+  sed -i '' -e 's/^rigor: .*/rigor: double/' -e 's/^multi_agent: .*/multi_agent: true/' "$p"; seal_fixture "$p"
   [ "${1:-yes}" = yes ] || rm -f "${p%/plans/*}/specs/epic-99-fixture/wave-01-fixture.requirements.md"
   printf '%s' "$h"
 }

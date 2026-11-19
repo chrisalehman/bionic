@@ -769,13 +769,9 @@ sleep 0.3 2>/dev/null || true
 # The run's page is at 15 and its log holds step 4 and the approval the writer's wall asks for.
 plan_fixture "$R8/.bionic/docs/plans/epic-99/wave-01.plan.md" wave > /dev/null
 printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8}.state"
-# …and this session's Patrol stamp, the third writer precondition since epic-17 W5 4/4: the
-# start gate refuses a dispatch whose session has no fresh one, and this case needs the gate
-# to actually JOURNAL a row. Also a fixture of the writer's preconditions, never of the value
-# under test.
-printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$OWN8" > "$R8/.bionic/tmp/patrol-${OWN8}.state"
-chmod 600 "$R8/.bionic/tmp/patrol-${OWN8}.state"
+# …and a watch that rested on purpose, which the start gate admits as it admits a live one: this case
+# needs the gate to actually JOURNAL a row.
+printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$R8/.bionic/tmp/watch-${OWN8}.state"
 # …and this session's engagement marker, the fourth writer precondition (task-engaged-session):
 # the start gate asks `engaged_session` before it asks anything else, and this case needs it
 # to actually JOURNAL a row. A fixture of the writer's preconditions, never of the value

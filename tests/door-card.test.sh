@@ -93,8 +93,10 @@ section "§CLOSE: the verbs carry the fixture to the end state, and the card ren
 DC_T0="$SECONDS"
 awk -F'|' -v OFS='|' '/^## / { t = ($0 ~ /^## Tasks/) } t && /^\|/ && !s { for (i = 2; i < NF; i++) if ($i ~ /^ *step *$/) s = i } t && s && $2 ~ /^ *T2 *$/ { $s = " 7 " } { print }' "$DC_PLAN" > "$DC_PLAN.t"
 door_run "$DC" bash -c '. "$1/units.sh" 2>/dev/null && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$DC_PLAN"
+seal_fixture "$DC_PLAN"
 expect_eq "(c1) the person's edit moves the release row to step 7, judged by the table check" "0" "$DOOR_RC"
 awk '{ L[NR] = $0 } /^\| T[0-9]/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) printf "%s\n%s\n", "| T3 | 5 | test | the regression. The whole suite runs once. | — | 10 | REQ-1 | .bionic/docs/record/wave-x/T3.md | — |", "| T4 | 8 | integrate | merge into main. The run reaches main by its merge. | approval:merge | 10 | REQ-1 | — | — |" } }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"
+seal_fixture "$DC_PLAN"
 dc_verb "(c2) the orchestrator's edit adds the regression row at step 5, and task-add records its birth" task-add T3
 dc_verb "(c3) …and the integrate row that waits on the merge approval" task-add T4
 expect_eq "(c4) the plan is in the release order, its regression row T3" "T3" \
@@ -130,6 +132,7 @@ dc_verb "(c19) release-check at the build head" release-check
 # The orchestrator's edit at Step 7: the header names the run's decision record, which no verb writes.
 printf 'no decision this run\n' > "$DC_REC/adr.md"
 awk '{ print } /^scale: / && !d { print "adrs: record/wave-x/adr.md"; d = 1 }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"
+seal_fixture "$DC_PLAN"
 dc_verb "(c22) current 7" current 7
 
 DC_P2="$(door_piece "$DC" T2)" && door_release "$DC" "$DC_P2" >/dev/null && door_land "$DC" "$DC_P2"

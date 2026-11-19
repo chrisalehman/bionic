@@ -681,6 +681,35 @@ expect_eq "WA5 no note counts what it leaves out (WA1 read the notes of the same
   "$(sr_tasks_f note | /usr/bin/grep -cE ' \+[0-9]+$')"
 
 # ============================================================
+section "§PR-WAIT: with the pull request open and no landing, the sheet names it as what the run waits on and the reader's ready set is empty"
+# ============================================================
+# fails-when: the sheet of a run whose request stands says nothing of it, or the reader still offers the integrate row
+# as ready. Every row but the integrate row has landed, step 8 is current, the regression and the reviews stand, so with
+# no request the integrate row is ready and with one it is not.
+SR_REPLY_R="$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh"
+sr_world prwait "6 6 12 12"
+for sr_i in 5 6 7 8 9 10 11 12 13 14 15 16 17; do sr_state "T$sr_i" landed; done
+awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | 10 | REQ-1 | lib/t18.sh | — |"; next } { print }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=step|n=8|at=2026-10-06T21:00:00Z"
+sr_ev "ev=proof|kind=regression|head=$SR_C1|rc=0|at=2026-10-06T21:10:00Z"
+sr_ev "ev=proof|kind=review|head=$SR_C1|rc=0|result=pass|at=2026-10-06T21:11:00Z"
+sr_ready() { bash "$SR_REPLY_R" "$SR_PLAN" stop 2>&1 | sed -n 's/^ready=//p'; }
+sr_run "$SR_PLAN"
+expect_eq "PW0 control: no request is recorded, so the reader offers the integrate row and the sheet's note names no pull request" "T18|0" \
+  "$(sr_ready)|$(sr_f "$(sr_task T18)" note | /usr/bin/grep -c 'pull request')"
+sr_ev "ev=published|part=pr|url=https://example.invalid/pull/1|branch=wave/02-fx|commit=$SR_C1|base=main|by=publish|at=2026-10-06T21:30:00Z"
+sr_run "$SR_PLAN"
+expect_eq "PW1 the request open: the sheet's integrate row names it, and the merge as the person's" \
+  "waits on your merge of the pull request https://example.invalid/pull/1" "$(sr_f "$(sr_task T18)" note)"
+expect_eq "PW2 …the reader's ready set is empty (PW0 read it through the same question)" "" "$(sr_ready)"
+expect_eq "PW3 …and the row has not landed: the sheet counts it open, pending" "pending" "$(sr_f "$(sr_task T18)" state)"
+sr_ask_ev "key=pr-closed:wave:02-fx|sent=-|title=the pull request was closed unmerged|at=2026-10-06T21:40:00Z"
+sr_run "$SR_PLAN"
+expect_eq "PW4 the host closed it unmerged (its ask open): the sheet no longer says the run waits on that request (PW1 named it before)" "0" \
+  "$(sr_f "$(sr_task T18)" note | /usr/bin/grep -c 'pull request')"
+
+# ============================================================
 section "§KINDS: an unruled matrix row (row:) and an unread ruling (ruling:) open on the register are asks on the sheet"
 # ============================================================
 # fails-when: either is open and missing from the sheet.
@@ -1099,7 +1128,7 @@ sr_tick_world() {
   sr_world "$1" "$2"
   : > "$SR_REPO/.bionic/tmp/engaged-$SID.state"
   ( cd "$SR_REPO" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1 )
-  sr_poke bind "$SR_PLAN" >/dev/null 2>&1; sr_poke arm >/dev/null 2>&1
+  sr_poke bind "$SR_PLAN" >/dev/null 2>&1
 }
 sr_tick() { sr_poke tick > "$TMPROOT/tick.out" 2> "$TMPROOT/tick.err"; RC=$?; OUT="$(cat "$TMPROOT/tick.out")"; }
 # The tick's worlds are unapproved plans (an approved one FILLs, and S1 pins QUIET), so the close is not forecast.
@@ -1563,6 +1592,33 @@ sr_recap
 expect_eq "RC3 the decision ruled: no open: and no ask: line names it while the tick's approvals still read open, and the recap lists it settled" \
   "0|0|2|settled: D21 · \"1\" · Chris Lehman 2026-10-06 · the gate the judge holds" \
   "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^ask: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^ask: approval: ')|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^settled: D21')"
+
+section "§RESUME-LINES: a resume says each step to the terminal as the step starts, before the step's own lines reach the recap"
+# The terminal is appended to the recap's own path, so the terminal's lines and the recap's land in one file in the order
+# they were written; the recap the verb keeps is read from a run with the terminal apart. fails-when: a step's line
+# comes after its first line, a step goes unsaid, the lines reach the recap, or the lines arrive out of order.
+sr_recap
+RL_TERM="$(/usr/bin/grep -c '^poker: resume — step: ' "$TMPROOT/rs.out")"
+RL_REC="$(printf '%s\n' "$RECAP" | /usr/bin/grep -c 'resume — step: ')"
+RL_F="$SR_DIR/resume-recap.md"; : > "$RL_F"; sr_poke resume "$SR_HF" >> "$RL_F" 2>/dev/null
+rl_at() { awk -v p="$1" 'index($0, p) == 1 { print NR; exit }' "$RL_F"; }  # <prefix> -> the number of the first line that starts with it
+RL_PREV=0; RL_GOT=""; RL_WANT=""; RL_N=0
+while IFS=$'\t' read -r RL_NAME RL_PFX; do  # <step> <the first line the step writes to the recap>
+  RL_OWN="$(rl_at "$RL_PFX")"; RL_SAID="$(rl_at "poker: resume — step: $RL_NAME")"
+  RL_N=$((RL_N + 1)); RL_WANT="$RL_WANT $RL_NAME:said-before"
+  if [ -n "$RL_OWN" ] && [ -n "$RL_SAID" ] && [ "$RL_SAID" -lt "$RL_OWN" ] && [ "$RL_SAID" -gt "$RL_PREV" ]; then RL_GOT="$RL_GOT $RL_NAME:said-before"
+  else RL_GOT="$RL_GOT $RL_NAME:${RL_SAID:-unsaid}/${RL_OWN:-no-lines}"; fi
+  [ -z "$RL_SAID" ] || RL_PREV="$RL_SAID"
+done <<EOT
+bind	poker: bound
+adopt	poker-adopt/v1|
+task list	task-list: 0:
+recap	settled:
+step file	step-file:
+tick	poker: sitrep
+EOT
+expect_eq "RL1 each step's line is on the terminal before its first line in the recap and after the step before it" "$RL_WANT" "$RL_GOT"
+expect_eq "RL2 …the terminal got one line a step and the recap the verb keeps got none" "$RL_N|0" "$RL_TERM|$RL_REC"
 
 section "§FOLD: a fold that fails is no fact: the sheet prints none and exits 2, the line and the recap say the status could not be read, and nothing is held"
 SR_ST="$TMPROOT/stand"; mkdir -p "$SR_ST/payload/scripts"; cp -R "$BIONIC_HOOKS_DIR" "$SR_ST/hooks"; cp -R "${SR_OWED_LIB%/*}" "$SR_ST/payload/scripts/lib"; echo 'reader_facts() { return 128; }' >> "$SR_ST/payload/scripts/lib/reader.sh"

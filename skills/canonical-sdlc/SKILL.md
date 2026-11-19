@@ -47,9 +47,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 ## Load-time announcement
 
-First user-facing action:
-
-> **Canonical SDLC engaged — `<intent> · <level> rigor · <scale>`** (for example `build · double rigor · wave`), then the line `bash <plugin-root>/scripts/card.sh rigor <rigor>` prints, which says what that rigor buys: `review rigor: double (two independent minds)`.
+First user-facing action: run `bash <plugin-root>/scripts/card.sh opening <rigor> [<intent> <scale>]` with the triple you know, and show its print first, unaltered: the version line, the engaged line (`build · double rigor · wave`), the rigor line.
 
 Triple not yet declared → say so and list the axes. Invoked as `help` → render the axis tables and stop.
 
@@ -88,13 +86,13 @@ Rigor follows one principle: the moment of a check is set by its cost model; mac
 
 `steps/6.md` holds the review findings disposition and turns a review into a fact.
 
-**scale** — the decomposition unit; rows are `lib/scale.sh`'s. At `pr`, close-out merges nothing and records `gh pr create`; at `piece+whole`, each code question also owes `scope=whole`.
+**scale** — the decomposition unit; rows are `lib/scale.sh`'s. At `pr`, close-out merges nothing and reads the host's merge; at `piece+whole`, each code question also owes `scope=whole`.
 
 | Scale | Steps | Artifacts | Patrol | Rigor | Writers | Regression | Branch | Integrate | Dealing |
 |---|---|---|---|---|---|---|---|---|---|
 | `task` | 0–9 | one plan + `## Tasks` | no | single | 3 | no | any | pr | piece |
-| `wave` | 0–9, the default | wave spec + plan | yes | double | uncapped | yes | `wave/<NN>-<slug>` | merge | piece+whole |
-| `epic` | 0–3; carves waves | epic spec + plan | yes | double | uncapped | no | `epic/<NN>-<slug>` | merge | piece |
+| `wave` | 0–9, the default | wave spec + plan | yes | double | uncapped | yes | `wave/<NN>-<slug>` | pr | piece+whole |
+| `epic` | 0–3; carves waves | epic spec + plan | yes | double | uncapped | no | `epic/<NN>-<slug>` | pr | piece |
 
 **Rigor minimums.** Default is the Rigor cell: at `task`, `single` unless a flag raises it; at `wave` and above, `double`. Effective rigor is the MAX of the default and four minimums — intent (`incident-response` is at least `double`, `spike` is CAPPED at `single`), flag (security-touching or privacy/vulnerable-population work is at least `double`), project (`rigor-minimum:` in `.bionic/config.yaml`), epic (`rigor-minimum:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Minimums advise; they never force.** Upgrades are free, and a rigor below the minimum is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL).
 
@@ -163,7 +161,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; every matrix row discharged at tier or waived; auditor CONFIRMED; regression run once |
 | 6 Review | `steps/6.md` | `canonical-sdlc` | One fact per owed question at the head, or its waiver |
 | 7 Document | `steps/7.md` | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
-| 8 Integrate | `steps/8.md` | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp ephemera wiped |
+| 8 Integrate | `steps/8.md` | `superpowers:finishing-a-development-branch` | Pull request merged; worktree removed; tmp ephemera wiped |
 | 9 Close-out | `steps/9.md` | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
 
 **Before any Step-N action, read `steps/N.md`. Before Step 4's first action and before the first dispatch, read `dispatch.md`. The load-time announcement names the file just read.**
@@ -216,7 +214,7 @@ A step's evidence is events in the run's log and the header a person wrote; `rea
 
 **Placeholder ban.** These exact values are rejected anywhere evidence is required: `todo`, `pending`, `in progress`, `inprogress`, `xxx`, `tbd`, `placeholder`.
 
-**Handoff.** A run spanning sessions hands off through `session-poker.sh handoff`, which writes `record/handoffs/<date>-<slug>.md` (the machine's facts, the five human lines carried, safe to clear or wait N minutes, the door last) and one handoff event. Invoked with that file's path, run `session-poker.sh resume <path>` first and do what it prints: it binds, arms, adopts and ticks, and prints the task list, the recap, the step file and the Patrol job. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
+**Handoff.** A run spanning sessions hands off through `session-poker.sh handoff`, which writes `record/handoffs/<date>-<slug>.md` (the machine's facts, the five human lines carried, safe to clear or wait N minutes, the door last) and one handoff event. Invoked with that file's path, run `session-poker.sh resume <path>` first and do what it prints: it binds, adopts and ticks, and prints the task list, the recap and the step file. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
 
 ## Hooks
 

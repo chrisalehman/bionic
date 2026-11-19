@@ -133,10 +133,9 @@ run_lines() {  # -> doctor.sh --restart-lines in PROJ
       bash "$DOCTOR_SH" --restart-lines < /dev/null 2>&1 )
 }
 POKER="${REPO}/hooks/session-poker.sh"
-run_tick() {  # -> the tick's output in PROJ, as this live session (engaged and armed first)
+run_tick() {  # -> the tick's output in PROJ, as this live session (engaged first)
   : > "${PROJ}/.bionic/tmp/engaged-${SID_LIVE}.state"
-  ( cd "$PROJ" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_CLAUDE_HOME="$CHOME" \
-      BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_CODE_SESSION_ID="$SID_LIVE" bash "$POKER" arm >/dev/null 2>&1
+  ( cd "$PROJ" || exit 9
     rm -f "${PROJ}/.bionic/tmp/tick-digest-${SID_LIVE}.state"
     HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_CLAUDE_HOME="$CHOME" \
       BIONIC_PLUGIN_ROOT="$PAYLOAD" CLAUDE_CODE_SESSION_ID="$SID_LIVE" bash "$POKER" tick < /dev/null 2>&1 )

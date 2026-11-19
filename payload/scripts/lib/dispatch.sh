@@ -51,18 +51,9 @@ Fix: render the brief for this dispatch; it writes briefs/${name:-<name>}.md and
 Then retry the dispatch."
 }
 
-# The Patrol frame: <fact> <fix> <fix block> <state lines, newline-joined>.
-_dispatch_patrol() {
-  _dispatch_words "$1" "$2" "${4}
-A dispatch with no Patrol behind it is an agent nobody is waiting on.
-
-${3}
-
-Then retry the dispatch."
-}
-
 dispatch_keys() {
-  printf '%s\n' deadline attest-none attest-failed plan-unreadable patrol-never patrol-silent patrol-stopped \
+  printf '%s\n' deadline attest-none attest-failed plan-unreadable \
+    watch-never watch-stopped \
     reviewer-retired facts-unread fill-missing unapproved unbound name-ambiguous approval-waits approval-unread \
     waits-unread nested-writer worktree budget in-flight deliverable-outside proto-row proto-tree proto-path \
     no-deliverable no-suites row-unknown row-mismatch lands-none live-writer brief-unreadable brief-unnamed \
@@ -108,53 +99,29 @@ Fix the failure above, then retry the dispatch (or re-run by hand: ${2-})." ;;
 Approval and the writer budget are read out of it, so neither can be measured. It is not
 closed and not gone, so no other plan is read in its place.
 Fix: restore read access (chmod u+r on the plan, u+rx on its folder), then dispatch." ;;
-    patrol-never)  # <poker script> <stamp file>
-      _dispatch_patrol "no Patrol stamp exists for this session" "CronCreate the Patrol job" \
-"Fix: CronList, then CronCreate a RECURRING session job at the interval \`bash ${1-} interval\`
-  reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch). That is the
-  one half this model owns. The stamp is the other half and it is written for you:
-  hooks/engage.sh arms it as the session engages canonical-sdlc, so a session that engaged
-  has one. Engage the skill again in this session if it is still missing." \
-"There is no Patrol stamp for this session at:
-    ${2-}
-The Patrol was never armed on this session (a symbolic link at that path is never
-followed and reads the same way), so nothing is watching the fleet this dispatch joins.
-" ;;
-    patrol-silent)  # <stamp age> <marker turns since it> <poker script> <stamp file>
-      _dispatch_words "the Patrol fires but never ticks" "run the tick; replace the job" \
-"The Patrol was armed on this session and its job still fires, but it never ticks.
-Its last tick stamp is ${1-}s old, and since then ${2-} Patrol marker turn(s)
-have run on this session without the tick stamping — the job's prompt carries the marker
-but does not run \`bash ${3-} tick\`, so nothing has decided anything since:
-    ${4-}
+    watch-never)  # <hook dir> <project root>
+      _dispatch_words "this session was never watched" "restart claude, or start the watcher" \
+"This session engaged a run and has ended a turn since, and no watch record stands for it.
+The turn-end hook starts the watcher at each turn's end (${1-}/watch.sh, registered in
+hooks/hooks.json); a session that took its hooks before that registration never runs it.
 
-A dispatch with no Patrol behind it is an agent nobody is waiting on.
+A dispatch with no watch behind it is an agent nobody is waiting on.
 
-Fix: repair the job, not the clock:
-  1. Run the tick now: bash ${3-} tick
-  2. CronList, and CronDelete this session's Patrol job.
-  3. CronCreate a RECURRING session job at the interval \`bash ${3-} interval\`
-     reports, carrying exactly the prompt \`bash ${3-} prompt\` prints.
+Fix: the person exits claude and starts it again, so the session takes the hook. Until then,
+start the watcher by hand from the Bash tool, with run_in_background:
+    cd $(refuse_shell_word "${2-.}") || exit 1; printf '{\"session_id\":\"%s\",\"cwd\":\"%s\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}' \"\$CLAUDE_CODE_SESSION_ID\" \"\$PWD\" | bash $(refuse_shell_word "${1-}/watch.sh")
 
 Then retry the dispatch." ;;
-    patrol-stopped)  # <poker script> <stamp age> <idle gap> <fire window> <interval> <default|configured> <stamp file>
-      case "${6-}" in
-        default) q="the poker's ${5-}s default interval (this project's configured value could not be read)" ;;
-        *)       q="the ${5-}s poker-interval this project configures" ;;
-      esac
-      _dispatch_patrol "the Patrol was armed and stopped firing" "re-arm the Patrol, both halves" \
-"Fix: re-arm the Patrol — look first, then the clock, then the stamp:
-  1. CronList — is this session's Patrol job still listed?
-  2. ONLY IF it is ABSENT: CronCreate a RECURRING session job at the interval
-     \`bash ${1-} interval\` reports, carrying the patrol prompt
-     (skills/canonical-sdlc/SKILL.md §Dispatch).
-  3. bash ${1-} arm" \
-"The Patrol was armed on this session and has stopped firing.
-Its last stamp is ${2-}s old, and this session has since sat idle for
-${3-}s in one stretch with no tick in it — past the ${4-}s fire window,
-which is ${q} plus the scheduler's jitter:
-    ${7-}
-" ;;
+    watch-stopped)  # <pid> <watch record>
+      _dispatch_words "the watch stopped without a word" "end this turn; it starts another" \
+"The watch record says pid ${1-} is watching this session, and that process is gone:
+    ${2-}
+It was killed, or ended at its time limit, and wrote nothing as it went.
+
+A dispatch with no watch behind it is an agent nobody is waiting on.
+
+Fix: end this turn. Its end starts a new watcher, which wakes this session when the run has
+work for it; dispatch then." ;;
     reviewer-retired)  # <subagent type>
       _dispatch_words "bionic:reviewer is retired (1.14.0)" "dispatch bionic:critic" \
 "The structure reviewer is not a role any more, so a brief cannot name it:

@@ -12,11 +12,36 @@
 #             seen standing, and one out of shape is seen as none.
 #   §LOCK     a held lock turns a call away in well under a hook's ten seconds with nothing run; a dead
 #             holder's lock is taken over; honest appends racing each other leave the run clean.
+#   §CLOSE    a plan moved off a standing seal reads gone; a seal removed before the move leaves none,
+#             by the old path too; a removal under a held lock exits 75 and keeps the seal.
 #   §PLAN     the write hook seals the plan in its after-arm: an admitted Write, then an admitted Edit,
 #             each driven through the before and after arms, leave it clean, and the binding Write's own
 #             bind event is sealed by the appender; an Edit seals and does not
 #             bind; an Edit denied at the before-arm, or admitted there with its tool never run, leaves the
-#             seal as it was; an after-arm whose seal cannot be had still exits 0 and says so.
+#             seal as it was; an after-arm whose seal cannot be had still exits 0 and says so. Then the
+#             commit gate over a bound run: a plan changed by the shell is refused as changed, the
+#             hook's own admitted Write and Edit and its denied Edit are not, and a seal held past
+#             the wait refuses the commit to be run again.
+#   §BOUND    the bound plan removed, renamed or moved: the commit is refused, the plan named gone.
+#   §MARKER   the engaged file removed or made a link lifts no wall (a commit, a push to main), and
+#             rewritten to no plan, no plan line or a decoy moves no judging off the bound run.
+#   §LOG      the log removed, renamed, emptied, cut, or a close, step, cancel, proof, approval or
+#             waiver appended by hand: refused, naming the log gone, shortened or added to.
+#   §TOOLS    the same roads by Write and Edit through the write hook, then the commit.
+#   §CHANGED  a caught change: the refusal names the log and both replies, the ask it opens is in the log
+#             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
+#   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
+#             log and binding untouched: the commit's refusal is the one before, word for word.
+#   §HONEST   one row each: close-out's archive, the bind verb, a new session id engaging, the step verb's
+#             move down, a record written into the record folder, step 8's wipe of the state folder, and an
+#             honest append that met a held lock: the run verifies clean and no commit is refused for a
+#             change. A hand line beside the held append, or its bytes again once paid, is caught.
+#   §SHUT     a Write, an Edit or a command that writes or deletes in the seal's home, deletes a directory
+#             holding it, or reaches it through a link, is refused in one line, engaged or not; a read, a
+#             command the reader cannot read, a sibling sharing the home's name and a verb's call are not.
+#   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
+#             and one line names the word and the change.
+#   §ABANDON  abandon is taken only on words a session typed, and on them it ends the run.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.
@@ -315,6 +340,257 @@ expect_status "an after-arm whose seal meets a held lock still exits 0" 0 "$HOOK
 expect_contains "and says the plan is not sealed" "not sealed" "$HOOK_ERR"
 expect_eq "and the seal is as it was" "$S2" "$(seal_bytes)"
 rm -rf "$R/.git/bionic-seal/.reap"
-expect_eq "so the plan reads changed until it is sealed again" "changed what=plan how=changed" "$(seal_verify "$RP")"
+expect_eq "so its plan is owed beside the seal, and verifies clean" clean "$(seal_verify "$RP")"
+printf '| hand |\n' >> "$RP"
+expect_eq "and a hand edit after it is caught" "changed what=plan how=changed" "$(seal_verify "$RP")"
+
+# The commit gate (hooks/bash-walls.sh) over a fresh run at step 5 bound to SID, whose log owes a fact,
+# so every commit of it is refused for that (OWED) until a change to the run is refused for the change.
+. "$(dirname "$0")/lib/bound-marker.sh"
+G="$SB/gate"
+world() {
+  rm -rf "$G"; mkdir -p "$G/.bionic/tmp"; git -C "$G" init -q
+  git -C "$G" -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m seed; git -C "$G" checkout -q -b feature/x
+  GP="$(plan_fixture --current 5 "$G/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)"; GL="$(plan_fixture_log "$GP")"
+  : > "$G/.bionic/tmp/engaged-$SID.state"; bound_marker "$G" "$SID" "$GP"; GM="$G/.bionic/tmp/engaged-$SID.state"
+}
+gate() {  # <command> -> GRC, GLINE: the hook's exit and the first line it printed
+  GRC=0; jq -n --arg s "$SID" --arg c "$G" --arg x "$1" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse",
+    tool_name:"Bash", tool_input:{command:$x}}' | HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+    BIONIC_PLUGINS_DIR="$SB/np" bash "$BIONIC_HOOKS_DIR/bash-walls.sh" > /dev/null 2> "$SB/gate.err" || GRC=$?
+  GLINE="$(head -1 "$SB/gate.err")"
+}
+gated() {  # <label> <expected first line> <change> [<command>] -- a fresh world, the change, then the command
+  world; eval "$3"; gate "${4:-git commit -m x}"
+  expect_status "$1: refused" 2 "$GRC"
+  expect_eq "$1: by that line" "$2" "$GLINE"
+}
+REF="bionic: commit refused —"
+OWED="$REF a fact this step owes is missing (record each fact named)"
+PUSH="bionic: push refused — main is a protected branch here (push from your own terminal)"
+PG="$REF the run's plan is gone (only the person can rule)"
+PC="$REF the run's plan was changed outside the tool (only the person can rule)"
+LG="$REF the run's log is gone (only the person can rule)"
+LS="$REF the run's log was shortened outside the tool (only the person can rule)"
+LA="$REF the run's log was added to outside the tool (only the person can rule)"
+LC="$REF the run's log was changed outside the tool (only the person can rule)"
+
+# A file-writing tool's call in the gate world, driven through the write hook's before and after arms (drive,
+# above), with the tool's own effect made by the shell between them; a call the before-arm denies goes no further.
+tool() {  # <Write|Edit> <file> <content | old> [<new>] -> the tool call, admitted and made, in the gate world
+  local in
+  if [ "$1" = Write ]; then in="$(jq -n --arg p "$2" --arg c "$3" '{file_path:$p, content:$c}')"
+  else in="$(jq -n --arg p "$2" --arg o "$3" --arg n "$4" '{file_path:$p, old_string:$o, new_string:$n, replace_all:false}')"; fi
+  R="$G" drive PreToolUse "$1" "$in"; TOOL_PRE="$HOOK_RC"; [ "$HOOK_RC" = 0 ] || return 0
+  # bash 3.2 keeps the quotes of a quoted replacement in the text, so the new string goes in unquoted.
+  if [ "$1" = Write ]; then printf '%s\n' "$3" > "$2"; else local b n="$4"; b="$(cat "$2")"; printf '%s\n' "${b/"$3"/$n}" > "$2"; fi
+  R="$G" drive PostToolUse "$1" "$in" '{"type":"update"}'
+}
+gated "the plan edited by sed -i" "$PC" 'sed -i.bak "s/fixture plan/a plan/" "$GP"'
+gated "a line redirected onto the plan" "$PC" 'printf "| T9 | x |\n" >> "$GP"'
+gated "an admitted Write, then an admitted Edit of the plan" "$OWED" \
+  'tool Write "$GP" "$(cat "$GP")
+"; tool Edit "$GP" "One plan a fixture writes" "One plan the tool wrote"'
+expect_status "and the write hook admitted the Edit" 0 "$TOOL_PRE"
+gated "an Edit of the plan denied at the before-arm" "$OWED" 'tool Edit "$GP" "governing-skill: canonical-sdlc" ""'
+expect_status "and the write hook denied it" 2 "$TOOL_PRE"
+world; mkdir -p "$G/.git/bionic-seal/.reap"; printf '%s\n' "$$" > "$G/.git/bionic-seal/.reap/pid"
+t0=$SECONDS; gate "git commit -m x"
+expect_eq "a seal held past the wait refuses the commit, to be run again (in $((SECONDS - t0)) s)" \
+  "$REF the run's seal could not be read (run the commit again)" "$GLINE"
+
+section "BOUND"
+gated "the run as sealed" "$OWED" ':'
+gated "the plan removed" "$PG" 'rm "$GP"'
+gated "the plan renamed off .plan.md" "$PG" 'mv "$GP" "${GP%.plan.md}.md"'
+gated "the plan moved to another folder" "$PG" 'mkdir -p "$G/.bionic/docs/plans/epic-y"; mv "$GP" "$G/.bionic/docs/plans/epic-y/"'
+
+section "MARKER"
+gated "the engaged file removed: a commit" "$OWED" 'rm "$GM"'
+gated "and a push to main" "$PUSH" 'rm "$GM"' 'git push origin main'
+gated "the engaged file replaced by a link: a commit" "$OWED" 'rm "$GM"; ln -s "$SB/outside" "$GM"'
+gated "and a push to main" "$PUSH" 'rm "$GM"; ln -s "$SB/outside" "$GM"' 'git push origin main'
+gated "the engaged file removed and a step added to the log" "$LA" 'rm "$GM"; printf "run/v1|ev=step|n=9|at=z\n" >> "$GL"'
+gated "the engaged file rewritten to no plan" "$OWED" 'printf "plan=none\n" > "$GM"'
+gated "to no plan line" "$OWED" 'printf "engaged_at=x\n" > "$GM"'
+DECOY='DP="$(plan_fixture --current 4 "$G/.bionic/docs/plans/epic-y/wave-y.plan.md" wave)"'
+world; eval "$DECOY"; bound_marker "$G" "$SID" "$DP"; gate "git commit -m x"
+expect_status "control: a session bound to the decoy at step 4 has its commit admitted" 0 "$GRC"
+gated "to a decoy plan at step 4" "$OWED" "$DECOY"'; printf "plan=%s\n" "$DP" > "$GM"'
+
+section "LOG"
+gated "the log removed" "$LG" 'rm "$GL"'
+gated "the log renamed" "$LG" 'mv "$GL" "$GL.old"'
+gated "the log emptied" "$LS" ': > "$GL"'
+gated "its last line cut" "$LS" 'sed -i.bak "\$d" "$GL"'
+gated "a line of it rewritten in place" "$LC" 'sed -i.bak "1s/n=1/n=7/" "$GL"'
+for l in 'ev=abandon' 'ev=step|n=9|delivered=x' 'ev=step|n=10' 'ev=step|n=3' 'ev=cancel|of=step' \
+         'ev=proof|kind=review|result=pass|head=x' 'ev=approval|key=step5|by=x|said=y' 'ev=waiver|key=x|by=y'; do
+  gated "a hand-appended ${l%%|*} line (${l#ev=})" "$LA" "printf 'run/v1|$l|at=z\n' >> \"\$GL\""
+done
+
+section "TOOLS"
+gated "a Write of the engaged file to no plan" "$OWED" 'tool Write "$GM" "plan=none"'
+gated "an Edit of it to a decoy" "$OWED" "$DECOY"'; tool Edit "$GM" "$GP" "$DP"'
+gated "a Write of the log cut short" "$LS" 'tool Write "$GL" "$(head -2 "$GL")"'
+gated "an Edit adding a step to the log" "$LA" 'tool Edit "$GL" "$(tail -1 "$GL")" "$(tail -1 "$GL")
+run/v1|ev=step|n=9|delivered=x|at=z"'
+expect_status "and the write hook admitted that Edit" 0 "$TOOL_PRE"
+
+section "CHANGED"
+sitrep_asks() { (cd "$G" && HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+  bash "$BIONIC_HOOKS_DIR/session-poker.sh" sitrep 2>/dev/null) | /usr/bin/grep '^ask: '; }
+SA='^ask: key=seal:changed holds=every commit title=changed run: .* blocks=yes waits=user$'
+while IFS="|" read -r label first change <&3; do
+  gated "$label" "${!first}" "$change"
+  E="$(cat "$SB/gate.err")"
+  expect_contains "$label: the refusal names the log" "Log:   $GL" "$E"
+  expect_contains "$label: and the reply that accepts" "session-poker.sh accept '<their words>'" "$E"
+  expect_contains "$label: and the reply that abandons" "session-poker.sh abandon '<their words>'" "$E"
+  expect_regex "$label: the ask is in the log the seal names" '^run/v1\|ev=ask\|key=seal:changed\|' "$(cat "$GL" 2>/dev/null)"
+  expect_regex "$label: the sitrep lists it" "$SA" "$(sitrep_asks)"
+done 3<<'ROWS'
+the log removed|LG|rm "$GL"
+the plan removed|PG|rm "$GP"
+the plan edited|PC|printf "| T9 | x |\n" >> "$GP"
+a line of the log rewritten|LC|sed -i.bak "1s/n=1/n=7/" "$GL"
+ROWS
+rm "$GP"
+expect_regex "the ask of the changed log is listed still, with the plan then removed" "$SA" "$(sitrep_asks)"
+gated "the plan removed, its commit refused, then put back" "$PC" 'cp "$GP" "$SB/keep"; rm "$GP"; gate "git commit -m x"; cp "$SB/keep" "$GP"'
+section "KEPT"
+. "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh"
+export TMPDIR="$SB/kept"
+kept() {  # <place|facts> -> each kept file of that kind made to read step 9, delivered, its key kept; then what it serves
+  local f b; for f in "$TMPDIR/bionic-$1-"*/*; do
+    b="$(sed '2,$ { s/^n=5$/n=9/; s/|n=5|/|n=9|/; s/^state=open$/state=delivered/; }' "$f")" && printf '%s\n' "$b" > "$f"; done
+  if [ "$1" = place ]; then proof_step_held "$GP"; else _proof_ask "$GP" reader_q_step "$GP"; fi
+}
+for k in place facts 'place facts'; do
+  rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world; gate "git commit -m x"; gate "git commit -m x"; E0="$(cat "$SB/gate.err")"
+  expect_eq "the run as sealed, its kept $k written by the gate: refused" "$OWED" "$GLINE"
+  for f in $k; do expect_contains "the kept $f rewritten by hand serves delivered" state=delivered "$(kept "$f")"; done
+  gate "git commit -m x"
+  expect_eq "with the kept $k read delivered, the refusal is the one before, word for word" "$E0" "$(cat "$SB/gate.err")"
+done
+
+section "SHUT"
+HL="bionic: write refused — this changes the seal's home (only the tool writes there)"
+SHUT_ROWS="R|rm -rf .git/bionic-seal
+R|rm .git/bionic-seal/w.plan.md.1-1.seal
+R|printf x > .git/bionic-seal/new.seal
+R|mv .git/bionic-seal ../away
+R|cd .git && rm -rf bionic-seal
+R|find .git/bionic-seal -delete
+R|rm -rf .git
+R|cp notes .git/bionic-seal/
+R|rm -rf gl/bionic-seal
+A|cat .git/bionic-seal/*
+A|rm -rf .git/bionic-*
+A|printf x > .git/bionic-seal-notes
+A|rm -rf .git/hooks
+A|bash hooks/session-poker.sh accept 'the .git/bionic-seal change is mine'
+R|Write|.git/bionic-seal/new.seal
+R|Edit|.git/bionic-seal/*.seal
+R|Write|gl/bionic-seal/new.seal
+A|Write|.git/bionic-seal-notes"
+shut() {  # <engaged|unengaged> -> each row judged in a gate world of that kind: refused by HL, or admitted
+  local want call arg line rc
+  world; ln -s .git "$G/gl"; [ "$1" = engaged ] || { rm "$GM"; seal_binding_drop "$G" "$SID"; gate "git commit -m x"
+    expect_status "the unengaged world: its commit is not judged" 0 "$GRC"; }
+  while IFS="|" read -r want call arg <&3; do
+    case "$call" in
+      Write|Edit) set -- "$1" "$G"/$arg; arg="$2"
+        if [ "$call" = Write ]; then tool Write "$arg" x; else tool Edit "$arg" state= state=; fi
+        rc="$TOOL_PRE"; line="$(head -1 "$SB/hook.err")" ;;
+      *) gate "$call"; rc="$GRC"; line="$GLINE" ;;
+    esac
+    if [ "$want" = A ]; then expect_status "$1, admitted: $call $arg" 0 "$rc"; continue; fi
+    expect_status "$1, refused: $call $arg" 2 "$rc"; expect_eq "$1, by the home's line: $call $arg" "$HL" "$line"
+  done 3<<< "$SHUT_ROWS"
+}
+shut engaged
+shut unengaged
+section "ACCEPT"
+. "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh"
+CFG="$SB/cfg/projects/$(printf '%s' "$G" | sed 's/[^a-zA-Z0-9]/-/g')"; FX="$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move"
+typed() {  # <sid> <prompt>... -> the session witnessed in the gate world, each prompt typed in its transcript
+  local s="$1" t; shift; mkdir -p "$CFG"; printf 'cwd=%s\n' "$G" > "$G/.bionic/tmp/loaded-$s.state"
+  cat "$FX/frame.jsonl" > "$CFG/$s.jsonl"; for t in "$@"; do jq -c --arg t "$t" '.message.content = $t' "$FX/typed.jsonl" >> "$CFG/$s.jsonl"; done
+}
+poke() { PRC=0; (cd "$G" && HOME="$SB/home" CLAUDE_CONFIG_DIR="$SB/cfg" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+  bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@") > "$SB/poke.out" 2>&1 || PRC=$?; }
+O=0a1b2c3d-4e5f-4061-8a7b-9c0d1e2f3a4b; W1="I accept the run as it stands"; ADD='printf "run/v1|ev=hand|what=note|why=by hand|at=z\n" >> "$GL"'
+other() { git -C "$G" config user.name T; typed "$SID" "a prompt of another matter"; typed "$O" "$W1"; bound_marker "$G" "$O" "$GP"; }
+gated "a bind line of another session added by hand" "$LA" 'other; printf "run/v1|ev=bind|by=engage|session=%s|at=z\n" "$O" >> "$GL"'
+poke accept "$W1"
+expect_status "accept on words only a session that line names typed: refused" 1 "$PRC"
+expect_contains "for the words, that session not read: the sealed log binds it not" "refused: $O (not bound as the run was sealed)" "$(cat "$SB/poke.out")"
+poke accept "a thing nobody typed at all"
+expect_status "accept on words no session typed: refused" 1 "$PRC"
+expect_eq "and the run stays changed" "changed what=log how=added" "$(seal_verify "$GP")"
+gated "a line added by hand, the other session's bind sealed" "$LA" 'other; bind_record_session "$GP" "$O" engage; eval "$ADD"'
+expect_regex "the ask stands before the word" "$SA" "$(sitrep_asks)"
+poke accept "$W1"
+expect_status "accept on words a session the sealed log binds typed: taken" 0 "$PRC"
+expect_eq "the run verifies clean" clean "$(seal_verify "$GP")"
+expect_eq "and its ask is closed" "" "$(sitrep_asks)"
+gate "git commit -m x"; expect_eq "the commit meets the run's own refusal" "$OWED" "$GLINE"
+expect_eq "the log holds one line, the word and what it accepted" 1 \
+  "$(/usr/bin/grep -c "^run/v1|ev=approval|key=seal|by=T|said=$W1|session=$O|what=log|how=added|at=" "$GL")"
+
+section "ABANDON"
+W2="abandon the run here, it is done"
+gated "a line added by hand" "$LA" "other; $ADD"
+poke abandon "$W2"
+expect_status "abandon on words no session typed: refused" 1 "$PRC"
+expect_contains "for the words" "stand in no prompt the user typed" "$(cat "$SB/poke.out")"
+expect_true "and the seal stands" seal_stands "$GP"
+typed "$SID" "$W2"; poke abandon "$W2"
+expect_status "abandon on words typed in this session: taken" 0 "$PRC"
+expect_eq "the reader's step reads abandoned" state=abandoned "$(reader_main "$GP" step | tail -1)"
+expect_status "the seal is gone" 1 "$(seal_stands "$GP"; echo $?)"
+expect_eq "the log holds one abandon line, the word" 1 "$(/usr/bin/grep -c "^run/v1|ev=abandon|by=T|said=$W2|session=$SID|at=" "$GL")"
+gate "git commit -m x"; expect_status "and a commit is admitted as a closed run's" 0 "$GRC"
+gated "the plan removed" "$PG" "other; rm \"\$GP\"; typed \"\$SID\" \"\$W2\""
+poke abandon "$W2"
+expect_status "a run whose plan is gone is abandoned on the word" 0 "$PRC"
+gate "git commit -m x"; expect_status "and its commit is admitted" 0 "$GRC"
+wl() { bash -c '. "$1/git-argv.sh" && . "$1/walls.sh" && _wall_poker_contract_verb "$2"; printf "%s|%s " "$?" "$_WALL_POKER_VERB"' \
+  _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "bash hooks/session-poker.sh $1 'w'"; }
+expect_eq "the walls read both as verbs of the run's record, and not the sitrep" "0|accept 0|abandon 1| " "$(wl accept; wl abandon; wl sitrep)"
+
+section "HONEST"
+CO="$(bash -c '. "$(dirname "$0")/lib/resolve-roots.sh"; require_helpers() { :; }; . "$(dirname "$0")/lib/regression-fixture.sh"
+  . "$(dirname "$0")/lib/roster-row.sh"; . "$(dirname "$0")/close-out.prelude.sh"
+  PS="$(mk_fixture honest)"; advance_to "$PS" 8; rm -f "$PS/$EPIC_REL"; run_close "$PS" run
+  printf "%s|%s|%s" "$CO_RC" "$(. "$REPO_ROOT/payload/scripts/lib/seal.sh"; seal_verify "$PS/$PLAN_REL")" "$(gate_rc "$PS")"' \
+  "$BIONIC_SCRIPTS_DIR/tests/honest" 2>/dev/null)"
+expect_eq "close-out's archive: the close exits 0, no seal reads the archived plan gone, and a commit is admitted" "0|none|0" "$CO"
+hold() { mkdir -p "$G/.git/bionic-seal/.reap"; printf '%s\n' "$$" > "$G/.git/bionic-seal/.reap/pid"; }
+free() { rm -rf "$G/.git/bionic-seal/.reap"; }
+put() { RUN_LOG="$GL" bash -c '. "$1/log.sh" && log_append hand what=note "why=$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1"; }
+engage_as() { jq -nc --arg s "$1" --arg c "$G" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Skill",
+  tool_input:{skill:"bionic:canonical-sdlc"}}' | (cd "$G" && HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR= \
+  bash "$BIONIC_HOOKS_DIR/engage.sh" >/dev/null 2>&1); SID="$1"; }
+t1md() { printf 'cat > %q <<X\n# T1: the build\nX\n' "${GL%/*}/T1.md"; }
+SID0="$SID"; ADMIT=""
+while IFS="|" read -r label rc first act <&3; do
+  SID="$SID0"; world; eval "$act"; gate "git commit -m x"
+  expect_eq "$label: the run verifies clean" clean "$(seal_verify "$GP")"
+  expect_eq "$label: and the commit is judged by the step, not refused for a change" "$rc|${!first}" "$GRC|$GLINE"
+done 3<<'ROWS'
+the bind verb|2|OWED|poke bind "$GP"
+a new session id engaging, as after a clear|2|OWED|engage_as 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+the step verb's move down to 4|0|ADMIT|poke current 4
+step 8's wipe of the state folder|2|OWED|rm -rf "$G/.bionic/tmp/"*
+an honest append that met a held lock|2|OWED|hold; put "an honest line"; free; HL="$(/usr/bin/grep -c "why=an honest line|" "$GL")"
+a writer's record written into the record folder|2|OWED|gate "$(t1md)"; HD="$GRC"; eval "$(t1md)"
+ROWS
+SID="$SID0"
+expect_eq "the held append's line is in the log, and the record's heredoc was admitted and written" "1|0|# T1: the build" \
+  "${HL:-}|${HD:-}|$(head -1 "${GL%/*}/T1.md" 2>/dev/null)"
+gated "a hand line beside an honest append that met the lock" "$LA" 'hold; put "an honest line"; printf "run/v1|ev=step|n=9|at=z\n" >> "$GL"; free'
+gated "the honest line's bytes appended again by hand once paid" "$LA" 'hold; put "an honest line"; free; put "the next"; tail -2 "$GL" | head -1 >> "$GL"'
 
 finish

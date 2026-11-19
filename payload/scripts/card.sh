@@ -46,6 +46,7 @@
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step0|step1|step2|step3> <artifact> (the whole card; no stdin)
 #     bash card.sh rigor <word>                         (a rigor level, printed with its meaning)
+#     bash card.sh opening <rigor> [<intent> <scale>]   (the method's opening: the version line, the engaged line, the rigor line)
 #     bash card.sh regression <scale> [<plan>]          (the regression line the Step-0 card prints)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
@@ -2370,10 +2371,8 @@ _card_stem() {  # <path> -> the name without `.<kind>.md`: wave-01-x.plan.md -> 
 # the runner inherits it, and a fixture's card would then open nothing for any writer who ran that suite.
 # A render that reopened any of these put "Blocked on you" on the sitrep for an answer already given.
 _card_writer() {  # -> 0 when the working tree is a linked tree marked with a dispatched writer's name
-  local out common gitdir
-  out="$(git rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 1
-  { IFS= read -r common; IFS= read -r gitdir; } <<< "$out"
-  [ -n "$gitdir" ] && [ "$gitdir" != "$common" ] && [ -s "$gitdir/bionic-agent" ]
+  local gitdir
+  gitdir="$(git_linked_dir "$PWD")" && [ -s "$gitdir/bionic-agent" ]
 }
 _card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or the renderer is a writer
   local facts
@@ -3629,6 +3628,26 @@ case "$1" in
     rigor_print "$2" && exit 0
     printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2
     exit 1 ;;
+  opening)
+    # The version line is the version command's own print and has no second source here: a line composed in
+    # this file would drift from the one the command prints. A triple not yet known is said so, never printed
+    # as a placeholder.
+    [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || _card_usage "opening takes a rigor word and, with it, an intent and a scale (got $(( $# - 1 )) arguments)"
+    _card_open_level="$(rigor_level "$2" 2>/dev/null)"
+    case "$_card_open_level" in
+      single|double) ;;
+      *) printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2; exit 1 ;;
+    esac
+    _card_open_version="$(bash "${CARD_SELF_DIR}/version.sh" 2>/dev/null </dev/null | sed -n 1p)"
+    [ -n "$_card_open_version" ] || { echo "card.sh: the version command printed no line" >&2; exit 1; }
+    printf '%s\n' "$_card_open_version"
+    if [ "$#" -eq 4 ]; then
+      printf 'Canonical SDLC engaged — %s · %s rigor · %s\n' "$3" "$_card_open_level" "$4"
+    else
+      printf 'Canonical SDLC engaged — %s rigor · intent and scale not yet declared\n' "$_card_open_level"
+    fi
+    rigor_print "$2"
+    exit 0 ;;
   regression)
     [ "$#" -ge 2 ] && [ "$#" -le 3 ] || _card_usage "regression takes a scale and an optional plan (got $(( $# - 1 )) arguments)"
     if _card_regression_line "$2" "${3:-}"; then

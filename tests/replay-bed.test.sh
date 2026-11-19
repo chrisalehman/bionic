@@ -249,7 +249,6 @@ expect_regex "…and a cancel the log appends takes it off the sheet" '^clock\.a
 # The tick follows it too: in the same run, a fact the log alone holds changes the tick's fill line.
 # Each tick forgets the last one's digest, which would otherwise print only that nothing changed.
 nofill() { rm -f "$FB"/tmp/tick-digest-*; ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: no FILL — '; }
-( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
 expect_regex "the tick over the logged run fills nothing, every row landed" '^poker: no FILL — width=' "$(nofill)"
 printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-09T00:00:00Z\n' >> "$FL"
 expect_contains "a cancel the log appends makes the tick's Step-3 approval pending again" "Step-3 approval pending" "$(nofill)"
