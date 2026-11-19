@@ -665,5 +665,46 @@ expect_eq "HC1 the CLI's file now names another conversation: the watcher exits 
 expect_eq "HC1.a …its record says resting, cleared" "resting|cleared" "$(wh_field "$RHC" state)|$(wh_field "$RHC" why)"
 kill "$WH_CLI" 2>/dev/null; wait "$WH_CLI" 2>/dev/null; rm -f "$WP_CFG/sessions/$WH_CLI.json"
 
+section "§ONCE: a wake is said once for its cause, the row and the arm, however often the print moves; a panel older than a dispatch judges nothing of it"
+# A ROW QUIET PAST ITS CADENCE, then a second row put on the roster: the print moves, the cause does not.
+RO="$(make_repo wh-once)"; new_roster "$RO"; bound_ago "$RO"; wh_fast "$RO"
+wave_plan_at "$RO" 'epic-99-fixture/wave-01-fixture.plan.md' "-" \
+  "| T1 | 4 | build | the writer's row | implementor | — | 60 | REQ-x | a.sh | active |" > /dev/null
+printf 'working\n' > "$RO/progress-w1.md"; backdate "$RO/progress-w1.md" 3000
+add_row "$RO" name=w1 agent_id=aonce-one-bbbbbbbbbbbbbbbb deliverable="$RO/absent-w1.md" \
+  duration="4 hours" launched_at="$(iso_ago 3600)" progress="$RO/progress-w1.md" cadence="5 minutes"
+plant_answer "$WP_TR" fresh "w1:running"
+poke_bind "$RO"
+wh_start "$RO" Stop; wh_wait
+wo_said() { printf '%s|%s' "$WH_RC" "$(printf '%s' "$WH_ERR" | grep -o "$1")"; }
+expect_eq "ON1 a row quiet past its cadence wakes the watcher, naming it" "$WP_WAKE|NOTIFY w1 - quiet past its cadence" \
+  "$(wo_said 'NOTIFY w1 - quiet past its cadence')"
+wo_digest() { sed -n 's/^digest=//p' "$(digest_of "$RO")" 2>/dev/null | head -1; }
+WO_D1="$(wo_digest)"
+add_row "$RO" name=w2 deliverable="$RO/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+plant_answer "$WP_TR" fresh "w1:running" "w2:running"
+wh_start "$RO" Stop; wh_wait 4
+expect_eq "ON2 the next turn end's watcher, the print moved by another row, does not say the same cause again" "124|" "$WH_RC|$WH_ERR"
+expect_true "ON2.a …though the pass behind it read a print in full: the digest moved off $WO_D1" \
+  test -n "$WO_D1" -a "$(wo_digest)" != "$WO_D1"
+printf 'more\n' >> "$RO/progress-w1.md"; wh_passes "$RO" 2
+backdate "$RO/progress-w1.md" 2400; wh_wait
+expect_eq "ON3 the row wrote and went quiet again: the cause is new, and said" "$WP_WAKE|NOTIFY w1" "$(wo_said 'NOTIFY w1')"
+sed '/name=w1|/s/duration=4 hours/duration=1 minute/' "$(roster_of "$RO")" > "$TMPROOT/once.roster" && cat "$TMPROOT/once.roster" > "$(roster_of "$RO")"
+wh_start "$RO" Stop; wh_wait
+expect_eq "ON4 a different arm names the same row: said" "$WP_WAKE|NOTIFY w1 - past its duration" "$(wo_said 'NOTIFY w1 - past its duration')"
+# A PANEL OLDER THAN A DISPATCH: the answer at ten minutes ago, a dispatch after it, two rows absent from it.
+RG2="$(make_repo wh-once-gone)"; new_roster "$RG2"; bound_ago "$RG2"
+plant_answer "$TMPROOT/once.panel" fresh "busy:running"
+sed -e "s/2026-09-05T00:50:00.000Z/$(iso_ago 620)/; s/2026-09-05T00:51:00.000Z/$(iso_ago 610)/; s/2026-09-05T00:52:23.349Z/$(iso_ago 600)/" \
+  "$TMPROOT/once.panel" > "$WP_TR"
+jq -nc --arg ts "$(iso_ago 60)" '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_once",name:"Agent",input:{}}]}}' >> "$WP_TR"
+add_row "$RG2" name=old agent_id=aonce-old-cccccccccccccccc deliverable="$RG2/never-old.md" duration="4 hours" launched_at="$(iso_ago 3600)"
+add_row "$RG2" name=new agent_id=aonce-new-dddddddddddddddd deliverable="$RG2/never-new.md" duration="4 hours" launched_at="$(iso_ago 60)"
+poke "$RG2" tick
+expect_eq "ON5 a row dispatched before the panel and absent from it is GONE" "old" \
+  "$(printf '%s\n' "$OUT" | sed -n 's/^poker: GONE \([^ ]*\) .*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
+expect_regex "ON5.a …and the one dispatched after it is counted open, not absent" '[|]open=1([|]|$)' "$(printf '%s\n' "$OUT" | grep '^poker-tick/v')"
+
 # ============================================================
 finish
