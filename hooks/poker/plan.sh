@@ -1516,6 +1516,7 @@ RR_MATRIX
     [ "$RR_PREVIEW" != yes ] || rr_fact preview
     rr_fact criteria "$RR_ACT" "$RR_ACW"
     for l in $RR_MISS; do rr_fact miss "$l"; done
+    for l in $RR_OWED; do rr_fact owed "${l%:*}" "${l##*:}"; done
     printf '%s\n' "$RR_CHG" | tr ',' '\n' | while IFS= read -r l; do [ -z "$l" ] || rr_fact check "$l"; done
     printf '%s\n' "$RR_ASIDE" | while IFS= read -r l; do [ -z "$l" ] || rr_fact aside "$l"; done
     for ((i = 0; i < RR_N; i++)); do
@@ -1641,7 +1642,7 @@ RR_WAIVES
     # other row is a decision: a discharged row whose person's part is `awaits` is the user's own check, to confirm
     # (approve <AC>) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
     # step a row is owed against is the run's (the reader's `step`), the plan's `current:` only where the log has none.
-    RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
+    RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""; RR_OWED=""
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_step; RR_CUR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^n=//p')"
     if ! RR_ROWS="$(rr_rows "$PV_PLAN" "${RR_CUR:-$PV_CUR}" "$RR_HEAD")"; then
       die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded or the run's facts could not be read; nothing is written. Run again: bash ${HOOK_DIR}/session-poker.sh $RR_AGAIN"
@@ -1657,7 +1658,11 @@ RR_WAIVES
       fi
       if [ "$ruled" = 1 ] && [ "$st" = waived ]; then RR_ACW=$((RR_ACW + 1)); continue; fi
       # A ROW OWED AT A LATER STEP IS NO DECISION: the step that proves it writes it, the close for a row owed at 9.
-      case "$ruled" in owed:9) RR_ACC=$((RR_ACC + 1)); continue ;; owed:*) RR_ACL=$((RR_ACL + 1)); continue ;; esac
+      # The bottom line names each, so it never says every criterion is proved while one is pending.
+      case "$ruled" in
+        owed:9) RR_ACC=$((RR_ACC + 1)); RR_OWED="${RR_OWED:+$RR_OWED }$ac:close"; continue ;;
+        owed:*) RR_ACL=$((RR_ACL + 1)); RR_OWED="${RR_OWED:+$RR_OWED }$ac:later"; continue ;;
+      esac
       RR_MISS="${RR_MISS:+$RR_MISS }$ac"
       if [ "$person" = awaits ] && [ "$st" = discharged ]; then
         RR_ACA=$((RR_ACA + 1))

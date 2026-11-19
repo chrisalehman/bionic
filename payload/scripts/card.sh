@@ -2692,6 +2692,8 @@ CF_CHECKED
 #   title       <project> <release> <clock> <head8> <tasks landed> <tasks>
 #   early       <why the card is early>          preview          (a fact each, at most once)
 #   criteria    <in the matrix> <waived by you>  miss <AC>        (a miss per criterion not proved)
+#   owed        <AC> <close|later>               (one per criterion owed by the close or at a later step: pending,
+#               neither proved nor a decision)
 #   check       <path>                           (one per file of the declared release check the release changes)
 #   aside       <an item of the user's outside the run>
 #   decision    <kind> <key> <default|other> <subject> <default label> <other label> <default phrase> <other phrase>
@@ -2753,7 +2755,7 @@ _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on std
   local l t title=0
   RL_EARLY=""; RL_PREVIEW=no; RL_ACT=0; RL_ACW=0; RL_REPLY=""; RL_N=0; RL_SF=""; RL_HH=""; RL_TR=""; RL_TACC=""; RL_TREG=""
   RL_FN=0; RL_FNF=0; RL_FNA=0; RL_FNC=0; RL_FROWS=""
-  RL_MISS=(); RL_CHK=(); RL_ASIDE=(); RL_GOAL=(); RL_REVIEW=(); RL_FIND=()
+  RL_MISS=(); RL_OWC=(); RL_OWL=(); RL_CHK=(); RL_ASIDE=(); RL_GOAL=(); RL_REVIEW=(); RL_FIND=()
   RL_DKIND=(); RL_DKEY=(); RL_DPICK=(); RL_DSUBJ=(); RL_DLAB=(); RL_OLAB=(); RL_DPH=(); RL_OPH=()
   while IFS= read -r l || [ -n "$l" ]; do
     [ -n "$l" ] || continue
@@ -2766,6 +2768,11 @@ _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on std
       preview) RL_PREVIEW=yes ;;
       criteria) RL_ACT="${CARD_CELLS[1]:-0}"; RL_ACW="${CARD_CELLS[2]:-0}" ;;
       miss) RL_MISS[${#RL_MISS[@]}]="${CARD_CELLS[1]:-}" ;;
+      owed)
+        case "${CARD_CELLS[2]:-}" in
+          close) RL_OWC[${#RL_OWC[@]}]="${CARD_CELLS[1]:-}" ;;
+          *) RL_OWL[${#RL_OWL[@]}]="${CARD_CELLS[1]:-}" ;;
+        esac ;;
       check) RL_CHK[${#RL_CHK[@]}]="${CARD_CELLS[1]:-}" ;;
       aside) RL_ASIDE[${#RL_ASIDE[@]}]="${CARD_CELLS[1]:-}" ;;
       decision)
@@ -2811,8 +2818,16 @@ _card_release_bottom() {
       else l="$l (decisions $(_card_list 6 "${nums[@]}"))"; fi
     fi
     _card_hang 2 "- $l."
-  elif [ "$RL_ACW" -gt 0 ]; then _card_hang 2 "- Every criterion is proved or waived by you."
-  elif [ "$RL_ACT" -gt 0 ]; then _card_hang 2 "- Every criterion is proved."
+  fi
+  # A CRITERION OWED BY THE CLOSE OR AT A LATER STEP IS PENDING: it is named as owed, and the line that says the
+  # criteria are proved speaks of the others alone, so the card never says all are while the reader answers one pending.
+  [ "${#RL_OWC[@]}" -eq 0 ] || _card_hang 2 "- $(_card_plural "${#RL_OWC[@]}" criterion criteria) owed by the close: $(_card_list 6 "${RL_OWC[@]}")."
+  [ "${#RL_OWL[@]}" -eq 0 ] || _card_hang 2 "- $(_card_plural "${#RL_OWL[@]}" criterion criteria) owed at a later step: $(_card_list 6 "${RL_OWL[@]}")."
+  n=$(( ${#RL_OWC[@]} + ${#RL_OWL[@]} )); l=""; [ "$n" -eq 0 ] || l=" other"
+  if [ "${#RL_MISS[@]}" -gt 0 ]; then :
+  elif [ "$n" -gt 0 ] && [ "$RL_ACT" -le "$n" ]; then :
+  elif [ "$RL_ACW" -gt 0 ]; then _card_hang 2 "- Every$l criterion is proved or waived by you."
+  elif [ "$RL_ACT" -gt 0 ]; then _card_hang 2 "- Every$l criterion is proved."
   else _card_hang 2 "- The matrix holds no criterion."; fi
   # An early run puts no decision: the acting render refuses it, so a preview says what the user will owe, never that
   # they owe it now, and the card says one thing.
