@@ -3094,15 +3094,15 @@ _eg_row_for_worktree() {
   _eg_v15_row_for_tree "$_want"
 }
 
-# At 15 a tree is the row's latest tree event; a row in flight (any state between its dispatch and its
-# landing) is what the table's `active` was. Two rows naming one tree collide as they do in the table.
+# At 15 a tree is the row's latest tree event, as the reader folds it (lib/reader.sh `reader_trees`); a row in flight
+# (any state between its dispatch and its landing) is what the table's `active` was. Two rows naming one tree collide
+# as they do in the table.
 _eg_v15_tree_rows() {  # <plan> <tree name> -> the rows whose latest tree it is, comma-joined; asked through _proof_ask
-  local f
-  f="$(reader_facts "$1")" || return 2
-  printf '%s\n' "$f" | awk -F'|' -v w="$2" "$_READER_AWK"'
-    ev() == "tree" { p = line_kv("path"); sub(/\/$/, "", p); n = split(p, q, "/"); r = line_kv("row")
-      if (tolower(q[n]) == tolower(w)) { if (!(r in s)) o[++k] = r; s[r] = 1 } else if (r in s) delete s[r] }
-    END { for (i = 1; i <= k; i++) if (o[i] in s) printf "%s%s", (c++ ? ", " : ""), o[i] }'
+  local t
+  t="$(reader_trees "$1")" || return 2
+  printf '%s\n' "$t" | awk -F'|' -v w="$2" "$_READER_AWK"'
+    { p = line_kv("path"); sub(/\/$/, "", p); n = split(p, q, "/") }
+    p != "" && tolower(q[n]) == tolower(w) { printf "%s%s", (c++ ? ", " : ""), line_kv("row") }'
 }
 _eg_v15_row_for_tree() {  # <tree name> -> _EG_ROW / _EG_ROW_DUP as _eg_row_for_worktree sets them
   local ids id st cells  # a tree whose row the plan lacks names no row, as in the table
@@ -3362,8 +3362,8 @@ _eg_v15_step_asks() {
   esac
 }
 _eg_v15_trees() {  # <plan> -> each path the run's latest tree events name, one per line; asked through _proof_ask
-  local f; f="$(reader_facts "$1")" || return 2
-  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "tree" { t[line_kv("row")] = line_kv("path") } END { for (r in t) if (t[r] != "") print t[r] }'
+  local t; t="$(reader_trees "$1")" || return 2
+  printf '%s\n' "$t" | awk -F'|' "$_READER_AWK"'{ p = line_kv("path") } p != "" { print p }'
 }
 
 _eg_v15_step_asks
