@@ -249,5 +249,123 @@ expect_eq "G3 the next pass does not wake for the same request again" "$WP_QUIET
 expect_eq "G3.a …and prints nothing" "" "$WP_OUT"
 expect_contains "G3.b …while the ask stays open" "gate:" "$(wp_owed "$RG" owed_list | cut -f1)"
 
+# THE PERSON'S WORLD: armed, an empty roster, the session bound to a plan at Step 3, so no row is ready, no run is
+# delivered and the run's log holds no pull request. Sets WP_R and WP_PLAN (not a subshell, so both survive).
+wp_person_world() {  # <label>
+  WP_R="$(make_repo "$1")"; new_roster "$WP_R"; armed_ago "$WP_R"
+  WP_PLAN="$(sp_plan_at_step "$WP_R" 3 "| T1 | 4 | build | a row | implementor | — | 15m | REQ-x | a.sh | pending |")"
+  bind_marker "$WP_R" "$WP_PLAN"
+}
+wp_ask() {  # <repo> <plan> <owed.sh fn> [args] -> an act on the run's own register, as the card and the verbs write it
+  local repo="$1" plan="$2"; shift 2
+  ( cd "$repo" && CLAUDE_CODE_SESSION_ID="$SID" OWED_ROOT="$repo" OWED_PLAN="$plan" \
+      bash -c '. "$1/owed.sh" && shift && "$@"' _ "$WP_LIB" "$@" ) >/dev/null 2>&1
+}
+# wp_why <repo> -> the fact the tick says keeps the run off the rest, or `rest`: one plain tick, its watch facts read
+wp_why() {
+  rm -f "$TMPROOT/wp.facts"
+  ( cd "$1" && exec env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WATCH_FACTS="$TMPROOT/wp.facts" bash "$POKER" tick ) \
+    >/dev/null 2>&1
+  sed -n 's/^watch-facts\/v[0-9]*|.*rest=\([a-z]*\).*$/\1/p' "$TMPROOT/wp.facts" 2>/dev/null | head -1 | grep -q '^yes$' \
+    && { printf 'rest'; return; }
+  sed -n 's/^.*|why=\([^|]*\).*$/\1/p' "$TMPROOT/wp.facts" 2>/dev/null | head -1
+}
+WP_SH="$(printf 'b%.0s' $(seq 40))"
+wp_pr_line() { printf 'run/v1|ev=published|part=pr|url=https://host.invalid/o/r/pull/7|branch=wave/01-fixture|commit=%s|base=main|at=2026-11-18T00:00:00Z\n' "$WP_SH"; }
+
+# ============================================================
+section "§ONLY-PERSON: with no row, nothing ready, no run, no pull request and every open ask the person's, the pass returns the rest code (AC-10.1, the hermetic half)"
+# ============================================================
+wp_person_world wp-person
+RP="$WP_R"; PP="$WP_PLAN"
+wp_pass "$RP"
+expect_eq "OP0 the person's world with no ask open is quiet, not a rest: nothing has put anything to the person" \
+  "$WP_QUIET|" "$WP_RC|$WP_OUT"
+expect_eq "OP0.a …and the tick's facts name that" "no-ask" "$(wp_why "$RP")"
+wp_ask "$RP" "$PP" owed_open approve:step3 "approval: step3" "the plan is put to you"
+wp_old_stamp "$RP"
+wp_pass "$RP"
+expect_eq "OP1 the plan's approval put to the person and nothing else open: the pass exits with the rest code" "$WP_REST" "$WP_RC"
+expect_eq "OP1.a …and prints nothing on stdout" "" "$WP_OUT"
+expect_ne "OP1.b …the tick ran behind it: the stamp moved off the planted one" "2000-01-01T00:00:00Z" "$(wp_stamp_at "$RP")"
+wp_pass "$RP"
+expect_eq "OP2 the next pass over the same resting state, its print unchanged, rests again" "$WP_REST|" "$WP_RC|$WP_OUT"
+expect_eq "OP2.a …and the tick's facts say rest" "rest" "$(wp_why "$RP")"
+# AN ASK THAT WAITS ON AN EVENT IS NOT THE PERSON'S: the waiver answered no waits on its review's next run.
+wp_ask "$RP" "$PP" owed_open waive:Q1 "waiver: Q1" "review Q1 is waived"
+wp_ask "$RP" "$PP" owed_answer waive:Q1 no
+wp_pass "$RP"
+expect_ne "OP3 one ask more, answered so it waits on its review's run: the pass does not rest" "$WP_REST" "$WP_RC"
+expect_eq "OP3.a …the tick's facts name the ask on an event" "ask-on-event" "$(wp_why "$RP")"
+wp_ask "$RP" "$PP" owed_close waive:Q1 "the review passed"
+wp_pass "$RP"
+expect_eq "OP3.b …and with that ask closed the same world rests again" "$WP_REST" "$WP_RC"
+# AN OPEN PULL REQUEST IS NOT WAITING ONLY ON THE PERSON (D27): the run's log holds the published request.
+wp_pr_line >> "$(plan_fixture_log "$PP")"
+wp_pass "$RP"
+expect_ne "OP4 the same world with its pull request published: the pass does not rest" "$WP_REST" "$WP_RC"
+expect_eq "OP4.a …the tick's facts name the pull request" "pull-request" "$(wp_why "$RP")"
+
+# THE PLAN THAT CANNOT BE READ IS A WAKE, NOT A REST: only the person can restore it, and nothing has told them.
+wp_person_world wp-unread
+RU="$WP_R"; PU="$WP_PLAN"
+wp_ask "$RU" "$PU" owed_open approve:step3 "approval: step3" "the plan is put to you"
+wp_pass "$RU"
+expect_eq "OP5 precondition: the readable world with the approval put rests" "$WP_REST" "$WP_RC"
+chmod 000 "$PU"
+wp_pass "$RU"
+WK_PU="$WP_OUT"
+expect_eq "OP6 the bound plan made unreadable: the pass wakes" "$WP_WAKE" "$WP_RC"
+expect_regex "OP6.a …its line names the plan and the person" '^bionic watch: PLAN unreadable - .*person' "$WK_PU"
+expect_eq "OP6.b …one line" "1" "$(wp_lines "$WK_PU")"
+expect_true "OP6.c …of at most $WP_MAX characters ($(wp_len "$WK_PU"))" test "$(wp_len "$WK_PU")" -le "$WP_MAX"
+wp_pass "$RU"
+expect_eq "OP7 the next pass over the same unreadable plan neither wakes again nor rests" "$WP_QUIET|" "$WP_RC|$WP_OUT"
+expect_eq "OP7.a …the tick's facts name the plan" "plan-unreadable" "$(wp_why "$RU")"
+chmod 644 "$PU"
+
+# ============================================================
+section "§STAYS: an active row with nothing changing, and no row but a detached run, never rest (AC-10.4, the pass's half)"
+# ============================================================
+# ONE ACTIVE ROW: the person's resting world with one agent at work inside its duration and cadence.
+wp_person_world wp-stays-row
+RA="$WP_R"
+wp_ask "$RA" "$WP_PLAN" owed_open approve:step3 "approval: step3" "the plan is put to you"
+wp_pass "$RA"
+expect_eq "ST0 precondition: the world with no row rests" "$WP_REST" "$WP_RC"
+add_row "$RA" name=busy deliverable="$RA/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+plant_answer "$WP_TR" fresh "busy:running"
+WP_ST=""
+for n in 1 2 3 4 5 6 7 8 9 10; do wp_pass "$RA"; WP_ST="$WP_ST$WP_RC "; done
+expect_eq "ST1 one active row and nothing changing: ten passes, none rests and none wakes after the first" \
+  "$(printf '%s ' $WP_QUIET $WP_QUIET $WP_QUIET $WP_QUIET $WP_QUIET $WP_QUIET $WP_QUIET $WP_QUIET $WP_QUIET)" \
+  "${WP_ST#* }"
+expect_ne "ST1.a …nor the first" "$WP_REST" "${WP_ST%% *}"
+expect_eq "ST1.b …the tick's facts name the open row" "open-row" "$(wp_why "$RA")"
+
+# NO ROW BUT A DETACHED RUN: a whole run the tick started, alive under booked.sh's shim, its row a run object.
+wp_person_world wp-stays-run
+RD="$WP_R"
+wp_ask "$RD" "$WP_PLAN" owed_open approve:step3 "approval: step3" "the plan is put to you"
+mkdir -p "$TMPROOT/shim" "$RD/.bionic/tmp/runs"
+WP_RUNLOG="$RD/.bionic/tmp/runs/regression@bbbbbbbb.log"; : > "$WP_RUNLOG"
+printf 'sleep 600\n' > "$TMPROOT/shim/booked.sh"
+bash "$TMPROOT/shim/booked.sh" --run-log "$WP_RUNLOG" >/dev/null 2>&1 &
+WP_RUNPID=$!
+roster_row_fixture status=run session="$SID" name=regression@bbbbbbbb agent_id= launched_at="$(iso_ago 60)" \
+  subagent_type=bionic:test-runner model= waiver="a whole run the tick started, not an agent: its log and its proof are its record" \
+  suites_allowed=run.sh suites_source=DECLARED tool_use_id= plan="$WP_PLAN" \
+  run_log="$WP_RUNLOG" run_pid="$WP_RUNPID" run_started_at="$(iso_ago 60)" >> "$(roster_of "$RD")"
+WP_ST=""
+for n in 1 2 3 4 5 6 7 8 9 10; do wp_pass "$RD"; WP_ST="$WP_ST$WP_RC "; done
+expect_eq "ST2 no row but a live detached run: ten passes, none rests" "" \
+  "$(printf '%s\n' $WP_ST | grep -x "$WP_REST")"
+expect_eq "ST2.a …each pass ran: ten codes read" "10" "$(printf '%s\n' $WP_ST | grep -c .)"
+expect_eq "ST2.b …the tick's facts name the detached run" "detached-run" "$(wp_why "$RD")"
+kill "$WP_RUNPID" 2>/dev/null; wait "$WP_RUNPID" 2>/dev/null
+printf '0\n' > "$WP_RUNLOG.rc"
+wp_pass "$RD"
+expect_eq "ST3 …and once the run has ended the same world rests" "$WP_REST" "$WP_RC"
+
 # ============================================================
 finish
