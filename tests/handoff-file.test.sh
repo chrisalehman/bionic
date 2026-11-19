@@ -582,8 +582,9 @@ HF_RS="$(cat "$HF_RECAP")"
 hf_labels() {  # <text> -> the labels of its unindented lines, comma-joined
   printf '%s\n' "$1" | awk '!/^  / && NF { l = $0; sub(/:.*$/, "", l); sub(/ \(.*$/, "", l); printf "%s%s", (n++ ? "," : ""), l } END { print "" }'
 }
-expect_eq "RS1c the terminal is the short page: bound, step, running, landed since, owed now, watch, the recap" \
-  "poker,step,running,landed since the handoff,owed now,watch,recap" "$(hf_labels "$HF_RS_TERM")"
+expect_eq "RS1c the terminal is the short page: each step as it starts, then bound, step, running, landed since, owed now, watch, the recap" \
+  "bind,adopt,task list,recap,step file,tick|poker,step,running,landed since the handoff,owed now,watch,recap" \
+  "$(printf '%s\n' "$HF_RS_TERM" | sed -n 's/^poker: resume — step: //p' | paste -sd, -)|$(hf_labels "$(printf '%s\n' "$HF_RS_TERM" | /usr/bin/grep -v '^poker: resume — step: ')")"
 expect_eq "RS1d …the step" "step: 4 Implement" "$(printf '%s\n' "$HF_RS_TERM" | grep '^step: ')"
 expect_regex "RS1e …each open agent with what it does and for how long" '^  - w-pred · implementor · for [0-9]+ min$' \
   "$(printf '%s\n' "$HF_RS_TERM" | grep '^  - ')"
