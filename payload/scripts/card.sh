@@ -2703,7 +2703,8 @@ CF_CHECKED
 #   goal        <status> <mark> <name> <reading> <evidence>
 #   sofar | handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
 #   findings    <n> <fixed> <awaiting your decision> <carried> <the rows that fix them, space-separated>
-#   finding     <F|A|C> <severity> <sentence>
+#               [<the carried findings no deferral in the run's log holds, by id, space-separated>]
+#   finding     <F|A|C|R> <severity> <sentence>          (R: carried by its record alone)
 #
 # Decisions, misses, goals, reviews and findings print in the order they came. A fact the renderer does not know,
 # or no title, refuses the card (64, nothing drawn): a card that silently dropped a fact would ask the user to
@@ -2754,7 +2755,7 @@ _card_release_dec_of() {  # <key> -> the decision number the card gives it; 1 wh
 _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on stderr on a fact it does not know
   local l t title=0
   RL_EARLY=""; RL_PREVIEW=no; RL_ACT=0; RL_ACW=0; RL_REPLY=""; RL_N=0; RL_SF=""; RL_HH=""; RL_TR=""; RL_TACC=""; RL_TREG=""
-  RL_FN=0; RL_FNF=0; RL_FNA=0; RL_FNC=0; RL_FROWS=""
+  RL_FN=0; RL_FNF=0; RL_FNA=0; RL_FNC=0; RL_FROWS=""; RL_FUNL=()
   RL_MISS=(); RL_OWC=(); RL_OWL=(); RL_CHK=(); RL_ASIDE=(); RL_GOAL=(); RL_REVIEW=(); RL_FIND=()
   RL_DKIND=(); RL_DKEY=(); RL_DPICK=(); RL_DSUBJ=(); RL_DLAB=(); RL_OLAB=(); RL_DPH=(); RL_OPH=()
   while IFS= read -r l || [ -n "$l" ]; do
@@ -2789,7 +2790,9 @@ _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on std
       review) RL_REVIEW[${#RL_REVIEW[@]}]="${CARD_CELLS[1]:-}" ;;
       findings)
         RL_FN="${CARD_CELLS[1]:-0}"; RL_FNF="${CARD_CELLS[2]:-0}"; RL_FNA="${CARD_CELLS[3]:-0}"; RL_FNC="${CARD_CELLS[4]:-0}"
-        RL_FROWS="${CARD_CELLS[5]:-}" ;;
+        RL_FROWS="${CARD_CELLS[5]:-}"
+        # shellcheck disable=SC2206  # the ids, one word each
+        RL_FUNL=(${CARD_CELLS[6]:-}) ;;
       finding) RL_FIND[${#RL_FIND[@]}]="${l#finding"$CARD_TAB"}" ;;
       *) printf "card.sh: unknown release fact '%s' — card.sh release takes the facts its header names\n" "$t" >&2; return 64 ;;
     esac
@@ -2900,8 +2903,9 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
     [ "$RL_FNF" -eq 0 ] || lab="$RL_FNF fixed"
     [ "$RL_FNA" -eq 0 ] || lab="${lab:+$lab · }$RL_FNA for your decision"
     [ "$RL_FNC" -eq 0 ] || lab="${lab:+$lab · }$RL_FNC carried"
+    [ "${#RL_FUNL[@]}" -eq 0 ] || lab="${lab:+$lab · }${#RL_FUNL[@]} carried by their records alone"
     _card_hang 0 "Findings — $RL_FN: $lab"
-    for g in F A C; do
+    for g in F A C R; do
       lines=""
       for ((i = 0; i < ${#RL_FIND[@]}; i++)); do
         _card_split "${RL_FIND[$i]}"
@@ -2914,6 +2918,8 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
            [ -z "$RL_FROWS" ] || lab="Fixed by $(_card_list 6 $RL_FROWS)" ;;
         A) lab="Awaiting your decision" ;;
         C) lab="Carried as known limits" ;;
+        # THE CARRIED COUNT IS THE LOG'S: the findings no deferral in the log holds are named in one line, apart.
+        R) lab="Carried by their records alone, with no deferral in the run's log: $(_card_list 6 "${RL_FUNL[@]}")" ;;
       esac
       _card_hang 0 "$lab"
       while IFS= read -r sent; do [ -z "$sent" ] || _card_hang 7 "$sent"; done <<< "$lines"

@@ -1543,7 +1543,7 @@ RR_MATRIX
     rr_fact acceptance "$RR_TACC"
     rr_fact regression "$RR_TREG"
     printf '%s\n' "$RR_REVIEWS" | while IFS= read -r l; do [ -z "$l" ] || rr_fact review "$l"; done
-    rr_fact findings "$RR_FN" "$RR_FNF" "$RR_FNA" "$RR_FNC" "$RR_FROWS"
+    rr_fact findings "$RR_FN" "$RR_FNF" "$RR_FNA" "$RR_FNC" "$RR_FROWS" "$RR_FUNL"
     printf '%s\n' "$RR_FLINES" | awk 'NF { print "finding\t" $0 }'
   }
 
@@ -1701,7 +1701,7 @@ RR_ROWS_EOF
     # deferral carried; a move to fixed fixed once its row landed, open with that row before), and the question is
     # the reader's newest review proof citing its record. The disposition's own state stands for a finding the
     # reader holds no line of, a review's unlined flag.
-    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""
+    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""; RR_FUNL=""
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_findings
     RR_RFIND="$(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'
       NF > 1 { print line_kv("ref") "\t" line_kv("to") "\t" line_kv("row") }')"
@@ -1751,6 +1751,9 @@ RR_ROWS_EOF
         done
         if [ "$grp" = C ] && [ "$state" = open ]; then grp=A; dec="$(rr_dec_of "waive:$q")" || dec=""; fi
       fi
+      # THE CARRIED COUNT IS THE LOG'S: a carried finding the reader holds no deferral of stands on its record alone,
+      # so it is counted apart and named; nothing is written to the log to make the two agree.
+      if [ "$grp" = C ]; then case "${to:-}" in deferred|defer|carried) : ;; *) grp=R; RR_FUNL="${RR_FUNL:+$RR_FUNL }$fid" ;; esac; fi
       case "$grp" in F) RR_FNF=$((RR_FNF + 1)) ;; A) RR_FNA=$((RR_FNA + 1)) ;; C) RR_FNC=$((RR_FNC + 1)) ;; esac
       RR_FLINES="${RR_FLINES}${grp}	${sev}	${sent}${dec:+ (decision $dec)}"$'\n'
     done <<RR_DISP_EOF
