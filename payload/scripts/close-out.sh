@@ -95,7 +95,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh; do
+for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh seal.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -121,6 +121,9 @@ fi
 . "${CO_LIB}/handoff.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/archive.sh"
+# THE SEAL (lib/seal.sh) that vouches for the run's plan and log: close-out lifts it before the archive moves the plan.
+# shellcheck source=/dev/null
+. "${CO_LIB}/seal.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/patrol.sh"
 # shellcheck source=/dev/null
@@ -1020,19 +1023,32 @@ $entry
 
 # act_disengage -> close-out's LAST act: this session's engaged marker (its binding) removed, after the continuation,
 # the epic row, the blocks, the archive and the notice, so any refusal before it left the session engaged (wave-36 T14).
+# The session's binding RECORD beside the seal outvotes the marker (lib/run.sh `session_plan`), so it goes with the
+# marker on every road that has a session key, the marker found or not: left standing, the closed-out session would read
+# as bound to the plan it closed. A record that survives its removal is a refusal, as the marker's is.
 act_disengage() {
-  local m
-  if [ -z "$CO_SID" ] || ! m="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)"; then
+  local m="" rec="" rc=0
+  if [ -z "$CO_SID" ]; then
     say "disengaged: no session key — no engaged marker to remove"
     return 0
   fi
+  seal_binding_drop "$ROOT" "$CO_SID" || rc=$?
+  case "$rc" in
+    0) rec=" and its binding record dropped" ;;
+    2) rec="" ;;
+    *) _co_refuse "the session's binding record could not be dropped (exit $rc)" ;;
+  esac
+  if ! m="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)"; then
+    say "disengaged: no engaged marker path for this session${rec:+ —$rec}"
+    return 0
+  fi
   if [ ! -e "$m" ] && [ ! -L "$m" ]; then
-    say "disengaged: this session holds no engaged marker — nothing to remove"
+    say "disengaged: this session holds no engaged marker — nothing to remove${rec:+;$rec}"
     return 0
   fi
   rm -f "$m" 2>/dev/null
   [ ! -e "$m" ] && [ ! -L "$m" ] || _co_refuse "the engaged marker $m survived its removal"
-  say "disengaged: $m removed — close-out's last act; this session is no longer engaged"
+  say "disengaged: $m removed${rec} — close-out's last act; this session is no longer engaged"
 }
 
 # ─── Act 4: the task list ────────────────────────────────────────────────────
@@ -2102,6 +2118,20 @@ act_archive() {
   return 0
 }
 
+# co_lift_seal -> the run's seal removed, or a refusal. It stands between the delivery's event and the archive's move: the
+# seal names the plan where it is, so a seal left standing would read the move of a closed run as the plan gone, and the
+# lifting before the delivery would leave the delivery's own events unvouched. No home (2) is no seal to lift; the lock
+# not had (75) is refused, because the move that follows would strand a seal that names a plan no longer there.
+co_lift_seal() {
+  local rc=0
+  seal_remove "$PLAN" || rc=$?
+  case "$rc" in
+    0|2) return 0 ;;
+    75)  _co_refuse "the run's seal could not be lifted: its lock was held (exit 75); the plan is closed and was not archived, so say the same close again once the holder is done" ;;
+    *)   _co_refuse "the run's seal could not be lifted (exit $rc); the plan is closed and was not archived" ;;
+  esac
+}
+
 # co_close_archived <the run's log, found before the move> -> the delivery's step restated with the archive's line.
 # The archive moves the plan and never its record, so the plan's new place joins no log: the log found before the move
 # is named to the step's writer, which takes only a log that is there. The restated step carries the delivery's own
@@ -2365,6 +2395,7 @@ do_run() {
                     say "handoff: the closed form (resume point NONE) written to $CO_HO_REL; the run's log names it"
                     say "step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}"
     CO_LOG="$(reader_log "$PLAN" 2>/dev/null)" || _co_refuse "the run's log of $PLAN cannot be found, so the archive's line has nowhere to go; nothing was moved"
+    co_lift_seal
     act_archive
     co_close_archived "$CO_LOG"
                     say "archived: $ARCHIVED_LINE"

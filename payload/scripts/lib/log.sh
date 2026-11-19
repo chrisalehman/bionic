@@ -24,6 +24,20 @@
 # not `<name>=<value>`, no RUN_LOG, a LOG_AT off the shape); 1 the write failed. The write is the landing record's one append
 # (`_wt_proofs_put`: a private file copied by one write(2)), so two writers' lines never interleave.
 #
+# THE SEAL (lib/seal.sh). A line for a run's log is written inside `seal_write`: under the seal's short lock
+# the run is checked against its seal, the line is written, and the run is sealed again from its files on disk.
+# The check comes first so that an honest line written after a change made around the tool cannot vouch for
+# that change: whatever the check catches is kept in the seal as changed, the line is still appended, and no
+# later append clears it. The run is the plan the log is joined to by the record's name (`_log_plan`, the
+# inverse of lib/reader.sh `reader_log`, confirmed by it); a log no plan names, or one in no repository, takes
+# the line with nothing sealed. A lock that cannot be had leaves the line appended and unsealed, so the next
+# check reads the log as added to: a busy lock fails toward a caught change, never toward a vouched one.
+# A RUN FOUND WITH NO SEAL is sealed as it stands, and the sealing is written first, as one `hand` line,
+# `what=seal`, through the hand events' one writer, then the caller's line. Only a run that a fresh fold of its
+# log reads open is sealed so, never one a kept answer reads open, and never under a dry call (BIONIC_DRY_STEP),
+# whose step is not the run's: a closed run, or a dry call, takes its line with no seal made. A seal that
+# stands is checked and kept under a dry call as under any other, since the line it writes is real.
+#
 # bash 3.2 (ADR-001).
 
 _LOG_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
@@ -31,6 +45,8 @@ if ! declare -F line_value >/dev/null 2>&1 || ! declare -F _wt_proofs_put >/dev/
   # shellcheck source=/dev/null
   . "$_LOG_LIB_DIR/line.sh"
 fi
+# shellcheck source=/dev/null
+declare -F seal_write >/dev/null 2>&1 || . "$_LOG_LIB_DIR/seal.sh"
 
 LOG_TYPES=" ready candidate verdict published returned stalled standing admitted void run walk step approval"
 LOG_TYPES="${LOG_TYPES} proof finding waiver decision order bind handoff dispatch tree born ask stop debt abandon cancel hand drop "
@@ -51,5 +67,66 @@ log_append() {  # <event type> <key>=<value>… -> 0 appended, 2 refused, 1 not 
     line="${line}|${f}"
   done
   mkdir -p "${RUN_LOG%/*}" 2>/dev/null || return 1
-  _wt_proofs_put "$RUN_LOG" "${line}|at=${at}" || return 1
+  _log_put "$RUN_LOG" "${line}|at=${at}" || return 1
+}
+
+LOG_SEALED_WHY="no seal stood for this open run, so it was sealed as it was found"
+
+_log_put() {  # <log> <line> -> 0 appended, 1 not; inside the seal when the log is a run's
+  local log plan
+  log="$(_seal_canon "$1")"
+  _log_plan "$log" || { _wt_proofs_put "$1" "$2"; return; }
+  plan="$_LOG_PLAN"
+  seal_stands "$plan"
+  case "$?" in
+    0) ;;
+    1) if [ -n "${BIONIC_DRY_STEP:-}" ] || ! _log_open "$plan"; then _wt_proofs_put "$1" "$2"; return; fi
+       seal_write "$plan" "$log"
+       if [ "$SEAL_WAS" = none ] && [ "$(_seal_canon "$(line_log "$plan" 2>/dev/null)")" = "$log" ]; then
+         line_hand_event "$plan" seal "$LOG_SEALED_WHY" >/dev/null 2>&1
+       fi ;;
+    *) _wt_proofs_put "$1" "$2"; return ;;
+  esac
+  seal_write "$plan" "$log" _wt_proofs_put "$1" "$2"
+  case "$?" in 64|75) _wt_proofs_put "$1" "$2"; return ;; esac
+  return "$SEAL_RC"
+}
+
+# _log_plan <canonical log> -> _LOG_PLAN, the plan of the run whose log it is; rc 1 when no plan is. The record is
+# `<docs>/record/<name>/run.log`, and a plan is joined to it at the places the run walk admits one: <name>.plan.md
+# in plans/ or incidents/ or one folder below, or an epic's epic.plan.md in the folder <name>. Each place is
+# confirmed by the reader's own join, so this never names a plan the reader would not.
+_log_plan() {
+  local log="$1" rec name docs c
+  _LOG_PLAN=""
+  case "$log" in */record/*/run.log) ;; *) return 1 ;; esac
+  rec="${log%/run.log}"; name="${rec##*/}"; docs="${rec%/record/*}"
+  for c in "$docs/plans/$name.plan.md" "$docs/plans/"*"/$name.plan.md" "$docs/plans/$name/epic.plan.md" \
+           "$docs/incidents/$name.plan.md" "$docs/incidents/"*"/$name.plan.md" "$docs/incidents/$name/epic.plan.md"; do
+    [ -f "$c" ] || continue
+    _log_reader || return 1
+    [ "$(reader_log "$c" 2>/dev/null)" = "$log" ] || continue
+    _LOG_PLAN="$c"; return 0
+  done
+  return 1
+}
+
+_log_reader() {  # -> 0 once lib/reader.sh, beside this file, is loaded
+  declare -F reader_main >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$_LOG_LIB_DIR/reader.sh" >/dev/null 2>&1
+  declare -F reader_main >/dev/null 2>&1
+}
+
+# _log_open <plan> -> 0 when the run is open, by lib/run.sh `run_open`'s rule (state open, at a step 0 to 9) over a
+# fresh fold of the log: the kept answer `run_open` serves is a fact kept between asks, and a seal is made from the
+# files alone.
+_log_open() {
+  local place n
+  place="$(reader_main "$1" step 2>/dev/null)" || return 1
+  case "$place" in *state=open*) ;; *) return 1 ;; esac
+  n=""; case "$place" in n=*) n="${place%%$'\n'*}"; n="${n#n=}" ;; esac
+  n="${n%[ab]}"
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$((10#$n))" -le 9 ]
 }

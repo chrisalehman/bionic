@@ -832,10 +832,12 @@ poker_verb_publish() {
     exit 2
   fi
   wb="$(plan_working_branch "$PV_PLAN")"; base="$(plan_integration_branch "$PV_PLAN")"
-  if [ -z "$wb" ] || [ -z "$base" ]; then
-    local missing=working-branch
-    [ -z "$wb" ] || missing=integration-branch
-    die "REFUSED — the plan's header names no $missing:, and publish opens the working branch's request against the integration branch; add it to the header. Nothing was pushed."
+  if [ -z "$wb" ]; then
+    die "REFUSED — the plan's header names no working-branch:, and publish opens the working branch's request against the integration branch; add it to the header. Nothing was pushed."
+    exit 2
+  fi
+  if [ -z "$base" ]; then
+    die "REFUSED — the plan's header names no integration-branch:, and publish opens the working branch's request against the integration branch; add it to the header. Nothing was pushed."
     exit 2
   fi
   head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
