@@ -29,6 +29,8 @@
 #                 the tree holds none. The tree event is folded in the reader alone: a second fold planted in a
 #                 script is found beside it, and the checkout holds the reader's one.
 #   §DEAD         a planted name of a removed landing function is found by its line; the checkout names neither.
+#   §GITHOME      a second resolution of the common git directory planted in a hook is found by its file; the checkout holds
+#                 none beside the root library's `git_common_dir`.
 #   §LOADER      the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
 #                 tree; a copy planted in a hook file is listed and counted.
 #   §REPORT       with the plants the check exits 1, refusing each finding of the four kinds once; a loader copy
@@ -292,6 +294,22 @@ dead() { ( cd "$1" && /usr/bin/grep -rnwE 'worktree_land|worktree_land_for_sessi
 mkdir -p "$S/dead/payload/scripts"; printf '%s\n' 'f() { :; }' '# worktree_land_for_session lands a tree' > "$S/dead/payload/scripts/p.sh"
 expect_eq "a planted comment naming a removed landing function is found by its file and line" "payload/scripts/p.sh:2" "$(dead "$S/dead")"
 expect_eq "the checkout's code, hooks, skills and agents name neither removed landing function" "" "$(dead "$BIONIC_SCRIPTS_DIR")"
+
+section "GITHOME"
+# The common git directory is resolved by lib/root.sh's `git_common_dir` and by no other code. A line that is not a
+# comment and names `git-common-dir` is a resolution of its own, counted by file so that a line moving is no change.
+# The root library is the resolver's own file. The files below resolve it for themselves and are carried as a debt;
+# the pin refuses a line beyond them.
+git_homes() { ( cd "$1" && /usr/bin/grep -rnE -- 'git-common-dir' payload/scripts hooks 2>/dev/null \
+  | awk -F: '{ t = $0; sub(/^[^:]*:[^:]*:/, "", t); if (t !~ /^[ \t]*#/) print $1 }' | /usr/bin/grep -vx 'payload/scripts/lib/root\.sh' \
+  | LC_ALL=C sort | uniq -c | awk '{ printf "%s:%s ", $2, $1 }' | sed 's/ $//' ); }
+CARRIED="hooks/canonical-sdlc-governing-skill.sh:3 hooks/dispatch-preflight.sh:2 hooks/poker/plan.sh:1 hooks/poker/sitrep.sh:1 hooks/session-poker.sh:1 payload/scripts/booked.sh:1 payload/scripts/lib/stop.sh:1 payload/scripts/lib/walls.sh:4"
+expect_eq "the checkout resolves the common git directory for itself only in the carried files" "$CARRIED" "$(git_homes "$S")"
+printf '%s\n' '# asks --git-common-dir in a comment' 'f() { git_common_dir "$1"; }' > "$L/planted-home.sh"
+expect_eq "a comment naming the flag and a caller of the function are no resolution of their own" "$CARRIED" "$(git_homes "$S")"
+printf '%s\n' 'g() { git -C "$1" rev-parse --git-common-dir; }' >> "$L/planted-home.sh"
+expect_eq "a second resolution planted beyond them is found by its file" "$(printf '%s\n' $CARRIED payload/scripts/lib/planted-home.sh:1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')" "$(git_homes "$S")"
+rm -f "$L/planted-home.sh"
 
 section "LOADER"
 expect_eq "the loader block's mark is found in one file, the loader's own" "payload/scripts/lib/loader.sh" \

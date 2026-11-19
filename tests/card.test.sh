@@ -2258,6 +2258,7 @@ ur_world() {  # <label> [<edit> [<last step>]] -> UR_P: the fixture at 15, its S
 ur_born() {  # <root> -> the person's edit: a second criterion joins the Eval design, under the first, naming no task
   awk '{ print } /^\| — \| fixture \| AC-1 \|/ { print "| — | fixture | AC-2 | unit | `bash tests/x.test.sh` | a second planted defect |" }' \
     "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
+  seal_fixture "$1/$PLAN_REL" "$1/$LOG_REL"
 }
 ur_typed() {  # <root> <words> -> the session's transcript holds the words as a typed prompt
   local tx="$UR_CFG/projects/$(printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g')/$UR_SID.jsonl"
