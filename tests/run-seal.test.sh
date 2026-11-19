@@ -30,6 +30,8 @@
 #   §TOOLS    the same roads by Write and Edit through the write hook, then the commit.
 #   §CHANGED  a caught change: the refusal names the log and both replies, the ask it opens is in the log
 #             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
+#   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
+#             and one line names the word and the change. §ABANDON: abandon on typed words ends the run.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.
@@ -488,5 +490,8 @@ gated "the plan removed" "$PG" "other; rm \"\$GP\"; typed \"\$SID\" \"\$W2\""
 poke abandon "$W2"
 expect_status "a run whose plan is gone is abandoned on the word" 0 "$PRC"
 gate "git commit -m x"; expect_status "and its commit is admitted" 0 "$GRC"
+wl() { bash -c '. "$1/git-argv.sh" && . "$1/walls.sh" && _wall_poker_contract_verb "$2"; printf "%s|%s " "$?" "$_WALL_POKER_VERB"' \
+  _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "bash hooks/session-poker.sh $1 'w'"; }
+expect_eq "the walls read both as verbs of the run's record, and not the sitrep" "0|accept 0|abandon 1| " "$(wl accept; wl abandon; wl sitrep)"
 
 finish
