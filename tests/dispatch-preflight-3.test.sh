@@ -44,7 +44,7 @@ section "§combined-deny — every fault one refusal on the deny wire, the first
 # The pool refuses once for every fault its arms found, on `deny`: exit 0, one verdict on stdout, one line on the
 # user stream. A lone fault keeps its arm's own detail; several put each fault after the first on a line of its
 # own, `<fact> (<fix>)`, and a pointer. A state fault rides the same wire. FIXTURES: make_repo's approved, bound,
-# armed session; s21_stamp_path's stamp removed for the unarmed Patrol. SYNTHESIZED.
+# watched session; a watch record over a dead watcher for the state fault. SYNTHESIZED.
 # fails-when: a refusal exits non-zero, prints a second line or object, journals a row, drops a fault from the
 # several-fault detail, or a lone fault loses its own Fix: block.
 expect_empty "§combined-deny the verbose knob is UNSET for every arm here" "${BIONIC_WALL_VERBOSE:-}"

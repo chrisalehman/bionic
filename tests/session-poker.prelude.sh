@@ -247,7 +247,6 @@ bind_marker() {  # <repo> <plan path|none> [sid]
   bound_marker "$1" "${3:-$SID}" "$2"
 }
 
-stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
 
 # THE TICK DIGEST (wave-24 T7, REQ-4; D4). A tick over the same facts as the last one prints one
 # `unchanged` line, so a case that ticks the SAME world twice to read the second tick's full

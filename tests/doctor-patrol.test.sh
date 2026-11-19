@@ -1,14 +1,9 @@
 #!/bin/bash
 # tests/doctor-patrol.test.sh — doctor.sh's PATROL section.
 #
-# THE CONTRACT UNDER TEST. Doctor's Patrol section shows running Patrols or
-# nothing: one line per live Patrol — `✓ session <short> · <n> open
-# dispatches` — and `– none running` when there is none. Gone from the default
-# output: the "reconstructed from the transcript" narrative header, per-job
-# cron/prompt detail lines, the stamp's firing/not-firing state and interval
-# provenance, and the dispatch-wall tally. The one survivor is the
-# duplicate-Patrol fix line (`CronDelete <id>`) — ratified to stay because it
-# costs nothing in the healthy, single-Patrol case.
+# THE CONTRACT UNDER TEST. Doctor's Patrol section shows each live session of
+# this project: its watch row, then `✓ session <short> · <n> open dispatches`,
+# or the launches its roster never saw — and `– none running` when there is none.
 #
 # EXECUTED, NOT SOURCED — doctor.sh's own header states this is the only
 # supported mode ("Executed, never sourced"), so this suite drives the real
@@ -16,8 +11,7 @@
 # lib/patrol.sh already offers every caller: BIONIC_CLAUDE_HOME. A fixture
 # claude-home carries a `sessions/<id>.json` naming a REAL live process (a
 # spawned `sleep`, so `kill -0` succeeds the way it would for an actual CLI)
-# and that session's own transcript, where a `CronCreate`/`CronDelete` pair is
-# a recorded tool_use like any other (lib/patrol.sh:22-29). A fixture repo
+# and that session's own transcript, where each launch is a recorded tool_use. A fixture repo
 # supplies the roster file patrol_roster_state reads directly off disk — no
 # session-poker, no cron table, nothing that needs a live CLI.
 #
@@ -96,23 +90,6 @@ transcript_of() {  # <claude-home> <sid>
   printf '%s/projects/-fixture-proj/%s.jsonl' "$1" "$2"
 }
 
-# One CronCreate + its joined tool_result, the shape lib/patrol.sh's join
-# reads: the job id comes back in the result's prose ("Scheduled recurring job
-# <id> (...)"), never in the request.
-plant_patrol_job() {  # <transcript> <tool_use_id> <job-id>
-  local t="$1" tid="$2" jobid="$3"
-  jq -nc --arg id "$tid" \
-    '{type:"assistant",isSidechain:false,
-      message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"CronCreate",
-        input:{cron:"*/30 * * * *",recurring:true,
-               prompt:"Patrol tick for the fixture (bionic). Run: bash /abs/hooks/session-poker.sh tick — then continue."}}]}}' \
-    >> "$t"
-  jq -nc --arg id "$tid" --arg c "Scheduled recurring job ${jobid} (*/30 * * * *) — Patrol tick" \
-    '{type:"user",isSidechain:false,
-      message:{role:"user",content:[{type:"tool_result",tool_use_id:$id,content:$c}]}}' \
-    >> "$t"
-}
-
 # The roster file patrol_roster_state() reads straight off disk — no session-
 # poker, no live process, just the append-only shape the wall itself writes.
 make_repo_with_roster() {  # <sid> <open-names...> -- <closed-names...> -> repo dir on stdout
@@ -156,50 +133,6 @@ ack_write() {  # <ledger> <at> <sid> <name>
   [ -f "$1" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$1"
   printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=0|pid=1|session=%s|name=%s|by=patrol|reason=landed\n' \
     "$2" "$3" "$4" >> "$1"
-}
-
-# THE STAMP hooks/session-poker.sh touches on every tick, and the ONE fact that
-# separates an armed Patrol from a dead one. `patrol_stamp_state` reads only its
-# mtime against 2x the poker interval (20m default → a 2400s limit), so a file
-# written now is `firing` and one backdated past that is `not-firing`. Absent is
-# a third answer, `never-armed`, and it needs no builder — it is what every
-# fixture here had before this existed.
-plant_patrol_stamp() {  # <repo> <sid> [<backdate-hours>]
-  local repo="$1" sid="$2" hours="${3:-}" f="$1/.bionic/tmp/patrol-$2.state"
-  mkdir -p "$repo/.bionic/tmp"
-  printf 'patrol-stamp/v1|verb=arm|ts=fixture\n' > "$f"
-  [ -n "$hours" ] && touch -t "$(date -v-"${hours}"H +%Y%m%d%H%M.%S)" "$f"
-  return 0
-}
-
-# ISO instants, and the two record shapes a gap is measured between — the same builders
-# tests/patrol-revive.test.sh uses on the same predicate, so the two surfaces are driven by
-# one fixture idiom rather than two.
-dp_iso() {  # <seconds ago> -> ISO-8601 Z
-  date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
-}
-dp_user() {  # <transcript> <seconds ago> <text>
-  jq -nc --arg ts "$(dp_iso "$2")" --arg t "$3" \
-    '{type:"user",isSidechain:false,timestamp:$ts,
-      message:{role:"user",content:[{type:"text",text:$t}]}}' >> "$1"
-}
-# `plant_patrol_job` with its two records DATED. The job join reads `C` records whatever
-# their date (the roster window gates only the `A`/`R` records it counts), but the verdict
-# scan dates every record it sees and one it cannot date poisons the whole answer — so a
-# fixture that wants a verdict has to date the job too.
-plant_patrol_job_dated() {  # <transcript> <tool_use_id> <job-id> <seconds ago>
-  local t="$1" tid="$2" jobid="$3" ts; ts="$(dp_iso "$4")"
-  jq -nc --arg id "$tid" --arg ts "$ts" \
-    '{type:"assistant",isSidechain:false,timestamp:$ts,
-      message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"CronCreate",
-        input:{cron:"*/20 * * * *",recurring:true,
-               prompt:"Patrol tick for the fixture (bionic). Run: bash /abs/hooks/session-poker.sh tick — then continue."}}]}}' \
-    >> "$t"
-  jq -nc --arg id "$tid" --arg ts "$ts" --arg c "Scheduled recurring job ${jobid} (*/20 * * * *) — Patrol tick" \
-    '{type:"user",isSidechain:false,timestamp:$ts,
-      message:{role:"user",content:[{type:"tool_result",tool_use_id:$id,content:$c}]}}' \
-    >> "$t"
 }
 
 # A repo whose session never wrote a roster at all — the state this suite's
@@ -378,11 +311,7 @@ spawn_live_pid; PID2="$LIVE_PID"
 REPO2="$(make_repo_with_roster "$SID2" beta -- alpha)"
 HOME2="$(make_claude_home "$SID2" "$PID2" "$REPO2")"
 TR2="$(transcript_of "$HOME2" "$SID2")"
-plant_patrol_job "$TR2" "toolu_1" "abc12345"
-# A FRESH STAMP, because a transcript-visible job is not a running Patrol. The
-# row is gated on this file's age (doctor.sh, `_patrol_flush`); Sections 4 and 5
-# below are the same fixture with the stamp stale and with it absent.
-plant_patrol_stamp "$REPO2" "$SID2"
+: >> "$TR2"
 
 OUT2="$(run_doctor "$HOME2" "$REPO2")"
 PB2="$(patrol_block "$OUT2")"
@@ -399,9 +328,6 @@ expect_no_match "4: 'dispatches' (plural) does not also appear on that line" \
 # also carry the retired detail.
 expect_no_match "5: the reconstruction narrative header is gone" \
   "*reconstructed from the transcript*" "$PB2"
-expect_no_match "6: the per-job 'patrol jobs' row is gone" "*patrol jobs*" "$PB2"
-expect_no_match "7: the job id/cron/prompt detail line is gone" "*abc12345*" "$PB2"
-expect_no_match "8: the 'patrol stamp' row is gone" "*patrol stamp*" "$PB2"
 expect_no_match "9: the interval-provenance detail is gone" "*came from the poker*" "$PB2"
 expect_no_match "10: the 'dispatch wall' row is gone" "*dispatch wall*" "$PB2"
 expect_no_match "11: the this-repo cwd detail is gone" "*this repo*" "$PB2"
@@ -419,9 +345,8 @@ section "Section 7: a firing Patrol with NO roster file and launches in the tran
 # blind=N`); the renderer parsed the first, read neither, and printed a count
 # nobody dispatched.
 #
-# THE ROW KEEPS ITS ✓. The Patrol IS running — that is what the stamp says and
-# what running-or-nothing (F3) reports. The roster is the thing that is missing,
-# and that is what the text now says.
+# THE ROW KEEPS ITS ✓. The session is live; the roster is the thing that is missing,
+# and that is what the text says.
 
 SID7="ffffffff-1111-2222-3333-444455556666"
 SHORT7="${SID7%%-*}"
@@ -429,11 +354,10 @@ spawn_live_pid; PID7="$LIVE_PID"
 REPO7="$(make_repo_without_roster)"
 HOME7="$(make_claude_home "$SID7" "$PID7" "$REPO7")"
 TR7="$(transcript_of "$HOME7" "$SID7")"
-plant_patrol_job "$TR7" "toolu_1" "abc12345"
+: >> "$TR7"
 plant_agent_dispatch "$TR7" "toolu_a1"
 plant_agent_dispatch "$TR7" "toolu_a2"
 plant_agent_dispatch "$TR7" "toolu_a3"
-plant_patrol_stamp "$REPO7" "$SID7"
 
 OUT7="$(run_doctor "$HOME7" "$REPO7")"
 PB7="$(patrol_block "$OUT7")"
@@ -446,7 +370,7 @@ expect_no_match "28: and the row makes no open-dispatch claim at all" \
   "*open dispatch*" "$PB7"
 # ALL THREE, AND THE WINDOW IS WHY THAT IS STILL THE RIGHT NUMBER (S9). Since the
 # windowing cluster landed, `blind` is counted from the roster's own birth — and with no
-# roster on disk that window falls back to the Patrol stamp planted above. These launches
+# roster on disk there is no window. These launches
 # carry no `timestamp` field at all, which both readers treat as in-window (the
 # alternative, dropping undatable entries, would silently shrink every count on a
 # transcript shape neither reader has seen). Section 12 is where a DATED transcript
@@ -464,11 +388,10 @@ spawn_live_pid; PID8="$LIVE_PID"
 REPO8="$(make_repo_with_roster "$SID8" beta)"
 HOME8="$(make_claude_home "$SID8" "$PID8" "$REPO8")"
 TR8="$(transcript_of "$HOME8" "$SID8")"
-plant_patrol_job "$TR8" "toolu_1" "abc12345"
+: >> "$TR8"
 plant_agent_dispatch "$TR8" "toolu_a1"
 plant_agent_dispatch "$TR8" "toolu_a2"
 plant_agent_dispatch "$TR8" "toolu_a3"
-plant_patrol_stamp "$REPO8" "$SID8"
 
 OUT8="$(run_doctor "$HOME8" "$REPO8")"
 PB8="$(patrol_block "$OUT8")"
@@ -609,9 +532,8 @@ spawn_live_pid; PID10="$LIVE_PID"
 REPO10="$(make_repo_without_roster)"
 HOME10="$(make_claude_home "$SID10" "$PID10" "$REPO10")"
 TR10="$(transcript_of "$HOME10" "$SID10")"
-plant_patrol_job "$TR10" "toolu_1" "abc12345"
+: >> "$TR10"
 # No plant_agent_dispatch call — the absence IS the variable under test.
-plant_patrol_stamp "$REPO10" "$SID10"
 
 OUT10="$(run_doctor "$HOME10" "$REPO10")"
 PB10="$(patrol_block "$OUT10")"
@@ -660,8 +582,7 @@ REPO_A="$(make_repo_with_roster "$SID_A" beta -- alpha)"
 mkdir -p "${REPO_A}/sub/deeper"
 HOME_AB="$(make_claude_home "$SID_A" "$PID_A" "${REPO_A}/sub/deeper")"
 TR_A="$(transcript_of "$HOME_AB" "$SID_A")"
-plant_patrol_job "$TR_A" "toolu_a" "aaa11111"
-plant_patrol_stamp "$REPO_A" "$SID_A"
+: >> "$TR_A"
 
 # Project B — a second, entirely unrelated project on the same machine, with its
 # own live session, its own firing Patrol, its own roster, and TWO Patrol jobs so
@@ -671,9 +592,8 @@ jq -nc --arg sid "$SID_B" --argjson pid "$PID_B" --arg cwd "$REPO_B" \
   '{sessionId:$sid,pid:$pid,cwd:$cwd}' > "${HOME_AB}/sessions/${SID_B}.json"
 : > "${HOME_AB}/projects/-fixture-proj/${SID_B}.jsonl"
 TR_B="$(transcript_of "$HOME_AB" "$SID_B")"
-plant_patrol_job "$TR_B" "toolu_b1" "bbb11111"
-plant_patrol_job "$TR_B" "toolu_b2" "bbb22222"
-plant_patrol_stamp "$REPO_B" "$SID_B"
+: >> "$TR_B"
+: >> "$TR_B"
 
 OUT11="$(run_doctor "$HOME_AB" "$REPO_A")"
 PB11="$(patrol_block "$OUT11")"
@@ -754,13 +674,12 @@ spawn_live_pid; PID12A="$LIVE_PID"
 REPO12A="$(make_repo_with_roster "$SID12A" wave-two-row)"   # <- the roster is born HERE
 HOME12A="$(make_claude_home "$SID12A" "$PID12A" "$REPO12A")"
 TR12A="$(transcript_of "$HOME12A" "$SID12A")"
-plant_patrol_job "$TR12A" "toolu_1" "abc12345"
+: >> "$TR12A"
 plant_agent_dispatch_at "$TR12A" "toolu_w1a" "$(iso_ago 86400)"   # wave one, before the wipe
 plant_agent_dispatch_at "$TR12A" "toolu_w1b" "$(iso_ago 86400)"
 plant_agent_dispatch_at "$TR12A" "toolu_w1c" "$(iso_ago 86400)"
 plant_agent_dispatch_at "$TR12A" "toolu_w1d" "$(iso_ago 86400)"
 plant_agent_dispatch_at "$TR12A" "toolu_w2a" "$(iso_ago 0)"       # wave two, and it IS rostered
-plant_patrol_stamp "$REPO12A" "$SID12A"
 
 OUT12A="$(run_doctor "$HOME12A" "$REPO12A")"
 PB12A="$(patrol_block "$OUT12A")"
@@ -777,7 +696,7 @@ spawn_live_pid; PID12B="$LIVE_PID"
 REPO12B="$(make_repo_with_roster "$SID12B" wave-two-row)"
 HOME12B="$(make_claude_home "$SID12B" "$PID12B" "$REPO12B")"
 TR12B="$(transcript_of "$HOME12B" "$SID12B")"
-plant_patrol_job "$TR12B" "toolu_1" "abc12345"
+: >> "$TR12B"
 plant_agent_dispatch_at "$TR12B" "toolu_w1a" "$(iso_ago 86400)"
 plant_agent_dispatch_at "$TR12B" "toolu_w1b" "$(iso_ago 86400)"
 plant_agent_dispatch_at "$TR12B" "toolu_w1c" "$(iso_ago 86400)"
@@ -785,7 +704,6 @@ plant_agent_dispatch_at "$TR12B" "toolu_w1d" "$(iso_ago 86400)"
 plant_agent_dispatch_at "$TR12B" "toolu_w2a" "$(iso_ago 0)"   # rostered
 plant_agent_dispatch_at "$TR12B" "toolu_w2b" "$(iso_ago 0)"   # NOT rostered
 plant_agent_dispatch_at "$TR12B" "toolu_w2c" "$(iso_ago 0)"   # NOT rostered
-plant_patrol_stamp "$REPO12B" "$SID12B"
 
 OUT12B="$(run_doctor_only "$HOME12B" "$REPO12B")"
 PB12B="$(patrol_block "$OUT12B")"
@@ -802,10 +720,9 @@ spawn_live_pid; PID12C="$LIVE_PID"
 REPO12C="$(make_repo_without_roster)"
 HOME12C="$(make_claude_home "$SID12C" "$PID12C" "$REPO12C")"
 TR12C="$(transcript_of "$HOME12C" "$SID12C")"
-plant_patrol_job "$TR12C" "toolu_1" "abc12345"
+: >> "$TR12C"
 plant_agent_dispatch "$TR12C" "toolu_c1"
 plant_agent_dispatch "$TR12C" "toolu_c2"
-plant_patrol_stamp "$REPO12C" "$SID12C"
 
 OUT12C="$(run_doctor_only "$HOME12C" "$REPO12C")"
 PB12C="$(patrol_block "$OUT12C")"
