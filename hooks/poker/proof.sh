@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/proof.sh — the proof record: deferrals, findings, approvals, waivers, confirmations, the regression
-# and the debt ledger (approve, proof-add, waive, finding-move, release-check,
+# and the debt ledger (approve, accept, abandon, proof-add, waive, finding-move, release-check,
 # regression-run, debt).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -403,6 +403,117 @@ whole_run_at_head() {
       *) die "approve — $AP_NAME is approved in the run's log, but its ruling is not in the design ledger: ${AP_RULED#poker: }; rule it with: bash ${HOOK_DIR}/session-poker.sh decisions rule $AP_NAME '<the reply>'."
          exit 1 ;;
     esac
+    exit 0
+  }
+
+  # THE PERSON'S WORD ON A CHANGED RUN. A run whose plan or log no longer matches its seal (lib/seal.sh) admits no
+  # commit until the person rules, by one of two verbs, each on words they typed (lib/said.sh `user_said`):
+  #   accept '<their words>'   the run as it now stands is theirs. One approval line, `key=seal`, names the words, the
+  #                            session that typed them and what was accepted (`what=` and `how=`, as the seal names
+  #                            the change); the ask the change opened is closed; then the run is sealed again, clean.
+  #                            A run that matches its seal has nothing to accept, and one whose plan is gone cannot be
+  #                            sealed: its plan is put back, or the run is abandoned.
+  #   abandon '<their words>'  the run ends. One abandon line, the type the reader reads as abandoned, names the words
+  #                            and the session; the ask is closed and the seal removed. Any open run the session is
+  #                            bound to, changed or not; with its plan gone the line goes to the log the seal names.
+  # WHOSE WORDS COUNT. A changed log can hold a bind line no binding act wrote, so the run's sessions read are those
+  # the log bound as it was last sealed: the reader reads the log's vouched bytes (`seal_vouched`) from a scratch copy
+  # beside a stub of the plan, and lib/said.sh is handed them in SAID_BOUND. When those bytes no longer stand, no
+  # session of the plan is read, and the words must stand in this session's own transcript. The run is the one the
+  # session's binding names (lib/run.sh `session_plan`), which outlives a plan that is gone.
+  seal_word_open() {  # <verb> -> SW_ROOT SW_PLAN SW_LOG SW_SEAL SW_WHO, or the refusal and its exit
+    local sid rc
+    case "$SW_WORDS" in *$'\n'*|*$'\r'*|*'|'*)
+      die "REFUSED — the words are one field of the run's log, and they carry a line break or a '|'; nothing was written. Fix: give them without one."
+      exit 1 ;;
+    esac
+    sid="$(session_id)" || sid=""
+    SW_ROOT="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
+    SW_PLAN=""; [ -z "$sid" ] || [ -z "$SW_ROOT" ] || SW_PLAN="$(session_plan "$SW_ROOT" "$sid" 2>/dev/null)" || SW_PLAN=""
+    if [ -z "$SW_PLAN" ]; then
+      die "REFUSED — this session (${sid:-no session key}) is bound to no run, so there is none to $1; nothing was written. Fix: run it in the session bound to the run."
+      exit 1
+    fi
+    if ! { declare -F seal_vouched >/dev/null 2>&1 || . "$BIONIC_LIB/seal.sh"; } 2>/dev/null || ! _proof_event_load \
+       || ! { declare -F user_said >/dev/null 2>&1 || . "$BIONIC_LIB/said.sh"; } 2>/dev/null; then
+      die "REFUSED — the seal, the reader, the appender or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written. Fix: reinstall the plugin."
+      exit 2
+    fi
+    seal_verify "$SW_PLAN" >/dev/null; rc=$?
+    SW_SEAL="$SEAL_LINE"; SW_LOG="$SEAL_LOG"
+    if [ "$rc" -eq 75 ]; then
+      die "REFUSED — the run's seal was held by another writer past the wait; nothing was written. run again: the same call."
+      exit 75
+    fi
+    [ -n "$SW_LOG" ] || SW_LOG="$(reader_log "$SW_PLAN" 2>/dev/null)" || SW_LOG=""
+    SW_WHO="$(git -C "$SW_ROOT" config user.name 2>/dev/null)"
+    if [ -z "$SW_WHO" ] || ! plan_verb_value_ok "$SW_WHO"; then
+      die "REFUSED — the project has no usable git user name to record as the one who ruled; nothing was written. Fix: git config user.name '<name>'."
+      exit 1
+    fi
+  }
+  seal_word_said() {  # <act> -> 0 when the words stand in a session the sealed log binds, or this one; else the refusal, exit 1
+    local tmp stub rec ans rc
+    SAID_BOUND=""
+    tmp="$(mktemp -d 2>/dev/null)" || tmp=""
+    if [ -n "$tmp" ]; then
+      stub="$tmp/plans/${SW_PLAN##*/}"; mkdir -p "$tmp/plans" && : > "$stub"
+      rec="$(reader_log "$stub" 2>/dev/null)" && mkdir -p "${rec%/*}" && seal_vouched "$SW_PLAN" > "$rec" \
+        && ans="$(reader_main "$stub" sessions 2>/dev/null)" \
+        && SAID_BOUND="$(printf '%s\n' "$ans" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) printf "%s ", substr($i, 9) }')"
+      rm -rf "$tmp"
+    fi
+    user_said "$SW_WORDS" "$SW_PLAN"; rc=$?
+    unset SAID_BOUND
+    [ "$rc" -eq 0 ] || { said_refuse "$rc" "$(said_fold "$SW_WORDS")" "$1"; exit 1; }
+  }
+  poker_verb_accept() {
+    local rc
+    seal_word_open accept
+    case "$SW_SEAL" in
+      changed*) ;;
+      *) die "REFUSED — the run of $SW_PLAN matches its seal (${SW_SEAL:-none}), so there is no change to accept; nothing was written. Fix: none; commit as the run stands."
+         exit 1 ;;
+    esac
+    if [ ! -f "$SW_PLAN" ]; then
+      die "REFUSED — the run's plan $SW_PLAN is gone, and a run with no plan cannot be sealed again; nothing was written. Fix: put the plan back, or end the run: session-poker.sh abandon '<their words>'."
+      exit 1
+    fi
+    seal_word_said "an acceptance"
+    SW_W="${SW_SEAL#*what=}"
+    if ! proof_approval_event "$SW_PLAN" seal "by=$SW_WHO" "said=$SW_WORDS" "session=$SAID_SESSION" "what=${SW_W%% *}" "how=${SW_SEAL##*how=}"; then
+      die "REFUSED — the acceptance could not be written to the run's log $SW_LOG; the run stays changed. run again: session-poker.sh accept '<their words>'."
+      exit 2
+    fi
+    declare -F owed_close >/dev/null 2>&1 && OWED_ROOT="$SW_ROOT" OWED_PLAN="$SW_PLAN" owed_close seal:changed accept >/dev/null 2>&1
+    seal_write --vouch run "$SW_PLAN" "$SW_LOG"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+      die "REFUSED — the acceptance is in the run's log, but the run could not be sealed again (exit $rc). run again: session-poker.sh accept '<their words>'."
+      exit 2
+    fi
+    say "accept — the run of $SW_PLAN is sealed again as it stands, on the word of $SW_WHO in session $SAID_SESSION; it accepted the $SW_W ${SW_SEAL##*how=}."
+    exit 0
+  }
+  poker_verb_abandon() {
+    local rc=0
+    seal_word_open abandon
+    [ ! -f "$SW_PLAN" ] || run_open "$SW_PLAN" || rc=$?
+    if [ "$rc" -ne 0 ] || [ -z "$SW_LOG" ]; then
+      die "REFUSED — the run of $SW_PLAN is not open (or has no log to write to), so there is nothing to abandon; nothing was written. Fix: none; a closed run stays closed."
+      exit 1
+    fi
+    seal_word_said "an abandonment"
+    declare -F owed_close >/dev/null 2>&1 && OWED_ROOT="$SW_ROOT" OWED_PLAN="$SW_PLAN" owed_close seal:changed abandon >/dev/null 2>&1
+    if ! RUN_LOG="$SW_LOG" log_append abandon "by=$SW_WHO" "said=$SW_WORDS" "session=$SAID_SESSION"; then
+      die "REFUSED — the abandonment could not be written to the run's log $SW_LOG; the run is open. run again: session-poker.sh abandon '<their words>'."
+      exit 2
+    fi
+    seal_remove "$SW_PLAN"; rc=$?
+    if [ "$rc" -eq 75 ]; then
+      die "REFUSED — the run is abandoned in its log, but its seal was held past the wait and still stands. run again: session-poker.sh abandon '<their words>'."
+      exit 75
+    fi
+    say "abandon — the run of $SW_PLAN is ended on the word of $SW_WHO in session $SAID_SESSION; its seal is removed."
     exit 0
   }
 

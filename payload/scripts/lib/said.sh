@@ -45,6 +45,11 @@
 # marker under this root names the plan, and refuses every other as `<sid> (no binding act)`; the refusal
 # lands in SAID_REFUSED as it comes, before either witness is asked. This session is not the plan's to vouch
 # for: it is read as itself (its own two witnesses still asked), and a refused line of its own is dropped.
+# THE SESSIONS THE SEALED LOG BINDS. A run whose log was changed around the tool can hold a bind line no binding act
+# wrote, beside a marker a hand also wrote, and both witnesses above would read that session. So a caller ruling on such
+# a run sets SAID_BOUND to the sessions the log bound as it was last sealed, space-separated (lib/seal.sh
+# `seal_vouched`, read by the reader), and a plan's session outside it is refused as `<sid> (not bound as the run was
+# sealed)`, before either witness is asked; set and empty, no session of the plan is read. Unset, nothing is narrowed.
 #     said_fold <text>   the one fold, on stdout: runs of white space and control characters become one
 #                        space, the ends trimmed (the verb writes the words it proved, its why and its
 #                        author through it, and the deferral's sentence the changelog is read through)
@@ -195,6 +200,8 @@ _said_sessions() {
   declare -F session_id >/dev/null 2>&1 && me="$(session_id 2>/dev/null)" || me=""
   if [ -n "$plan" ] && declare -F bind_sessions >/dev/null 2>&1; then
     rec="$(bind_sessions "$plan" "$root" 2>/dev/null)" || rec=""
+    [ -z "${SAID_BOUND+x}" ] || rec="$(printf '%s\n' "$rec" | awk -v ok=" $SAID_BOUND " -v me="$me" '$0 == "" || $0 == me || index($0, " ") || index(ok, " " $0 " ") { print; next }
+      { print $0 " (not bound as the run was sealed)" }')"
     [ -z "$me" ] || rec="$(printf '%s\n' "$rec" | awk -v me="$me" '$0 == me " (no binding act)" { $0 = me } { print }')"
   fi
   { [ -z "$rec" ] || printf '%s\n' "$rec"
