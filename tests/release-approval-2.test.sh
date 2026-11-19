@@ -236,6 +236,7 @@ cv_reviews() { fc_under Reviews | fc_flat; }
 cv_adv() {  # -> the adversarial line of the Reviews section, unfolded, up to the next line's icon
   cv_reviews | awk '{ i = index($0, "adversarial — "); if (!i) exit; split(substr($0, i), a, /(✅|✖️|❔|➖)/); sub(/ +$/, "", a[1]); print a[1] }'
 }
+cv_mark() { fc_under Reviews | awk -v q="$1 — " 'index($0, q) { print $1; exit }'; }  # <question> -> the mark its Reviews line opens on
 cv_card_failing() { fc_under Reviews | /usr/bin/grep -c '^ *✖️'; }
 cv_sitrep_failed() {  # [<poker>] -> the failed count of the sitrep sheet's reviews line over PFC, as this session
   ( cd "$RFC" && env CLAUDE_CODE_SESSION_ID="$SID" bash "${1:-$POKER}" sitrep "$PFC" 2>/dev/null ) \
@@ -261,6 +262,11 @@ fc_page --preview
 expect_contains "COVERED-1 AC-13.1 the fix landed at the head: the adversarial line reads covered" "covered" "$(cv_adv)"
 expect_absent "COVERED-1b …and no longer failing (COVERED-1 read the same line)" "failing" "$(cv_adv)"
 expect_contains "COVERED-1c …naming the covering landing, its row and commit" "T4 at ${FC_CV_F:0:8}" "$(cv_adv)"
+# A covered reading carries its own result: the pass mark is the newest reading's pass, never the cover's.
+# fails-when: the covered fail draws the pass mark.
+expect_eq "COVERED-1d …and the covered fail draws no pass mark: its result is said, the evidence pass beside it keeps ✅" \
+  "➖|✅" "$(cv_mark adversarial)|$(cv_mark evidence)"
+expect_contains "COVERED-1e …the line saying the reading's result" "result fail" "$(cv_adv)"
 FC_CV1_CARD="$(cv_card_failing)"; FC_CV1_SR="$(cv_sitrep_failed)"
 expect_eq "COVERED-2 the sitrep's failed count over the same fixture agrees with the card: none failing on either" "0|0" "$FC_CV1_CARD|$FC_CV1_SR"
 # THE PLANT: a copy of the tree whose sitrep is put back to counting the recorded result; it then disagrees with the card.
@@ -273,6 +279,20 @@ expect_eq "COVERED-3b …and the planted sitrep counts the fixed review failed w
   "$FC_CV1_CARD|$(cv_sitrep_failed "$FC_CVM/hooks/session-poker.sh")"
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
+# A newer adversarial reading that flags, its range held by the release text's cover, reads covered with no fix row:
+# the line says its result and draws no pass mark. FIXTURE FIDELITY: a reading record in the readers' grammar with one
+# S3, its proof line by the writer at C, newer than the passing ones.
+# fails-when: the card draws the pass mark for the covered flag.
+printf 'question: adversarial\nresult: flag\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S3 off lib/x.sh:1 a name could be plainer\n\nwhat the reader found\n' \
+  "${FC_B:0:10}" "${FC_C:0:10}" > "$FC_REC/adversarial-flag.md"
+fc_plan "$FC_GOOD
+$(fc_line review "$FC_C" 2026-10-12T12:30:00Z record/wave-x/adversarial-flag.md adversarial w-read flag piece)"
+fc_page --preview
+expect_eq "COVERED-4 precondition: the card renders and the reader's newest adversarial reading is the flag" "0|result=flag" \
+  "$FC_RC|$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" reviews | /usr/bin/grep 'question=adversarial' | tail -1 | /usr/bin/grep -o 'result=[a-z]*')"
+expect_contains "COVERED-4b the covered flag's line says its result" "result flag" "$(cv_adv)"
+expect_eq "COVERED-4c …and draws no pass mark, while the evidence pass beside it keeps ✅" "➖|✅" "$(cv_mark adversarial)|$(cv_mark evidence)"
+rm -f "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-flag.md"
 
 # ============================================================
 section "§TASK: a run with no release row is asked the release approval at the advance to 8 and at the close, and its card asks what the gate owes"
