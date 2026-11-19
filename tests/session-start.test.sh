@@ -802,7 +802,7 @@ has   "15h.10 …and the run on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}"
 
 
 section "16 — predecessor watches: each record but this session's own, read by the alive rule"
-# THE CONTRACT. hooks/watch.sh keeps .bionic/tmp/watch-<sid>.state. The banner lists each predecessor's: watching
+# THE CONTRACT. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory. The banner lists each predecessor's: watching
 # over a live process, stopped over a dead one (the watcher died without a word), or resting and why. This
 # session's own record is not a predecessor's: its watcher starts beside this hook.
 # FIXTURE FIDELITY: records in the shape hooks/watch.sh writes; a live `sleep` and a finished subshell as watchers.

@@ -645,7 +645,7 @@ else
   esac
 fi
 
-# THE WATCH. hooks/watch.sh keeps .bionic/tmp/watch-<sid>.state and `watch_verdict` (lib/patrol.sh) reads it: a
+# THE WATCH. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory and `watch_verdict` (lib/patrol.sh) reads it: a
 # watcher alive, or one that rested on purpose (the turn's end starts the next), admits; a record naming a dead
 # watcher, or no record once a turn has ended since the session engaged, is a fleet nobody is waiting on. Scoped as
 # the stamp's arms are: a scale with no Patrol owes no watch. The turn that engaged the session has no record yet,

@@ -691,8 +691,8 @@ printf 'run/v1|ev=approval|key=step3|by=u|said=approved|at=2026-11-01T00:00:02Z\
 expect_eq "PL.2 …and admitted once its log alone holds the approval" "allow" "$GATE_VERDICT"
 
 section "§WATCH — the wall reads the watch record: a watch alive or rested admits; none, or a dead watcher, refuses"
-# THE CONTRACT (AC-12.1, AC-12.2's dispatch half, AC-10.3's suite half). hooks/watch.sh keeps
-# .bionic/tmp/watch-<sid>.state. A record that says watching over a live process admits, and so does
+# THE CONTRACT. hooks/watch.sh keeps the session's watch record,
+# `watch-<sid>.state` in the project's tmp directory. A record that says watching over a live process admits, and so does
 # one that rested on purpose, since the turn's end starts the watch again. A record that says watching
 # over a dead process is a watcher that died without a word: refused, naming it. No record is a session
 # whose turn-end hook never started a watch: refused as never watched, except in the turn that engaged

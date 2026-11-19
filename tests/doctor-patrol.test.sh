@@ -922,7 +922,7 @@ fi
 
 section "Section 18: the watch, one row per engaged session of this project"
 
-# THE CONTRACT. hooks/watch.sh keeps .bionic/tmp/watch-<sid>.state and doctor reads it through `watch_verdict`, the
+# THE CONTRACT. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory and doctor reads it through `watch_verdict`, the
 # reading the dispatch wall refuses on: a live watcher and a rested watch are rows; a watcher that died without a word,
 # and a session that has ended a turn since it engaged with no watch at all, are each a fix line.
 # FIXTURE FIDELITY: a live session in a fixture claude-home whose cwd is a fixture repo carrying the engagement marker

@@ -813,7 +813,7 @@ fi
 
 section "§WATCH-LOST — a watcher killed mid-run: the next turn end says so in one line, once, and starts another (AC-12.2)"
 
-# THE CONTRACT. hooks/watch.sh keeps .bionic/tmp/watch-<sid>.state; a watcher killed from outside leaves
+# THE CONTRACT. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory; a watcher killed from outside leaves
 # it saying watching over a dead process. The turn end runs hooks/stop.sh and hooks/watch.sh together,
 # in no fixed order. The new watcher's claim keeps the dead one's pid as `lost=`, so whichever hook
 # reads first, the stop wall prints one advisory line naming the dead watcher, and no later turn end
