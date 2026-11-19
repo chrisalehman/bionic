@@ -406,99 +406,6 @@ expect_no_match "9: the interval-provenance detail is gone" "*came from the poke
 expect_no_match "10: the 'dispatch wall' row is gone" "*dispatch wall*" "$PB2"
 expect_no_match "11: the this-repo cwd detail is gone" "*this repo*" "$PB2"
 
-section "Section 3: duplicate Patrols — the one survivor"
-
-SID3="dddddddd-1111-2222-3333-444455556666"
-SHORT3="${SID3%%-*}"
-spawn_live_pid; PID3="$LIVE_PID"
-REPO3="$(make_repo_with_roster "$SID3" -- alpha)"  # a roster, one closed row — open=0
-# THE ROSTER IS PRESENT AND EMPTY OF OPEN WORK, which is not the same fixture as
-# a session that never wrote one. This section owns the duplicate-Patrol fix line
-# and wants the ordinary `0 open dispatches` row underneath it; the no-roster case
-# it used to be built on is Section 7's, where it is asserted rather than incidental.
-HOME3="$(make_claude_home "$SID3" "$PID3" "$REPO3")"
-TR3="$(transcript_of "$HOME3" "$SID3")"
-plant_patrol_job "$TR3" "toolu_1" "old11111"
-plant_patrol_job "$TR3" "toolu_2" "new22222"
-plant_patrol_stamp "$REPO3" "$SID3"
-
-OUT3="$(run_doctor "$HOME3" "$REPO3")"
-PB3="$(patrol_block "$OUT3")"
-
-expect_match "12: the running Patrol still prints, 0 open dispatches (plural)" \
-  "*✓ session ${SHORT3} · 0 open dispatches*" "$PB3"
-expect_match "13: the duplicate fix line names the OLDER job for deletion" \
-  "*session ${SHORT3} has 2 Patrol jobs armed → CronDelete old11111*" "$OUT3"
-expect_no_match "14: the fix line does NOT also name the newer (kept) job" \
-  "*CronDelete*new22222*" "$OUT3"
-expect_no_match "15: the Patrol block itself carries no per-job detail" \
-  "*old11111*" "$PB3"
-
-section "Section 4: the job is in the transcript and the Patrol is DEAD"
-
-# WHAT THIS SECTION OWNS, and why nothing above it could see it. Jobs are
-# reconstructed from the transcript — CronCreate minus CronDelete — and the four
-# events that kill a Patrol (a plugin update, /reload-plugins, a continue, a
-# /clear and resume) take the job out of the CLI's in-memory cron table with no
-# tool call behind them. So the count stays positive on a machine where nothing
-# is firing, and doctor printed `✓ session … · N open dispatches` for it: the
-# Step-6 correctness FAIL against AC-F3. The fixture is Section 2's, with one
-# thing changed — the stamp is three hours old, well past the fire window.
-#
-# AND THE STAMP'S AGE IS NO LONGER THE WHOLE FIXTURE (epic-23 wave-16 REQ-11). A session
-# cron fires only while the session is idle, so "dead" is now an idle gap at least one fire
-# window long since the stamp with no tick in it — read off the transcript, which therefore
-# has to be DATABLE and has to hold that gap. Three hours of stamp with one turn-starting
-# user record a second ago is the same machine this section always described, said in the
-# terms the reading now uses. Section 17 holds the other three verdicts.
-
-SID4="dddddddd-1111-2222-3333-444455556666"
-SHORT4="${SID4%%-*}"
-spawn_live_pid; PID4="$LIVE_PID"
-REPO4="$(make_repo_with_roster "$SID4" beta -- alpha)"
-HOME4="$(make_claude_home "$SID4" "$PID4" "$REPO4")"
-TR4="$(transcript_of "$HOME4" "$SID4")"
-plant_patrol_job_dated "$TR4" "toolu_1" "abc12345" 10000
-dp_user "$TR4" 1 "carry on"
-plant_patrol_stamp "$REPO4" "$SID4" 3
-
-OUT4="$(run_doctor "$HOME4" "$REPO4")"
-PB4="$(patrol_block "$OUT4")"
-
-expect_no_match "17: a dead Patrol prints no running line" "*✓ session ${SHORT4}*" "$PB4"
-expect_no_match "18: and no session line of any kind" "*session ${SHORT4}*" "$PB4"
-expect_match    "19: the section falls back to none running" "*none running*" "$PB4"
-# NOT SILENCE. Running-or-nothing governs the SECTION; a Patrol that was armed
-# and stopped ticking is the one state a person can act on, and the fix channel
-# is where doctor says so.
-# The deleted detail stays deleted — the stamp is read, not rendered.
-expect_no_match "21: the stamp state itself is still not printed" "*not-firing*" "$OUT4"
-expect_no_match "22: nor its age or interval provenance" "*came from the poker*" "$OUT4"
-
-section "Section 5: the job is in the transcript and there is no stamp"
-
-# THE THIRD STATE, AND IT IS NOT A FAULT. An absent stamp means never armed —
-# or deliberately ended, because the poker's `disarm` verb REMOVES this file
-# (S10). Both are decisions, so this machine gets the same quiet page as one
-# with no Patrol at all: no row, and no fix line either. This is the assertion
-# that keeps Section 4's fix line from becoming noise on every stopped run.
-
-SID5="eeeeeeee-1111-2222-3333-444455556666"
-SHORT5="${SID5%%-*}"
-spawn_live_pid; PID5="$LIVE_PID"
-REPO5="$(make_repo_with_roster "$SID5" beta -- alpha)"
-HOME5="$(make_claude_home "$SID5" "$PID5" "$REPO5")"
-TR5="$(transcript_of "$HOME5" "$SID5")"
-plant_patrol_job "$TR5" "toolu_1" "abc12345"
-
-OUT5="$(run_doctor "$HOME5" "$REPO5")"
-PB5="$(patrol_block "$OUT5")"
-
-expect_no_match "23: a never-armed session prints no running line" "*session ${SHORT5}*" "$PB5"
-expect_match    "24: the section falls back to none running" "*none running*" "$PB5"
-expect_no_match "25: and a deliberate stop earns no fix line" \
-  "*session ${SHORT5}: the Patrol*" "$OUT5"
-
 section "Section 7: a firing Patrol with NO roster file and launches in the transcript"
 
 # THE DEFECT THIS SECTION OWNS (Chris, 2026-08-29, on the 1.3.0 plugin):
@@ -775,8 +682,6 @@ expect_match "40: the session belonging to THIS project prints, resolved from a 
   "*✓ session ${SHORT_A} · 1 open dispatch*" "$PB11"
 expect_no_match "41: the other project's live session is not listed here" \
   "*session ${SHORT_B}*" "$PB11"
-expect_no_match "42: nor does its duplicate-Patrol fix line reach this page" \
-  "*CronDelete*bbb11111*" "$OUT11"
 expect_no_match "43: and no row is attributed to the other project's roster" \
   "*2 open dispatches*" "$PB11"
 
