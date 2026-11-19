@@ -485,11 +485,12 @@ section "§ONLY-PERSON (the stop line): the turn-end hook says once, in one line
 # watcher the same turn end started.
 WS_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
 WS_LINE_WANT="bionic watch: stopped - waiting on you; your reply starts it again"
-# ws_tx <repo> <prompt time> -> the transcript path: one prompt of the person's, at that time
+# ws_tx <repo> <prompt time> -> the transcript path: one prompt of the person's, at that time. It lives outside the
+# repository, as the platform's own transcript does, so the tree the watcher's pass reads is the fixture's alone.
 ws_tx() {
   jq -nc --arg t "$2" '{type:"user",uuid:"u-ws",isSidechain:false,userType:"external",timestamp:$t,
-    message:{role:"user",content:"over to you"}}' > "$1/ws-tx.jsonl"
-  printf '%s' "$1/ws-tx.jsonl"
+    message:{role:"user",content:"over to you"}}' > "$TMPROOT/ws-tx-${1##*/}.jsonl"
+  printf '%s' "$TMPROOT/ws-tx-${1##*/}.jsonl"
 }
 # ws_stop <repo> <transcript> [env assignment...] -> WS_OUT WS_ERR WS_RC: the turn-end hook, as the platform runs it
 ws_stop() {
@@ -507,15 +508,32 @@ ws_rest() {
   [ -z "${4:-}" ] || printf 'tick-digest/v1\ndigest=%s\nat=%s\n' "$4" "$3" > "$1/.bionic/tmp/tick-digest-$SID.state"
 }
 ws_iso() { date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ; }
-require_helpers ws_tx ws_stop ws_line ws_rest ws_iso
+# ws_claimed <repo> -> rc 0 once the watcher wh_start launched has claimed the record, as an earlier turn end's
+# watcher already had in a live session; the hook does not wait on a session that never ran one
+ws_claimed() {
+  local i=0
+  while [ ! -f "$(wh_rec "$1")" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+  [ -f "$(wh_rec "$1")" ]
+}
+# ws_late_rest <repo> <digest> <seconds> -> a live watcher claims the record now and rests on the person <seconds>
+# later, in the background: this turn end's watcher, still on its first pass when the hook first reads the record
+ws_late_rest() {
+  sleep 3600 & WS_LATE=$!
+  printf 'state=watching\npid=%s\nat=%s\n' "$WS_LATE" "$(ws_iso 0)" > "$(wh_rec "$1")"
+  ( sleep "$3"; ws_rest "$1" person "$(ws_iso 0)" "$2"; kill "$WS_LATE" 2>/dev/null ) &
+  WS_LATE_REST=$!
+}
+ws_late_done() { wait "$WS_LATE_REST" 2>/dev/null; wait "$WS_LATE" 2>/dev/null; }
+require_helpers ws_tx ws_stop ws_line ws_rest ws_iso ws_claimed ws_late_rest ws_late_done
 
-# THE RACE, WITH THE REAL WATCHER. The platform starts the watcher and the turn-end hook together; the hook waits for
-# the watcher this turn end started, and the watcher's first pass decides the rest.
+# THE REAL WATCHER. The platform starts the watcher and the turn-end hook together; the hook waits for the watcher
+# this turn end started, and the watcher's first pass decides the rest. The ask is the release's: the turn-end hook
+# closes a plan step's ask once the plan is approved, so a step's ask would leave the run waiting on nothing.
 wp_person_world ws-race
 RWS="$WP_R"; wh_fast "$RWS"
-wp_ask "$RWS" "$WP_PLAN" owed_open approve:step3 "approval: step3" "the plan is put to you"
+wp_ask "$RWS" "$WP_PLAN" owed_open approve:release "approval: release" "the release card is put to you"
 WS_TX="$(ws_tx "$RWS" "$(ws_iso 120)")"
-wh_start "$RWS" Stop; ws_stop "$RWS" "$WS_TX" BIONIC_STOP_WATCH_WAIT=60; wh_wait
+wh_start "$RWS" Stop; ws_claimed "$RWS"; ws_stop "$RWS" "$WS_TX" BIONIC_STOP_WATCH_WAIT=60; wh_wait
 expect_eq "OPL1 precondition: the watcher this turn end started rests on the person" "0|resting|person" \
   "$WH_RC|$(wh_field "$RWS" state)|$(wh_field "$RWS" why)"
 expect_eq "OPL1.a the turn end that leaves the run waiting on the person says the line, once, on the quiet channel" \
@@ -525,19 +543,21 @@ expect_eq "OPL1.b …one systemMessage and nothing else: no turn, no error look"
 expect_true "OPL1.c …the line keeps to 66 columns, so the window's line under the platform's label keeps to 80" \
   test "$(printf '%s' "$(ws_line)" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')" -le 66
 expect_contains "OPL1.d …and it names the return" "your reply starts it again" "$(ws_line)"
-wh_start "$RWS" Stop; ws_stop "$RWS" "$WS_TX" BIONIC_STOP_WATCH_WAIT=60; wh_wait
+wh_start "$RWS" Stop; ws_claimed "$RWS"; ws_stop "$RWS" "$WS_TX" BIONIC_STOP_WATCH_WAIT=60; wh_wait
 expect_eq "OPL2 the next turn end over the same resting state: the watcher rests again" "0|resting|person" \
   "$WH_RC|$(wh_field "$RWS" state)|$(wh_field "$RWS" why)"
 expect_eq "OPL2.a …and the line is not said a second time" "" "$(ws_line)$WS_ERR"
-# THE WAIT IS WHAT SETTLES IT: with none, the hook reads the record before the watcher has rested.
+# THE WAIT IS WHAT SETTLES IT, timed by hand: this turn end's watcher rests four seconds after its claim.
 wp_person_world ws-nowait
-RWN="$WP_R"; wh_fast "$RWN"
-wp_ask "$RWN" "$WP_PLAN" owed_open approve:step3 "approval: step3" "the plan is put to you"
+RWN="$WP_R"
 WN_TX="$(ws_tx "$RWN" "$(ws_iso 120)")"
-wh_start "$RWN" Stop; ws_stop "$RWN" "$WN_TX" BIONIC_STOP_WATCH_WAIT=0; wh_wait
-expect_eq "OPL3 with no wait the same world's watcher still rests on the person" "resting|person" \
+ws_late_rest "$RWN" n1 4; ws_stop "$RWN" "$WN_TX" BIONIC_STOP_WATCH_WAIT=0; ws_late_done
+expect_eq "OPL3 with no wait the watcher still rests on the person" "resting|person" \
   "$(wh_field "$RWN" state)|$(wh_field "$RWN" why)"
 expect_eq "OPL3.a …but the hook read the record before the rest, and said nothing" "" "$(ws_line)"
+ws_late_rest "$RWN" n2 4; ws_stop "$RWN" "$WN_TX" BIONIC_STOP_WATCH_WAIT=12; ws_late_done
+expect_eq "OPL3.b with a wait the hook reads the rest the watcher writes after it started, and says the line" \
+  "$WS_LINE_WANT|0|" "$(ws_line)|$WS_RC|$WS_ERR"
 
 # THE RULE OVER A PLANTED RECORD, with no wait: each row moves one fact of OPL4's.
 wp_person_world ws-rule
@@ -558,11 +578,18 @@ printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$WS_LIVE" \
   "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$WS_LIVE" | awk '{$1=$1; print}')" "$(ws_iso 2)" > "$(wh_rec "$RWR")"
 ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
 expect_eq "OPL7 a watcher still watching: nothing" "" "$(ws_line)"
+printf 'state=watching\npid=%s\nat=%s\n' "$WS_LIVE" "$(ws_iso 60)" > "$(wh_rec "$RWR")"
+WS_T0=$(date +%s); ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=12; WS_T1=$(date +%s)
+expect_eq "OPL7.a a watcher an earlier turn end started, still watching: nothing" "" "$(ws_line)"
+expect_true "OPL7.b …and the hook does not wait out its bound for it" test $((WS_T1 - WS_T0)) -lt 8
 kill "$WS_LIVE" 2>/dev/null; wait "$WS_LIVE" 2>/dev/null
 ws_rest "$RWR" person "$(ws_iso 2)" d5
-add_row "$RWR" name=busy deliverable="$RWR/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+# The row's deliverable is on disk, so no landing refusal takes the turn and the open row alone keeps the line back.
+printf 'done\n' > "$RWR/written.md"
+add_row "$RWR" name=busy deliverable="$RWR/written.md" duration="4 hours" launched_at="$(iso_ago 60)"
 ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
 expect_eq "OPL8 a roster row open: nothing rests, and nothing is said" "" "$(ws_line)"
+expect_eq "OPL8.a …because the row is open, not because a wall refused the turn" "0|" "$WS_RC|$WS_OUT"
 
 section "§HOOK-STAYS: with an agent or a detached run out and nothing changing, ten passes leave the watcher running (AC-10.4, the suite's half)"
 wp_person_world wh-stays-row

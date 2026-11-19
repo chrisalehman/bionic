@@ -1279,9 +1279,14 @@ $CANDIDATES
 EOF
 
 [ -n "$REFUSALS" ] || return "$_adv"
+# WHOSE FIX, BY EVENT. On SubagentStop the refusal goes to the writer whose contract it is, on the only channel that
+# event has. On Stop it is the orchestrator's sweep, and the fix is the orchestrator's: a duty, one quiet line in the
+# window and the whole list behind `session-poker.sh duty`.
+local LG_CHANNEL=exit2
+[ "$_ev" = Stop ] && LG_CHANNEL=duty
 case "$REFUSE_KIND" in
-  undeclared) fold_block exit2 stop "this branch touched undeclared files" "declare them, or revert them" "$REFUSALS" ;;
-  *)          fold_block exit2 stop "a dispatched agent's contract is unmet" "write the named artifacts" "$REFUSALS" ;;
+  undeclared) fold_block "$LG_CHANNEL" stop "this branch touched undeclared files" "declare them, or revert them" "$REFUSALS" ;;
+  *)          fold_block "$LG_CHANNEL" stop "a dispatched agent's contract is unmet" "write the named artifacts" "$REFUSALS" ;;
 esac
 return 2
 }
@@ -1596,7 +1601,7 @@ Do the resume ritual, in order, then stop again — this gate blocks once per tu
   3. CronCreate — only if step 2 left this session with no Patrol job of its own
   4. bash ${HOOK_DIR}/session-poker.sh arm
   5. … adopt"
-  fold_block block stop "a cron was created with no CronList first" "list and delete stray jobs first" \
+  fold_block duty stop "a cron was created with no CronList first" "list and delete stray jobs first" \
     "$RITUAL_REASON"
   return 2
 fi
@@ -1903,7 +1908,7 @@ if [ -n "$TELL_REASON" ]; then
   # at 100 columns and the fix at six words (payload/scripts/lib/refuse.sh), which is why
   # these read as tightly as they do.
   if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
-    fold_block block stop "a FILL and a STANDDOWN went unanswered" \
+    fold_block duty stop "a FILL and a STANDDOWN went unanswered" \
       "dispatch, make wait, stop, or hold" "$TELL_REASON"
   elif [ -n "$FILL_REASON" ]; then
     # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap. Its detail is
@@ -1911,14 +1916,14 @@ if [ -n "$TELL_REASON" ]; then
     # turn's paragraph rides below them, as it rode in the old paragraph.
     _fill_detail="$FILL_FORMS"
     [ -n "$NOTICK_REASON" ] && _fill_detail="${_fill_detail}"$'\n\n'"${NOTICK_REASON}"
-    fold_block block stop "$FILL_FACT" "$FILL_FIX" "$_fill_detail"
+    fold_block duty stop "$FILL_FACT" "$FILL_FIX" "$_fill_detail"
   elif [ -n "$STANDDOWN_REASON" ]; then
-    fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
+    fold_block duty stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
       "$TELL_REASON"
   else
     # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
     # rides in the same paragraph under that duty's fact, so one refusal names every miss.
-    fold_block block stop "a Patrol marker turn ran no tick" "run the tick, then stop again" \
+    fold_block duty stop "a Patrol marker turn ran no tick" "run the tick, then stop again" \
       "$TELL_REASON"
   fi
   return 2
@@ -2833,16 +2838,113 @@ esac
 # its line names the tick first.
 case "$WHY" in
   *"marker turn"*)
-    fold_block block stop "Patrol never ticks" "tick; CronList; replace its job" ""
+    fold_block duty stop "Patrol never ticks" "tick; CronList; replace its job" ""
     return 2
     ;;
 esac
 
-# The JSON decision payload on STDOUT with return 2 is the Stop-hook block channel that
-# hooks/patrol-duties-gate.sh uses too; the landing arm refuses through exit 2 and stderr instead.
-# Both are live in this CLI, and gates that share no code path do not share a mechanism either.
-fold_block block stop "Patrol dead" "CronList; CronCreate if absent; arm" ""
+# The fix is the model's, so the refusal rides the duty channel: one fixed line in the window, and the
+# whole reason behind `session-poker.sh duty`.
+fold_block duty stop "Patrol dead" "CronList; CronCreate if absent; arm" ""
 return 2
+}
+
+# ─── THE STOP LINE: the turn end that leaves the run waiting only on the person says so, once ───────────────
+#
+# The watcher rests when only the person can move the run, and it can say nothing as it does: a watcher's
+# exit 0 adds nothing to the window. So the turn-end hook says it, on the person's quiet channel (`fold_say`, a
+# `systemMessage`, which the platform paints as one grey line under the reply with no error look and no turn for
+# the model). The platform prefixes it `Stop says: `, fourteen columns, so the line keeps to 66 and the window's
+# line to 80. It names the return, because the person's reply is what starts the watch again.
+#
+# WHAT IS READ. The watch record (lib/patrol.sh `watch_record_path`), the one fact about the watch: a rest on the
+# person, written since this turn's prompt, with no roster row open. A rest older than the prompt is the person's
+# return, which the watch answers by starting again; a rest for any other reason is not the person's to end.
+#
+# THE RACE. The platform starts this hook and the watcher together at the turn end, and the watcher's first pass
+# decides whether it rests. So the hook waits, within a bound counted from its own start, kept well inside the
+# Stop hook's timeout: while this turn end's watcher (a claim at or after this hook's start, less a few seconds'
+# slack, whose process lives) is still on its pass; and, for a few seconds only, while the record still shows the
+# turn before (a rest older than the prompt, or a watcher that died) and the new claim may be about to land. A
+# watcher claimed before this turn end goes on watching and is not waited for, and a session with no record at
+# all never ran a watcher, so nothing is waited for either.
+#
+# ONCE. The key is the tick's digest at the rest, the same state twice is one key; it is kept in the session's
+# `stop-said-` file, and written only when the line goes out. This function runs last in the fold, so a turn some
+# wall refused, which shows no line, marks nothing said.
+STOP_WATCH_LINE="bionic watch: stopped - waiting on you; your reply starts it again"
+STOP_WATCH_WAIT_DEFAULT=6
+STOP_WATCH_CLAIM_GRACE=3
+STOP_WATCH_SLACK=5
+
+_stop_watch_read() {  # <record> — sets _SW_STATE _SW_WHY _SW_AT _SW_PID; rc 1 when it is no record
+  local l
+  _SW_STATE=''; _SW_WHY=''; _SW_AT=''; _SW_PID=''
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  while IFS= read -r l; do
+    case "$l" in
+      state=*) _SW_STATE="${l#state=}" ;; why=*) _SW_WHY="${l#why=}" ;;
+      at=*) _SW_AT="${l#at=}" ;; pid=*) _SW_PID="${l#pid=}" ;;
+    esac
+  done < "$1"
+  [ -n "$_SW_STATE" ]
+}
+
+stop_said_path() {  # <root> <sid> -> the session's record of the last stop line said, or nothing
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  case "$2" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  printf '%s/.bionic/tmp/stop-said-%s.state' "$1" "$2"
+}
+
+stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
+  [ "${1:-}" = Stop ] || return 0
+  [ "${BIONIC_ENGAGED:-0}" = 1 ] || return 0
+  [ "${BIONIC_FOLD_BLOCKS:-0}" -eq 0 ] || return 0
+  declare -F watch_record_path >/dev/null 2>&1 || return 0
+  local rec prompt bound grace fresh live said key tmp
+  rec="$(watch_record_path "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
+  _stop_watch_read "$rec" || return 0
+  stop_turn_facts >/dev/null 2>&1
+  prompt="${_ST_MARK_TS%%.*}"; prompt="${prompt%Z}"
+  [ -n "$prompt" ] || return 0
+  prompt="${prompt}Z"
+  bound="${BIONIC_STOP_WATCH_WAIT:-$STOP_WATCH_WAIT_DEFAULT}"
+  case "$bound" in ''|*[!0-9]*) bound="$STOP_WATCH_WAIT_DEFAULT" ;; esac
+  grace="$STOP_WATCH_CLAIM_GRACE"; [ "$grace" -le "$bound" ] || grace="$bound"
+  fresh="$(date -u -v-"$((SECONDS + STOP_WATCH_SLACK))"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null     || date -u -d "-$((SECONDS + STOP_WATCH_SLACK)) seconds" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  while :; do
+    case "$_SW_STATE" in
+      resting)
+        [[ "$_SW_AT" < "$prompt" ]] || break
+        [ "$SECONDS" -lt "$grace" ] || break ;;
+      watching)
+        live=no
+        case "$_SW_PID" in ''|*[!0-9]*) : ;; *) kill -0 "$_SW_PID" 2>/dev/null && live=yes ;; esac
+        if [ "$live" = yes ] && [ -n "$fresh" ] && ! [[ "$_SW_AT" < "$fresh" ]]; then
+          [ "$SECONDS" -lt "$bound" ] || break
+        else
+          [ "$live" = no ] && [ "$SECONDS" -lt "$grace" ] || break
+        fi ;;
+      *) [ "$SECONDS" -lt "$grace" ] || break ;;
+    esac
+    sleep 0.2
+    _stop_watch_read "$rec" || return 0
+  done
+  [ "$_SW_STATE" = resting ] && [ "$_SW_WHY" = person ] || return 0
+  [[ "$_SW_AT" < "$prompt" ]] && return 0
+  [ -z "$(roster_open_names "$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state" \
+    "$BIONIC_ROOT/.bionic/tmp/sweeper-$BIONIC_SID.state" "$BIONIC_SID" 2>/dev/null)" ] || return 0
+  key="$(tick_digest_field "$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")" digest)"
+  key="digest=${key:-at $_SW_AT}"
+  said="$(stop_said_path "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
+  [ -f "$said" ] && [ ! -L "$said" ] && [ "$(cat "$said" 2>/dev/null)" = "$key" ] && return 0
+  # Written whole beside it and renamed in, never through a link; a line that cannot be marked said is not said,
+  # so it can never repeat on every turn end.
+  [ -L "$said" ] && return 0
+  tmp="$(mktemp "${said%/*}/.stop-said.XXXXXX" 2>/dev/null)" || return 0
+  printf '%s\n' "$key" > "$tmp" 2>/dev/null && mv -f "$tmp" "$said" 2>/dev/null || { rm -f "$tmp"; return 0; }
+  fold_say "$STOP_WATCH_LINE"
+  return 1
 }
 
 # ─── THE STOP GUARD: the judgement of a TaskStop, its words and its roster writes ─────────────
