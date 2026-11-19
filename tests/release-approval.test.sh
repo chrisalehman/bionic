@@ -411,6 +411,27 @@ expect_regex "REG-3b …writing the waiver with the reply's words" \
 expect_eq "REG-4 answered here, the waiver is closed for the session that raised it; its gate act stays open" \
   "gate:fixture" "$(fc_owed2)"
 rm -f "$RFC/.bionic/tmp/engaged-$FC_SID2.state" "$RFC/.bionic/tmp/owed-$FC_SID2.state"
+# fails-when: a run with four open finding asks and the approval owed draws "You owe 1 decision".
+fc_four() {  # -> the adversarial reading carries three S1s and an S2, each the person's to rule; the merge already given
+  fc_record adversarial adversarial piece "$(for n in 1 2 3 4; do printf 'finding: %s S%s off lib/x.sh:1 defect %s\nshown: %s cat lib/x.sh\n' \
+    "$n" "$([ "$n" = 4 ] && echo 2 || echo 1)" "$n" "$n"; done)"
+  sed -i '' 's/^findings: 1$/findings: 4/; s/^\(finding: 4 S2\) off/\1 on/' "$FC_REC/adversarial.md"
+  fc_plan "$FC_GOOD
+run/v1|ev=approval|key=merge|by=Dana Fixture|said=fixture|at=2026-10-12T13:30:00Z"
+}
+fc_uasks() {  # -> the reader's open asks that wait on the person, sorted, space-separated
+  bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" asks | sed -n 's/.*|key=\([^|]*\)|.*/\1/p' | while IFS= read -r k; do
+    [ "$(bash -c '. "$1/owed.sh"; ask_waits_on "$2" "$3" "$4"' _ "$FC_LIB" "$k" "$PFC" "$RFC")" != user ] || echo "$k"; done | LC_ALL=C sort | fc_flat
+}
+fc_four; fc_page --preview
+expect_contains "REG-5 a preview already counts the four findings the person rules and the approval" "You owe 5 decisions" "$(fc_under 'Bottom line' | fc_flat)"
+fc_page
+expect_eq "REG-6 the register holds four finding asks and the release approval, each waiting on the person" "5|approve:release" \
+  "$(fc_uasks | wc -w | tr -d ' ')|$(fc_uasks | tr ' ' '\n' | /usr/bin/grep -v '^finding:')"
+expect_contains "REG-6b …and the card owes five decisions" "You owe 5 decisions" "$(fc_under 'Bottom line' | fc_flat)"
+expect_eq "REG-6c …numbering exactly the asks that wait on the person" "$(fc_uasks)" "$(fc_keys | LC_ALL=C sort | fc_flat)"
+expect_eq "REG-6d …each finding under Findings naming its decision" "4" "$(fc_under Findings | /usr/bin/grep -cE 'defect [1-4] \(decision [1-4]\)$')"
+fc_record adversarial adversarial piece "$FC_S3"
 
 # ============================================================
 section "§REPLY: all default and all recommended replay into their verbs with the user's words; anything else writes nothing"
@@ -501,6 +522,19 @@ poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-11 reply all default over an open waive:adversarial item exits 0" "0" "$RC"
 expect_regex "REPLY-11b …writing the waiver at the working head with the reply's words" \
   "^run/v1\|ev=waiver\|question=adversarial\|head=$FC_R\|by=Dana Fixture\|said=$FC_WD\|at=[0-9T:Z-]+\$" "$(/usr/bin/grep -F '|question=adversarial|' "$FC_REC/run.log" 2>/dev/null)"
+# fails-when: after the reply the register still holds an ask the card numbered, or one waiting on the person it never
+# showed. The changed-run ask has no verb a reply runs, so the page shows it in its own words and it stays the person's.
+fc_four; fc_owe seal:changed; fc_page
+FC_NUMS="$(fc_keys)"
+fc_numbered_open() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" asks | sed -n 's/.*|key=\([^|]*\)|.*/\1/p' | /usr/bin/grep -cxF "$FC_NUMS"; }
+expect_eq "REPLY-12 precondition: the five numbered asks are open; the changed-run ask is on the page in its own words" "5|yes" \
+  "$(fc_numbered_open)|$(fc_has "$(fc_under 'Bottom line' | fc_flat)" 'fixture item seal:changed')"
+poke "$RFC" reply "$FC_WR"
+expect_eq "REPLY-12b reply all recommended over the four findings and the approval (exit 0)" "0" "$RC"
+expect_eq "REPLY-12c …leaves open no ask the card numbered" "0" "$(fc_numbered_open)"
+expect_eq "REPLY-12d …and none waiting on the person that the page did not show" "seal:changed" "$(fc_uasks)"
+expect_eq "REPLY-12e …the findings moved to fix on the reply's words" "4" "$(/usr/bin/grep -c "|ev=finding|ref=record/wave-x/adversarial.md#[1-4]|to=fix|.*|words=$FC_WR|" "$FC_REC/run.log")"
+fc_record adversarial adversarial piece "$FC_S3"
 
 # ============================================================
 section "§T4: a T4 row is read through the gate's one predicate: confirmed by you is proved, pending or a standing finding is a decision"
