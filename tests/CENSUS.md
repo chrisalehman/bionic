@@ -395,9 +395,8 @@ dispatch-preflight-2.test.sh | §EXISTS | keep | hooks/dispatch-preflight.sh (th
 
 dispatch-preflight-3.test.sh | §combined | keep | hooks/dispatch-preflight.sh: a single-fault refusal's detail rendered without its Fix: block, so rcomb4 counts 0 (the last row); also the three faults stacked as three refusals in the detail | none (searched 'Fix: ' and 'BRIEF_THREE_FAULTS' in tests/)
 dispatch-preflight-3.test.sh | §scaffold-marks | keep | hooks/dispatch-preflight.sh: the Deliverable-waiver: scaffold line marked <ADD> whenever the waiver is absent, even beside a declared artifact, so (b) goes red | none (searched '<ADD>' and 'scaffold_raw_line' in tests/; dispatch-preflight-2, -4a and -4b mark other lines)
-dispatch-preflight-3.test.sh | §combined-deny | keep | hooks/dispatch-preflight.sh dp_refuse_findings: a lone state fault (the unarmed Patrol) refused on exit2 instead of the deny wire, so the verdict reads exit2 and stdout is empty (rcombdeny3); also a second fault dropped from the several-fault detail (rcombdeny) | none (searched 'deny wire' and 's21_stamp_path' in tests/)
+dispatch-preflight-3.test.sh | §combined-deny | keep | hooks/dispatch-preflight.sh dp_refuse_findings: a lone state fault (a watcher that died) refused on exit2 instead of the deny wire, so the verdict reads exit2 and stdout is empty (rcombdeny3); also a second fault dropped from the several-fault detail (rcombdeny) | none (searched 'deny wire' and 'cd_dead_watch' in tests/)
 dispatch-preflight-3.test.sh | §scaffold-verbatim | keep | skills/canonical-sdlc/dispatch.md: a label of the brief scaffold respelled so the wall no longer reads it, so the filled scaffold is refused (scaffold rows 58, 77, 98) | none (searched 'SCAFFOLD_SUITES' and 'scaffold' in tests/)
-dispatch-preflight-3.test.sh | §a3-text | keep | hooks/dispatch-preflight.sh: the never-armed Patrol fix line names CronCreate with no CronList before it, so "Fix: CronList, then CronCreate" goes red; the fix is the only carrier of which Patrol state refused and moves with it (§a3 rows) | none (searched 'CronList' and 'stopped firing' in tests/)
 
 ## dispatch-preflight-4a.test.sh
 
@@ -459,9 +458,6 @@ doctor-fleet.test.sh | §Section 8 | keep | payload/scripts/doctor.sh: the CLI-a
 
 doctor-patrol.test.sh | §Section 1 | keep | payload/scripts/doctor.sh: the npm row's absent arm prints "not installed" instead of naming that npm is not on PATH, so T37's whole-run read of the page goes red; "1: the fallback line prints" is caught by §Section 4 and §Section 5 too | none (searched 'npm is not on PATH' in tests/)
 doctor-patrol.test.sh | §Section 2 | keep | payload/scripts/doctor.sh: the singular/plural choice on the Patrol row dropped, so one open dispatch prints "1 open dispatches" (4); the other sections' `*1 open dispatch*` globs match either | none (searched 'open dispatch' in tests/)
-doctor-patrol.test.sh | §Section 3 | keep | payload/scripts/doctor.sh: the duplicate-Patrol fix line names the newer job instead of the older, so "13: …names the OLDER job for deletion" goes red | none (searched 'Patrol jobs armed' and 'CronDelete' in tests/)
-doctor-patrol.test.sh | §Section 4 | keep | payload/scripts/doctor.sh _patrol_flush: the stamp-and-idle-gap gate deleted, so a dead Patrol still prints ✓ session (17, 18) | none (searched 'none running' and '_patrol_flush' in tests/; patrol-stale and patrol-revive read lib/patrol.sh's fields, not the page)
-doctor-patrol.test.sh | §Section 5 | keep | payload/scripts/doctor.sh: an absent stamp read as firing, so a never-armed session prints a running row (23) | none (searched 'never-armed' and 'none running' in tests/)
 doctor-patrol.test.sh | §Section 7 | keep | payload/scripts/doctor.sh: present=no rendered as the number zero again, so an absent roster prints "0 open dispatches" instead of "roster absent — launches unrecorded" (27, 28) | none (searched 'roster absent' in tests/)
 doctor-patrol.test.sh | §Section 8 | duplicate | payload/scripts/lib/patrol.sh: blind stops subtracting the rostered launches (32); payload/scripts/doctor.sh: the absent row gated on blind alone, so a present roster renders absent (31) | doctor-patrol.test.sh §Section 12
 doctor-patrol.test.sh | §Section 9 | keep | payload/scripts/doctor.sh: under BIONIC_DOCTOR_ONLY=PATROL,PROJECT,FIXES the Patrol gather's fix line not raised, so the filtered page lacks the launches-unrostered line the whole page carries (36d); 33, 33b and 34 read source text; 36h to 36k are also caught by doctor-version.test.sh §Section 11 | none (searched 'BIONIC_DOCTOR_ONLY' in tests/; doctor-version.test.sh drives only the NATIVE filter)
@@ -619,7 +615,7 @@ fold.test.sh | §4 | duplicate | payload/scripts/lib/fold.sh: the loop stops at 
 fold.test.sh | §5 | duplicate | payload/scripts/lib/fold.sh: each function run in a subshell, so staged verdicts and state are lost and no block composes | bash-walls.test.sh §3
 fold.test.sh | §6 | duplicate | payload/scripts/lib/fold.sh: each function run in a subshell, so an exit returns and no staged block survives; no other change to the fold moves 6a or 6b | bash-walls.test.sh §3
 fold.test.sh | §7 | keep | payload/scripts/lib/fold.sh: the verdict read from staged text instead of the function's return code, so a function that stages a block and returns 0 blocks; (7a) goes red | none (searched 'STAGED-BUT-UNCLAIMED' and 'fold_block' stubs in tests/; no shipped wall stages and returns 0)
-fold.test.sh | §8 | duplicate | payload/scripts/lib/fold.sh: the process status forced to 2 for a lone block-channel blocker, so a Stop refusal on the block channel exits 2 instead of 0 | patrol-revive.test.sh §Group 4
+fold.test.sh | §8 | duplicate | payload/scripts/lib/fold.sh: the process status forced to 2 for a lone block-channel blocker, so a Stop refusal on the block channel exits 2 instead of 0 | stop.test.sh §PERSON
 fold.test.sh | §9 | keep | payload/scripts/lib/fold.sh: the composed verdict rides the first blocker's channel instead of the first whose model_only cell says yes | bash-walls.test.sh §6 (reopened by the merge: every named catcher is culled, so it keeps its defect)
 fold.test.sh | §SAY | keep | payload/scripts/lib/fold.sh fold_say: the staged line not joined into the one stdout object, or printed on stderr, so SAY1 and SAY2 go red; shown beside a block, so SAY3 goes red; kept though its function returned 0, so SAY4 goes red. also: the person's-channel rows of §9 (9d-9o) are killed by the person test dropped from the line owner's choice (`= person` made `= nobody`), planted and red | none (searched 'fold_say' and 'systemMessage' in tests/; watch.test.sh §ONLY-PERSON (the stop line) drives the one production speaker)
 fold.test.sh | §10 | keep | payload/scripts/lib/fold.sh: staged advisories printed in reverse, so ("10e: …in the order the functions were named") goes red | none (searched 'fold_advise' in tests/; no driven hook stages two user advisories on one event)
@@ -932,34 +928,20 @@ one-reader.test.sh | §READINGS | keep | payload/scripts/readings.sh: the sessio
 
 ## patrol-duties-gate.test.sh
 
-patrol-duties-gate.test.sh | §Section 1 | duplicate | payload/scripts/lib/stop.sh stop_patrol_duties: the ran-the-tick test inverted, so a tick turn that ran the tick is refused (1, 4); the stop_hook_active pass lost (6) | patrol-duties-gate.test.sh §Section 2, patrol-duties-gate.test.sh §Section 4
-patrol-duties-gate.test.sh | §Section 2 | keep | payload/scripts/lib/stop.sh stop_patrol_duties: a tool_result user entry taken as the start of a new turn, so the marker turn that ran no tick is allowed (14b) | none (searched 'tool_result' and 'Patrol tick not run' in tests/)
-patrol-duties-gate.test.sh | §Section 3 | keep | payload/scripts/lib/stop.sh stop_patrol_duties: the engagement check deleted, so an unengaged session's unticked marker turn is refused (21b); also hooks/hooks.json loses the Stop registration (25). also: 2 prose pins on the hook header's comment (26, 26b) | none (searched 'stop_patrol_duties' and 'engagement marker it is silent' in tests/)
-patrol-duties-gate.test.sh | §Section 4 | keep | payload/scripts/lib/stop.sh: the resume/clear ritual arm counts a CronList before an earlier marker, so a CronList before a later marker discharges the new window (35c) | none (searched 'RITUAL_CRONLIST' and 'no prior CronList' in tests/)
+patrol-duties-gate.test.sh | §Section 1 | duplicate | payload/scripts/lib/stop.sh stop_patrol_duties: the ran-the-tick test inverted, so a tick turn that ran the tick is refused (1, 4); the stop_hook_active pass lost (6) | patrol-duties-gate.test.sh §Section 2
+patrol-duties-gate.test.sh | §Section 2 | keep | payload/scripts/lib/stop.sh stop_patrol_duties: a tool_result user entry taken as the start of a new turn, so a turn's answers before the carrier are lost (14) | none (searched 'tool_result' in tests/)
+patrol-duties-gate.test.sh | §Section 3 | keep | payload/scripts/lib/stop.sh stop_patrol_duties: hooks/hooks.json loses the Stop registration (25). also: 2 prose pins on the hook header's comment (26, 26b) | none (searched 'stop_patrol_duties' in tests/)
 patrol-duties-gate.test.sh | §Section 5 | duplicate | payload/scripts/lib/stop.sh stop_patrol_duties: the ran-the-tick test inverted, so FILL-printing tick turns are refused (36, 37, 41); the unticked marker turn allowed (37b) | patrol-duties-gate.test.sh §Section 2
-patrol-duties-gate.test.sh | §Section 5b | keep | payload/scripts/lib/stop.sh: a TaskStop of one ordered agent taken as answering every stand-down, so the half-answered stand-down names no one (51) | none (searched 'stand-down' and 'standdown-declined' in tests/)
-
-## patrol-marker.test.sh
-
-patrol-marker.test.sh | — | — | no section | —
+patrol-duties-gate.test.sh | §Section 5b | keep | payload/scripts/lib/stop.sh: a TaskStop of one ordered agent taken as answering every stand-down, so the half-answered stand-down names no one (51); the bound read from this turn instead of the previous turn end, so a stand-down a person-started turn owes is passed (55) | none (searched 'stand-down' and 'standdown-declined' in tests/)
 
 ## patrol-revive.test.sh
 
-patrol-revive.test.sh | §Group 1 | duplicate | payload/scripts/lib/stop.sh stop_patrol_revive: the stale-stamp block deleted; payload/scripts/lib/patrol.sh: the fire window computed wrong; the absent and fresh stamps blocking | stop.test.sh §1, patrol-stale.test.sh §Section 2, landing-gate.test.sh §Section 2
-patrol-revive.test.sh | §Group 2 | keep | payload/scripts/lib/stop.sh stop_patrol_revive: the `-L` refusal on the stamp deleted, so a symlink backdated with touch -h reads as a stale stamp and blocks; (10) goes red. also: the SubagentStop row is also read by stop.test.sh §4 | none (searched 'touch -h' and 'symlinked stamp' in tests/)
-patrol-revive.test.sh | §Group 3 | keep | payload/scripts/lib/stop.sh stop_patrol_revive: the stamp read under the worktree's own root instead of the main repository's, so a stale main stamp seen from a worktree cwd is silent; (16) goes red | none (searched 'pr-wt' and worktree stamp rows in tests/)
-patrol-revive.test.sh | §Group 4 | keep | payload/scripts/lib/stop.sh stop_patrol_revive: the window made twice the interval instead of patrol_fire_window, so a 90s stamp against a 1m knob is not refused (22c); the interval read as a constant instead of the project's poker-interval, so a 40s stamp is refused (22b); the age gate removed and the verdict forced dead, so a freshly touched stamp is refused (18b, with 22b and 17). also: the rows that pinned the retired long reason (the stamp path, the age, the limit, "plugin update", "blocks once", the absolute arm line) are rewritten or gone, since the one line carries none of them: 19, 20 and 22 read the line (the CronCreate-if-absent clause, the acts in order, a repeat identical), duplicates of stop.test.sh §PATROL on the line itself and kept here only with the behavioural rows; 24 is gone, duplicate of row 9 (§Group 2), which is where "blocks once" lives | none (searched 'poker-interval' and 'fire window' in tests/; patrol-stale.test.sh reads the library's predicate and stop.test.sh §PATROL drives a 1s knob only)
 patrol-revive.test.sh | §Group 5 | duplicate | payload/scripts/lib/stop.sh: the Stop process's one write, the fill ledger, sent to a path outside the run's record; no line in the revive arm writes or stamps, so 25 can turn red on no change to code that is there | stop.test.sh §9
 patrol-revive.test.sh | §Group 6 | keep | hooks/stop.sh loses its exec bit, so the manifest's bare-path invocation gets 126; (29) goes red while every other suite runs the hook through `bash` | none (searched 'sh -c "$HOOK"' in tests/)
-patrol-revive.test.sh | §Group 7 | keep | hooks/session-poker.sh tick: the DISARM decision's stamp removal deleted, so the stamp outlives the decision and the death notice fires one window later; (33) goes red. also: 39 and 39b pin a source comment no program reads | none (searched 'decision=DISARM' in tests/; session-poker.test.sh reads only the decision line)
-patrol-revive.test.sh | §TASK-SCALE | keep | hooks/poker/tick.sh tick_patrol_owed deleted, so the tick stamps a task-scale run again (TS-2); payload/scripts/lib/stop.sh stop_patrol_revive: the `scale_cell … patrol` return deleted, so a stale stamp on a task-scale run blocks `Patrol dead` (TS-4); the wave-scale controls (TS-1, TS-3, TS-5, TS-7c) go red when the cell is read as `no` for every scale, and TS-2c when an unreadable scale stops stamping; hooks/dispatch-preflight.sh and hooks/poker/sitrep.sh read the cell already, so TS-6 and TS-7, TS-7b pin them and go red on a wall or resume that asks a task-scale run for a Patrol | scale-profile.test.sh §TASK (the dispatch wall's budget rows T.w1 to T.w8 and engagement), handoff-file.test.sh RT1-RT4 (resume's own rows); neither drives the tick or the stop wall at task scale (searched 'patrol_stamp' and 'scale: task' in tests/)
 patrol-revive.test.sh | §WATCH-LOST | keep | payload/scripts/lib/stop.sh stop_patrol_revive: the lost-watcher line dropped (WL2, WL2a, WL6, WL6a) or its said= write dropped, so a later turn end says it again (WL4, WL7); payload/scripts/lib/patrol.sh watch_claim: the dead pid not kept as lost= over a stopped record, so a claim made first silences the line (WL5-WL6a) | none (searched 'lost=' and 'bionic watch: stopped' in tests/; watch.test.sh drives the claim's lock, not what it keeps)
 
 ## patrol-stale.test.sh
 
-patrol-stale.test.sh | §Section 1 | duplicate | payload/scripts/lib/patrol.sh patrol_fire_window: the tenth-of-the-interval jitter term changed (1c); patrol_verdict's record loses a field (1d) | patrol-stale.test.sh §Section 2
-patrol-stale.test.sh | §Section 2 | keep | payload/scripts/lib/patrol.sh patrol_stamp_state: limit computed as twice the interval instead of patrol_fire_window, so "5: limit = patrol_fire_window(interval)" and 6's 1320 go red; patrol_verdict's record loses a field its callers read by key ("7: patrol_verdict answers every field") | none (searched 'patrol_stamp_state' and 'limit=' in tests/)
-patrol-stale.test.sh | §Section 3 | keep | hooks/dispatch-preflight.sh: the staleness half grades the stamp's age itself instead of calling patrol_verdict, so "12: …it calls patrol_verdict" goes red; 8 to 10 read source text that §Section 2 and session-start.test.sh §6 also exercise | none (searched 'patrol_verdict' in tests/; the other hits are comments, and dispatch-preflight-2.test.sh drives only an unarmed stamp)
 patrol-stale.test.sh | §Section 4 | keep | payload/scripts/close-out.sh _co_tmp_owner: the owner read past the first dot, so a per-start clock file parses to `<sid>.<id>` and close-out spares it for ever (OW4); also payload/scripts/lib/patrol.sh: `tick-run` dropped from PATROL_STATE_CLASSES, so a running tick's record is not a class (OW1c), and `watch` dropped from it, so the watch record is not a class (OW1d) | none (searched '_co_tmp_owner' and 'PATROL_STATE_CLASSES' in tests/; session-sweep.test.sh not read to verdict)
 
 ## permission-answer.test.sh
@@ -1436,7 +1418,7 @@ seam-resolution.test.sh | §Group 6 | keep | rule: lint — a tests/*.test.sh th
 
 ## session-poker-2.test.sh
 
-session-poker-2.test.sh | §Section 36 | keep | hooks/session-poker.sh prompt: the bionic-patrol session marker dropped from the front of the printed prompt, so ("36b AC-6.1 the prompt starts with this session's marker") goes red | none (searched ' prompt' verb drives in tests/; handoff-file and session-start name the verb in text)
+session-poker-2.test.sh | §Section 36 | keep | hooks/session-poker.sh: an arm, disarm or prompt verb restored, so it exits 0 instead of as an unknown verb (36a, 36b); a hook or script line naming CronCreate, CronList, CronDelete, the bionic-patrol marker or those verbs (36d) | none (searched 'unknown verb: arm' and 'CronCreate' in tests/)
 session-poker-2.test.sh | §Section 37 | keep | payload/scripts/lib/units.sh: a step hold put on the release doc row in the ready program, so the Step-7 release row is not filled at current: 5; (37a) goes red. also: hooks/poker/plan.sh poker_verb_task_add writing the plan, a birth for a row the plan does not hold, or a short row accepted or refused without the line it would accept, so the plan's sum moves or 37g-37i go red; poker_verb_task_drop: a drop of a pending row not written as one drop event with the person's words, or a landed row, a row in flight, a row the plan lacks or words holding a bar dropped (37j, 37k) | none (searched 'Release 1.8.7' and 'held for their step' in tests/)
 session-poker-2.test.sh | §Section 38 | keep | hooks/session-poker.sh tick: the poker: HELD line for an ext:-held row deleted, so ("38a AC-3.3 the ext:-held row prints its HELD line") goes red | none (searched 'poker: HELD' in tests/)
 session-poker-2.test.sh | §Section 39 | keep | hooks/session-poker.sh tick: the LEDGER print of units_findings deleted, so ("39b …an active row whose agent is not on the roster ticks a launch line, naming the cell") goes red | none (searched 'poker: LEDGER' in tests/)
@@ -1495,7 +1477,7 @@ session-poker.test.sh | §Section 2 | keep | payload/hooks/session-poker.sh inte
 session-poker.test.sh | §Section 3 | keep | payload/hooks/session-poker.sh tick: an unacked UNMET row past its duration decided QUIET instead of NOTIFY, so rows=overdue-agent is never named | none (searched 'decision=NOTIFY' in tests/)
 session-poker.test.sh | §Section 4 | keep | payload/hooks/session-poker.sh tick: the sweeper's refusal on a symlinked state directory swallowed, so the tick decides DISARM instead of exit 2 | none (searched 'REFUSED' with session-poker.sh tick in tests/)
 session-poker.test.sh | §Section 5 | keep | payload/hooks/session-poker.sh: the root taken from the cwd's git toplevel instead of project_root, so a tick from a linked worktree finds no roster and refuses (the worktree-cwd NOTIFY row) | none (searched 'worktree' with session-poker.sh tick in tests/; root.test.sh §2 drives project_root alone)
-session-poker.test.sh | §Section 6 | keep | payload/hooks/session-poker.sh tick: the Patrol stamp written after the decision, so a refused pre-roster tick leaves no verb=tick stamp | none (searched 'verb=tick' and 'patrol-stamp/v1' in tests/)
+session-poker.test.sh | §Section 6 | keep | hooks/poker/tick.sh: a keyless tick writes a session-keyed file, so the tmp directory holds more than the engagement marker | none (searched 'keyless tick' in tests/)
 session-poker.test.sh | §Section 7 | keep | payload/scripts/lib/patrol.sh patrol_window: the roster's mtime read instead of its birth instant, so a roster touched a day ahead moves the window; or the stamp's fallback dropped | none (searched 'patrol_window' in tests/; doctor-patrol.test.sh §Section 12 reads it through doctor)
 
 ## session-start.test.sh
@@ -1721,7 +1703,7 @@ stop-orders.test.sh | §BACK | keep | hooks/stop-orders.sh stopped: the row of a
 
 ## stop.test.sh
 
-stop.test.sh | §1 | keep | hooks/stop.sh's bionic_fold manifest lists stop_patrol_revive ahead of stop_landing_gate, so "1d: …and in the manifest's order, landing before patrol, by offset" goes red | none (searched 'bionic_fold' and 'LANDING CONTRACT UNMET' in tests/: fold.test.sh drives stubs, landing-gate and patrol-revive one arm each)
+stop.test.sh | §1 | keep | payload/scripts/lib/stop.sh: a bound session's landing refusal at the turn end left on exit2, so "1e: it is ONE duty" reads exit2 | none (searched 'LANDING CONTRACT UNMET' in tests/)
 stop.test.sh | §2 | keep | payload/scripts/lib/stop.sh: the unbound advisory written straight to stderr instead of staged through the fold, so it prints ahead of the landing refusal (2e). also: stop_context_spend, stop_patrol_duties or stop_patrol_revive loses its engagement check, so a bystander's turn end speaks (2f) | none (searched 'newest-plan fallback' in tests/)
 stop.test.sh | §3 | duplicate | each arm's engagement check deleted, so a bystander's turn end speaks; a library on the Stop path writes to stderr when loaded (3c) | stop.test.sh §2 (the three run-scoped arms), cross-gate-agreement-1.test.sh §A1 (the landing arm), landing-gate.test.sh §Section 1 (3c)
 stop.test.sh | §4 | keep | payload/scripts/lib/stop.sh stop_patrol_duties: the session's run resolved, announcing the unbound advisory, before its SubagentStop return, so the advisory prints on a worker's stop (4b) | none (searched 'session unbound' in tests/)
@@ -1736,16 +1718,14 @@ stop.test.sh | §GUARD | keep | payload/scripts/lib/stop.sh: a word of a stop gu
 stop.test.sh | §EVENTS | keep | hooks/stop.sh: the PreToolUse arm's TaskStop test dropped or `stop_guard` no longer called on it, so the orchestrator's stop of an agent passes unjudged (EV1, BID1-BID4, LOOK1-LOOK3, FIX, HOSTILE go red); its missing-library refusal made once-only, so a TaskStop with no library passes (EV2); a payload that is not JSON judged as a stop (EV3); payload/scripts/lib/stop.sh stop_guard: the row's cadence ignored (LOOK2 control), a zero-byte artifact taken as delivered (LOOK3 d), the progress channel unread (LOOK3 e), the transcript's backgroundTaskId lookup deleted (BID2), the roster's readable or link test deleted (HOSTILE); also: the AGENT rows ask an agent's own stop the facts stop_agent_armed asks, which stop_landing_gate asks again, so they go red only when both checks are gone | none (searched 'TaskStop', 'backgroundTaskId' and 'inside the declared cadence' in tests/: fail-direction-table.test.sh and cross-gate-agreement-1.test.sh drive hooks/stop.sh by TaskStop's payload for its fail directions, not the look)
 stop.test.sh | §UB | keep | payload/scripts/lib/stop.sh the fill duty charges a session whose run is the newest-plan fallback as if it were bound, so B is refused for p1's T5; "UB1: B (plan=none) ends its turn — exit 0" goes red | none (searched 'newest-plan fallback' and 'ready with room' in tests/)
 stop.test.sh | §WAIT | keep | payload/scripts/lib/stop.sh: a form dropped from the fill refusal's detail (the dependency, the read of a ruling or the order line), so "WAIT1b the refusal names the first form, a dependency" or its siblings go red; also lib/fill.sh: the open order not read, so "WAIT4c the turn ends: no refusal" goes red | none (searched 'reads+=approval:DN', 'order: given' and 'ready with room' in tests/)
-stop.test.sh | §GONE | keep | rule: lint — hooks/session-poker.sh: a decline arm restored to the verb dispatch, so `decline T1 'why they wait'` exits 0 ("GONE2 the decline verb exits as any unknown verb does"); a `state=decline` writer planted under hooks/ (GONE1b); the Patrol prompt naming the verb (GONE3b) | none (searched 'unknown verb: decline' and 'state=decline' in tests/)
-stop.test.sh | §PATROL | keep | payload/scripts/lib/stop.sh stop_patrol_revive: a clock that fires and never ticks given the dead clock's reason, or its repair without the tick first (PATROL3, PATROL3c, PATROL3d); the re-arm sentence deleted from the rules or the prompt (PATROL6b, PATROL6d); also the dead clock's repair out of order (PATROL1d, PATROL1e) | patrol-revive.test.sh §Group 4 (rows 19 and 20 read the dead clock's CronList, CronCreate if absent, arm in order; nothing else in tests/ reads 'Patrol never ticks' through the real Stop or 'Patrol re-armed')
+stop.test.sh | §GONE | keep | rule: lint — hooks/session-poker.sh: a decline arm restored to the verb dispatch, so `decline T1 'why they wait'` exits 0 ("GONE2 the decline verb exits as any unknown verb does"); a `state=decline` writer planted under hooks/ (GONE1b) | none (searched 'unknown verb: decline' and 'state=decline' in tests/)
 stop.test.sh | §LOG | keep | payload/scripts/lib/stop.sh stop_facts_load: its calls deleted, so the wall reads the step and the approval through lib/fill.sh's plan parse and the order through gate_order_of's, and a log-only Step-3 approval readies nothing (LOG1) while a log-only order holds nothing (LOG2, LOG3); its read of the approval made to ignore a cancel the log appends, so the cancelled approval still readies both rows (LOG4) | none (searched 'run/v1|ev=approval', 'run/v1|ev=order' and 'fill_facts_load' in tests/: reader.test.sh and proof-at-head.test.sh plant them for the reader and the judge, replay-bed.test.sh §FOLLOWS for the tick, none for the Stop)
 stop.test.sh | §ONE | keep | payload/scripts/lib/stop.sh stop_fill_ledger: the turn's end written to a file of its own and not as the log's stop event, so a run at 15 reads it from no log (ONE4, ONE5, ONE5a) or a fill ledger is written beside it (ONE5b); a failed append made the hook's failure, so a log it cannot write, or a plain directory, changes its exit or its words (ONE7, ONE8 beside ONE6) | none (searched 'ev=stop' and 'stop_fill_ledger' in tests/: replay-bed.test.sh asks stop over recorded runs, and no other suite drives a Stop to its log)
-stop.test.sh | §RUNNING | keep | payload/scripts/lib/stop.sh: the no-tick duty's `tick_running` test dropped, so a marker turn under a live tick record is refused (RUN2); payload/scripts/lib/patrol.sh tick_running: the alive rule replaced by the record's existence, so a dead or reused pid holds the duty off (RUN3, RUN3b) and a dead record holds the next tick off (RUN6, RUN6d); hooks/poker/tick.sh: the claim's live-holder arm made to run on, so a second tick prints in full and stamps (RUN4, RUN4c, RUN4e); the release dropped from tick_emit, so the record outlives the tick (RUN5f, RUN6d) | none (searched 'tick-run', 'tick_running' and 'Patrol tick not run' in tests/: patrol-duties-gate.test.sh SD9 and 7b refuse the marker turn with no record, never beside one)
+stop.test.sh | §RUNNING | keep | payload/scripts/lib/patrol.sh tick_running: the alive rule replaced by the record's existence, so a dead record holds the next tick off (RUN6, RUN6d); hooks/poker/tick.sh: the claim's live-holder arm made to run on, so a second tick prints in full (RUN4, RUN4e); the release dropped from tick_emit, so the record outlives the tick (RUN5f, RUN6d) | none (searched 'tick-run', 'tick_running' and 'Patrol tick not run' in tests/: patrol-duties-gate.test.sh SD9 and 7b refuse the marker turn with no record, never beside one)
 
 ## time.test.sh
 
 time.test.sh | §AGREE | keep | payload/scripts/lib/time.sh iso_epoch: the trailing-Z check loosened, so `2026-10-18T15:07:33Zx` reads an epoch on all three readers instead of nothing (AG.8) | none (searched 'iso_epoch' in tests/)
-time.test.sh | §TRANSCRIPT | keep | payload/scripts/lib/patrol.sh patrol_verdict: a millisecond timestamp not cut to the whole second, so the fractional turns read unreadable instead of dead with gap 600 (TR.1) | none (searched 'patrol_verdict' fractional rows in tests/)
 
 ## units.test.sh
 
@@ -1985,6 +1965,7 @@ dispatch-preflight-2.test.sh §S10L — gone with lift_contract_fields
 dispatch-preflight-2.test.sh §EXISTS — gone with brief_validate_fields
 dispatch-preflight-3.test.sh §combined — gone with dp_scaffold_marked
 dispatch-preflight-3.test.sh §scaffold-marks — gone with dp_scaffold_marked
+dispatch-preflight-3.test.sh §a3-text — cut with the stamp it pinned: the never-armed fix line went with the dispatch wall's stamp arms
 dispatch-preflight-4a.test.sh §Q — gone with lift_contract_fields
 dispatch-preflight-4a.test.sh §scaffold-walk — gone with lift_contract_fields
 dispatch-preflight-4a.test.sh §brief-lib — gone with lift_contract_fields
@@ -1995,6 +1976,9 @@ dispatch-preflight.test.sh §S22b — duplicate
 dispatch-preflight.test.sh §budget-markers — duplicate
 doctor-fleet.test.sh §Section 7 — cut in f40b8d112: a width pin on the fullest page; the CLI-absent page and the reads suite keep the width rule on other pages
 doctor-patrol.test.sh §Section 8 — duplicate
+doctor-patrol.test.sh §Section 3 — cut with the cron-job scan it pinned: doctor names no Patrol job and no CronDelete
+doctor-patrol.test.sh §Section 4 — cut with the stamp gate it pinned: doctor reads no stamp
+doctor-patrol.test.sh §Section 5 — cut with the stamp gate it pinned: doctor reads no stamp
 doctor-reads.test.sh §Section 9 — duplicate
 doctor-restart.test.sh §Section 2 — duplicate
 doctor-version.test.sh §Section 3 — duplicate
@@ -2069,9 +2053,20 @@ name-scan.test.sh §BASH32 — duplicate
 notify.test.sh §ASKS mutants — duplicate
 patrol-duties-gate.test.sh §Section 1 — duplicate
 patrol-duties-gate.test.sh §Section 5 — duplicate
+patrol-duties-gate.test.sh §Section 4 — cut with the duty it pinned: the turn-end wall asks no CronList before a CronCreate
+patrol-marker.test.sh — cut with its suite: the cron-job classifier and the prompt marker it held in agreement are gone
 patrol-revive.test.sh §Group 1 — duplicate
 patrol-revive.test.sh §Group 5 — duplicate
+patrol-revive.test.sh §Group 1 — cut with the stamp verdict it named: the turn end judges no stamp
+patrol-revive.test.sh §Group 2 — cut with the stamp verdict it guarded: the turn end judges no stamp
+patrol-revive.test.sh §Group 3 — cut with the stamp verdict it guarded: the turn end judges no stamp
+patrol-revive.test.sh §Group 4 — cut with the dead-clock refusal it pinned: the turn end judges no stamp
+patrol-revive.test.sh §Group 7 — cut with the disarm it pinned: the verb and the stamp are gone
+patrol-revive.test.sh §TASK-SCALE — cut with the stamp it pinned at each scale; the watch wall's task-scale row is dispatch-preflight.test.sh WA6
 patrol-stale.test.sh §Section 1 — duplicate
+patrol-stale.test.sh §Section 1 — cut with the fire window it named: no reader judges a stamp
+patrol-stale.test.sh §Section 2 — cut with patrol_stamp_state, which it pinned
+patrol-stale.test.sh §Section 3 — cut with patrol_verdict's readers, which it pinned
 permission-answer.test.sh §A1 the lead's question is answered — duplicate
 permission-answer.test.sh §A7 the incident command is denied with a fix naming the unread target — duplicate
 permission-answer.test.sh §A19 a delete of a workspace root itself is denied; beneath it is allowed — duplicate
@@ -2163,6 +2158,8 @@ stop-guard.test.sh §Section 7 — cut with its suite in 2b5eace4d: its hostile-
 stop-guard.test.sh §Sections 8 and 9 — vacuous
 stop.test.sh §3 — duplicate
 stop.test.sh §5 — duplicate
+stop.test.sh §PATROL — cut with the dead-clock refusal and the prompt's re-arm sentence it pinned
+time.test.sh §TRANSCRIPT — cut with patrol_verdict, whose transcript reading it pinned
 units.test.sh §0 — duplicate
 units.test.sh §5 — duplicate
 units.test.sh §6b — duplicate

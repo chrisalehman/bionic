@@ -55,6 +55,7 @@ export BIONIC_WALL_VERBOSE=1
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
@@ -375,8 +376,8 @@ verdict_er() {  # <repo> -> yes|no|other:<detail>
 # — §J drives the gate's verdict/gate agreement, not its wave detection (Step-6 critic D-1).
 # Its observable is a Stop over a roster carrying ONE unmet contract that has LANDED (its
 # agent_id is absent from the payload's background_tasks): with a wave active the gate
-# reaches the verdict, reads UNMET and refuses (exit 2); with no wave it exits 0 before ever
-# taking a verdict. So exit-2-with-the-refusal <=> yes and exit-0 <=> no, the same predicate
+# reaches the verdict, reads UNMET and refuses on the duty channel (tests/lib/duty-read.sh);
+# with no wave it says nothing. So the duty with the refusal <=> yes, the same predicate
 # the other four answer. The gate resolves the sweeper as its own sibling, so a MUTATED copy
 # of it (§A2) must sit beside a sweeper — $MUTDIR carries one. The roster is re-seeded per
 # call under $SID_LG, off verdict_er's $SID_A file — which also clears the sweep's own
@@ -396,10 +397,11 @@ verdict_lg() {  # <repo> -> yes|no|other:<detail>
       agent_id=alg-probe-0001 launched_at=2026-08-05T00:00:00Z \
       deliverable=.bionic/docs/record/never-lg.md tool_use_id=toolu_LGPROBE
   } > "$roster"
-  out=$(mk_stopsweep_payload "$repo" "$SID_LG" false | bash "$PARTY_LG" 2>&1); st=$?
+  out=$(mk_stopsweep_payload "$repo" "$SID_LG" false | bash "$PARTY_LG" 2>/dev/null); st=$?
   case "$st" in
-    0) echo no ;;
-    2) if printf '%s' "$out" | grep -qF "bionic: stop refused — a dispatched agent's contract is unmet"; then echo yes; else echo "other:block-no-detail"; fi ;;
+    0) if [ "$(duty_channel "$out")" != duty ]; then echo no
+       elif duty_reason "$out" "$(duty_path "$repo" "$SID_LG")" | grep -qF "a dispatched agent's contract is unmet"; then echo yes
+       else echo "other:duty-no-detail"; fi ;;
     *) echo "other:exit-$st" ;;
   esac
 }

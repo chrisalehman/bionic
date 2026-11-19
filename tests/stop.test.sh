@@ -15,7 +15,7 @@
 # something to say, which no per-verdict suite can see and no stub suite can prove.
 #
 # THE CASES:
-#   §1  two verdicts block on one Stop -> BOTH reasons, blocks before advisories
+#   §1  a bound session's landing refusal  -> one duty, nothing on the person's stream
 #   §2  one block and one advisory     -> the block first, the advisory kept
 #   §4  a SubagentStop payload         -> only the landing arm can speak
 #   §7  the real tick's turn, judged by the wall's own ready set
@@ -29,10 +29,8 @@
 #   §UB      unbound means no run: two plans, two sessions, the real Stop per session
 #   §WAIT    a row waits by a dependency, a read of a ruling or an order; the refusal names the
 #            three, and a waiting row is not ready, so the turn ends
-#   §GONE    no verb records a wait in prose: decline is an unknown verb, nothing writes a decline
-#            or a lapse, and the Patrol prompt names none
-#   §PATROL  a dead Patrol clock names its three acts in order, a clock that never ticks is told apart,
-#            and the one report sentence is in the rules and the prompt
+#   §GONE    no verb records a wait in prose: decline is an unknown verb, and nothing writes a decline
+#            or a lapse
 #   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
 #   §ONE     a stop is one event: the turn's end is the run's stop event, the reader's answer at 15, and a log the
 #            hook cannot write, or a plain directory, changes nothing it says
@@ -40,8 +38,8 @@
 #            arming check, each a stop-library function called in a shell of its own
 #   §EVENTS  the orchestrator's stop of an agent (TaskStop's PreToolUse) and an agent's own stop
 #            (SubagentStop), each driven through this hook by its payload
-#   §RUNNING a tick of this session is running: its record is judged by the one alive rule, a second
-#            tick exits at once, and the turn end owes no tick while one runs
+#   §RUNNING a tick of this session is running: its record is judged by the one alive rule, and a
+#            second tick exits at once
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the
