@@ -3017,14 +3017,14 @@ CARD_SITREP_WORDS="landed=work.landed,pace.work-landed left=work.left remaining=
 dropped=waste.dropped,work.dropped work=pace.work-landed forecast=pace.time-used,clock.forecast \
 elapsed=clock.elapsed,pace.time-used h=clock.forecast,clock.elapsed hours=clock.forecast,clock.elapsed \
 suites=tests.suites-run,tests.suites-total suite=tests.suites-run,tests.suites-total green=tests.suites-run \
-red=tests.suites-run total=tests.suites-total reviews=reviews review=reviews passed=reviews failed=reviews \
+red=tests.suites-run total=tests.suites-total reviews=reviews review=reviews passed=reviews failed=reviews notpassed=reviews \
 findings=findings.open,asks finding=findings.open,asks discarded=waste.runs-discarded \
 waiting=waste.waiting-on-you,asks chain=close.chain goals=goals goal=goals met=goals notmet=goals \
 notmeasured=goals oncourse=goals items=asks item=asks carried=asks rulings=asks step=steps steps=steps wave=run.wave \
 criteria=goal.* discharged=goal.*"
 # The words the sheet itself sets after its numbers, so a number set before one is that number: 11 green, 1 red; 4
-# passed, 2 failed; 0 of 4 met, 4 on course; 14 items, 8 carried findings, 6 rulings given.
-CARD_SITREP_PLACED="green red passed failed met notmet notmeasured oncourse items carried rulings"
+# passed, 2 failed, 1 not passed; 0 of 4 met, 4 on course; 14 items, 8 carried findings, 6 rulings given.
+CARD_SITREP_PLACED="green red passed failed notpassed met notmet notmeasured oncourse items carried rulings"
 
 # _card_sitrep_sheet <sheet file> -> its facts as tab-separated records, in the sheet's order: `R <key> <value>` per
 # run. and close. fact; `S <n> <name> <state> <tasks>` per step; `T <id> <step> <state> <desc> <note>` per
@@ -3125,7 +3125,7 @@ _card_bind() {
     function tokenize(s,   L, i, j, c, b, a, bb, aa) {
       nt = 0; split("", tt); split("", tv)
       s = " " tolower(s) " "
-      gsub(/not met/, "notmet", s); gsub(/not measured/, "notmeasured", s); gsub(/on course/, "oncourse", s)
+      gsub(/not met/, "notmet", s); gsub(/not measured/, "notmeasured", s); gsub(/not passed/, "notpassed", s); gsub(/on course/, "oncourse", s)
       if (judging) s = names(s)
       L = length(s); i = 1
       while (i <= L) {

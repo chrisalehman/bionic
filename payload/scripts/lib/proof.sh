@@ -3307,6 +3307,20 @@ PROOF_REVIEWS
   return "$rc"
 }
 
+# facts_review_mark <state> <result> -> THE ONE MARK OF A REVIEW QUESTION: `pass`, `fail` or `neither`, from the state
+# facts_reviews gives it at the head (empty where the judge cannot deal the plan) and its newest reading's result. The
+# cover holds the range, never the result, so only a newest reading that passed is a pass, and only where its range is
+# covered or no judge reads coverage. A failing question is a fail, and so, with no judge, is a newest reading that
+# failed. Anything else (a covered flag or fail, an uncovered question, one owed a reading) is neither. The release
+# card's Reviews marks and the situation report's judged reviews count both read this, so no question counts two ways.
+facts_review_mark() {
+  case "${1:-}:${2:-}" in
+    failing:*|:fail) printf 'fail\n' ;;
+    covered:pass|:pass) printf 'pass\n' ;;
+    *) printf 'neither\n' ;;
+  esac
+}
+
 # proof_door_cover <tree> <from> <candidate> -> THE JUDGE'S BASIS OF A CANDIDATE AT ITS DOOR: `release`, `prose`, or
 # `owes`, a tab, and each path the range touched outside the release set, comma-joined, read by the walk facts_cover
 # reads, over <from>..<candidate>, with the check that has just passed at the door taken as passing at <candidate>.

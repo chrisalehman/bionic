@@ -1570,7 +1570,7 @@ RR_MATRIX
   }
 
   poker_verb_release_approval() {
-    local nm line key reply ac tier st au ruled person why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again fo fw
+    local nm line key reply ac tier st au ruled person why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again fo fw mk
     if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_last_line >/dev/null 2>&1 || ! _proof_reader_load; then
       die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
@@ -1903,18 +1903,19 @@ RR_AGAINST_EOF
         -) clands="" ;;
         *) clands="$(printf '%s' "$clands" | tr ',' '\n' | awk -F'@' 'NF == 2 { printf "%s%s", (n++ ? ", " : ""), ($1 == "-" ? "" : $1 " at ") substr($2, 1, 8) }')" ;;
       esac
+      # THE MARK IS lib/proof.sh `facts_review_mark`'s, the one the situation report's count reads; the words say
+      # why, a covered reading that flagged or failed its result beside the cover.
+      case "$(facts_review_mark "${cst:-}" "$r")" in pass) mk="✅" ;; fail) mk="✖️" ;; *) mk="➖" ;; esac
       case "${cst:-}:$r" in
-        failing:*) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
-        # THE PASS MARK IS THE NEWEST READING'S PASS: the cover holds the range, never the result, so a covered reading
-        # that flagged or failed says its result beside the cover and draws no pass mark.
-        covered:pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm${clands:+, covered at this head by $clands}"$'\n' ;;
-        covered:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, result ${r:-none}, covered at this head${clands:+ by $clands}"$'\n' ;;
-        uncovered:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, not covered at this head"$'\n' ;;
-        absent:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, a review still owed at this head"$'\n' ;;
-        :pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm"$'\n' ;;
-        :fail) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
-        *) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, ${r:-no result}"$'\n' ;;
+        failing:*|:fail) why=", failing" ;;
+        covered:pass) why="${clands:+, covered at this head by $clands}" ;;
+        covered:*) why=", result ${r:-none}, covered at this head${clands:+ by $clands}" ;;
+        uncovered:*) why=", not covered at this head" ;;
+        absent:*) why=", a review still owed at this head" ;;
+        :pass) why="" ;;
+        *) why=", ${r:-no result}" ;;
       esac
+      RR_REVIEWS="${RR_REVIEWS}$mk $q — $nm$why"$'\n'
     done
 
     # THE HAND-HOLDS, from the last build landing (line.sh `hand_holds_window`'s start) to this render. The render's
