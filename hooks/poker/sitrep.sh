@@ -1926,11 +1926,12 @@ sitrep_tick_line() {
     if [ "$HO_MODE" != none ]; then
       HO_PLAN_REL="${PV_PLAN#"$PV_REPO"/}"
       # THE WATCH, AS ITS RECORD SAYS IT (lib/patrol.sh `watch_state`): the session's watcher, or none yet.
-      HO_PATROL="no watch yet — this turn's end starts it"
-      case "$(watch_state "$HO_ROOT" "$HO_SID" 2>/dev/null)" in
+      HO_WS="$(watch_state "$HO_ROOT" "$HO_SID" 2>/dev/null)" || HO_WS=""
+      case "$HO_WS" in
         watching\ *) HO_PATROL="watching" ;;
-        resting\ *)  HO_PATROL="resting ($(watch_state "$HO_ROOT" "$HO_SID" 2>/dev/null | cut -d' ' -f2-))" ;;
-        stopped\ *)  HO_PATROL="stopped without a word — this turn's end starts another" ;;
+        resting\ *)  HO_PATROL="resting, ${HO_WS#resting }" ;;
+        stopped\ *)  HO_PATROL="stopped without a word; this turn's end starts another" ;;
+        *)           HO_PATROL="none yet; this turn's end starts it" ;;
       esac
       { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
       if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$PV_PLAN")" = no ]; then
