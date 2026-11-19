@@ -492,12 +492,15 @@ ws_tx() {
     message:{role:"user",content:"over to you"}}' > "$TMPROOT/ws-tx-${1##*/}.jsonl"
   printf '%s' "$TMPROOT/ws-tx-${1##*/}.jsonl"
 }
-# ws_stop <repo> <transcript> [env assignment...] -> WS_OUT WS_ERR WS_RC: the turn-end hook, as the platform runs it
+# ws_stop <repo> <transcript> [env assignment...] -> WS_OUT WS_ERR WS_RC: the turn-end hook, as the platform runs it,
+# with the agents WS_BG names (a JSON array, none by default) still running
 ws_stop() {
   local repo="$1" tx="$2"; shift 2
-  jq -nc --arg s "$SID" --arg c "$repo" --arg t "$tx" \
-    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}' > "$TMPROOT/ws.in"
-  ( cd "$repo" && exec env CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$SID" "$@" bash "$WS_HOOK" < "$TMPROOT/ws.in" ) \
+  jq -nc --arg s "$SID" --arg c "$repo" --arg t "$tx" --argjson bg "${WS_BG:-[]}" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:$bg}' > "$TMPROOT/ws.in"
+  ( cd "$repo" && exec env CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$SID" \
+      BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
+      "$@" bash "$WS_HOOK" < "$TMPROOT/ws.in" ) \
     > "$TMPROOT/ws.out" 2> "$TMPROOT/ws.err"
   WS_RC=$?; WS_OUT="$(cat "$TMPROOT/ws.out")"; WS_ERR="$(cat "$TMPROOT/ws.err")"
 }
@@ -584,12 +587,13 @@ expect_eq "OPL7.a a watcher an earlier turn end started, still watching: nothing
 expect_true "OPL7.b …and the hook does not wait out its bound for it" test $((WS_T1 - WS_T0)) -lt 8
 kill "$WS_LIVE" 2>/dev/null; wait "$WS_LIVE" 2>/dev/null
 ws_rest "$RWR" person "$(ws_iso 2)" d5
-# The row's deliverable is on disk, so no landing refusal takes the turn and the open row alone keeps the line back.
-printf 'done\n' > "$RWR/written.md"
-add_row "$RWR" name=busy deliverable="$RWR/written.md" duration="4 hours" launched_at="$(iso_ago 60)"
-ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
+# The row's agent is still running, so the landing sweep does not judge it and the open row alone keeps the line back.
+add_row "$RWR" name=busy agent_id=abusy-1111111111111111 deliverable="$RWR/never-written.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+WS_BG='[{"id":"abusy-1111111111111111","status":"running"}]' ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
 expect_eq "OPL8 a roster row open: nothing rests, and nothing is said" "" "$(ws_line)"
-expect_eq "OPL8.a …because the row is open, not because a wall refused the turn" "0|" "$WS_RC|$WS_OUT"
+expect_eq "OPL8.a …because the row is open, not because a wall refused the turn" "0||" \
+  "$WS_RC|$WS_OUT|$(head -1 "$RWR/.bionic/tmp/duty-$SID.state" 2>/dev/null)"
 
 section "§HOOK-STAYS: with an agent or a detached run out and nothing changing, ten passes leave the watcher running (AC-10.4, the suite's half)"
 wp_person_world wh-stays-row
