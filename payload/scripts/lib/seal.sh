@@ -4,7 +4,7 @@
 # WHAT IT OWNS. One plain record per open run, kept where the project's own tools do not reach: the
 # plan's canonical path and digest, the log's path, length and digest, and a state, clean or changed.
 # A run whose files no longer match their seal is a CHANGED run, and the seal names what changed (the
-# plan or the log) and how (gone, changed, shortened or added to). Three functions:
+# plan or the log) and how (gone, changed, shortened or added to). Four functions:
 #
 #   seal_verify <plan>
 #       prints ONE line and exits by it:
@@ -40,6 +40,12 @@
 #   seal_remove <plan>
 #       under the lock, removes the run's seal. 0 removed or none stood; 2 no home; 75 the lock
 #       could not be had.
+#
+#   seal_stands <plan>
+#       0 when a seal in shape stands for the plan, 1 when none does (a seal out of shape is none, as
+#       verify reads it), 2 no home. It takes no lock: a seal is replaced whole by one mv, so a read
+#       sees a whole one, and a writer that acts on the answer is checked again under the lock by
+#       seal_write.
 #
 # WHERE IT LIVES. `<common git dir>/bionic-seal/`, the common directory as lib/root.sh's
 # `git_common_dir` resolves it from the plan's own directory: the same directory from the main
@@ -240,4 +246,10 @@ seal_remove() {  # <plan> -> 0 removed or none stood, 2 no home, 75 the lock not
   _seal_lock || return 75
   rm -f "$_SEAL_FILE"
   _seal_unlock
+}
+
+seal_stands() {  # <plan> -> 0 a seal stands, 1 none, 2 no home
+  [ -n "${1:-}" ] || return 64
+  _seal_place "$1" || return 2
+  _seal_read "$_SEAL_FILE" || return 1
 }

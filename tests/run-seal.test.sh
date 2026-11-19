@@ -8,11 +8,13 @@
 #             reached through a linked directory is the same seal.
 #   §SEAL     verify, write and remove driven directly: no seal, clean, and each road of a change named by
 #             what and how; a caught change stays caught through an honest write until the run is vouched
-#             for; the command a write wraps runs between the check and the new seal.
+#             for; the command a write wraps runs between the check and the new seal; a seal that stands is
+#             seen standing, and one out of shape is seen as none.
 #   §LOCK     a held lock turns a call away in well under a hook's ten seconds with nothing run; a dead
 #             holder's lock is taken over; honest appends racing each other leave the run clean.
 #   §PLAN     the write hook seals the plan in its after-arm: an admitted Write, then an admitted Edit,
-#             each driven through the before and after arms, leave it clean; an Edit seals and does not
+#             each driven through the before and after arms, leave it clean, and the binding Write's own
+#             bind event is sealed by the appender; an Edit seals and does not
 #             bind; an Edit denied at the before-arm, or admitted there with its tool never run, leaves the
 #             seal as it was; an after-arm whose seal cannot be had still exits 0 and says so.
 #
@@ -123,9 +125,16 @@ expect_eq "vouching for the plan never vouches for a hand change to the log" "ch
 rm "$P"; seal_write --vouch run "$P" "$L"; rc=$?
 expect_status "a run whose plan is gone cannot be vouched for" 1 "$rc"
 expect_eq "it stays changed, plan gone" "changed what=plan how=gone" "$(seal_verify "$P")"
+expect_status "a seal that stands is seen standing" 0 "$(seal_stands "$P"; echo $?)"
 seal_remove "$P"; rc=$?
 expect_status "remove exits 0" 0 "$rc"
 expect_eq "and the run reads none" none "$(seal_verify "$P")"
+expect_status "and no seal is seen standing" 1 "$(seal_stands "$P"; echo $?)"
+base; printf 'not a seal\n' > "$(ls "$HOME_DIR"/w.plan.md.*.seal)"
+expect_status "a seal out of shape is seen as none" 1 "$(seal_stands "$P"; echo $?)"
+expect_eq "as verify reads it" none "$(seal_verify "$P")"
+expect_status "outside any repository there is no home to stand in" 2 "$(seal_stands "$SB/outside/x.plan.md"; echo $?)"
+seal_remove "$P"; rm -f "$P"
 expect_status "remove of a seal not there exits 0" 0 "$(seal_remove "$P"; echo $?)"
 seal_write "$P" "$L"; rc=$?
 expect_status "with no seal and no plan nothing is sealed" 2 "$rc"
@@ -215,6 +224,8 @@ expect_status "its after-arm exits 0" 0 "$HOOK_RC"
 expect_eq "the Write that creates a plan binds the session" "plan=$NP" "$(head -1 "$MK")"
 expect_eq "and seals the plan as written" "plan_sum=$(cksum < "$NP")" \
   "$(grep -h '^plan_sum=' "$R/.git/bionic-seal/${NP##*/}".*.seal 2>/dev/null)"
+expect_regex "the bind's event is in the log" '^run/v1\|ev=bind\|' "$(/usr/bin/grep '^run/v1|ev=bind|' "$(plan_fixture_log "$NP")")"
+expect_eq "and is sealed by the appender with the run, which verifies clean" clean "$(seal_verify "$NP")"
 seal_remove "$NP"; unbind
 
 WI=$(jq -n --arg p "$RP" --arg c "$BODY" '{file_path:$p, content:$c}')
