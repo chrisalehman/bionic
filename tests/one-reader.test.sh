@@ -26,7 +26,8 @@
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
-#                 the tree holds none.
+#                 the tree holds none. The tree event is folded in the reader alone: a second fold planted in a
+#                 script is found beside it, and the checkout holds the reader's one.
 #   §LOADER       the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
 #                 tree; a copy planted in a hook file is listed and counted.
 #   §REPORT       with the plants the check exits 1, refusing each finding of the four kinds once; a loader copy
@@ -263,6 +264,12 @@ section "FOLDS"
 expect_eq "a fold through a pipe, an unread \$( ) and a local's \$( ) are named; one whose exit is read and a stand-in are not" "1 2 3" \
   "$(printf '%s\n' "$AFTER" | sed -n 's|^unheard	payload/scripts/lib/planted-folds\.sh:||p' | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "the unheard count rises by three over the tree, which holds none" "0 3" "$(count "$BEFORE" unheard_folds) $(count "$AFTER" unheard_folds)"
+# A row's tree is folded from its events by the reader alone; every other site asks the reader for it.
+tree_folds() { ( cd "$1" && /usr/bin/grep -n 'ev() *== *"tree"\|_e *== *"tree"' payload/scripts/lib/*.sh payload/scripts/*.sh | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//' ); }
+TF="$S/tree-fold/payload/scripts"; mkdir -p "$TF/lib"; cp "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" "$TF/lib/reader.sh"
+printf '%s\n' "planted_trees() { awk -F'|' 'ev() == \"tree\" { t[line_kv(\"row\")] = \$0 }'; }" > "$TF/planted-tree.sh"
+expect_eq "a fold of the tree event planted in a script is found beside the reader's" "payload/scripts/lib/reader.sh payload/scripts/planted-tree.sh" "$(tree_folds "$S/tree-fold")"
+expect_eq "the checkout folds the tree event once, in the reader" "payload/scripts/lib/reader.sh" "$(tree_folds "$BIONIC_SCRIPTS_DIR")"
 
 section "LOADER"
 expect_eq "the loader block's mark is found in one file, the loader's own" "payload/scripts/lib/loader.sh" \

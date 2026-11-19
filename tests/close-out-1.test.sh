@@ -80,7 +80,7 @@ section "ANY-BRANCH — T11 (AC-9.2): a column-less TASK-scale plan closes on an
 mk_task_scale_fixture() {
   local name="$1" working="$2" p
   p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"; advance_to "$p" 8
-  sed -i.bak 's/^scale: wave$/scale: task/' "$p/$PLAN_REL" && rm -f "$p/$PLAN_REL.bak"
+  sed -i.bak 's/^scale: wave$/scale: task/' "$p/$PLAN_REL" && rm -f "$p/$PLAN_REL.bak"; seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   (
     in_fixture "$p" || exit 1
     git checkout -q -b "$working"
@@ -211,6 +211,7 @@ expect_eq "1ar: the step's writer takes a run's log that is there, and refuses o
 # it cleaned, the run open at 8; the close run again delivers on that step and appends no emptier one over it.
 PS="$(mk_fixture p-again)"
 printf 'run/v1|ev=step|n=8|cleanup=done|tmp-wiped=7 entries under the first close|tasks-completed=%s|at=2026-10-04T12:30:00Z\n' "$TASKS_WORDS" >> "$PS/$LOG_REL"
+seal_fixture "$PS/$PLAN_REL" "$PS/$LOG_REL"
 run_close "$PS" run
 expect_eq "1aq: the second close delivers on the step 8 that stood, its wipe kept: one step 8 in the log" "0|yes|1|n=9" \
   "$CO_RC|$(contains "$(co_step_answer "$PS" 8)" "tmp-wiped=7 entries under the first close")|$(grep -c '|ev=step|n=8|' "$PS/$LOG_REL")|$(co_step_answer "$PS" | sed -n 1p)"
@@ -358,7 +359,7 @@ delivered_line() { co_step_answer "$1" | sed -n 's/^delivered=//p'; }
 
 PV1="$(mk_fixture ver1)"; advance_to "$PV1" 8
 awk -v r="$RELV" '{ print } /^walk: exempt$/ { print "release: " r }' "$PV1/$PLAN_REL" > "$PV1/plan.tmp" \
-  && mv "$PV1/plan.tmp" "$PV1/$PLAN_REL"
+  && mv "$PV1/plan.tmp" "$PV1/$PLAN_REL"; seal_fixture "$PV1/$PLAN_REL" "$PV1/$LOG_REL"
 run_close "$PV1" run
 expect_eq "VER2: run with release: closes rc 0" "0" "$CO_RC"
 DL1="$(delivered_line "$PV1")"
@@ -422,6 +423,7 @@ expect_eq "E2E11: …the plan untouched and wt/01-x still standing (nothing was 
 # A RELEASE THAT WOULD SPLIT A CELL (A-orch-28): a `|` in `release:` is refused before any act.
 PR="$(mk_fixture e2e-pipe)"; advance_to "$PR" 8
 sed 's/^archive-root: /release: 1.2|3\narchive-root: /' "$PR/$PLAN_REL" > "$PR/$PLAN_REL.n" && mv "$PR/$PLAN_REL.n" "$PR/$PLAN_REL"
+seal_fixture "$PR/$PLAN_REL" "$PR/$LOG_REL"
 PR_SHA="$(sha_of "$PR/$PLAN_REL")"
 run_close "$PR" run
 expect_eq "E2E14: A-orch-28 run refuses a release holding a | (rc 2)" "2" "$CO_RC"
@@ -434,6 +436,7 @@ co_hold_state() {  # <project> -> open|closed, the state of the run's latest hol
 }
 expect_eq "E2E17: the refused close holds the merge on the run's register" "open" "$(co_hold_state "$PR")"
 sed 's/^release: 1\.2|3$/release: 1.2.3/' "$PR/$PLAN_REL" > "$PR/$PLAN_REL.n" && mv "$PR/$PLAN_REL.n" "$PR/$PLAN_REL"
+seal_fixture "$PR/$PLAN_REL" "$PR/$LOG_REL"
 run_close "$PR" run
 expect_eq "E2E18: …and the close that delivers releases it" "0|closed" "$CO_RC|$(co_hold_state "$PR")"
 
@@ -514,6 +517,7 @@ section "DEPLOY — a run that names a deploy target is delivered only with what
 dp_fixture() {  # <name> <deploy target> -> a fixture at step 8 whose plan names that target
   local p; p="$(mk_fixture "$1")"; advance_to "$p" 8
   sed "s|^deploy_target: n/a\$|deploy_target: $2|" "$p/$PLAN_REL" > "$p/$PLAN_REL.d" && mv "$p/$PLAN_REL.d" "$p/$PLAN_REL"
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"
 }
 dp_close() {  # <project> <verb> [<option> <value>]... -> CO_OUT and CO_RC, as run_close with the options after the verb
@@ -571,6 +575,7 @@ cat >> "$SPY_DIR/lib/seal.sh" <<'SPY'
 eval "_spy_$(declare -f seal_remove)"
 seal_remove() {
   printf 'remove: delivered-lines=%s\n' "$(grep -c '|ev=step|n=9|.*delivered=' "$SPY_LOGFILE" 2>/dev/null)" >> "$SPY_LOG"
+  if [ -n "${SPY_HOLD:-}" ] && _seal_place "$1"; then mkdir -p "$_SEAL_HOME/.reap"; printf '%s\n' "$SPY_HOLD" > "$_SEAL_HOME/.reap/pid"; fi
   _spy_seal_remove "$@"
 }
 SPY
@@ -606,12 +611,15 @@ expect_eq "SEAL6: a close whose plan stays in an open epic lifts the seal too, t
   "$CO_RC|$(seal_count "$PS2")|$([ -f "$PS2/$PLAN_REL" ] && echo yes || echo no)"
 
 # THE LOCK NOT HAD IS A REFUSAL, NOT A STALE SEAL. A held lock turns the removal away after about two seconds; the close
-# names the seal and moves nothing, the seal stands, and the same close with a dead holder's lock goes through.
+# names the seal and moves nothing, the seal stands, and the same close with a dead holder's lock goes through. The
+# lock is taken by the spy as the lift begins: held from the start, it turns the close away at its gate, which
+# compares the run with its seal under that same lock, and the lift would never be reached.
 PS3="$(mk_fixture seal-held)"; advance_to "$PS3" 8; rm -f "$PS3/$EPIC_REL"
-mkdir "$PS3/.git/bionic-seal/.reap"; printf '%s\n' "$$" > "$PS3/.git/bionic-seal/.reap/pid"
-expect_eq "SEAL7: precondition: a live holder's lock stands beside the run's seal" "1|yes" \
+expect_eq "SEAL7: precondition: the run's seal stands, and no lock is held before the close" "1|no" \
   "$(seal_count "$PS3")|$([ -d "$PS3/.git/bionic-seal/.reap" ] && echo yes || echo no)"
+export SPY_LOG SPY_LOGFILE="$PS3/$LOG_REL" SPY_HOLD="$$"; SCRIPT="$SPY_DIR/close-out.sh"
 run_close "$PS3" run
+SCRIPT="$SCRIPT_REAL"; unset SPY_LOGFILE SPY_HOLD
 expect_eq "SEAL8: the lock not had refuses the close (rc 2), naming the seal" "2|yes" \
   "$CO_RC|$(contains "$CO_OUT" "the run's seal could not be lifted")"
 expect_eq "SEAL9: …the seal still stands and the plan was not moved" "1|yes" "$(seal_count "$PS3")|$([ -f "$PS3/$PLAN_REL" ] && echo yes || echo no)"

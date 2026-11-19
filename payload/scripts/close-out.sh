@@ -1724,7 +1724,7 @@ co_close_facts() {
   # A row is landed only on a merge read: with none, the judgment folds no landing, as the run would write none.
   ih="$CO_MERGE_COMMIT"
   [ -z "$ih" ] || for id in $(co_lands_rows); do printf '\npublished|row=%s|commit=%s|kind=close|by=close-out|why=merged' "$id" "$ih"; done
-  co_facts tree | awk -F'|' "$_READER_AWK"'ev() == "tree" { p = line_kv("path"); sub(/\/$/, "", p); if (p != "" && p != "—") print line_kv("row") "\t" p }' \
+  co_ask reader_trees | awk -F'|' "$_READER_AWK"'{ p = line_kv("path"); sub(/\/$/, "", p); if (p != "" && p != "—") print line_kv("row") "\t" p }' \
     | while IFS=$'\t' read -r id p; do
         git -C "$ROOT" show-ref --verify --quiet "refs/heads/wt/${p##*/}" && printf '\ntree|row=%s|path=' "$id"
       done

@@ -57,10 +57,8 @@
 # identical words (Chris, 2026-09-03: "Nothing should apply until bionic is triggered");
 # there is one guard now, ahead of all five, and BELOW the fail-closed arm — which cannot
 # be scoped by it, because the predicate lives in the library that just failed to load.
-# The line itself is at column zero further down, and it is deliberately the FIRST mention
-# of that variable in this file: tests/cross-gate-agreement.test.sh reads the first one and
-# holds it to the canonical shape, so a comment quoting the guard above the guard would
-# make that row read prose instead of code.
+# Only the seal's comparison runs ahead of it, because a changed run is refused whether or
+# not its engaged file still stands.
 #
 # THE LIBRARY IS WANTED ONLY AS WIDE AS THE FAIL-CLOSED ARM REACHES (A-56.1).
 # `BIONIC_LIB_WANT` is the union of the two CLOSED walls' pre-fold lists — protect-main's
@@ -147,12 +145,49 @@ fi
 # session's command to two different roots; one call cannot.
 bionic_context 2>/dev/null || exit 0
 
-# THE ENGAGEMENT GUARD (AC-20), asked once for all five. EVERY UNREADABLE STATE READS
-# AS NOT ENGAGED — absent marker, a symlink at the path, a foreign or unshaped session
-# key, no key at all. The marker is the one artifact whose PRESENCE opens a wall, so the
-# fail direction is inverted here on purpose: the arming partition is the consent
-# boundary (1.3.2 close-out).
-[ "$BIONIC_ENGAGED" = 1 ] || exit 0
+# THE PLAN THIS SESSION IS BOUND TO, read once: lib/run.sh `session_plan`, which believes the
+# binding record kept beside the seals over the engaged file, and reads that file only for a
+# session with no record. A session not engaged resolves the record's home here, in this shell,
+# so the later readers inherit it (an engaged one had it resolved by `bionic_context`).
+[ "$BIONIC_ENGAGED" = 1 ] || { _run_seal && seal_binding_warm "$BIONIC_ROOT"; } >/dev/null 2>&1 || :
+BIONIC_BOUND_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_BOUND_PLAN=""
+
+# THE SEAL, FIRST. A commit of a bound run is compared with that run's seal before the
+# engagement test and before any costly read: the collector below derives readings and the
+# gate folds the log, and a hook that runs past its ten seconds admits the commit, so a run
+# changed around the tool is refused here or not at all. It costs one digest of the plan and
+# one of the log. On a change the seal's wall alone is folded, and nothing after it runs. A
+# commit placed in another repository is not this run's, as the gate itself judges it. A
+# session with no seal standing (a run the appender has not sealed yet) is not compared.
+BIONIC_SEAL_LINE=""; BIONIC_SEAL_PLAN=""; BIONIC_SEAL_LOG=""; SEAL_LINE=""; SEAL_LOG=""
+case "$COMMAND" in
+  *commit*)
+    # A plan this process cannot read has no digest to take, and that is not a change: the gate
+    # refuses it in its own words, naming what cannot be opened.
+    if [ -n "$BIONIC_BOUND_PLAN" ] && ! plan_unreadable "$BIONIC_BOUND_PLAN" >/dev/null \
+       && git_argv_has_sub "$COMMAND" commit && ! eg_commit_outside_root && _run_seal; then
+      seal_verify "$BIONIC_BOUND_PLAN" >/dev/null 2>&1
+    fi ;;
+esac
+case "$SEAL_LINE" in
+  changed*|busy)
+    BIONIC_SEAL_LINE="$SEAL_LINE"; BIONIC_SEAL_PLAN="$BIONIC_BOUND_PLAN"; BIONIC_SEAL_LOG="$SEAL_LOG"
+    EVENT=$(bionic_jq .hook_event_name); [ -n "$EVENT" ] || EVENT="PreToolUse"
+    bionic_fold "$EVENT" wall_run_seal
+    exit $? ;;
+esac
+
+# THE ENGAGEMENT GUARD, asked once for all five. EVERY UNREADABLE STATE READS AS NOT
+# ENGAGED — absent marker, a symlink at the path, a foreign or unshaped session key, no key
+# at all — and the fail direction is inverted here on purpose: a session that never invoked
+# the skill never consented, and no wall binds it. But consent is given once, by binding, not
+# held by the engaged file: under D3 a session the binding record holds to a plan stays judged
+# whatever became of that file, since a tool can remove it or replace it with a link, and a
+# guard that let that lift every wall would make the file a switch any command can throw. So
+# such a session is judged as engaged, by every wall below. A record of `none`, or no record,
+# leaves the file the one answer, as before.
+[ "$BIONIC_ENGAGED" = 1 ] || [ -n "$BIONIC_BOUND_PLAN" ] || exit 0
+BIONIC_ENGAGED=1
 
 # AN ABSENT FIELD IS NOT A MISMATCH, so a hand-run payload still reaches the walls — the
 # rule hooks/stop.sh states for its own event. The event is handed to every function and

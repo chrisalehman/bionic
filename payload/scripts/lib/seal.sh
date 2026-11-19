@@ -18,6 +18,9 @@
 #       log whose sealed part differs is `changed`. A log sealed while absent reads as an empty one, so
 #       a log made where there was none is `added`. When the files show a difference now, that is
 #       the line; when they match but the seal holds a change caught earlier, the caught one is.
+#       The line is also left in the caller's shell as SEAL_LINE, and the log the seal names as
+#       SEAL_LOG (empty when no seal was read), so a caller that runs it in its own shell can name
+#       the log even when the plan that would lead to it is gone.
 #
 #   seal_write [--vouch plan|run] <plan> <log> [<command> [<arg>…]]
 #       under the lock: checks the run against its seal, runs <command> if one is given, then seals
@@ -179,15 +182,17 @@ _seal_check() {
 
 seal_verify() {  # <plan> -> one line: clean | changed what= how= | none | nohome | busy
   local rc
+  SEAL_LINE="" SEAL_LOG=""
   [ -n "${1:-}" ] || return 64
-  _seal_place "$1" || { printf 'nohome\n'; return 3; }
-  [ -f "$_SEAL_FILE" ] || { printf 'none\n'; return 2; }
-  _seal_lock || { printf 'busy\n'; return 75; }
+  _seal_place "$1" || { SEAL_LINE=nohome; printf 'nohome\n'; return 3; }
+  [ -f "$_SEAL_FILE" ] || { SEAL_LINE=none; printf 'none\n'; return 2; }
+  _seal_lock || { SEAL_LINE=busy; printf 'busy\n'; return 75; }
   if ! _seal_read "$_SEAL_FILE"; then
-    _seal_unlock; printf 'none\n'; return 2
+    _seal_unlock; SEAL_LINE=none; printf 'none\n'; return 2
   fi
   _seal_check; rc=$?
   _seal_unlock
+  SEAL_LINE="$_SEAL_LINE" SEAL_LOG="$_S_LOG"
   printf '%s\n' "$_SEAL_LINE"
   return "$rc"
 }

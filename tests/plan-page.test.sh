@@ -253,6 +253,10 @@ ap() { ( cd "$R" && HOME="$HOME_DIR" CLAUDE_CONFIG_DIR="$HOME_DIR/.claude" CLAUD
 hdr "base-sha: $H"; B="$(ap launch)|$(grows)"; sed -i '' 's/| Grow. | — |/| Grow. | approval:doctrine-growth, approval:launch |/' "$P2"
 expect_eq "with the approval standing, growth from T3's tree is refused (exit 2) while T3 names no wait on it, saying what to write, and admitted (exit 0) once it does" "1|21|Not admitted: row T3 does not wait on approval:doctrine-growth|edit the deps cell of T3 in the plan to: approval:doctrine-growth|00|" "$B|$(grows)"
 expect_eq "approve refuses launch while no task waits on it, takes it once T3 does, and refuses a name none waits on" "1|0|1" "${B%%|*}|$(ap launch)|$(ap nobody)"
+# A tree whose name a second row's latest tree also carries is no row's: the gate names both, in the order their trees were set.
+cp "$L2" "$L2.k"; printf 'run/v1|ev=tree|row=T1|path=.worktrees/50-T3/|branch=wt/t3|base=%s|at=2026-11-01T00:00:16Z\n' "$H" >> "$L2"; gate_as "$SID" "" "$T3W"; mv "$L2.k" "$L2"
+expect_eq "a tree two rows' latest tree events name is judged at current, naming the rows" "evidence-gate: worktree 50-T3 is named by more than one ## Tasks row (T3, T1)" \
+  "$(grep -o 'evidence-gate: worktree [^ ]* is named by more than one ## Tasks row ([^)]*)' <<< "$GATE_SAID")"
 # A page at 15 whose landed tasks stand out of order is judged with its run's log: the hook names the plan its copy is of.
 OL="$R/.bionic/docs/record/wave-01-x/run.log"; mkdir -p "${OL%/*}"; [ ! -f "$OL" ] || mv "$OL" "$OL.kept"
 for t in T1 T5 T6 T7; do printf 'run/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-11-01T00:00:0%sZ\n' "$t" "$(printf 'a%.0s' {1..40})" "${t#T}"; done > "$OL"
