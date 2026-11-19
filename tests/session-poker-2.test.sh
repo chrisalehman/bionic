@@ -419,13 +419,30 @@ s41_turn() {  # <repo> <tick output> -> the transcript path
   printf '%s' "$tr"
 }
 s41_stop() {  # <repo> <transcript> -> sets S41_STOP_OUT
+  S41_STOP_D="$1"
   S41_STOP_OUT="$(jq -nc --arg t "$2" --arg c "$1" --arg s "$SID" \
       '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
     | env CLAUDE_CODE_SESSION_ID="$SID" bash "$S41_STOP" 2>/dev/null)"
 }
+# WHOSE FIX DECIDES THE CHANNEL. An unanswered stand-down is the agent's to answer, so the wall refuses it on the
+# duty channel: the fixed line in a Stop context, the whole refusal in the session's duty file. These two read the
+# refusal on whichever channel it rides: `s41_refused` names the channel, or nothing for a turn that ends.
+S41_DUTY_LINE="bionic: a duty is owed; run session-poker.sh duty"
+s41_ctx() { printf '%s' "$S41_STOP_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+s41_refused() {
+  local d; d="$(s41_refused)"
+  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
+  [ -z "$(s41_ctx)" ] || printf 'duty'
+}
+s41_reason() {
+  case "$(s41_refused)" in
+    block) printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null ;;
+    duty)  if [ "$(s41_ctx)" = "$S41_DUTY_LINE" ]; then cat "$S41_STOP_D/.bionic/tmp/duty-$SID.state" 2>/dev/null; else s41_ctx; fi ;;
+  esac
+}
 s41_stop "$R41B" "$(s41_turn "$R41B" "$S41B_OUT")"
 expect_contains "41b5 the CONTROL: the real stop wall refuses an unanswered stand-down on this drive" \
-  "stand-down unanswered" "$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+  "stand-down unanswered" "$(s41_reason)"
 
 # ---------- §HOLD-fix (wave-24 T27; critic I4): one pasteable hold line at all three sites ----------
 # The tick's STANDDOWN line, the stop wall's stand-down refusal and the Patrol prompt each print
@@ -439,7 +456,7 @@ s41_hold_argv() {  # <text> -> the first `bash …session-poker.sh hold …` com
   eval "set -- $l"
   printf '%s|%s|%s' "$#" "$4" "$5"
 }
-S41B_WALL="$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+S41B_WALL="$(s41_reason)"
 expect_eq "41b6 critic I4 the tick's STANDDOWN line pastes as one hold of w-1 with a quoted reason" \
   "5|w-1|why it stays up" "$(s41_hold_argv "$S41B_OUT")"
 expect_eq "41b7 …and the stop wall's refusal prints the same command for the same row" \
@@ -465,7 +482,7 @@ expect_absent "41c5 …and neither tick stands it down" "poker: STANDDOWN" "$S41
 expect_absent "41c6 …nor writes it an order" "target=w-1" "$(cat "$(orders_of "$R41H")" 2>/dev/null)"
 s41_stop "$R41H" "$(s41_turn "$R41H" "$S41H_T1")"
 expect_eq "41c7 AC-4.3 the real stop wall ends the held tick's turn with no decline text" "" \
-  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+  "$(s41_refused)"
 # A successor row (a re-dispatch's, or `extend`'s) is a new contract and carries no hold (D1).
 poke "$R41H" extend w-1 "more work"
 expect_absent "41c8 the copy a successor row takes drops held=" "held=" \
@@ -510,7 +527,7 @@ expect_contains "41dc precondition: the tick stands w-1 down" "poker: STANDDOWN 
 S41DC_TR="$(s41_turn "$R41DC" "$OUT")"
 jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"text",text:"standdown-declined: w-1 is kept for a second pass"}]}}' >> "$S41DC_TR"
 s41_stop "$R41DC" "$S41DC_TR"
-expect_eq "41dc2 the declining turn ends" "" "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+expect_eq "41dc2 the declining turn ends" "" "$(s41_refused)"
 # An unrelated row joins, so the next tick prints in full rather than `unchanged` (an unchanged
 # tick writes no order whatever the answer was) and has to decide w-1 again.
 add_row "$R41DC" name=busy2 deliverable="$R41DC/never-written-2.md" duration="4 hours" launched_at="$(iso_ago 60)"
@@ -521,13 +538,13 @@ expect_contains "41dc3 AC-4.6 the next tick reads the decline as a hold" "poker:
 expect_absent "41dc4 …and does not stand w-1 down again" "poker: STANDDOWN" "$OUT"
 s41_stop "$R41DC" "$(s41_turn "$R41DC" "$OUT")"
 expect_eq "41dc5 AC-4.6 the second turn, same agent and no decline text, is not refused" "" \
-  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+  "$(s41_refused)"
 s41_transcript 2 "w-1:idle" "busy2:running"
 poke "$R41DC" tick
 expect_contains "41dc6 a new message from w-1 voids the decline: the tick stands it down" "poker: STANDDOWN w-1" "$OUT"
 s41_stop "$R41DC" "$(s41_turn "$R41DC" "$OUT")"
 expect_contains "41dc7 …and that turn, with no answer, is refused" "stand-down unanswered" \
-  "$(printf '%s' "$S41_STOP_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+  "$(s41_reason)"
 
 # ---------- §HOLD-idle (AC-4.5; D1): a held idle row is not re-opened ----------
 R41I="$(s41_world s41-hold-idle)"
