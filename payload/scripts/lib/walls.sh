@@ -4530,7 +4530,8 @@ return 0
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs one of these `session-poker.sh`
 # verbs: `amend`, `extend`, `task-add` and `hold` (a roster row, or a row's birth); `current` (the
 # run's step); `proof-add` (a proof the gates judge by); `approve` and `waive` (each written on the
-# user's word); `release-check` (the check's fact); `finding-move` (a finding across the line);
+# user's word); `accept` and `abandon` (the person's word on a run changed around the tool, which seals it
+# again or ends it); `release-check` (the check's fact); `finding-move` (a finding across the line);
 # `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
 # writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
 # user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
@@ -4610,7 +4611,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|accept|abandon|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"

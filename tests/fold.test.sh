@@ -219,6 +219,82 @@ expect_contains "9b: …and so does the block blocker's" "REASON-ALPHA" "$(reaso
 expect_true "9c: …in the order the functions were named" \
   test "$(index_of REASON-EXIT2)" -lt "$(index_of REASON-ALPHA)"
 
+# THE PERSON'S CHANNEL WINS, in either order: refuse.sh's `whose` cell, read through the composed wire.
+FD_ROOT="$(cd "$(mktemp -d)" && pwd -P)"; mkdir -p "$FD_ROOT/.bionic/tmp"
+FD_FILE="$FD_ROOT/.bionic/tmp/duty-fs.state"
+FD_ENV="BIONIC_ROOT='$FD_ROOT'; BIONIC_SID=fs"
+STUB_DUTY_A='dutyA() {
+  fold_block duty stop "the duty fact" "do the duty" "REASON-DUTY for the model"
+  return 2
+}'
+STUB_DUTY_B='dutyB() {
+  fold_block duty stop "the second duty" "do the second" "REASON-DUTY-B for the model"
+  return 2
+}'
+fd_headline() { printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -m1 '^bionic: ' || true; }
+fd_ctx() { printf '%s' "$FOLD_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+fd_decision() { printf '%s' "$FOLD_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+for FD_ORDER in "dutyA blockA" "blockA dutyA"; do
+  rm -f "$FD_FILE"
+  # shellcheck disable=SC2086
+  drive "$FD_ENV
+$STUB_DUTY_A
+$STUB_BLOCK_A" Stop $FD_ORDER
+  expect_eq "9d [$FD_ORDER]: the person's refusal keeps its channel: a block" "block" "$(fd_decision)"
+  expect_eq "9e [$FD_ORDER]: …and its headline is the person's line, on the person's stream" \
+    "bionic: stop refused — the first fact (fix the first)" "$(fd_headline)"
+  expect_contains "9f [$FD_ORDER]: …while the duty still binds: its line rides the model's reason" \
+    "bionic: stop refused — the duty fact (do the duty)" "$(reason_of)"
+  expect_contains "9g [$FD_ORDER]: …with its detail" "REASON-DUTY" "$(reason_of)"
+  expect_contains "9h [$FD_ORDER]: …beside the person's detail" "REASON-ALPHA" "$(reason_of)"
+  expect_false "9i [$FD_ORDER]: …and no duty file is left to say it a second time" test -e "$FD_FILE"
+done
+rm -f "$FD_FILE"
+drive "$FD_ENV
+$STUB_DUTY_A
+$STUB_DUTY_B" Stop dutyA dutyB
+expect_eq "9j: two duties compose onto the duty channel: the fixed line, exit 0, nothing for the person" \
+  "bionic: a duty is owed; run session-poker.sh duty|0|" "$(fd_ctx)|$FOLD_RC|$FOLD_ERR"
+expect_eq "9k: …the file opens on the first duty's line" "bionic: stop refused — the duty fact (do the duty)" \
+  "$(sed -n '1p' "$FD_FILE" 2>/dev/null)"
+expect_contains "9l: …and holds the second's line and both details" \
+  "bionic: stop refused — the second duty (do the second)" "$(cat "$FD_FILE" 2>/dev/null)"
+expect_true "9m: …in the order the functions were named" \
+  test "$(awk '/REASON-DUTY for/{print NR; exit}' "$FD_FILE" 2>/dev/null)" -lt "$(awk '/REASON-DUTY-B/{print NR; exit}' "$FD_FILE" 2>/dev/null)"
+drive "$FD_ENV
+$STUB_DUTY_A
+$STUB_BLOCK_EXIT2" Stop dutyA blockE
+expect_eq "9n: an exit2 beside a duty: the person's exit2 keeps its status and its headline" \
+  "2|bionic: stop refused — the exit2 fact (fix the exit2)" "$FOLD_RC|$(fd_headline)"
+expect_contains "9o: …and the duty's line still reaches the one wire both readers read" "the duty fact" "$FOLD_ERR"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "SAY: a line for the person on the quiet channel rides only a turn that blocked nothing"
+STUB_SAY='sayS() {
+  fold_say "SAY-LINE for the person"
+  return 1
+}'
+STUB_SAY_MUTE='sayM() {
+  fold_say "SAY-DISCARDED"
+  return 0
+}'
+say_of() { printf '%s' "$FOLD_OUT" | jq -r '.systemMessage // ""' 2>/dev/null; }
+drive "$STUB_SAY" Stop sayS
+expect_eq "SAY1: a staged line is one systemMessage object on stdout, exit 0, nothing on stderr" \
+  "SAY-LINE for the person|systemMessage|0|" \
+  "$(say_of)|$(printf '%s' "$FOLD_OUT" | jq -r 'keys | join(",")' 2>/dev/null)|$FOLD_RC|$FOLD_ERR"
+drive "$STUB_SAY
+$STUB_ADVISE" Stop sayS adviseA
+expect_eq "SAY2: an advisory beside it stays on stderr, the line on stdout" "SAY-LINE for the person|ADVISORY-ONE from a function with no refusal" \
+  "$(say_of)|$FOLD_ERR"
+drive "$STUB_SAY
+$STUB_BLOCK_A" Stop sayS blockA
+expect_eq "SAY3: a block takes the turn: the refusal is the one document, and the line is not shown" "block|" \
+  "$(fd_decision)|$(say_of)"
+expect_absent "SAY3b …anywhere" "SAY-LINE" "$FOLD_OUT$FOLD_ERR"
+drive "$STUB_SAY_MUTE" Stop sayM
+expect_eq "SAY4: a function that stages a line and returns 0 has said nothing" "" "$FOLD_OUT$FOLD_ERR"
+
 # ─────────────────────────────────────────────────────────────────────────────
 section "10: advisories alone — in order, on stderr, exit 0"
 

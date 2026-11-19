@@ -542,6 +542,7 @@ s31_transcript() {  # <repo> <text>... -> the transcript path
   printf '%s' "$tr"
 }
 s31_stop() {  # <repo> <transcript> -> sets S31_OUT, S31_RC
+  S31_D="$1"
   S31_OUT="$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$S31_STOP_HOOK" <<EOF 2>/dev/null
 $(jq -nc --arg t "$2" --arg c "$1" --arg s "$SID" \
    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}')
@@ -549,8 +550,11 @@ EOF
 )"
   S31_RC=$?
 }
-s31_reason() { printf '%s' "$S31_OUT" | jq -r '.reason // ""' 2>/dev/null; }
-s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+# The refusal on the channel it rides (tests/lib/duty-read.sh): block, duty, or nothing for a turn that ends.
+. "${BASH_SOURCE[0]%/*}/lib/duty-read.sh"
+S31_D=""
+s31_decision() { duty_channel "$S31_OUT"; }
+s31_reason() { duty_reason "$S31_OUT" "$(duty_path "$S31_D" "$SID")"; }
 
 # ── hoisted from Section 34: s34_plan — Sections 37, 42, 49, 51 and §ROW-LABEL build the gate-admitted plan with it. ──
 s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the session is bound to it

@@ -49,6 +49,7 @@ set -uo pipefail
 # running this plan" binds to it, because an unbound session's newest-plan fallback is
 # announced and never acted on.
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 # THE MERGED ENTRY POINT (epic-23 wave-11, T12). This gate is a FUNCTION now —
 # `stop_patrol_duties` in payload/scripts/lib/stop.sh — and the process that runs it is
@@ -217,6 +218,7 @@ stdin_for() {  # <project> <transcript-path> [event] [stop_hook_active]
 # operator's real session id, find no marker under it, and pass every case in silence. The
 # same mirroring the suites of hooks/stop.sh and dispatch-preflight already do.
 fire() {  # <project> [event] [stop_hook_active]
+  FIRE_D="$1"
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" <<< "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-Stop}" "${3:-false}")" 2>"${PE1_ERRFILE:-/dev/null}")
   # THE USER STREAM, kept for the AC-E1.3 section at the end (task 13). The JSON reason
   # on stdout is what every arm above reads; this is the one line a reader is shown.
@@ -227,12 +229,15 @@ fire() {  # <project> [event] [stop_hook_active]
 # The raw driver takes the id OUT OF THE PAYLOAD it was handed, so a case that ships a
 # deliberately odd session key still drives the gate with that key on both channels.
 fire_raw() {  # <project> <stdin-json>
+  FIRE_D="$1"
   local _sid; _sid=$(printf '%s' "$2" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_RC=$?
 }
 
-reason_of() { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
-decision_of() { printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+# Every duty this gate owes is the agent's, so it is read on the duty channel (tests/lib/duty-read.sh).
+FIRE_D=""
+reason_of() { duty_reason "$HOOK_OUT" "$(duty_path "$FIRE_D" "$SID")"; }
+decision_of() { duty_channel "$HOOK_OUT"; }
 
 expect_allow() {  # <label>
   if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
@@ -242,8 +247,8 @@ expect_allow() {  # <label>
   fi
 }
 
-# A block is the JSON decision payload on stdout, with rc 0 — the form Design
-# (T5) names. Every block assertion also states what the reason must NOT say:
+# A refusal of this gate is the duty on stdout, with rc 0: the agent's fix, so the agent's channel. Every
+# refusal assertion also states what the reason must NOT say:
 # a reason that lists both duties whichever one is missing tells the reader
 # nothing, and is the failure this gate's whole value rests on avoiding.
 expect_block() {  # <label> <must-contain> [must-not-contain]
@@ -251,8 +256,8 @@ expect_block() {  # <label> <must-contain> [must-not-contain]
   if [ "$HOOK_RC" -ne 0 ]; then
     no "$1" "rc=$HOOK_RC (a JSON block exits 0); stdout=<$HOOK_OUT>"; return
   fi
-  if [ "$d" != "block" ]; then
-    no "$1" "decision=<$d> expected block; stdout=<$HOOK_OUT>"; return
+  if [ "$d" != "duty" ]; then
+    no "$1" "decision=<$d> expected duty; stdout=<$HOOK_OUT>"; return
   fi
   case "$r" in
     *"$2"*) ;;

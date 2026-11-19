@@ -34,6 +34,10 @@ permission-answer PermissionRequest Bash  exit 2 is not honoured on this event: 
 stop Stop -
 stop SubagentStop -
 EOF
+# THE PERSON'S REFUSAL KEEPS ITS CHANNEL: the broken install's words on the person's stream (its exit 2 is above).
+hc "$S/hooks/stop.sh" Stop - false >/dev/null
+expect_eq "stop on Stop, no library: the person's line, whole, on the person's stream" \
+  "bionic: load refused — stop cannot load the bionic library (run /bionic:doctor)" "$(cat "$S/err")"
 for ev in Stop SubagentStop; do
   for a in true null raw; do expect_eq "stop on $ev, no library, stop_hook_active $a: the turn ends" 0 "$(hc "$S/hooks/stop.sh" "$ev" - "$a")"; done
   expect_eq "stop on $ev, no library, no jq: the turn ends" 0 "$(hc "$S/hooks/stop.sh" "$ev" - false "$S/nojq")"
