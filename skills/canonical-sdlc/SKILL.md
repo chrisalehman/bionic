@@ -47,9 +47,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 ## Load-time announcement
 
-First user-facing action:
-
-> **Canonical SDLC engaged — `<intent> · <level> rigor · <scale>`** (for example `build · double rigor · wave`), then the line `bash <plugin-root>/scripts/card.sh rigor <rigor>` prints, which says what that rigor buys: `review rigor: double (two independent minds)`.
+First user-facing action: run `bash <plugin-root>/scripts/card.sh opening <rigor> [<intent> <scale>]` with the triple you know, and show its print first, unaltered: the version line, the engaged line (`build · double rigor · wave`), the rigor line.
 
 Triple not yet declared → say so and list the axes. Invoked as `help` → render the axis tables and stop.
 
