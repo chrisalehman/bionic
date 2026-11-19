@@ -336,9 +336,10 @@ section "AGREE"
 nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }
 for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
   cp "$d.read" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"; sv="$( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>"$d.serr" )"
-  c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else f++ } END { printf "%d passed, %d failed", p, f }' "$d.out")"
-  s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
-  expect_regex "$n: the sheet prints its reviews line" '^[0-9]+ passed, [0-9]+ failed$' "$s"
+  c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else if (index($0, "✖️") == 1) f++; else if (index($0, "➖") == 1) o++ }
+    END { printf "%d passed, %d failed, %d not passed", p, f, o }' "$d.out")"
+  s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), \(\([0-9]*\) not passed, \)\{0,1\}.*/\1, \3 not passed/p' | sed 's/, \( not passed\)$/, 0\1/')"
+  expect_regex "$n: the sheet prints its reviews line" '^[0-9]+ passed, [0-9]+ failed, [0-9]+ not passed$' "$s"
   expect_eq "$n: the card's Reviews lines count as the sheet's reviews line does" "$s" "$c"
   h="$(printf '%s\n' "$sv" | nums)"; k="$(nums < "$d.out")"; a="$(ask "$p" hands | grep -c .) $(ask "$p" asks | grep -c .)"
   expect_regex "$n: the sheet prints the run's acts taken by hand and open asks" '^[0-9]+ [0-9]+$' "$h"

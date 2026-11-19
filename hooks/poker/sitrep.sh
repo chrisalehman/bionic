@@ -1478,12 +1478,13 @@ SITREP_SIT
   SG_SO_FAR="$(sitrep_so_far "$plan")"
 
   # ---- correctness and waste
-  local k rv q sc res at ev nf passed=0 failed=0 running=0 jhead jv jrc open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
+  local k rv q sc res at ev nf passed=0 failed=0 neither=0 running=0 jhead jv jrc open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
   rv="$(sitrep_reviews "$plan" "$root")"
   SG_REVIEWS=""
-  # THE COUNT IS THE JUDGE'S, as the release card's Reviews lines are: each question the rigor deals, failed only while
-  # lib/proof.sh `facts_reviews` reads it failing at the working branch's head, so a failed reading its fix landing
-  # answered counts passed here exactly when the card reads it covered. A question nobody has read is not counted.
+  # THE COUNT IS THE JUDGE'S, marked as the release card's Reviews lines are: each question the rigor deals, by
+  # lib/proof.sh `facts_review_mark` over its state at the working branch's head (`facts_reviews`) and its newest
+  # reading's result, so a question counts passed, failed or neither exactly where the card draws ✅, ✖️ or ➖. Neither
+  # is said only when one is. A question nobody has read is not counted, as the card draws it ❔.
   # A plan the judge cannot deal (no rigor and scale, no base, no head) has no coverage to read: there each question
   # and scope counts once by its latest recorded result, a pass a later fail supersedes being no pass.
   jhead="$(proof_branch_head "$plan" "$root" 2>/dev/null)" || jhead=""
@@ -1491,7 +1492,13 @@ SITREP_SIT
   if [ -n "$jhead" ] && declare -F facts_reviews >/dev/null 2>&1; then jv="$(facts_reviews "$plan" "$jhead" 2>/dev/null)"; jrc=$?; fi
   if [ "$jrc" -ne 2 ]; then
     SG_T_REVIEWS_WHAT="the reviews, each question once as the judge reads it at the head"
-    read -r passed failed <<< "$(printf '%s\n' "$jv" | awk -F'\t' 'NF >= 3 && $3 != "absent" { if ($3 == "failing") f++; else p++ } END { print p + 0, f + 0 }')"
+    # the result is cut with no case: a case pattern's ) inside this here-string's substitution was read as its end
+    read -r passed failed neither <<< "$(while IFS='	' read -r q _ st _; do
+        [ -n "$q" ] || continue
+        res=" $(proof_last_line "$plan" review "$q" 2>/dev/null)"; [ "$res" != " " ] || continue
+        k="${res##* result=}"; if [ "$k" != "$res" ]; then res="${k%% *}"; else res=""; fi
+        facts_review_mark "$st" "$res"
+      done <<< "$jv" | awk '{ n[$1]++ } END { print n["pass"] + 0, n["fail"] + 0, n["neither"] + 0 }')"
   else
     SG_T_REVIEWS_WHAT="the reviews, each question and scope once by its latest result"
     read -r passed failed <<< "$(printf '%s\n' "$rv" | awk -F'\t' '
@@ -1517,7 +1524,11 @@ $(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s); 
 SITREP_RUNNING
   # a record read twice (a re-run's result beside the first) counts its findings once, as it stands now
   open="$(printf '%s\n' "$rv" | awk -F'\t' 'NF >= 6 { o[$5] = $6 } END { for (e in o) t += o[e]; print t + 0 }')"
-  SG_T_REVIEWS="$passed passed, $failed failed, $running running"; SG_T_FINDINGS="$open"
+  SG_T_REVIEWS="$passed passed, $failed failed, $running running"; SG_T_REVIEWS_UNIT="count passed, failed, running"
+  if [ "${neither:-0}" -gt 0 ]; then
+    SG_T_REVIEWS="$passed passed, $failed failed, $neither not passed, $running running"; SG_T_REVIEWS_UNIT="count passed, failed, not passed, running"
+  fi
+  SG_T_FINDINGS="$open"
   # read from a variable: bash 3.2 runs a command substitution in a here-string under the read's own IFS, and the reader
   # under sitrep_suites splits its word lists on the default one
   k="$(sitrep_suites "$plan")"
@@ -1631,7 +1642,7 @@ sitrep_sheet() {
   sitrep_m tests.suites-run "$SG_T_RUN" "the suites run this wave, each by its last run" "count run: count green, count red" "source: the landing record's verdicts"
   sitrep_m tests.suites-total "$SG_T_TOTAL" "the suites in the project" "count" "source: the project's tests/*.test.sh, every suite tests/run.sh runs"
   sitrep_m tests.whole-run "$SG_T_WHOLE" "the whole regression" "not run (and why), or green or red at a commit" "source: the plan's regression: and its proof"
-  sitrep_m reviews "$SG_T_REVIEWS" "${SG_T_REVIEWS_WHAT:-the reviews, each question and scope once by its latest result}" "count passed, failed, running" "source: the review proofs and the review tasks in flight"
+  sitrep_m reviews "$SG_T_REVIEWS" "${SG_T_REVIEWS_WHAT:-the reviews, each question and scope once by its latest result}" "${SG_T_REVIEWS_UNIT:-count passed, failed, running}" "source: the review proofs and the review tasks in flight"
   sitrep_m findings.open "$SG_T_FINDINGS" "the review findings not yet closed" "count" "source: the review records"
   sitrep_m waste.dropped "$SG_W_DROPPED" "the tasks dropped, as work.dropped" "count, sized minutes" "source: the rows with status dropped"
   sitrep_m waste.runs-discarded "$SG_X_RUNS" "the suite runs thrown away" "count of all suite runs" "source: the landing record and the gate"

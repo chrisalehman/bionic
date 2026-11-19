@@ -889,6 +889,33 @@ expect_eq "RV1 five results of reviews, a line for each one standing, and the co
   "5|a1.md a2.md e1.md s1.md s2.md|2 passed, 1 failed, 0 running" \
   "$(sr_lines review | /usr/bin/grep -c .)|$(sr_lines review | sed 's/.*record=record\/wave-02-fx\///' | sort | tr '\n' ' ' | sed 's/ $//')|$(sr_m reviews)"
 
+# A page the judge deals (single rigor, task scale, a base commit) with its three readings at the head, C, each record in
+# the readers' grammar. The judged count marks a question as the release card does: a newest reading that flagged,
+# its range covered, is neither passed nor failed and is said as its own count; so is a question a later code commit
+# leaves uncovered. A sheet holding no such question prints as it did.
+sr_judged() {  # <the adversarial reading's result> [<its finding line>] -> the judged world, SR_JC its head
+  local b r q; SR_SCALE=task sr_world "judged-$1" "6 6 12 12"; printf '.bionic\n' > "$SR_REPO/.gitignore"; mkdir -p "$SR_REPO/lib"
+  printf 'one\n' > "$SR_REPO/lib/x.sh"; git -C "$SR_REPO" add -A; git -C "$SR_REPO" -c user.name=f -c user.email=f@example.invalid commit -qm base
+  git -C "$SR_REPO" checkout -qb wave/02-fx; b="$(git -C "$SR_REPO" rev-parse HEAD)"; SR_JC="$(sr_jcommit two)"
+  awk -v b="$b" 'NR > 1 && /^---$/ && !d { print "rigor: single"; print "base-sha: " b; d = 1 } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  for r in evidence:pass structure:pass "adversarial:$1"; do q="${r%%:*}"
+    { printf 'question: %s\nresult: %s\nscope: piece\nreviewed: %s..%s\n' "$q" "${r#*:}" "${b:0:10}" "${SR_JC:0:10}"
+      if [ "$q" = adversarial ] && [ -n "${2:-}" ]; then printf 'findings: 1\n%s\n' "$2"; else printf 'findings: 0\n'; fi; } > "$SR_DIR/$q.md"
+    sr_ev "ev=proof|kind=review|head=$SR_JC|evidence=record/wave-02-fx/$q.md|question=$q|reader=c-$q|result=${r#*:}|scope=piece|at=2026-10-06T19:00:00Z"
+  done
+}
+sr_jcommit() { printf '%s\n' "$1" > "$SR_REPO/lib/x.sh"; git -C "$SR_REPO" -c user.name=f -c user.email=f@example.invalid commit -qam "$1"; git -C "$SR_REPO" rev-parse HEAD; }
+sr_junit() { sr_d reviews | sed -n 's/.* · unit: \(.*\) · source: .*/\1/p'; }
+sr_judged pass; sr_run "$SR_PLAN"
+expect_eq "RV2 a judged page whose three readings passed at the head: the judge's count, as it printed before" \
+  "as the judge reads it|3 passed, 0 failed, 0 running|count passed, failed, running" \
+  "$(sr_d reviews | /usr/bin/grep -o 'as the judge reads it')|$(sr_m reviews)|$(sr_junit)"
+sr_judged flag 'finding: 1 S3 off lib/x.sh:1 a name could be plainer'; sr_run "$SR_PLAN"
+expect_eq "RV3 …the adversarial reading flagged, its range covered: neither passed nor failed, its own count, named in the unit" \
+  "2 passed, 0 failed, 1 not passed, 0 running|count passed, failed, not passed, running" "$(sr_m reviews)|$(sr_junit)"
+sr_jcommit three >/dev/null; sr_run "$SR_PLAN"
+expect_eq "RV4 …a code commit past the readings leaves every question uncovered: none passed" "0 passed, 0 failed, 3 not passed, 0 running" "$(sr_m reviews)"
+
 # Correctness names the suites run, each by its last verdict on the line, then the whole run. A suite named by its
 # path is the suite its bare name is; the whole run's own verdicts are no suite's run here.
 sr_world metrics-suites "6 6 12 12"
