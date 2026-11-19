@@ -1752,8 +1752,9 @@ RR_ROWS_EOF
         if [ "$grp" = C ] && [ "$state" = open ]; then grp=A; dec="$(rr_dec_of "waive:$q")" || dec=""; fi
       fi
       # THE CARRIED COUNT IS THE LOG'S: a carried finding the reader holds no deferral of stands on its record alone,
-      # so it is counted apart and named; nothing is written to the log to make the two agree.
-      if [ "$grp" = C ]; then case "${to:-}" in deferred|defer|carried) : ;; *) grp=R; RR_FUNL="${RR_FUNL:+$RR_FUNL }$fid" ;; esac; fi
+      # so it is counted apart and named as the page names a finding, never by its record's path; nothing is written
+      # to the log to make the two agree.
+      if [ "$grp" = C ]; then case "${to:-}" in deferred|defer|carried) : ;; *) grp=R; RR_FUNL="${RR_FUNL:+$RR_FUNL;}${q:-a review} #$num" ;; esac; fi
       case "$grp" in F) RR_FNF=$((RR_FNF + 1)) ;; A) RR_FNA=$((RR_FNA + 1)) ;; C) RR_FNC=$((RR_FNC + 1)) ;; esac
       RR_FLINES="${RR_FLINES}${grp}	${sev}	${sent}${dec:+ (decision $dec)}"$'\n'
     done <<RR_DISP_EOF

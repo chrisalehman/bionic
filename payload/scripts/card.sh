@@ -2703,7 +2703,7 @@ CF_CHECKED
 #   goal        <status> <mark> <name> <reading> <evidence>
 #   sofar | handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
 #   findings    <n> <fixed> <awaiting your decision> <carried> <the rows that fix them, space-separated>
-#               [<the carried findings no deferral in the run's log holds, by id, space-separated>]
+#               [<the carried findings no deferral in the run's log holds, `<question> #<n>`, `;`-separated>]
 #   finding     <F|A|C|R> <severity> <sentence>          (R: carried by its record alone)
 #
 # Decisions, misses, goals, reviews and findings print in the order they came. A fact the renderer does not know,
@@ -2791,8 +2791,7 @@ _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on std
       findings)
         RL_FN="${CARD_CELLS[1]:-0}"; RL_FNF="${CARD_CELLS[2]:-0}"; RL_FNA="${CARD_CELLS[3]:-0}"; RL_FNC="${CARD_CELLS[4]:-0}"
         RL_FROWS="${CARD_CELLS[5]:-}"
-        # shellcheck disable=SC2206  # the ids, one word each
-        RL_FUNL=(${CARD_CELLS[6]:-}) ;;
+        IFS=';' read -r -a RL_FUNL <<< "${CARD_CELLS[6]:-}" ;;
       finding) RL_FIND[${#RL_FIND[@]}]="${l#finding"$CARD_TAB"}" ;;
       *) printf "card.sh: unknown release fact '%s' — card.sh release takes the facts its header names\n" "$t" >&2; return 64 ;;
     esac

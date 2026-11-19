@@ -948,12 +948,12 @@ $(for fc_n in structure adversarial-whole structure-whole; do printf 'run/v1|ev=
 FC_CK_LOG="$(cat "$FC_REC/run.log")"; FC_CK_N="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" findings | /usr/bin/grep -c 'to=deferred')"
 fc_page --preview; FC_CK_H="$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Findings — ')"
 FC_CK_F="$(printf '%s\n' "$FC_OUT" | sed -n '/^Findings/,/^Decisions$/p' | fc_flat)"
-FC_CK_ONE="$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oE "[A-Z][^:]*no deferral in the run's log: record/wave-x/(evidence|adversarial)\.md#1 and record/wave-x/(evidence|adversarial)\.md#1")"
+FC_CK_ONE="$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oE "[A-Z][^:]*no deferral in the run's log: (evidence|adversarial) #1 and (evidence|adversarial) #1")"
 expect_eq "CARRY-11 the reader lists three deferrals; the card renders (exit 0) and counts five findings and the log's three carried" \
   "3|0|Findings — 5: 3 carried" "$FC_CK_N|$FC_RC|${FC_CK_H%% · *}"
 expect_absent "CARRY-12 …never five carried (CARRY-11 read the same line)" "5 carried" "$FC_CK_H"
 expect_eq "CARRY-13 one line names the two the records alone carry, each named once in the section" "1|1|1" \
-  "$(printf '%s\n' "$FC_CK_ONE" | /usr/bin/grep -c .)|$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oF 'record/wave-x/evidence.md#1' | /usr/bin/grep -c .)|$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oF 'record/wave-x/adversarial.md#1' | /usr/bin/grep -c .)"
+  "$(printf '%s\n' "$FC_CK_ONE" | /usr/bin/grep -c .)|$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oF 'evidence #1' | /usr/bin/grep -c .)|$(printf '%s\n' "$FC_CK_F" | /usr/bin/grep -oF 'adversarial #1' | /usr/bin/grep -c .)"
 expect_contains "CARRY-13b …and says their standing is their records', not the log's" "by their records alone" "$FC_CK_ONE"
 expect_contains "CARRY-13c …while a finding the log defers is still listed carried" "the structure reading's wording could be clearer" "$FC_CK_F"
 expect_eq "CARRY-14 the render wrote no line to the log to make the counts agree" "same" "$([ "$(cat "$FC_REC/run.log")" = "$FC_CK_LOG" ] && echo same || echo changed)"
