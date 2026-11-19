@@ -889,7 +889,7 @@ _wt_undo_arrival_fix() {  # <checkout> <onto> <merge sha> <first parent> <arrive
 # branch must be held by one checkout (land merges there); with 0 a branch no checkout holds is the
 # line's `update-ref` case. Sets _WT_ABS, _WT_ROOT, _WT_BRANCH and _WT_CO ("" when none holds it).
 _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, or 2 having refused
-  local target="${1:-}" onto="${2:-}" plan="${3:-}" wt_abs root co rc judged_cur branch dirt ahead
+  local target="${1:-}" onto="${2:-}" plan="${3:-}" wt_abs root co rc judged_cur branch dirt ahead row
   _WT_ABS=""; _WT_ROOT=""; _WT_BRANCH=""; _WT_CO=""
   [ -n "$target" ] && [ -d "$target" ] || { _wt_refuse "no-such-worktree path=${target:-<none>}"; return 2; }
   # A linked worktree's `.git` is a FILE pointing into the shared repository;
@@ -940,7 +940,9 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
     judged_cur="$(_wt_plan_current "$plan")" || {
       _wt_refuse "place-unreadable plan=${plan} — the run's step could not be read, so whether it was judged for integration is not known; land again once the run's facts read"; return 2; }
     case "${judged_cur%[ab]}" in
-      8|9) declare -F line_born_failing >/dev/null 2>&1 && line_born_failing "$plan" "$root" "$wt_abs" || {
+      8|9) row="$(_wt_proofs_row "$root" "$plan" "$wt_abs")" && [ "$(worktree_row_kind "$plan" "$row")" = integrate ] && {
+           _wt_refuse "integrate-row row=${row} kind=integrate path=${wt_abs} — an integrate row lands as a record, never through ready: remove its tree (spawn-worktree.sh remove ${wt_abs}), and once its writer ends with its contract met the tick lands the row (session-poker.sh tick)"; return 2; }
+           declare -F line_born_failing >/dev/null 2>&1 && line_born_failing "$plan" "$root" "$wt_abs" || {
            _wt_refuse "past-judgment why=current-${judged_cur} plan=${plan} — the run has been judged for integration at current: ${judged_cur}, and a landing would move the working branch past the head that was judged; set the step back (session-poker.sh current 7), land again"; return 2; } ;;
     esac
   fi
@@ -1407,14 +1409,17 @@ landing_tree_free() { rm -f "${1:-/nonexistent}.held"; }   # <tree> — the hold
 # (which refuses a tree with changes), prune; the link put back when the removal is refused. The
 # branch is never touched. rc 1 when git refused.
 _wt_tree_remove() {  # <tree abs> <root>
-  local wt="$1" root="$2" link_to
+  local wt="$1" root="$2" link_to plan
   link_to="$(readlink "${wt}/.bionic" 2>/dev/null)"
+  plan="$(_wt_tree_record_plan "$wt")"
   _wt_drop_legacy_link "$wt" || :
   if ! git -C "$root" worktree remove "$wt" >/dev/null 2>&1; then
     [ -n "$link_to" ] && [ ! -e "${wt}/.bionic" ] && ln -s "$link_to" "${wt}/.bionic" 2>/dev/null
     return 1
   fi
   git -C "$root" worktree prune >/dev/null 2>&1
+  # The row's tree event goes with the tree, best effort: the tree is already gone, and the landing it ended stands.
+  [ -z "$plan" ] || worktree_tree_gone "$root" "" "$wt" "$plan" >/dev/null 2>&1 || :
 }
 
 # THE HAND LANDING'S LAST ACT (wave-28 T3, D9): as land ended its lease, the writer's tree goes once
@@ -1810,19 +1815,57 @@ worktree_tree_row() {
   [ -n "$hits" ] || return 1
   printf '%s' "$hits"; return 2
 }
-# worktree_tree_event <root> <sid> <name> <abs tree> <branch> <base sha> <row> -> the row's tree event appended to
-# the log of the session's bound run; rc 1 with nothing appended.
+worktree_row_kind() {  # <plan> <row> -> the row's kind cell; nothing, rc 1, for a row the plan lacks
+  local rec
+  _wt_units_load && rec="$(_wt_row_where "${1:-}" id "${2:-}")" || return 1
+  units_field "$rec" kind
+}
+# worktree_tree_event <root> <sid> <name> <abs tree | empty> <branch> <base sha> <row> [<plan>] -> the row's tree event
+# appended to the log of <plan>, else of the session's bound run; rc 1 with nothing appended. An empty tree is the
+# tree removed: the path and base empty, `why=removed`.
 worktree_tree_event() {
-  local root="${1:-}" tree="${4:-}" plan rec d rp
+  local root="${1:-}" tree="${4:-}" plan="${8:-}" rec d
   [ -n "${7:-}" ] || return 1
-  plan="$(_wt_workspace_plan "$root" "${2:-}")" && [ "$plan" != none ] || return 1
+  [ -n "$plan" ] || plan="$(_wt_workspace_plan "$root" "${2:-}")" || return 1
+  [ "$plan" != none ] || return 1
   rec="$(_wt_proofs_path "$root" "$plan")" || return 1
   d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
   # shellcheck source=/dev/null
   declare -F log_append >/dev/null 2>&1 || . "$d/log.sh" >/dev/null 2>&1 || return 1
-  rp="$(cd "$root" 2>/dev/null && pwd -P)" || rp="$root"
-  case "$tree" in "$rp"/*) tree="${tree#"$rp"/}" ;; "$root"/*) tree="${tree#"$root"/}" ;; esac
-  RUN_LOG="$rec" log_append tree "row=$7" "path=$tree" "branch=${5:-}" "base=${6:-}" "by=${3:-}"
+  [ -n "$tree" ] || { RUN_LOG="$rec" log_append tree "row=$7" path= "branch=${5:-}" base= "by=${3:-}" why=removed; return; }
+  RUN_LOG="$rec" log_append tree "row=$7" "path=$(_wt_tree_rel "$root" "$tree")" "branch=${5:-}" "base=${6:-}" "by=${3:-}"
+}
+_wt_tree_rel() {  # <root> <abs tree> -> the tree from the root, as a tree event names it
+  local rp tree="${2:-}"
+  rp="$(cd "${1:-}" 2>/dev/null && pwd -P)" || rp="${1:-}"
+  case "$tree" in "$rp"/*) tree="${tree#"$rp"/}" ;; "$1"/*) tree="${tree#"$1"/}" ;; esac
+  printf '%s' "$tree"
+}
+_wt_tree_record_plan() {  # <abs tree> -> the plan its own record names, read before the tree goes; nothing for none
+  local l
+  l="$(worktree_tree_record "${1:-}" 2>/dev/null)" || return 0
+  l="$(_wt_field "$l" plan)"; [ "$l" = none ] || printf '%s' "$l"
+}
+# A TREE REMOVED IS NO ROW'S TREE: each row whose latest tree event names it gets the event again with an empty path,
+# through the one writer above, in <plan> (the tree's own record's, read before the removal) or the session's bound
+# run. rc 0 with nothing to write, 1 when a removal could not be written.
+worktree_tree_gone() {  # <root> <sid> <abs tree> [<plan>]
+  local root="${1:-}" plan="${4:-}" d t rel row branch by rc=0
+  [ -n "$plan" ] || plan="$(_wt_workspace_plan "$root" "${2:-}")" || return 1
+  [ "$plan" != none ] || return 0
+  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
+  # shellcheck source=/dev/null
+  declare -F reader_trees >/dev/null 2>&1 || . "$d/reader.sh" >/dev/null 2>&1 || return 1
+  t="$(reader_trees "$plan")" || return 1
+  rel="$(_wt_tree_rel "$root" "${3:-}")"
+  while IFS=$'\t' read -r row branch by; do
+    [ -n "$row" ] || continue
+    worktree_tree_event "$root" "${2:-}" "$by" "" "$branch" "" "$row" "$plan" || rc=1
+  done <<TREES
+$(printf '%s\n' "$t" | awk -F'|' -v p="$rel" "$_READER_AWK"'{ q = line_kv("path"); sub(/\/$/, "", q) }
+  q != "" && q == p { print line_kv("row") "\t" line_kv("branch") "\t" line_kv("by") }')
+TREES
+  return "$rc"
 }
 
 # worktree_tree_record <tree> -> the tree's record line; rc 1 when it carries none of its own.

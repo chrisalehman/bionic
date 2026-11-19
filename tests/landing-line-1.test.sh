@@ -1257,6 +1257,20 @@ ll_verb "$RB" T3
 expect_eq "(ba4) once T1 answered the review, a row born of the same finding is refused past-judgment (exit 2)" "2 yes" \
   "$LL_RC $(printf '%s' "$LL_OUT" | grep -qF 'REFUSED reason=past-judgment why=current-8' && echo yes || echo no)"
 
+section "§INTEGRATE: an integrate row is told its own route, and a removed tree lets the tick land its record"
+# §BORN-AT-8's world at step 8, its tree row T3 made the integrate row. The tick lands a launched row only while the
+# fill's tree cell for it is empty (hooks/poker/tick.sh), so that cell is the tick's answer.
+# fails-when: ready tells the integrate row to set the step back, or the tree cell outlives the tree's removal.
+awk '/^\| T3 \|/ { sub(/\| 4 \| build \|/, "| 8 | integrate |") } { print }' "$PB" > "$PB.n" && mv "$PB.n" "$PB"
+ll_verb "$RB" T3
+expect_match "(in1) ready refuses the integrate row (exit 2) by its route: a record row, landed by the tick with no tree" \
+  "2 *REFUSED reason=integrate-row row=T3 kind=integrate *" "$LL_RC $LL_OUT"
+expect_absent "(in2) …never told to set the step back" "set the step back" "$LL_OUT"
+in_cell() { ( _wt_units_load && units_rows "$PB" ) | awk -F'\t' '$1 == "T3" { print $3 "|" $11 }'; }
+expect_eq "(in3) the fill reads T3's tree while it stands" "integrate|.worktrees/T3" "$(in_cell)"
+( cd "$RB" && bash "$SPAWN" remove "$RB/.worktrees/T3" >/dev/null 2>&1 )
+expect_eq "(in4) …and none once it is removed, so the tick lands the row's record" "integrate|" "$(in_cell)"
+
 
 section "§KNOWN: the entry's Known limits are rendered from the plan's deferrals, by the verb, on the working branch"
 #

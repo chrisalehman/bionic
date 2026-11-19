@@ -12,6 +12,8 @@
 #   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place,
 #     save a step's: a step written again is the run taken back to it, so the step a run stands at is the last written;
 #     and save a hand's: an act taken by hand again at another time is another act, so two timed ones are two facts;
+#   - a row's tree is one fact, so a tree made again after its removal stands; an untimed tree line keeps all its
+#     fields as its identity, so it replaces no timed one;
 #   - a later line with the same identifying fields and another value replaces the earlier, and takes its place;
 #   - a discarded verdict replaces no earlier verdict, whatever its commit, and one with none before it stands
 #     as the discarded run it was; a red or a green after it replaces it as any later line does;
@@ -56,7 +58,9 @@ reader_identity() {  # <event type> <field>… -> the fields that name one fact 
 }
 reader_identity step n
 reader_identity approval key
-reader_identity proof kind head question
+# A criterion's proof names it by `ac=`, so two criteria proved at one head by one kind are two facts, not one
+# replacing the other; `scope=` keeps a proof of one scope from replacing another's at the same head.
+reader_identity proof kind head question ac scope
 reader_identity ask key round
 # A part of the release is told from a row's landing and from another part by `part=`: the reviews part's commit is the
 # head a publish pushes, so the two name one commit and are still two facts.
@@ -144,6 +148,7 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       id = named
       if (named in idk) { m = split(idk[named], ik, ","); for (i = 1; i < m; i++) id = id SUBSEP ik[i] "=" f[ik[i]] }
       else id = id SUBSEP body
+      if (t == "tree" && f["at"] == "") id = id SUBSEP body
       # two review records are two readings, even of one question at one head and scope; a later run of a check
       # or a regression at a head still replaces the earlier one
       if (named == "proof" && f["kind"] == "review") id = id SUBSEP "evidence=" f["evidence"]
@@ -321,6 +326,8 @@ reader_identity order
 reader_identity handoff
 # One drop stands per row: a drop said again with other words replaces the first.
 reader_identity drop row
+# One tree stands per row: a removal is the row's tree event with an empty path, and a tree made again replaces it.
+reader_identity tree row
 
 # A ROW'S WORK IS NO LONGER OWED when a drop of it stands and it has not landed. This is the one rule: the questions
 # below and the fill (lib/units.sh `_units_live`) put it before their own program over the facts they already fold, so
@@ -544,9 +551,6 @@ reader_q_criterion() {  # <plan> <id> -> its Eval design row as key=value, one p
   plan_read_row "$1" 'Eval design' Criterion "$2"
 }
 
-# A criterion's proof names it by `ac=`, so two criteria proved at one head by one kind are two facts, not
-# one replacing the other. This later entry for the type is the one the fold reads.
-reader_identity proof kind head question ac scope
 reader_question cell value reader_q_cell
 reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>, or state=pending; 1 not in the plan
   _reader_needs cell '<criterion>' "${2:-}" || return 2
