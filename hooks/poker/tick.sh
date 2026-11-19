@@ -856,8 +856,9 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
 #
 # tick_waits_only_on_person -> rc 0 when nothing but the person can move the run, read from what this tick decided:
 # the band QUIET, no open row on this roster, nothing ready and nothing filled, no detached run alive, the run not
-# delivered, its bound plan readable, no pull request in its log, and the asks open on the run at least one, every one
-# waiting on the person. rc 1 otherwise, with TICK_REST_WHY naming the first fact that keeps the run moving.
+# delivered, its bound plan readable, no pull request open (`tick_run_pr_open`), and the asks open on the run at least
+# one, every one waiting on the person. rc 1 otherwise, with TICK_REST_WHY naming the first fact that keeps the run
+# moving.
 #
 # A REST ENDS THE WATCH, so it is only ever a state the person alone can end and already knows about. An ask open on
 # them is what says they were told; with none open nothing has put anything to them, and the run is not resting. An
@@ -868,16 +869,12 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
 # them, `sitrep_waits_only_on_you` reads them), so the status line's `owed: <n> on you · 0 on events` and this predicate
 # cannot disagree. Called from the tick's exit, after that line; nothing here prints on stdout.
 tick_waits_only_on_person() {
-  local st
   TICK_REST_WHY=""
   [ "${TICK_DECISION:-}" = QUIET ] || { TICK_REST_WHY=decision; return 1; }
   [ "${OPEN_ROSTER:-1}" = 0 ] || { TICK_REST_WHY=open-row; return 1; }
   case "${SCHED_READY_ALL:-}${SCHED_FILL:-}" in *[!\ ]*) TICK_REST_WHY=ready; return 1 ;; esac
   if [ -n "${TICK_RUNS_KEY:-}" ] || tick_runs_out; then TICK_REST_WHY=detached-run; return 1; fi
-  # The run's state is read on the empty-roster arm; the armed tick with no roster yet reads it here.
-  st="${RUN_STATE_RAW:-}"
-  [ -n "$st" ] || st="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID" 2>/dev/null)"
-  [ "${st%%|*}" != delivered ] || { TICK_REST_WHY=delivered; return 1; }
+  ! tick_run_delivered || { TICK_REST_WHY=delivered; return 1; }
   [ -n "${SCHED_PLAN:-}" ] || { TICK_REST_WHY=no-plan; return 1; }
   [ "${POKER_RUN_OPEN:-}" != unreadable ] || { TICK_REST_WHY=plan-unreadable; return 1; }
   tick_run_pr_open "$SCHED_PLAN"
@@ -906,30 +903,57 @@ tick_runs_out() (
   exit 1
 )
 
-# tick_run_pr_open <plan> -> rc 0 when the run's log holds its pull request, 1 when it holds none, 2 when the log cannot
-# be read. The request is the published event of its own part, `part=pr`, read through the reader's landings; its
-# state on the host is not read here, so a request in the log reads as open until the run is delivered. The one place
-# the predicate asks it: the reader's own pull request question replaces this read when it lands.
+# tick_run_delivered -> rc 0 when the run reads delivered. Its state is read on the empty-roster arm
+# (RUN_STATE_RAW); the armed tick with no roster yet reads it here.
+# Read once a tick: the predicate and the pass's look both ask it at the tick's exit.
+tick_run_delivered() {
+  [ -n "${TICK_RUN_STATE:-}" ] || TICK_RUN_STATE="${RUN_STATE_RAW:-}"
+  [ -n "$TICK_RUN_STATE" ] || TICK_RUN_STATE="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID" 2>/dev/null)"
+  [ "${TICK_RUN_STATE%%|*}" = delivered ]
+}
+
+# tick_run_pr_open <plan> -> rc 0 when the run's log holds its pull request and the host has not closed it unmerged, 1
+# when the log holds none or that close, 2 when the log cannot be read. The request is the reader's `pr` answer. Its
+# close is the ask `pr-closed:<branch>` the merge's one reader (lib/line.sh `line_merge_seen`) keeps open from the
+# host's word under a fetch of the merge, so the tick itself never asks the host; a request reopened reads open again
+# once such a fetch has read it so (close-out's own check is one). The one place the predicate and the watcher's pass
+# ask whether the request is open.
 tick_run_pr_open() {
-  local l
+  local pr rc asks
   [ -n "${1:-}" ] && [ -f "$1" ] || return 2
   declare -F reader_main >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/reader.sh" ] && . "$BIONIC_LIB/reader.sh"; } >/dev/null 2>&1
   declare -F reader_main >/dev/null 2>&1 || return 2
-  l="$(reader_main "$1" landed 2>/dev/null)" || return 2
-  printf '%s\n' "$l" | awk -F'|' "$_READER_AWK"'line_kv("part") == "pr" { f = 1 } END { exit !f }' && return 0
-  return 1
+  declare -F line_merge_ask_key >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  declare -F line_merge_ask_key >/dev/null 2>&1 || return 2
+  pr="$(reader_main "$1" pr 2>/dev/null)"; rc=$?
+  [ "$rc" -ne 1 ] || return 1
+  [ "$rc" -eq 0 ] || return 2
+  asks="$(reader_main "$1" asks 2>/dev/null)" || return 2
+  printf '%s\n' "$asks" | /usr/bin/grep -qF "|key=$(line_merge_ask_key "$(printf '%s\n' "$pr" | sed -n 's/^branch=//p')")|" && return 1
+  return 0
+}
+
+# tick_pr_watched -> rc 0 when the watcher's pass owes the run's pull request a look: the run not delivered, its bound
+# plan readable, and its request open (`tick_run_pr_open`). Whatever else keeps the run moving, the merge is looked for.
+tick_pr_watched() {
+  [ -n "${SCHED_PLAN:-}" ] && [ "${POKER_RUN_OPEN:-}" != unreadable ] || return 1
+  ! tick_run_delivered || return 1
+  tick_run_pr_open "$SCHED_PLAN"
 }
 
 # tick_watch_facts <file> -> the predicate's answer written to <file> for the watcher's pass, one line:
 # `watch-facts/v1|rest=yes` or `watch-facts/v1|rest=no|why=<fact>`, and `|plan=unreadable` when the bound plan cannot be
-# read. Only the pass names the file (BIONIC_WATCH_FACTS), so a tick the Patrol runs writes nothing and prints the same.
+# read, `|pr=open` when the pass owes the request a look (`tick_pr_watched`), the root and plan it is to look from on
+# the next two lines, `pr-root=<path>` and `pr-plan=<path>`. Only the pass names the file (BIONIC_WATCH_FACTS), so a
+# tick the Patrol runs writes nothing and prints the same.
 tick_watch_facts() {  # <file>
-  local f="${1:-}" line
+  local f="${1:-}" line more=""
   [ -n "$f" ] && [ ! -L "$f" ] || return 0
   if tick_waits_only_on_person; then line="watch-facts/v1|rest=yes"
   else line="watch-facts/v1|rest=no|why=${TICK_REST_WHY:-unknown}"; fi
   [ "${POKER_RUN_OPEN:-}" != unreadable ] || line="${line}|plan=unreadable"
-  printf '%s\n' "$line" > "$f" 2>/dev/null || :
+  if tick_pr_watched; then line="${line}|pr=open"; more="pr-root=${REPO_REAL}"$'\n'"pr-plan=${SCHED_PLAN}"$'\n'; fi
+  printf '%s\n%s' "$line" "$more" > "$f" 2>/dev/null || :
 }
 
   poker_verb_arm() {
@@ -3042,8 +3066,16 @@ EOF
   # code and prints nothing. A bound plan that cannot be read is the person's to restore but nothing has told them, so
   # it is no rest: the pass wakes once, on the print that first holds it, and the turn that wakes ends where the
   # turn-end wall puts the refusal to the person.
+  #
+  # THE MERGE IS LOOKED FOR ON EVERY PASS WHILE THE RUN'S PULL REQUEST IS OPEN (`tick_pr_watched`, said in the facts as
+  # `pr=open`), and only then: a pass with no act to name fetches the integration branch and reads the merge
+  # (`watch_merge_look`), so an open request keeps the watch passing quietly, never resting, until the merge can be
+  # reached, and the pass that reaches it closes the run and wakes. A request the host closed unmerged is the person's
+  # ask, and with it open the run rests and nothing is fetched. BIONIC_WATCH_PR, when the watcher names it, is a file
+  # this pass leaves holding `open` while the request is watched and empty otherwise, so the watcher's day's end can
+  # count the request as something still out.
   poker_verb_watch_pass() {
-    local out err facts rc line iv_rc rest=no
+    local out err facts rc line iv_rc rest=no pr=no pr_root pr_plan
     out="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
       && err="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
       && facts="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" || {
@@ -3062,18 +3094,58 @@ EOF
     line="$(watch_wake_line "$out")"
     [ -n "$line" ] || line="$(watch_person_wake "$out" "$facts")"
     /usr/bin/grep -q '^watch-facts/v[0-9]*|rest=yes' "$facts" 2>/dev/null && rest=yes
+    if /usr/bin/grep -q '^watch-facts/v[0-9]*|.*|pr=open' "$facts" 2>/dev/null; then
+      pr=open; pr_root="$(sed -n 's/^pr-root=//p' "$facts" | head -1)"; pr_plan="$(sed -n 's/^pr-plan=//p' "$facts" | head -1)"
+    fi
     rm -f "$out" "$err" "$facts"
+    if [ -n "${BIONIC_WATCH_PR:-}" ] && [ ! -L "$BIONIC_WATCH_PR" ]; then
+      if [ "$pr" = open ]; then printf 'open\n' > "$BIONIC_WATCH_PR"; else : > "$BIONIC_WATCH_PR"; fi
+    fi 2>/dev/null
     if [ -z "$line" ]; then
       poker_watch_interval_seconds >/dev/null; iv_rc=$?
       [ "$iv_rc" -eq 0 ] \
         || line="bionic watch: watch-interval refused - set watch-interval: to $((WATCH_INTERVAL_MAX / 60))m or less in .bionic/config.yaml"
     fi
+    [ -n "$line" ] || [ "$pr" = no ] || line="$(watch_merge_look "$pr_root" "$pr_plan")"
     if [ -n "$line" ]; then
       printf '%s\n' "$line"
       exit "$WATCH_RC_WAKE"
     fi
     [ "$rest" = no ] || exit "$WATCH_RC_REST"
     exit "$WATCH_RC_QUIET"
+  }
+
+  # watch_merge_look <root> <plan> -> the wake line once the merge of the run's open pull request can be reached, or
+  # nothing. The merge's one reader is asked with its fetch (lib/line.sh `line_merge_seen --fetch`), which also keeps the
+  # person's ask on a request closed unmerged; anything but merged is no act: an open request, a closed one (its ask is
+  # open now, and the next pass rests on it), and a read that failed, which the next pass reads again. Merged, the run is
+  # closed by close-out's own `run`, which reads the merge again and lands the integrate row at it, and close-out's
+  # account is kept at .bionic/tmp/close-<session, first 8>.out for the woken turn, whose acts it names.
+  # A CLOSE THAT HOLDS IS TOLD ONCE: the account's first line is the hold's key (the merge, the exit, the refusal's last
+  # line), and a pass that meets the same hold again stays quiet, so a hold nobody has mended starts no turn after each
+  # turn's end.
+  watch_merge_look() {
+    local root="${1:-}" plan="${2:-}" seen co tmp acct rel key sid
+    [ -d "$root" ] && [ -f "$plan" ] || return 0
+    declare -F line_merge_seen >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+    declare -F line_merge_seen >/dev/null 2>&1 || return 0
+    seen="$(line_merge_seen "$plan" "$root" --fetch 2>/dev/null)" || return 0
+    sid="$(printf '%s' "${CLAUDE_CODE_SESSION_ID:-}" | LC_ALL=C tr -cd 'A-Za-z0-9_-' | cut -c1-8)"
+    rel=".bionic/tmp/close-${sid:-session}.out"; acct="$root/$rel"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-close.XXXXXX" 2>/dev/null)" || return 0
+    ( cd "$root" && bash "$BIONIC_LIB/../close-out.sh" "$plan" run ) > "$tmp" 2>&1 < /dev/null
+    co=$?
+    key="watch-close/v1|commit=$(printf '%s' "$seen" | cut -f2)|rc=${co}|last=$(tail -1 "$tmp" | cksum | cut -d' ' -f1)"
+    if [ "$co" -ne 0 ] && [ -f "$acct" ] && [ "$(head -1 "$acct" 2>/dev/null)" = "$key" ]; then rm -f "$tmp"; return 0; fi
+    if [ -d "$root/.bionic/tmp" ] && [ ! -L "$root/.bionic/tmp" ] && [ ! -L "$acct" ]; then
+      { printf '%s\n' "$key"; cat "$tmp"; } > "$acct" 2>/dev/null
+    fi
+    rm -f "$tmp"
+    if [ "$co" -eq 0 ]; then
+      printf 'bionic watch: DELIVERED - merged; close-out closed the run: do the acts in %s\n' "$rel"
+    else
+      printf 'bionic watch: MERGED - close-out held (exit %s): mend what %s names\n' "$co" "$rel"
+    fi
   }
 
   # watch_person_wake <tick print> <watch facts> -> the wake line for a state the person alone can end and nobody has
