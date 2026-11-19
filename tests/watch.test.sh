@@ -493,11 +493,13 @@ ws_tx() {
   printf '%s' "$TMPROOT/ws-tx-${1##*/}.jsonl"
 }
 # ws_stop <repo> <transcript> [env assignment...] -> WS_OUT WS_ERR WS_RC: the turn-end hook, as the platform runs it,
-# with the agents WS_BG names (a JSON array, none by default) still running
+# with the agents WS_BG names (a JSON array, none by default) still running, and WS_ACTIVE the platform's
+# `stop_hook_active` (false by default; true at the end of a turn a duty continued)
 ws_stop() {
   local repo="$1" tx="$2"; shift 2
   jq -nc --arg s "$SID" --arg c "$repo" --arg t "$tx" --argjson bg "${WS_BG:-[]}" \
-    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:$bg}' > "$TMPROOT/ws.in"
+    --argjson a "${WS_ACTIVE:-false}" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:$a,background_tasks:$bg}' > "$TMPROOT/ws.in"
   ( cd "$repo" && exec env CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$SID" \
       BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 \
       "$@" bash "$WS_HOOK" < "$TMPROOT/ws.in" ) \
@@ -522,7 +524,8 @@ ws_claimed() {
 # later, in the background: this turn end's watcher, still on its first pass when the hook first reads the record
 ws_late_rest() {
   sleep 3600 & WS_LATE=$!
-  printf 'state=watching\npid=%s\nat=%s\n' "$WS_LATE" "$(ws_iso 0)" > "$(wh_rec "$1")"
+  printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$WS_LATE" \
+    "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$WS_LATE" | awk '{$1=$1; print}')" "$(ws_iso 0)" > "$(wh_rec "$1")"
   ( sleep "$3"; ws_rest "$1" person "$(ws_iso 0)" "$2"; kill "$WS_LATE" 2>/dev/null ) &
   WS_LATE_REST=$!
 }
@@ -572,6 +575,9 @@ ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
 expect_eq "OPL4.a …the same digest at the next turn end: nothing" "" "$(ws_line)"
 ws_rest "$RWR" person "$(ws_iso 4)" d2; ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
 expect_eq "OPL4.b a rest over a changed run: said again" "$WS_LINE_WANT" "$(ws_line)"
+ws_rest "$RWR" person "$(ws_iso 4)" d2b; WS_ACTIVE=true ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
+expect_eq "OPL4.c the end of a turn a duty continued leaves the run on the person: said there too" \
+  "$WS_LINE_WANT|0|" "$(ws_line)|$WS_RC|$WS_ERR"
 ws_rest "$RWR" woke "$(ws_iso 3)" d3; ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
 expect_eq "OPL5 a rest for a wake is not the person's: nothing" "" "$(ws_line)"
 ws_rest "$RWR" person "$(ws_iso 600)" d4; ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
@@ -581,7 +587,8 @@ printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$WS_LIVE" \
   "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$WS_LIVE" | awk '{$1=$1; print}')" "$(ws_iso 2)" > "$(wh_rec "$RWR")"
 ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=0
 expect_eq "OPL7 a watcher still watching: nothing" "" "$(ws_line)"
-printf 'state=watching\npid=%s\nat=%s\n' "$WS_LIVE" "$(ws_iso 60)" > "$(wh_rec "$RWR")"
+printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$WS_LIVE" \
+  "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$WS_LIVE" | awk '{$1=$1; print}')" "$(ws_iso 60)" > "$(wh_rec "$RWR")"
 WS_T0=$(date +%s); ws_stop "$RWR" "$WR_TX" BIONIC_STOP_WATCH_WAIT=12; WS_T1=$(date +%s)
 expect_eq "OPL7.a a watcher an earlier turn end started, still watching: nothing" "" "$(ws_line)"
 expect_true "OPL7.b …and the hook does not wait out its bound for it" test $((WS_T1 - WS_T0)) -lt 8
