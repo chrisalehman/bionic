@@ -1612,7 +1612,7 @@ RR_MATRIX
     set -- $(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v l="$RR_LANDED_IDS" 'NF >= 10 { t++; if (index(l, " " $1 " ")) n++ } END { print t + 0, n + 0 }')
     RR_TOTAL="${1:-0}"; RR_LANDED="${2:-0}"
 
-    RR_N=0; RR_ASIDE=""
+    RR_N=0; RR_ASIDE=""; RR_FASKS=""
     RR_KIND=(); RR_KEY=(); RR_DO=(); RR_ELSE=(); RR_WHYS=(); RR_SUBJ=(); RR_DLAB=(); RR_OLAB=(); RR_DPH=(); RR_OPH=(); RR_PICK=()
 
     # WAIVERS: the run's open waive: asks (the reader's `asks`), then the ones the red check owes, each once; never the
@@ -1696,7 +1696,7 @@ RR_ROWS_EOF
     # deferral carried; a move to fixed fixed once its row landed, open with that row before), and the question is
     # the reader's newest review proof citing its record. The disposition's own state stands for a finding the
     # reader holds no line of, a review's unlined flag.
-    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""; RR_FASKS=""
+    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_findings
     RR_RFIND="$(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'
       NF > 1 { print line_kv("ref") "\t" line_kv("to") "\t" line_kv("row") }')"
@@ -1755,9 +1755,9 @@ RR_ROWS_EOF
         done
         if [ "$grp" = C ] && [ "$state" = open ]; then grp=A; dec="$(rr_dec_of "waive:$q")" || dec=""; fi
       fi
-      [ -z "$dec" ] || RR_FASKS="${RR_FASKS}$(finding_owed_key "$fid")"$'\n'
       case "$grp" in F) RR_FNF=$((RR_FNF + 1)) ;; A) RR_FNA=$((RR_FNA + 1)) ;; C) RR_FNC=$((RR_FNC + 1)) ;; esac
       RR_FLINES="${RR_FLINES}${grp}	${sev}	${sent}${dec:+ (decision $dec)}"$'\n'
+      [ -z "$dec" ] || RR_FASKS="${RR_FASKS}$(finding_owed_key "$fid")"$'\n'
     done <<RR_DISP_EOF
 $RR_DISP
 RR_DISP_EOF
