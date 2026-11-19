@@ -65,12 +65,16 @@ Expected duration: ~15 minutes.
 Suites: tests/widget.test.sh" "denybot2")"
 expect_eq "§combined-deny a single-fault brief refuses on the same wire" "deny|0" "$GATE_VERDICT|$GATE_ST"
 expect_contains "§combined-deny …carrying its arm's own Fix: block" "Fix: declare one durable artifact path" "$GATE_REASON"
-REPO=$(make_repo rcombdeny3 yes); write_attestation "$REPO" "$SID_A"; rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+# A WATCH RECORD OVER A DEAD WATCHER is a state fault: the watch wall refuses it (lib/patrol.sh `watch_verdict`).
+cd_dead_watch() {  # <repo>
+  printf 'state=watching\npid=999999\nstart=Thu Jan  1 00:00:00 2026\nat=2026-01-01T00:00:00Z\n' > "$1/.bionic/tmp/watch-$SID_A.state"
+}
+REPO=$(make_repo rcombdeny3 yes); write_attestation "$REPO" "$SID_A"; cd_dead_watch "$REPO"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "denybot3")"
-expect_eq "§combined-deny a lone state fault (the unarmed Patrol) takes the deny wire too" "deny|1" \
+expect_eq "§combined-deny a lone state fault (a watcher that died) takes the deny wire too" "deny|1" \
   "$GATE_VERDICT|$(printf '%s\n' "$GATE_OUT" | /usr/bin/grep -c . || true)"
-expect_contains "§combined-deny …refusing for the state, in the arming wall's own words" "Patrol" "$GATE_ERR$GATE_VERR"
-REPO=$(make_repo rcombdeny3b yes); write_attestation "$REPO" "$SID_A"; rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+expect_contains "§combined-deny …refusing for the state, in the watch wall's own words" "the watch stopped without a word" "$GATE_ERR$GATE_VERR"
+REPO=$(make_repo rcombdeny3b yes); write_attestation "$REPO" "$SID_A"; cd_dead_watch "$REPO"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$CD_TWO" "denybot3b")"
 expect_eq "§combined-deny the state fault beside brief faults refuses once" "deny|1" \
   "$GATE_VERDICT|$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
@@ -215,58 +219,6 @@ $SCAFFOLD_RAW" "scaffoldbot5")"
 # one remaining fault is the unfilled deliverable slot, and the exit-2 channel is pinned.
 expect_eq "§scaffold …SKILL.md's scaffold, unfilled, is REFUSED the same way" \
   "deny" "$GATE_VERDICT"
-
-# ============================================================================
-
-section "§a3-text — the Patrol stamp is armed at engagement, not by hand (D4, REQ-3)"
-# ============================================================================
-#
-# WHY THE TEXT MOVED. Until this wave the A3 refusal handed the model a two-step re-arm and
-# step 2 was `session-poker.sh arm` — a command the operator was expected to type after
-# engaging. hooks/engage.sh now runs it itself, with the session id and the project root it
-# already holds, right after writing the engagement marker (T4, spec D4). A refusal that
-# still ordered the hand step would be instructing the model to do the machine's work, which
-# is principle P-A read at its own wall.
-#
-# THE ARM ITSELF IS UNCHANGED — an absent stamp still refuses, in the same words, and still
-# names the CronCreate half, which IS the model's step: engagement writes the stamp, nothing
-# but the model can create the recurring job that keeps writing it.
-#
-# fails-when: the never-armed refusal still names `session-poker.sh arm` as a step to run,
-# or stops naming engagement as what writes the stamp.
-
-REPO=$(make_repo ra3 yes)
-write_attestation "$REPO" "$SID_A"
-rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_eq "§a3 an absent stamp still refuses the dispatch" "deny" "$GATE_VERDICT"
-expect_contains "§a3 …and the fix names engagement as what writes the stamp" \
-  "engage" "$GATE_VERR"
-expect_absent "§a3 …and no longer orders the hand-run arm" \
-  "session-poker.sh arm" "$GATE_VERR"
-expect_contains "§a3 …while still naming the one half the model owns" "CronCreate" "$GATE_VERR"
-# LOOK FIRST (wave-21 T7; REQ-1 AC-1.4, the preflight half). A `/clear` or a resume leaves a
-# predecessor's job running, and the stop gate's ritual fold refuses a CronCreate that no
-# CronList preceded — so a fix that names CronCreate alone walks the model into the next
-# refusal. The fix text names CronList, and names it FIRST.
-#
-# fails-when: the never-armed fix names CronCreate with no CronList before it.
-T7_FIX_TEXT="$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 '^Fix: ' || true)"
-expect_contains "§a3 …and the fix line looks before it creates" "Fix: CronList, then CronCreate" \
-  "$T7_FIX_TEXT"
-
-# THE PAIRED ARM, and the anti-vacuity one. A4 (armed, then stopped firing) is a different
-# finding with a different remedy — the clock died, the stamp did not — and it keeps both
-# halves. It also proves the absence above is a fact about A3's text rather than about a
-# string this suite can no longer produce at all.
-REPO=$(make_repo ra3b yes)
-write_attestation "$REPO" "$SID_A"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
-run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
-expect_eq "§a3 the STALE arm is untouched by the A3 rewording" "deny" "$GATE_VERDICT"
-expect_contains "§a3 …still naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
-expect_contains "§a3 …and still offering the hand re-arm, which is A4's remedy" \
-  "session-poker.sh arm" "$GATE_VERR"
 
 # ======================== §T22-name-in-flight: A NAME IN FLIGHT IS REFUSED AT DISPATCH
 #
