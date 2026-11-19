@@ -423,13 +423,14 @@ fc_uasks() {  # -> the reader's open asks that wait on the person, sorted, space
   bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" asks | sed -n 's/.*|key=\([^|]*\)|.*/\1/p' | while IFS= read -r k; do
     [ "$(bash -c '. "$1/owed.sh"; ask_waits_on "$2" "$3" "$4"' _ "$FC_LIB" "$k" "$PFC" "$RFC")" != user ] || echo "$k"; done | LC_ALL=C sort | fc_flat
 }
+fc_regkeys() { fc_keys | sed '/^finding:/{s/^finding://; s/[^A-Za-z0-9._-]/:/g; s/^/finding:/;}'; }  # the table's keys, a finding's under its register key
 fc_four; fc_page --preview
 expect_contains "REG-5 a preview already counts the four findings the person rules and the approval" "You owe 5 decisions" "$(fc_under 'Bottom line' | fc_flat)"
 fc_page
 expect_eq "REG-6 the register holds four finding asks and the release approval, each waiting on the person" "5|approve:release" \
   "$(fc_uasks | wc -w | tr -d ' ')|$(fc_uasks | tr ' ' '\n' | /usr/bin/grep -v '^finding:')"
 expect_contains "REG-6b …and the card owes five decisions" "You owe 5 decisions" "$(fc_under 'Bottom line' | fc_flat)"
-expect_eq "REG-6c …numbering exactly the asks that wait on the person" "$(fc_uasks)" "$(fc_keys | LC_ALL=C sort | fc_flat)"
+expect_eq "REG-6c …numbering exactly the asks that wait on the person" "$(fc_uasks)" "$(fc_regkeys | LC_ALL=C sort | fc_flat)"
 expect_eq "REG-6d …each finding under Findings naming its decision" "4" "$(fc_under Findings | /usr/bin/grep -cE 'defect [1-4] \(decision [1-4]\)$')"
 fc_record adversarial adversarial piece "$FC_S3"
 
@@ -525,7 +526,7 @@ expect_regex "REPLY-11b …writing the waiver at the working head with the reply
 # fails-when: after the reply the register still holds an ask the card numbered, or one waiting on the person it never
 # showed. The changed-run ask has no verb a reply runs, so the page shows it in its own words and it stays the person's.
 fc_four; fc_owe seal:changed; fc_page
-FC_NUMS="$(fc_keys)"
+FC_NUMS="$(fc_regkeys)"
 fc_numbered_open() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" asks | sed -n 's/.*|key=\([^|]*\)|.*/\1/p' | /usr/bin/grep -cxF "$FC_NUMS"; }
 expect_eq "REPLY-12 precondition: the five numbered asks are open; the changed-run ask is on the page in its own words" "5|yes" \
   "$(fc_numbered_open)|$(fc_has "$(fc_under 'Bottom line' | fc_flat)" 'fixture item seal:changed')"
