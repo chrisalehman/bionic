@@ -28,6 +28,8 @@
 #   §LOG      the log removed, renamed, emptied, cut, or a close, step, cancel, proof, approval or
 #             waiver appended by hand: refused, naming the log gone, shortened or added to.
 #   §TOOLS    the same roads by Write and Edit through the write hook, then the commit.
+#   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
+#             log and binding untouched: the commit's refusal is the one before, word for word.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.
@@ -418,5 +420,21 @@ gated "a Write of the log cut short" "$LS" 'tool Write "$GL" "$(head -2 "$GL")"'
 gated "an Edit adding a step to the log" "$LA" 'tool Edit "$GL" "$(tail -1 "$GL")" "$(tail -1 "$GL")
 run/v1|ev=step|n=9|delivered=x|at=z"'
 expect_status "and the write hook admitted that Edit" 0 "$TOOL_PRE"
+
+section "KEPT"
+. "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh"
+export TMPDIR="$SB/kept"
+kept() {  # <place|facts> -> each kept file of that kind made to read step 9, delivered, its key kept; then what it serves
+  local f b; for f in "$TMPDIR/bionic-$1-"*/*; do
+    b="$(sed '2,$ { s/^n=5$/n=9/; s/|n=5|/|n=9|/; s/^state=open$/state=delivered/; }' "$f")" && printf '%s\n' "$b" > "$f"; done
+  if [ "$1" = place ]; then proof_step_held "$GP"; else _proof_ask "$GP" reader_q_step "$GP"; fi
+}
+for k in place facts 'place facts'; do
+  rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world; gate "git commit -m x"; gate "git commit -m x"; E0="$(cat "$SB/gate.err")"
+  expect_eq "the run as sealed, its kept $k written by the gate: refused" "$OWED" "$GLINE"
+  for f in $k; do expect_contains "the kept $f rewritten by hand serves delivered" state=delivered "$(kept "$f")"; done
+  gate "git commit -m x"
+  expect_eq "with the kept $k read delivered, the refusal is the one before, word for word" "$E0" "$(cat "$SB/gate.err")"
+done
 
 finish
