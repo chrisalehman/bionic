@@ -529,8 +529,6 @@ _rh_replay() {
   f="$(find "$dir/home" -path "*/$DOOR_PLAN_REL" -type f 2>/dev/null | head -1)"
   [ -n "$f" ] || { echo "rehearse $RH_STATE: close-out ran and no archived plan holds $DOOR_PLAN_REL under $dir/home" >&2; return 1; }
   RH_PLAN="$f"
-  # At the run's close the Patrol's stamp goes with it, as the skill says to end it.
-  _rh_poker "the Patrol is disarmed at the close" disarm
 }
 
 # _rh_card <step> <artifact> -> the step's card rendered by its verb

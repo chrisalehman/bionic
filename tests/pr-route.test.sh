@@ -378,7 +378,6 @@ prr_owed() {  # -> every fact the run owes at the working head, each a passing p
 prr_watch_world() {  # <name> [bare] -> §OPEN-ONLY's fixture armed and published; with `bare`, nothing the steps owe
   prr_case8 "$1"
   : > "$R/.bionic/tmp/roster-$WORLD_SID.state"
-  door_run "$R" bash "$DOOR_POKER" arm
   prr_approve "$(prr_head)"; prr_publish
   [ "${2:-}" = bare ] || prr_owed
 }

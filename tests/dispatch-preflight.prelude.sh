@@ -477,18 +477,12 @@ make_repo() {
   fi
   git -C "$repo" commit -qm seed 2>/dev/null
   if [ "$wave" = "yes" ]; then
-    # A live wave has a live Patrol: it is armed at engagement, before the first dispatch
-    # (skills/canonical-sdlc/SKILL.md §Dispatch). Every wave-active fixture therefore
-    # carries a fresh stamp for the session ids this suite dispatches with, and the S21
-    # arms remove or backdate it to drive the arming wall. Without this the wall would be
-    # under test in every case in the file rather than in its own section.
+    # A live wave is watched. Every wave-active fixture carries a rested watch for the session ids
+    # this suite dispatches with, so the watch wall is under test in its own section alone.
     mkdir -p "$repo/.bionic/tmp"
     local _psid
     for _psid in "${SID_A:-}" "${SID_B:-}" "${SID_DEAD:-}" "${SID_LIVE:-}"; do
       [ -n "$_psid" ] || continue
-      printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" > "$repo/.bionic/tmp/patrol-$_psid.state"
-      chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
       # …AND A WATCH, rested on purpose: the dispatch wall admits a watch that is alive or that rested
       # (hooks/watch.sh writes this record), so §WATCH alone drives the watch's other states.
       watch_rested "$repo" "$_psid"

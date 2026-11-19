@@ -1099,7 +1099,7 @@ sr_tick_world() {
   sr_world "$1" "$2"
   : > "$SR_REPO/.bionic/tmp/engaged-$SID.state"
   ( cd "$SR_REPO" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1 )
-  sr_poke bind "$SR_PLAN" >/dev/null 2>&1; sr_poke arm >/dev/null 2>&1
+  sr_poke bind "$SR_PLAN" >/dev/null 2>&1
 }
 sr_tick() { sr_poke tick > "$TMPROOT/tick.out" 2> "$TMPROOT/tick.err"; RC=$?; OUT="$(cat "$TMPROOT/tick.out")"; }
 # The tick's worlds are unapproved plans (an approved one FILLs, and S1 pins QUIET), so the close is not forecast.

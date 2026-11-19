@@ -424,32 +424,23 @@ write_plan() {  # <path> <state-body>
   seal_fixture "$1"
 }
 
-# A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). hooks/dispatch-preflight.sh refuses a
-# dispatch whose session carries no fresh Patrol stamp, so a repo fixture without one answers
-# "refused" to every question this suite asks about roster rows, identity chains and progress
-# paths — the arming wall would be under test in every section instead of in its own (§P,
-# which removes the stamp deliberately). This is the fixture equivalent of an engagement
-# arming the Patrol before the first dispatch. Written under the MAIN repository always: the
-# stamp shares the roster's pinned root, which §N.3 depends on and would break by planting
-# a phantom `.bionic` in a worktree.
+# A LIVE WAVE IS WATCHED. hooks/dispatch-preflight.sh refuses a dispatch no watch stands
+# behind, so a repo fixture without one answers "refused" to every question this suite asks
+# about roster rows, identity chains and progress paths. Written under the MAIN repository
+# always: the records share the roster's pinned root, which §N.3 depends on and would break by
+# planting a phantom `.bionic` in a worktree.
 arm_patrol() {  # <repo> <session-id>...
   local repo="$1"; shift
   mkdir -p "$repo/.bionic/tmp"
   local sid
   for sid in "$@"; do
-    printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" > "$repo/.bionic/tmp/patrol-$sid.state"
-    chmod 600 "$repo/.bionic/tmp/patrol-$sid.state"
-    # …AND A WATCH THAT RESTED ON PURPOSE, which the dispatch wall admits as it admits a live one.
+    # A WATCH THAT RESTED ON PURPOSE, which the dispatch wall admits as it admits a live one.
     printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$repo/.bionic/tmp/watch-$sid.state"
     # …AND AN ENGAGED SESSION (task-engaged-session). Since this wave every gate this suite
     # drives asks `engaged_session` before it asks anything else, so a fixture without the
     # marker answers every question in this file the same way — silence — and the whole
-    # suite would be green over nothing. The marker travels with the stamp for the same
-    # reason the stamp travels with the plan: SKILL.md arms the Patrol AT engagement, so a
-    # world that has one has both. A marker already there is KEPT: a binding written before
-    # the Patrol was armed is the session's, and re-arming must not unbind it
-    # (wave-23-fixit-1810 T1 — an unbound session's fallback plan is never acted on).
+    # suite would be green over nothing. A marker already there is KEPT: a binding written
+    # before is the session's, and this must not unbind it.
     [ -f "$repo/.bionic/tmp/engaged-$sid.state" ] || : > "$repo/.bionic/tmp/engaged-$sid.state"
   done
 }
