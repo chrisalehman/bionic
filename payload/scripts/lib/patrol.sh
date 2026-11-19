@@ -1169,6 +1169,8 @@ watch_wake_line() {  # <tick print file>
 #   state=watching   pid=<the watcher's process>   start=<its start, lib/alive.sh `alive_since`>
 #   state=resting    why=<person|woke|refused|limit|cleared>
 #   at=<ISO, when this state was written>          told=<the restart it already woke for, when it did>
+#   lost=<the pid of a watcher that died without a word, whose record this one's claim replaced>
+#   said=<the lost pid the turn-end wall has already said is gone>
 #
 # WATCHING IS A PROCESS, judged by lib/alive.sh's one rule, never by the file's age: a watcher killed from outside, or
 # by the platform at its time limit, leaves `watching` naming a dead process, and `watch_state` says `stopped`. A
@@ -1187,14 +1189,15 @@ watch_record_path() {  # <project root> <session-id> -> absolute path, or nothin
   printf '%s/.bionic/tmp/watch-%s.state' "$1" "$2"
 }
 
-_watch_read() {  # <record> — sets _WR_STATE _WR_PID _WR_START _WR_WHY _WR_TOLD; rc 1 when it is no record
+_watch_read() {  # <record> — sets _WR_STATE _WR_PID _WR_START _WR_WHY _WR_TOLD _WR_LOST _WR_SAID; rc 1 when it is no record
   local l
-  _WR_STATE=''; _WR_PID=''; _WR_START=''; _WR_WHY=''; _WR_TOLD=''
+  _WR_STATE=''; _WR_PID=''; _WR_START=''; _WR_WHY=''; _WR_TOLD=''; _WR_LOST=''; _WR_SAID=''
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
   while IFS= read -r l; do
     case "$l" in
       state=*) _WR_STATE="${l#state=}" ;; pid=*) _WR_PID="${l#pid=}" ;; start=*) _WR_START="${l#start=}" ;;
       why=*) _WR_WHY="${l#why=}" ;; told=*) _WR_TOLD="${l#told=}" ;;
+      lost=*) _WR_LOST="${l#lost=}" ;; said=*) _WR_SAID="${l#said=}" ;;
     esac
   done < "$1"
   [ -n "$_WR_STATE" ]
@@ -1231,7 +1234,7 @@ watch_state() {
 # watch_claim <root> <sid> <pid> -> rc 0 the record names <pid>, watching; rc 1 a live watcher of the session holds it,
 # `<pid> <start>` on stdout; rc 2 it could not be written. The caller has judged the directory safe to write in.
 watch_claim() {
-  local f d start tmp held told=''
+  local f d start tmp held told='' lost='' said=''
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 2
   case "${3:-}" in ''|*[!0-9]*) return 2 ;; esac
   [ -L "$f" ] && return 2
@@ -1246,11 +1249,16 @@ watch_claim() {
       "watching $3 "*) return 0 ;;
       watching\ *) held="${held#watching }"; printf '%s\n' "$held"; return 1 ;;
     esac
-    _watch_read "$f" && told="$_WR_TOLD"
+    # A WATCHER THAT DIED WITHOUT A WORD IS NOT FORGOTTEN BY ITS SUCCESSOR. The turn end starts this claim and the
+    # turn-end wall together, in no fixed order, so the record keeps the dead pid until that wall has said it.
+    _watch_read "$f" && { told="$_WR_TOLD"; said="$_WR_SAID"; lost="$_WR_LOST"; }
+    case "$held" in stopped\ *) lost="${held#stopped }" ;; esac
   fi
   printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$3" "$start" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tmp" 2>/dev/null \
     || { rm -f "$tmp"; return 2; }
   [ -z "$told" ] || printf 'told=%s\n' "$told" >> "$tmp"
+  [ -z "$lost" ] || printf 'lost=%s\n' "$lost" >> "$tmp"
+  [ -z "$said" ] || printf 'said=%s\n' "$said" >> "$tmp"
   if [ ! -e "$f" ] && ln "$tmp" "$f" 2>/dev/null; then rm -f "$tmp"; return 0; fi
   if held="$(watch_state "$1" "$2")"; then
     case "$held" in watching\ *) rm -f "$tmp"; held="${held#watching }"; printf '%s\n' "$held"; return 1 ;; esac
@@ -1274,7 +1282,7 @@ watch_rest() {
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
   watch_holds "$1" "$2" "${3:-}" || return 1
   set -- "$f" "${f%/*}/.watch-$2.$3" "state=resting" "why=${4:-unsaid}" "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    ${_WR_TOLD:+"told=$_WR_TOLD"}
+    ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} ${_WR_SAID:+"said=$_WR_SAID"}
   _watch_write "$@"
 }
 
@@ -1284,7 +1292,7 @@ watch_told() {
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
   watch_holds "$1" "$2" "${3:-}" || return 1
   _watch_write "$f" "${f%/*}/.watch-$2.$3" "state=watching" "pid=$_WR_PID" "start=$_WR_START" \
-    "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "told=${4:-}"
+    "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "told=${4:-}" ${_WR_LOST:+"lost=$_WR_LOST"} ${_WR_SAID:+"said=$_WR_SAID"}
 }
 
 # watch_told_key <root> <sid> -> the `told=` the session's record carries, or nothing.
@@ -1293,4 +1301,72 @@ watch_told_key() {
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 0
   _watch_read "$f" && printf '%s' "$_WR_TOLD"
   return 0
+}
+
+# watch_lost <root> <sid> -> the pid of a watcher that died without a word and that the turn-end wall has not yet said,
+# and rc 0; rc 1 and nothing when there is none. A record still saying watching over a dead process names it; so does a
+# successor's `lost=`, which its claim kept.
+watch_lost() {
+  local s p
+  s="$(watch_state "${1:-}" "${2:-}")" || return 1
+  _watch_read "$(watch_record_path "$1" "$2")" || return 1
+  case "$s" in stopped\ *) p="${s#stopped }" ;; *) p="$_WR_LOST" ;; esac
+  [ -n "$p" ] && [ "$p" != "$_WR_SAID" ] || return 1
+  printf '%s\n' "$p"
+}
+
+# watch_lost_said <root> <sid> <pid> -> `said=<pid>` on the record, every other line kept: the turn-end wall has said
+# that watcher is gone, and no later turn end says it again.
+watch_lost_said() {
+  local f tmp
+  f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
+  case "${3:-}" in ''|*[!0-9]*) return 1 ;; esac
+  _watch_read "$f" || return 1
+  tmp="${f%/*}/.watch-$2.said.$$"
+  { /usr/bin/grep -v '^said=' "$f"; printf 'said=%s\n' "$3"; } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  [ -L "$f" ] && { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
+}
+
+# ─── WHETHER A DISPATCH IS WATCHED: the dispatch wall's and doctor's one reading of the record ───────────────────────
+#
+# watch_verdict <root> <sid> <engaged-at ISO> <transcript> -> one line, rc 0 when it admits a dispatch, rc 1 when not:
+#   watching <pid> <start>   the recorded watcher lives                                   admits
+#   resting <why>            it ended on purpose, and the turn's end starts the next one   admits
+#   stopped <pid>            the record says watching and the process is gone              refuses
+#   unstarted                no record, and no turn has ended since the session engaged    admits
+#   never                    no record, and a turn has ended since it engaged              refuses
+#
+# NO RECORD IS NOT YET A FAULT IN THE TURN THAT ENGAGED. The watcher starts at a turn's end and at a session's start,
+# and it writes nothing for a session bionic has not engaged, so the turn that engages the session has no record until
+# it ends. A turn end is the platform's own transcript record, `type: system` with `subtype: stop_hook_summary`, written
+# when the turn-end hooks have run; one dated after the engagement means the turn-end hook ran on an engaged session and
+# started no watch. When that cannot be read (no transcript, no engagement instant, an engagement older than the scanned
+# window, no jq), the answer is `never`: the wall refuses what it cannot prove watched.
+watch_verdict() {
+  local s at tr="${4:-}" ae n out
+  if s="$(watch_state "${1:-}" "${2:-}")"; then
+    printf '%s\n' "$s"
+    case "$s" in watching\ *|resting\ *) return 0 ;; *) return 1 ;; esac
+  fi
+  at="${3:-}"
+  ae="$(_TIME_ISO="$at" awk "${_TIME_ISO_AWK:-}"'BEGIN { if (ENVIRON["_TIME_ISO"] == "") exit 1; e = iso2epoch(ENVIRON["_TIME_ISO"]); if (e < 0) exit 1; print e }' 2>/dev/null)" \
+    || ae=""
+  if [ -z "$ae" ] || [ -z "$tr" ] || [ -L "$tr" ] || [ ! -f "$tr" ] || ! command -v jq >/dev/null 2>&1; then
+    printf 'never\n'; return 1
+  fi
+  n="$(wc -l < "$tr" 2>/dev/null | tr -d ' ')"
+  out="$(tail -n "$PATROL_VERDICT_SCAN_LINES" "$tr" 2>/dev/null | jq -Rr '
+      (fromjson? // null) as $r
+      | if $r == null or (($r.isSidechain // false) == true) then empty
+        elif $r.type == "system" and $r.subtype == "stop_hook_summary" then "E\t" + (($r.timestamp // "") | tostring)
+        else "R\t" + (($r.timestamp // "") | tostring) end' 2>/dev/null \
+    | awk -F'\t' -v ae="$ae" -v whole="$([ "${n:-0}" -le "$PATROL_VERDICT_SCAN_LINES" ] && echo 1 || echo 0)" \
+        "${_TIME_ISO_AWK:-}"'
+      { t = $2; if (substr(t, 20, 1) == ".") t = substr(t, 1, 19) "Z"; e = iso2epoch(t) }
+      e >= 0 && (first == "" || e < first) { first = e }
+      $1 == "E" && e > ae { ended = 1 }
+      END { if (ended) print "never"; else if (!whole && (first == "" || ae < first)) print "never"; else print "unstarted" }')"
+  case "$out" in unstarted) printf 'unstarted\n'; return 0 ;; esac
+  printf 'never\n'; return 1
 }

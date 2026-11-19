@@ -133,6 +133,8 @@ printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-04T00:0
 printf 'version=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$NR" > "$NR/.bionic/tmp/preflight-$SID.state"
 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$(stamp_of "$NR")"
 chmod 600 "$NR/.bionic/tmp/preflight-$SID.state" "$(stamp_of "$NR")"
+# A watch that rested on purpose, which the wall admits as it admits a live one.
+printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$NR/.bionic/tmp/watch-$SID.state"
 : > "$TMPROOT/wall.jsonl"
 WALL="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 wall() {  # <name> <subagent type> <prompt> -> WV (allow|deny), WR (the deny reason), WROW (the roster row, its clock off)

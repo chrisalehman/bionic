@@ -1595,6 +1595,26 @@ _p_here=""
 # library's fire window and, past it, on `patrol_verdict`'s reading of idle time. The
 # three states above are what this renderer receives, so the mapping lives there and
 # this file renders it.
+# THE WATCH, PER ENGAGED SESSION OF THIS PROJECT. hooks/watch.sh keeps the session's watch record and `watch_verdict`
+# (lib/patrol.sh) reads it, the reading the dispatch wall refuses on: a live or a rested watch is a row, a watcher that
+# died without a word and a session that ended a turn with no watch are each a fix. A session bionic never engaged has
+# no watch to report. Asked before the Patrol's own gate, since a session can be watched with no Patrol job armed.
+_doctor_watch_row() {  # <sid>
+  local sid="$1" short="${1%%-*}" mark at v
+  engaged_session "$DOCTOR_ROOT" "$sid" || return 0
+  declare -F watch_verdict >/dev/null 2>&1 || return 0
+  mark="$(engaged_marker_path "$DOCTOR_ROOT" "$sid" 2>/dev/null)" || mark=""
+  at=""; [ -n "$mark" ] && at="$(sed -n 's/^engaged_at=//p' "$mark" 2>/dev/null | head -1 | tr -d '\r')"
+  v="$(watch_verdict "$DOCTOR_ROOT" "$sid" "$at" "$(patrol_transcript "$sid" 2>/dev/null)")"
+  case "$v" in
+    watching\ *) _patrol_add "  ${DOCTOR_OK} session ${short} · watch: watching (pid $(printf '%s' "${v#watching }" | cut -d' ' -f1))" ;;
+    resting\ *)  _patrol_add "  ${DOCTOR_NIL} session ${short} · watch: resting (${v#resting }) — the next turn end starts it" ;;
+    unstarted)   _patrol_add "  ${DOCTOR_NIL} session ${short} · watch: none yet — this turn's end starts it" ;;
+    stopped\ *)  fix "session ${short}: the watch died (pid ${v#stopped }) → end a turn; its end starts another" ;;
+    *)           fix "session ${short}: no watch has started → exit claude and start it again" ;;
+  esac
+}
+
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
   # THIS PROJECT'S SESSIONS ONLY (T3 finding 1). lib/patrol.sh walks every live
@@ -1605,6 +1625,7 @@ _patrol_flush() {
   # together, because a repair addressed to a project the reader is not standing
   # in is not a repair they can make.
   [ "$_p_here" = "yes" ] || return 0
+  _doctor_watch_row "$_p_sid"
   [ "$_p_n_patrol" -gt 0 ] || return 0
   local short="${_p_sid%%-*}" j id extras="" n open=0 blind="${_p_blind}" _p_lead
   case "$blind" in ''|*[!0-9]*) blind=0 ;; esac

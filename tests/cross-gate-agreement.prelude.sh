@@ -440,6 +440,8 @@ arm_patrol() {  # <repo> <session-id>...
     printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" > "$repo/.bionic/tmp/patrol-$sid.state"
     chmod 600 "$repo/.bionic/tmp/patrol-$sid.state"
+    # …AND A WATCH THAT RESTED ON PURPOSE, which the dispatch wall admits as it admits a live one.
+    printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$repo/.bionic/tmp/watch-$sid.state"
     # …AND AN ENGAGED SESSION (task-engaged-session). Since this wave every gate this suite
     # drives asks `engaged_session` before it asks anything else, so a fixture without the
     # marker answers every question in this file the same way — silence — and the whole

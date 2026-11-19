@@ -645,6 +645,28 @@ else
   esac
 fi
 
+# THE WATCH. hooks/watch.sh keeps .bionic/tmp/watch-<sid>.state and `watch_verdict` (lib/patrol.sh) reads it: a
+# watcher alive, or one that rested on purpose (the turn's end starts the next), admits; a record naming a dead
+# watcher, or no record once a turn has ended since the session engaged, is a fleet nobody is waiting on. Scoped as
+# the stamp's arms are: a scale with no Patrol owes no watch. The turn that engaged the session has no record yet,
+# since the watcher starts at a turn's end, so it is admitted and told so.
+if [ "$DP_PATROL" != no ]; then
+  DP_ENGAGED_AT=""
+  DP_MARK="$(engaged_marker_path "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || DP_MARK=""
+  if [ -n "$DP_MARK" ] && [ -f "$DP_MARK" ] && [ ! -L "$DP_MARK" ]; then
+    DP_ENGAGED_AT="$(sed -n 's/^engaged_at=//p' "$DP_MARK" 2>/dev/null | head -1 | tr -d '\r')"
+  fi
+  DP_WATCH="$(watch_verdict "$BIONIC_ROOT" "$BIONIC_SID" "$DP_ENGAGED_AT" "$(_jq '.transcript_path')")"
+  case "$DP_WATCH" in
+    never)
+      dispatch_finding watch-never "$HOOK_DIR" "$BIONIC_ROOT" ;;
+    stopped\ *)
+      dispatch_finding watch-stopped "${DP_WATCH#stopped }" "$(watch_record_path "$BIONIC_ROOT" "$BIONIC_SID")" ;;
+    unstarted)
+      echo "dispatch-preflight: no watch record yet — this session engaged in this turn, and this turn's end starts the first watch." >&2 ;;
+  esac
+fi
+
 # ========================================= THE APPROVAL CHECKPOINT (epic-22 K2, AC-K2.4)
 #
 # A WRITER IS THE FIRST IRREVERSIBLE ACT OF A PLAN. Steps 0-3 produce documents the user
