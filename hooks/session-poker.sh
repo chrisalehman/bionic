@@ -303,6 +303,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> [--born …]   record the birth of row <id>, which an edit of the bound plan wrote first: the row is read back and judged as a row born mid-run, one born event is appended, and the plan is not written; a short row is refused with the lines it would accept; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite; task-add <id> --drop '<the person's words>' says a pending row's work is no longer owed: one drop event, the plan not written"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
+  die "  bash ${HOOK_DIR}/session-poker.sh judge <N> [<N>…]   the advance's judgment for each step from 5 to 8 in one process: what current <N> --check prints for each, each closed by judged <N> exit <rc>; appends nothing; exits 0 when every step would advance"
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order event with the words in the bound run's log, else a line in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>' ['<why>']   record the user's approval <name> as one approval in the run's log: a name a row reads, plan at Step 3, or a T4 criterion the user confirms on words they typed"
@@ -602,6 +603,17 @@ case "$VERB" in
         *) usage "current $1 --check: the check-only advance is for steps 5 to 8." ;;
       esac
     fi
+    ;;
+  # THE JUDGE ASKED DIRECTLY: one or more steps from 5 to 8, each judged as `current <N> --check` judges it.
+  judge)
+    [ $# -ge 1 ] || usage "judge takes one or more step numbers from 5 to 8, each judged as current <N> --check judges it."
+    for _pv_n in "$@"; do
+      case "$_pv_n" in
+        [5-8]|[5-8][ab]) : ;;
+        *) usage "judge: '$(printf '%s' "${_pv_n:0:24}" | tr -d '[:cntrl:]')' is not a step from 5 to 8, the steps the check-only advance judges." ;;
+      esac
+    done
+    PV_KEY="$1"; PV_CHECK=1
     ;;
   # THE REPLY TO THE RELEASE APPROVAL CARD. One operand: the user's reply to the page `release-approval` rendered, verbatim.
   # Its words, and whether the user typed them, are the verb's own refusals (1).
@@ -2211,18 +2223,21 @@ plan_verb_open() {
 # plan_verb_dry <verb> <what changed> <step> -> the dry commit through the real gate, asked about the plan itself
 # with <step> pending in its facts (BIONIC_DRY_STEP, honoured only for this session, lib/proof.sh `_proof_dry_step`),
 # so the move is judged as a commit at that step would be; exits 1 on the gate's refusal, 2 when it cannot run.
+# THE GATE IS ASKED IN THIS PROCESS (lib/walls.sh `wall_gate_judge`): the collector's libraries are loaded in the
+# subshell that asks, so the fold this shell holds is inherited and nothing this shell defines is redefined by the ask.
 plan_verb_dry() {
   local verb="$1" what="$2" step="$3" err rc
-  if [ ! -f "$HOOK_DIR/bash-walls.sh" ] || [ -z "$PV_MARK" ] || ! command -v jq >/dev/null 2>&1; then
-    die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
+  if [ ! -f "$BIONIC_LIB/walls.sh" ] || [ -z "$PV_MARK" ] || ! command -v jq >/dev/null 2>&1; then
+    die "REFUSED — the dry commit cannot be run (no lib/walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
     exit 2
   fi
   mkdir -p "${PV_MARK%/*}" 2>/dev/null
   printf 'plan=%s\nengaged_at=%s\n' "$PV_PLAN" "$(iso_now)" > "$PV_MARK"
-  err="$(cd "$PV_REPO" && BIONIC_DRY_STEP="$step" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PV_SID" BIONIC_WALL_VERBOSE=1 \
-    bash "$HOOK_DIR/bash-walls.sh" 2>&1 >/dev/null <<< "$(jq -n --arg s "$PV_SID" --arg cwd "$PV_REPO" --arg v "$verb" \
-      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
-        tool_input: {command: ("git commit -m " + $v)}, tool_use_id: "toolu_planverb"}')")"
+  err="$( for _pv_l in context.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh fold.sh walls.sh; do
+            # shellcheck source=/dev/null
+            . "$BIONIC_LIB/$_pv_l" >/dev/null 2>&1 || exit 2
+          done
+          wall_gate_judge "$PV_REPO" "$PV_SID" "$step" "git commit -m $verb" 2>&1 >/dev/null )"
   rc=$?
   rm -f "$PV_MARK"
   if [ "$rc" -ne 0 ]; then
@@ -2419,6 +2434,7 @@ case "$VERB" in
   handoff) poker_verb_handoff "$@" ;;
   brief) poker_verb_brief "$@" ;;
   current) poker_verb_current "$@" ;;
+  judge) poker_verb_judge "$@" ;;
   reply) poker_verb_reply "$@" ;;
   release-approval) poker_verb_release_approval "$@" ;;
   approve) poker_verb_approve "$@" ;;

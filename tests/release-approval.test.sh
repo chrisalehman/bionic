@@ -345,6 +345,109 @@ expect_eq "PREV-8c control: the reviewer acked, the same run is ready and the de
 new_roster "$RFC"
 
 # ============================================================
+section "§ASKED: the advance's judge, asked directly, prints what the checked advance prints, and judges as the whole wall does (AC-16.3; D23)"
+# ============================================================
+# fails-when: `judge <N>` asked directly prints another first line, other lines or another exit than `current <N> --check`;
+# one ask of the three steps answers a step otherwise than that step asked alone; the gate the judge runs in its own shell
+# prints other lines, or exits otherwise, than the whole wall (hooks/bash-walls.sh) does for the same dry commit at the
+# same pending step, so the facts the judge sets by hand are not the ones the gate's own collector sets.
+fc_wall_dry() {  # <step> -> FC_WALL, FC_WALL_RC: what the whole wall prints on stderr for the advance's dry commit at <step>, and its exit
+  local sid="planverb-9$$" mark="$RFC/.bionic/tmp/engaged-planverb-9$$.state" repo plan
+  # The advance asks from the run's physical root about the plan its binding names, so the wall is asked the same way.
+  repo="$(cd "$RFC" && pwd -P)"; plan="$(cd "${PFC%/*}" && pwd -P)/${PFC##*/}"
+  printf 'plan=%s\nengaged_at=2026-10-12T00:00:00Z\n' "$plan" > "$mark"
+  FC_WALL="$(cd "$repo" && BIONIC_DRY_STEP="$1" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" BIONIC_WALL_VERBOSE=1 \
+    bash "$BIONIC_HOOKS_DIR/bash-walls.sh" 2>&1 >/dev/null <<< "$(jq -n --arg s "$sid" --arg cwd "$repo" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+        tool_input: {command: "git commit -m current"}, tool_use_id: "toolu_planverb"}')")"
+  FC_WALL_RC=$?
+  rm -f "$mark"
+}
+fc_gate_lines() {  # <a checked advance's output> -> the lines its gate printed: below the verdict, above the advance's refusal of the dry commit
+  printf '%s\n' "$1" | awk 'NR == 1 { next } index($0, "poker: REFUSED — the commit gate refused the plan with ") == 1 { exit } { print }'
+}
+fc_gate_rc() { printf '%s\n' "$1" | sed -n 's/^poker: REFUSED — the commit gate refused the plan with current: [0-9][ab]* (rc=\([0-9]*\)).*/\1/p'; }
+fc_block() {  # <a judge's output> <step> -> the lines it printed for <step>, its closing line left out
+  printf '%s\n' "$1" | awk -v n="$2" '
+    index($0, "poker: judged ") == 1 { if ($3 == n) { printf "%s", b; exit } b = ""; next }
+    { b = b $0 "\n" }'
+}
+fc_judged_rc() { printf '%s\n' "$1" | awk -v n="$2" 'index($0, "poker: judged ") == 1 && $3 == n { print $5; exit }'; }
+# Each world: the advance's check alone, the judge asked for that step alone, and the whole wall's dry commit at it.
+fc_judge_world() {  # -> JW_ROWS: one line per step, <step> <check rc> <exits equal> <first lines equal> <blocks equal>; JW_CK_<n>, JW_J_<n>, JW_RC_<n>
+  local n ck ckrc j jrc
+  JW_ROWS=""
+  for n in 6 7 8; do
+    poke "$RFC" current "$n" --check; ck="$OUT"; ckrc="$RC"
+    poke "$RFC" judge "$n"; j="$OUT"; jrc="$(fc_judged_rc "$OUT" "$n")"
+    eval "JW_CK_$n=\"\$ck\"; JW_J_$n=\"\$j\"; JW_RC_$n=\"\$ckrc\""
+    JW_ROWS="$JW_ROWS$n $ckrc $([ "$ckrc" = "$jrc" ] && echo same || echo differ) $([ "$(printf '%s\n' "$ck" | head -1)" = "$(printf '%s\n' "$j" | head -1)" ] && echo same || echo differ)"
+    JW_ROWS="$JW_ROWS $([ "$ck" = "$(fc_block "$j" "$n")" ] && echo same || echo differ)"$'\n'
+  done
+}
+fc_plan "$FC_GOOD" "$FC_NODOC"
+fc_judge_world
+expect_eq "JUDGE-1 precondition: with no Step-7 document the advance to 7 checks red through its gate, the gate's own line under the verdict" \
+  "1|poker: current 7 --check: would refuse|yes" \
+  "$(printf '%s\n' "$JW_ROWS" | awk '$1 == 7 { print $2 }')|$(printf '%s\n' "$JW_CK_7" | head -1)|$(fc_has "$(fc_gate_lines "$JW_CK_7")" "Step 7's document")"
+expect_eq "JUDGE-1b asked directly for each step, the judge prints the first line the checked advance prints, every line of it, and exits as it does" \
+  "6 same same same|7 same same same|8 same same same" "$(printf '%s\n' "$JW_ROWS" | sed '/^$/d' | awk '{ print $1, $3, $4, $5 }' | paste -sd'|' -)"
+poke "$RFC" judge 6 7 8; FC_J3="$OUT"
+expect_eq "JUDGE-1c one ask of the three steps answers each as it is answered alone, block for block, exit for exit" \
+  "same same|same same|same same" \
+  "$(for n in 6 7 8; do eval "j=\"\$JW_J_$n\"; r=\"\$JW_RC_$n\""; printf '%s %s|' "$([ "$(fc_block "$FC_J3" "$n")" = "$(fc_block "$j" "$n")" ] && echo same || echo differ)" "$([ "$(fc_judged_rc "$FC_J3" "$n")" = "$r" ] && echo same || echo differ)"; done | sed 's/|$//')"
+fc_wall_dry 7
+expect_eq "JUDGE-2 the judge's gate prints at 7 what the whole wall prints for the dry commit at 7, line for line, with its exit" \
+  "yes|$FC_WALL_RC|$FC_WALL" \
+  "$(fc_has "$FC_WALL" "Step 7's document")|$(fc_gate_rc "$JW_CK_7")|$(fc_gate_lines "$JW_CK_7")"
+# The criterion owed now and never run: the gate at 6 refuses with the wall's repair for a live row.
+fc_plan "$FC_GOOD" "" fc_owed_now
+fc_judge_world
+expect_eq "JUDGE-3 precondition: a criterion owed now and never run makes the advance to 6 check red through its gate" \
+  "1|yes" "$(printf '%s\n' "$JW_ROWS" | awk '$1 == 6 { print $2 }')|$(fc_has "$(fc_gate_lines "$JW_CK_6")" 'AC-1.2')"
+expect_eq "JUDGE-3b …and the judge, asked directly, answers each step as the checked advance does" \
+  "same same same|same same same|same same same" "$(printf '%s\n' "$JW_ROWS" | sed '/^$/d' | awk '{ print $3, $4, $5 }' | paste -sd'|' -)"
+fc_wall_dry 6
+expect_eq "JUDGE-3c …and its gate at 6 prints what the whole wall prints for the dry commit at 6, with its exit" \
+  "$FC_WALL_RC|$FC_WALL" "$(fc_gate_rc "$JW_CK_6")|$(fc_gate_lines "$JW_CK_6")"
+# The failing reading: the advance to 8 is the facts judge's, which names it; the gate at 6 and 7 reads the readings.
+fc_plan "$FC_FAILR"
+fc_judge_world
+expect_eq "JUDGE-4 precondition: the failing adversarial reading makes the advance to 8 check red on the judge's line" \
+  "1|yes" "$(printf '%s\n' "$JW_ROWS" | awk '$1 == 8 { print $2 }')|$(printf '%s\n' "$JW_CK_8" | /usr/bin/grep -q '^review	adversarial	.*failing' && echo yes)"
+expect_eq "JUDGE-4b …and the judge, asked directly, answers each step as the checked advance does" \
+  "same same same|same same same|same same same" "$(printf '%s\n' "$JW_ROWS" | sed '/^$/d' | awk '{ print $3, $4, $5 }' | paste -sd'|' -)"
+for fc_n in 6 7; do
+  fc_wall_dry "$fc_n"; eval "fc_ck=\"\$JW_CK_$fc_n\""
+  expect_eq "JUDGE-4c …and at $fc_n its gate exits as the whole wall's dry commit does, printing what it prints" \
+    "$FC_WALL_RC|$FC_WALL" "$( [ "$FC_WALL_RC" = 0 ] && printf '0' || fc_gate_rc "$fc_ck")|$( [ "$FC_WALL_RC" = 0 ] && printf '%s' "$FC_WALL" || fc_gate_lines "$fc_ck")"
+done
+# The collector's two facts the gate reads only as it is handed them: the readings' derived results, and the open debts.
+fc_judge_gate() {  # <step> -> the judge's gate at <step> as `fc_wall_dry` reads the whole wall's: its exit, then its lines
+  local ck
+  eval "ck=\"\$JW_CK_$1\""
+  if [ "$(fc_gate_rc "$ck")" = "" ]; then printf '0|'; else printf '%s|%s' "$(fc_gate_rc "$ck")" "$(fc_gate_lines "$ck")"; fi
+}
+fc_plan "$FC_FAILR
+run/v1|ev=finding|ref=record/wave-x/adversarial-fail.md#1|to=defer|by=Dana Fixture|words=defer it to the next wave|why=the user ruled it|at=2026-10-12T12:30:00Z"
+fc_judge_world
+fc_wall_dry 6
+expect_eq "JUDGE-5 precondition: the failing reading's one finding moved to defer, the whole wall admits the dry commit at 6 on its derived result" \
+  "0|" "$FC_WALL_RC|$FC_WALL"
+expect_eq "JUDGE-5b …and so does the judge's gate, the derived result handed to it as the collector hands it" \
+  "0|" "$(fc_judge_gate 6)"
+expect_eq "JUDGE-5c …and asked directly the judge answers each step as the checked advance does" \
+  "same same same|same same same|same same same" "$(printf '%s\n' "$JW_ROWS" | sed '/^$/d' | awk '{ print $3, $4, $5 }' | paste -sd'|' -)"
+fc_plan "$FC_GOOD
+run/v1|ev=admitted|id=d1|row=T1|suite=a.test.sh|token=ext:gone|at=2026-10-12T14:30:00Z"
+fc_judge_world
+fc_wall_dry 6
+expect_eq "JUDGE-6 precondition: a debt the landing declared and nothing cleared, the whole wall refuses the dry commit at 6 naming its suite" \
+  "2|yes" "$FC_WALL_RC|$(fc_has "$FC_WALL" 'a.test.sh')"
+expect_eq "JUDGE-6b …and the judge's gate at 6 refuses it in the same lines, the debt handed to it as the collector hands it" \
+  "$FC_WALL_RC|$FC_WALL" "$(fc_judge_gate 6)"
+
+# ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"
 # ============================================================
 # fails-when: the page offers an item the record does not owe, or leaves one out. The unrun row is owed now
