@@ -317,7 +317,7 @@ plant_facts() {
   /usr/bin/grep -q '^base-sha:' "$plan" || {
     awk -v b="base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)" 'NR == 1 && $0 == "---" { h = 1; print; next }
       h && $0 == "---" { if (!d) print b; d = 1; h = 0 } { print } h && !d && /^working-branch: / { print b; d = 1 }' \
-      "$plan" > "$plan.b" && mv "$plan.b" "$plan"; }
+      "$plan" > "$plan.b" && mv "$plan.b" "$plan" && seal_fixture "$plan" "$p/$LOG_REL"; }
   fixture_git "$p" worktree list --porcelain 2>/dev/null | grep -qxF "branch refs/heads/$wb" \
     || fixture_git "$p" worktree add -q "$p-wave" "$wb" >/dev/null 2>&1
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
