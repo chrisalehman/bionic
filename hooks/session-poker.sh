@@ -15,6 +15,8 @@
 #     bash <plugin-root>/hooks/session-poker.sh arm        stamp the Patrol as alive, at engagement
 #     bash <plugin-root>/hooks/session-poker.sh disarm     remove that stamp — this Patrol was ended on purpose
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
+#     bash <plugin-root>/hooks/session-poker.sh tick --watch   one pass of the tick for the watcher: quiet, or one wake line
+#     bash <plugin-root>/hooks/session-poker.sh interval --watch   the configured watch interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
 #     bash <plugin-root>/hooks/session-poker.sh task-add <id> … record the birth of a row an edit added to the bound plan, or with --drop '<words>' that its work is no longer owed (writes no plan)
@@ -381,6 +383,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
+  die "  bash ${HOOK_DIR}/session-poker.sh tick --watch   one pass of the tick with no model: exit ${WATCH_RC_QUIET} quiet; exit ${WATCH_RC_WAKE} with one line of at most ${WATCH_LINE_MAX} characters naming the act owed"
+  die "  bash ${HOOK_DIR}/session-poker.sh interval --watch   the configured watch interval, in seconds (watch-interval:, default ${WATCH_INTERVAL_DEFAULT}s, refused above ${WATCH_INTERVAL_MAX}s)"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share (92 when none is set), the cores the person keeps (1 when none is set), the cores and the room; with <n> or reserve=<cores>, set it in the user-level file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt [--why '<reason>']   every open row a PREDECESSOR session left on this project's rosters, each adoption one hand event with its reason (the predecessor's clear when none is given)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
@@ -839,7 +843,12 @@ $1"; shift ;;
   # one. Its flags, --starter and --reason, are the verb's own to read and refuse (hooks/poker/proof.sh
   # poker_verb_regression_run), so they pass through.
   regression-run) : ;;
-  tick|arm|disarm|interval|prompt)
+  # THE WATCH FORM (`--watch`): tick runs one pass for the watcher and interval prints the watch's period; each takes
+  # that one flag or nothing.
+  tick|interval)
+    [ $# -eq 0 ] || { [ $# -eq 1 ] && [ "$1" = --watch ]; } || usage "$VERB takes no arguments, or --watch."
+    ;;
+  arm|disarm|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
   # THE MACHINE'S SHARE. No operand prints it; a share and `reserve=<cores>`
@@ -1183,6 +1192,28 @@ poker_interval_seconds() {
     [ -n "$ov" ] && raw="$ov"
   fi
   parse_seconds "$raw"
+}
+
+# `watch-interval:` in the same file, by the same convention: the watcher's period, seconds on stdout. Absent, it is
+# WATCH_INTERVAL_DEFAULT (lib/patrol.sh). rc 1: the value cannot be read as a duration, or reads as none. rc 2: it is
+# above WATCH_INTERVAL_MAX, and the seconds it reads as are printed so the refusal can name them; a period the
+# ceiling refuses is never taken, since a watch that looks less often than the Patrol it replaces is a slower eye.
+poker_watch_interval_seconds() {
+  local repo cfg raw ov secs
+  repo="$(project_root "$PWD")"
+  cfg="$repo/.bionic/config.yaml"
+  raw="${WATCH_INTERVAL_DEFAULT}s"
+  if [ -f "$cfg" ] && [ ! -L "$cfg" ]; then
+    ov="$(grep -E '^[[:space:]]*watch-interval[[:space:]]*:' "$cfg" 2>/dev/null | head -1 \
+      | sed -E 's/^[[:space:]]*watch-interval[[:space:]]*:[[:space:]]*//' \
+      | tr -d '\r' | sed -e 's/[[:space:]]*$//')"
+    [ -n "$ov" ] && raw="$ov"
+  fi
+  secs="$(parse_seconds "$raw")" || return 1
+  case "$secs" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$secs" -ge 1 ] || return 1
+  printf '%s' "$secs"
+  [ "$secs" -le "$WATCH_INTERVAL_MAX" ] || return 2
 }
 
 # ---------------------------------------------------------------- shared by the parts
@@ -2349,6 +2380,17 @@ PFC_OUT=""; PFC_ART=""
 case "$VERB" in
 
   interval)
+    if [ "${1:-}" = --watch ]; then
+      SECS="$(poker_watch_interval_seconds)"; SECS_RC=$?
+      case "$SECS_RC" in
+        0) printf '%s\n' "$SECS"; exit 0 ;;
+        2) die "REFUSED — the configured watch-interval is ${SECS}s, above the ceiling of $((WATCH_INTERVAL_MAX / 60))m; it is not taken."
+           die "Set 'watch-interval:' in .bionic/config.yaml to $((WATCH_INTERVAL_MAX / 60))m or less, or remove it for the default of $((WATCH_INTERVAL_DEFAULT / 60))m." ;;
+        *) die "REFUSED — the configured watch-interval could not be read as a duration."
+           die "Fix or remove the 'watch-interval:' line in .bionic/config.yaml; the default is $((WATCH_INTERVAL_DEFAULT / 60))m." ;;
+      esac
+      exit 2
+    fi
     SECS="$(poker_interval_seconds)" || {
       die "REFUSED — the configured poker-interval could not be read as a duration."
       die "Fix or remove the 'poker-interval:' line in .bionic/config.yaml; the default is $POKER_INTERVAL_DEFAULT."
@@ -2498,5 +2540,5 @@ case "$VERB" in
   resume) poker_verb_resume "$@" ;;
   sitrep) poker_verb_sitrep "$@" ;;
   stop-run) poker_verb_stop_run "$@" ;;
-  tick) poker_verb_tick "$@" ;;
+  tick) if [ "${1:-}" = --watch ]; then poker_verb_watch_pass; else poker_verb_tick "$@"; fi ;;
 esac

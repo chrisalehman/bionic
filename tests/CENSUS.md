@@ -1738,6 +1738,13 @@ units.test.sh | §DEPS-15 | keep | payload/scripts/lib/units.sh _units_sched row
 version-compare.test.sh | §Section 1 | keep | payload/scripts/lib/detect.sh version_compare: the comparison made lexical, so "4: 1.10.0 vs 1.9.0 -> ahead (numeric, not lexical)" reads lag | none (searched 'version_compare' in tests/; doctor-version.test.sh §Section 10 compares a version against 0.0.1, where lexical and numeric agree)
 version-compare.test.sh | §Section 2 | duplicate | payload/scripts/lib/detect.sh detect_plugin_latest: the ahead, current or lag state word misreported, which doctor's version row renders | doctor-version.test.sh §Section 10, doctor-version.test.sh §Section 1, doctor-version.test.sh §Section 2
 
+## watch.test.sh
+
+watch.test.sh | §QUIET | keep | payload/scripts/lib/patrol.sh watch_wake_line: the `unchanged since` guard deleted, so a print the tick already told wakes again (Q2, Q3); hooks/poker/tick.sh poker_verb_watch_pass: the tick no longer run, so the stamp stays planted (Q1.b-Q3.c) | none (searched 'tick --watch' and 'watch_wake_line' in tests/)
+watch.test.sh | §WAKE | keep | payload/scripts/lib/patrol.sh watch_wake_line: FILL, STANDDOWN or NOTIFY left out of the woken kinds, so a ready row, a reported agent or one quiet past its cadence passes with no wake (W1-W3); hooks/session-poker.sh poker_watch_interval_seconds: the ceiling deleted, so 21m is taken (W4.b, W5.a) | none (searched 'watch-interval' and 'tick --watch' in tests/)
+watch.test.sh | §PROMPT | keep | payload/scripts/lib/patrol.sh watch_wake_line: the cut to WATCH_LINE_MAX or the ASCII fold deleted, so the line over every kind is longer than 120 or carries a multibyte name (P1.b, P1.c) | none (searched 'WATCH_LINE_MAX' in tests/)
+watch.test.sh | §GATE | keep | payload/scripts/lib/patrol.sh watch_wake_line: GATE left out of the woken kinds, so a denied reserved request passes quiet with its ask open and no line (G1) | notify.test.sh §SOURCES (the tick's own GATE line and ask, not the pass's wake)
+
 ## width.test.sh
 
 width.test.sh | §Section 1 | keep | payload/scripts/lib/width.sh bionic_cols: '×' left out of the closed set, so it measures 2 under LC_ALL=C (1c.×) | none (searched 'bionic_cols' in tests/; refuse.test.sh §T47 measures é and 日, which are outside the set)
