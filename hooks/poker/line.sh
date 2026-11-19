@@ -828,40 +828,40 @@ poker_verb_publish() {
   plan_verb_open publish
   if ! _line_load_proof || ! declare -F proof_approved_head >/dev/null 2>&1 || ! _proof_reader_load \
      || ! declare -F reader_q_pr >/dev/null 2>&1; then
-    die "REFUSED — the proof record (lib/proof.sh) or the reader (lib/reader.sh) cannot be loaded from $BIONIC_LIB; nothing was pushed."
+    die "REFUSED — the proof record (lib/proof.sh) or the reader (lib/reader.sh) cannot be loaded from $BIONIC_LIB; nothing was pushed. Fix: reinstall the plugin (claude plugin install bionic@bionic), then run again: bash $HOOK_DIR/session-poker.sh publish"
     exit 2
   fi
   wb="$(plan_working_branch "$PV_PLAN")"; base="$(plan_integration_branch "$PV_PLAN")"
   if [ -z "$wb" ]; then
-    die "REFUSED — the plan's header names no working-branch:, and publish opens the working branch's request against the integration branch; add it to the header. Nothing was pushed."
+    die "REFUSED — the plan's header names no working-branch:, and publish opens the working branch's request against the integration branch. Nothing was pushed. Add it to the header, then run again: bash $HOOK_DIR/session-poker.sh publish"
     exit 2
   fi
   if [ -z "$base" ]; then
-    die "REFUSED — the plan's header names no integration-branch:, and publish opens the working branch's request against the integration branch; add it to the header. Nothing was pushed."
+    die "REFUSED — the plan's header names no integration-branch:, and publish opens the working branch's request against the integration branch. Nothing was pushed. Add it to the header, then run again: bash $HOOK_DIR/session-poker.sh publish"
     exit 2
   fi
   head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
   if [ -z "$head" ]; then
-    die "REFUSED — the working branch $wb names no commit in $PV_REPO; nothing was pushed."
+    die "REFUSED — the working branch $wb names no commit in $PV_REPO; nothing was pushed. Commit the work on it, then run again: bash $HOOK_DIR/session-poker.sh publish"
     exit 2
   fi
   # The consent, first: nothing below it runs without the approval at this head.
   ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)"; rc=$?
   if [ "$rc" -eq 2 ]; then
-    die "REFUSED — the run's facts could not be read, so the release approval is not known; nothing was pushed. Run publish again."
+    die "REFUSED — the run's facts could not be read, so the release approval is not known; nothing was pushed. Run again: bash $HOOK_DIR/session-poker.sh publish"
     exit 2
   fi
   if [ -z "$ah" ]; then
-    die "REFUSED — publish leaves the machine at the head the user approved for release, and no approved: release line names a head; the user's word for the working head ${head:0:12} is approve release '<reply>'. Nothing was pushed and no pull request was opened."
+    die "REFUSED — publish leaves the machine at the head the user approved for release, and no approved: release line names a head; the user's word for the working head ${head:0:12} is recorded with bash $HOOK_DIR/session-poker.sh approve release '<reply>'. Nothing was pushed and no pull request was opened."
     exit 1
   fi
   if ! cur8_release_holds "$ah" "$head"; then
-    die "REFUSED — publish leaves the machine at the head the user approved for release: the working head ${head:0:12} is not the approved head ${ah:0:12}, and a commit past it is code or a release-set file. Have the user approve this head (approve release '<reply>'). Nothing was pushed and no pull request was opened."
+    die "REFUSED — publish leaves the machine at the head the user approved for release: the working head ${head:0:12} is not the approved head ${ah:0:12}, and a commit past it is code or a release-set file. Have the user approve this head, recorded with bash $HOOK_DIR/session-poker.sh approve release '<reply>'. Nothing was pushed and no pull request was opened."
     exit 1
   fi
   pr="$(_proof_ask "$PV_PLAN" reader_q_pr "$PV_PLAN")"; rc=$?
   if [ "$rc" -gt 1 ]; then
-    die "REFUSED — the run's facts could not be read, so whether its request is open is not known; nothing was pushed. Run publish again."
+    die "REFUSED — the run's facts could not be read, so whether its request is open is not known; nothing was pushed. Run again: bash $HOOK_DIR/session-poker.sh publish"
     exit 2
   fi
   if [ "$rc" -eq 0 ]; then
@@ -891,7 +891,7 @@ poker_verb_publish() {
     [ -n "$url" ] || publish_failed "$wb" "$head" "the pull request against $base" "gh answered no address: $out"
   fi
   if ! line_published_event "$PV_PLAN" part=pr "url=$url" "branch=$wb" "commit=$head" "base=$base" by=publish; then
-    die "REFUSED — $wb at ${head:0:12} is on origin and its pull request is $url, and the run's log could not be written: append ev=published|part=pr|url=$url|branch=$wb|commit=$head|base=$base|by=publish to $(line_log "$PV_PLAN" 2>/dev/null || printf 'the log')."
+    die "REFUSED — $wb at ${head:0:12} is on origin and its pull request is $url, and the run's log could not be written: append ev=published|part=pr|url=$url|branch=$wb|commit=$head|base=$base|by=publish to $(line_log "$PV_PLAN" 2>/dev/null || printf 'the log'). Fix: once the log takes a line, append it, or run again: bash $HOOK_DIR/session-poker.sh publish."
     exit 1
   fi
   proof_owed close "$(publish_ask_key "$wb")" publish
