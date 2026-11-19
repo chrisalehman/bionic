@@ -9,6 +9,7 @@
 #                     weeks out, a held task naming what it waits on, and a card head with no invented wave
 #   §FACTS            three goals declared, met, not met and not measured; a close at 1× under three landings;
 #                     the suites and the whole run named
+#   §SEALED           after every verb and landing the run's seal reads clean, and its gate reads no change
 #   §GATE             a rehearsed world whose own gate is full stops at its landing's WAITING
 #
 # EACH SECTION, ONE SHAPE. The sandbox's own `hooks/session-poker.sh sitrep <plan>` prints the sheet, whose `ask:`
@@ -76,6 +77,17 @@ section "§FACTS: the sheet's facts read true: every line a measurement naming w
 # goal, or a goal reads another status; the close is scaled by one or two landed tasks; a review that passed and then
 # failed counts as both; a note counts the reads it leaves out.
 rt_facts_state clean
+
+section "§SEALED: every verb and landing of the rehearsed run leaves its seal matching, and its gate reads no change"
+# fails-when: a writer of the run's log or plan, a verb or a landing, leaves the seal reading changed.
+SE="$WORLD_ROOT/clean/seals"; SE_GATE() { jq -n --arg s "$WORLD_SID" --arg c "$RT_ROOT" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse",
+  tool_name:"Bash", tool_input:{command:"git commit -m x"}}' | (cd "$RT_ROOT" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" CLAUDE_PROJECT_DIR= \
+  bash "$RT_ROOT/hooks/bash-walls.sh" 2>&1 >/dev/null) | head -1; }
+expect_eq "SE-1 the build row's landing left the run's seal clean" "the build row says ready|clean" "$(/usr/bin/grep '^the build row says ready|' "$SE")"
+expect_eq "SE-2 …and no command of the run left it reading anything but clean or none" "" "$(/usr/bin/grep -v '|clean$' "$SE" | /usr/bin/grep -v '|none$')"
+expect_eq "SE-3 a commit through the sandbox's gate is not refused for a change" "" "$(SE_GATE | /usr/bin/grep 'outside the tool\|is gone')"
+printf 'run/v1|ev=step|n=9|at=z\n' >> "$RT_ROOT/.bionic/docs/record/wave-x/run.log"
+expect_contains "SE-3b …and is, once a line is added by hand" "added to outside the tool" "$(SE_GATE)"
 
 section "§GATE: a rehearsed world whose own gate is full stops at the build row's landing"
 # fails-when: the rehearsal takes the landing line's WAITING as a landing, or its world's gate ignores its own config.

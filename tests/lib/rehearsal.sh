@@ -131,6 +131,8 @@ _rh_run() {
   door_run "${RH_CWD:-$RH_ROOT}" "$@"
   { _rh_cmdline "$@"; printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /'; printf '  rc=%s  (%s, %s s)\n' "$DOOR_RC" "$label" "$((SECONDS - t0))"; } >> "$RH_LOG"
   printf '%s|%s|%s\n' "$label" "$s0" "$(_rh_sum)" >> "$RH_DIR/plan-sums"
+  # The seal as the commit gate would read it after this command, by the sandbox's own library.
+  printf '%s|%s\n' "$label" "$(bash -c '. "$1/seal.sh" && seal_verify "$2"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" 2>/dev/null)" >> "$RH_DIR/seals"
   # Numbered by the logs already kept, so a command run in a subshell keeps its place in the order.
   n="$(( $(ls "$RH_DIR/logs" | wc -l) + 1 ))"
   cat "$RH_REC/run.log" > "$RH_DIR/logs/$n.log" 2>/dev/null || : > "$RH_DIR/logs/$n.log"
@@ -702,7 +704,7 @@ rehearse() {
   # quiet machine, planted through the readers' pins as the gate's own suites plant one, so only its own store and config
   # (a share, a reserve) can make a rehearsed landing wait. Callers run rehearse in a subshell, so nothing leaks.
   export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0
-  : > "$RH_LOG"; : > "$dir/plan-sums"; mkdir -p "$dir/logs" || return 1
+  : > "$RH_LOG"; : > "$dir/plan-sums"; : > "$dir/seals"; mkdir -p "$dir/logs" || return 1
   [ "$state" != single-verify ] || rigor=single
   built="$(door_project "$dir/project")" || { echo "rehearse $state: door_project failed under $dir" >&2; return 1; }
   RH_ROOT="${built% *}"; RH_BASE="${built##* }"

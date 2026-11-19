@@ -457,9 +457,10 @@ gs_bind_decline_unengaged() { echo "canonical-sdlc [bind]: $1" >&2; }
 # (`reader_log`): a plan of a delivered run, or a page the walk admits no record for, has no seal
 # for the gate to read, and one made here would be a stray.
 #
-# THE CALLER LEAVES THROUGH `exit 0` WHATEVER THIS ANSWERS. A seal that cannot be had (the lock
-# busy, the home unwritable) costs the run a changed reading at its next commit, which is the safe
-# direction, and the line on stderr and in the audit file is how the reader learns why. A plan in no
+# THE CALLER LEAVES THROUGH `exit 0` WHATEVER THIS ANSWERS. A lock held past its wait leaves the
+# plan's digest owed beside the seal (lib/seal.sh), so the admitted write still reads as the tool's;
+# an unwritable home costs the run a changed reading at its next commit, the safe direction. The line
+# on stderr and in the audit file is how the reader learns the seal was not made. A plan in no
 # repository has no home and no gate to read one, and is not worth a line.
 gs_seal_plan() {
   local log rc=0
