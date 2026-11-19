@@ -572,9 +572,7 @@ put() { RUN_LOG="$GL" bash -c '. "$1/log.sh" && log_append hand what=note "why=$
 engage_as() { jq -nc --arg s "$1" --arg c "$G" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Skill",
   tool_input:{skill:"bionic:canonical-sdlc"}}' | (cd "$G" && HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR= \
   bash "$BIONIC_HOOKS_DIR/engage.sh" >/dev/null 2>&1); SID="$1"; }
-T1MD='cat > "${GL%/*}/T1.md" <<X
-# T1: the build
-X'
+t1md() { printf 'cat > %q <<X\n# T1: the build\nX\n' "${GL%/*}/T1.md"; }
 SID0="$SID"; ADMIT=""
 while IFS="|" read -r label rc first act <&3; do
   SID="$SID0"; world; eval "$act"; gate "git commit -m x"
@@ -586,7 +584,7 @@ a new session id engaging, as after a clear|2|OWED|engage_as 9a8b7c6d-5e4f-4a3b-
 the step verb's move down to 4|0|ADMIT|poke current 4
 step 8's wipe of the state folder|2|OWED|rm -rf "$G/.bionic/tmp/"*
 an honest append that met a held lock|2|OWED|hold; put "an honest line"; free; HL="$(/usr/bin/grep -c "why=an honest line|" "$GL")"
-a writer's record written into the record folder|2|OWED|gate "$T1MD"; HD="$GRC"; eval "$T1MD"
+a writer's record written into the record folder|2|OWED|gate "$(t1md)"; HD="$GRC"; eval "$(t1md)"
 ROWS
 SID="$SID0"
 expect_eq "the held append's line is in the log, and the record's heredoc was admitted and written" "1|0|# T1: the build" \
