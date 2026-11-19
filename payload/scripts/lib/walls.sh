@@ -1201,8 +1201,10 @@ eg_step_reads_readings() {
 # eg_plan_reads_readings <plan> -> 0 when the step <plan>'s run stands at is such a step, as the reader answers it
 # (lib/proof.sh `proof_step_held`, loaded by the collector that asks); 1 when it is not, or when the run's place cannot be
 # read, which the gate's own read then refuses by name. FILE SCOPE, for the collector, which asks before the wall's body
-# has run.
+# has run. It decides what the gate is handed, so the place is folded from the log, never the held file; the collector
+# asks in the hook's own shell, and the gate's body is served that fold.
 eg_plan_reads_readings() {
+  local _PROOF_PLACE_FRESH=1
   [ -f "${1:-}" ] && declare -F proof_step_held >/dev/null 2>&1 || return 1
   proof_step_held "$1" >/dev/null || return 1
   case "$_PROOF_PLACE" in n=*) local n="${_PROOF_PLACE%%$'\n'*}"; eg_step_reads_readings "${n#n=}" ;; *) return 1 ;; esac
@@ -2036,6 +2038,13 @@ DOCS_ROOT=$(docs_root "$BIONIC_ROOT")
 # So the closed plan stays THE plan here — the hygiene refusals below still judge it,
 # because a plan that lies is a defect in every state and this hook's ordering contract
 # says so — and nothing else in the root is read to replace it.
+#
+# OPEN, AND AT WHICH STEP, ARE FOLDED FROM THE RUN'S LOG, which the seal has vouched for above this gate. The held place
+# and the kept facts under $TMPDIR stay for the hooks that decide nothing about a commit; a file anyone can rewrite there
+# never answers this gate (lib/proof.sh `_PROOF_PLACE_FRESH`). The bound plan is folded once, in this shell, and every
+# later ask of its place below is served that fold.
+_PROOF_PLACE_FRESH=1
+_eg_bound="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" && _run_place "$_eg_bound" >/dev/null 2>&1 || :
 EG_RUN=$(session_run "$BIONIC_ROOT" "$BIONIC_SID")
 EG_VERDICT="${EG_RUN%% *}"
 EG_VPATH=""
@@ -2283,7 +2292,7 @@ Fix: run the commit again; the fold's own line above names why it failed."
 }
 _eg_refuse_lowered() {
   local s found="declares canonical_sdlc_version: $SDLC_VERSION"
-  s="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+  s="$(_run_place "$PLAN")" || _eg_v15_unreadable
   case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
   [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
   [ -n "$FRONTMATTER" ] || found="has no header on its first line"
@@ -2842,7 +2851,7 @@ Grew:${grown}"
 }
 
 # The step is the run's newest step event: an integer, or 8b, the adversarial critic's step.
-_eg_step="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+_eg_step="$(_run_place "$PLAN")" || _eg_v15_unreadable
 CURRENT="$(sed -n 's/^n=//p' <<< "$_eg_step")"
 [ -n "$CURRENT" ] || refuse exit2 commit "the run's log holds no step" "record the run's step" \
 "canonical-sdlc plan at version 15: the run's log holds no step event, so the step this commit is judged at is not known.
@@ -3335,7 +3344,7 @@ _eg_v15_step_asks() {
          *) for p in $(printf '%s' "$v" | tr ',' ' '); do [ -f "$DOCS_ROOT/$p" ] || [ -f "$BIONIC_ROOT/$p" ] || miss=1; done ;;
        esac
        [ -z "$miss" ] || _eg_v15_ask "Step 7's document: the header's adrs: naming records that stand, or none with its reason" ;;
-    8) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+    8) st="$(_run_place "$PLAN")" || _eg_v15_unreadable
        for r in $(plan_read_rows "$PLAN" Tasks 2>/dev/null | awk -F'\t' '{ id = ""; k = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^id=/) id = substr($i, 4); if ($i ~ /^kind=/) k = substr($i, 6) } if (k == "integrate") print id }'); do
          miss="${miss:-1}"; v="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$r")"; [ "${v#*state=landed}" = "$v" ] || miss=0
        done
@@ -3356,7 +3365,7 @@ _eg_v15_step_asks() {
        case "$st" in *$'\ncleanup=n/a'*) : ;;
          *$'\ncleanup='*$'\ntmp-wiped='*$'\ntasks-completed='*) : ;;
          *) _eg_v15_ask "Step 8's cleanup, tmp-wiped and tasks-completed, given to its step by close-out" ;; esac ;;
-    9) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+    9) st="$(_run_place "$PLAN")" || _eg_v15_unreadable
        case "$st" in *state=delivered*) : ;; *) _eg_v15_ask "Step 9's delivery, given to its step by close-out" ;; esac
        if deploy_target_named; then
          for v in deployed verified monitored; do case "$st" in *$'\n'"$v="*) : ;; *) miss="${miss:+$miss, }$v" ;; esac; done
