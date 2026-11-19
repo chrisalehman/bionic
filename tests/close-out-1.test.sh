@@ -550,4 +550,70 @@ expect_eq "DP8: …given none, check owes none and run closes as before, no depl
 expect_eq "DP9: the deploy writes no new event type: both closes leave the same set" "$(dp_events "$PDO")" "$(dp_events "$PDN")"
 expect_nonempty "DP9b: …and the set is read" "$(dp_events "$PDN")"
 
+# ============================================================
+section "SEAL — close-out lifts the run's seal after the delivery is logged and before the archive moves the plan"
+# ============================================================
+# The seal vouches for a plan and a log; the archive moves the plan, so a seal left standing would read the honest
+# move as a plan gone. The ORDER is read from a copy of the scripts with two spies: the library's `seal_remove` notes
+# whether the delivery is in the run's log when it is called, and `archive_run` notes whether a seal still stands when
+# it is entered. Both spies call the real functions on.
+seal_count() { ls "$1"/.git/bionic-seal/*.seal 2>/dev/null | wc -l | tr -d ' '; }
+SPY_DIR="$SANDBOX/scripts-spy"; SPY_LOG="$SANDBOX/seal-spy.log"
+rm -rf "$SPY_DIR"; cp -R "$REPO_ROOT/payload/scripts" "$SPY_DIR"
+cat >> "$SPY_DIR/lib/seal.sh" <<'SPY'
+eval "_spy_$(declare -f seal_remove)"
+seal_remove() {
+  printf 'remove: delivered-lines=%s\n' "$(grep -c '|ev=step|n=9|.*delivered=' "$SPY_LOGFILE" 2>/dev/null)" >> "$SPY_LOG"
+  _spy_seal_remove "$@"
+}
+SPY
+cat >> "$SPY_DIR/lib/archive.sh" <<'SPY'
+eval "_spy_$(declare -f archive_run)"
+archive_run() {
+  printf 'archive: seals=%s plan-present=%s\n' "$(ls "$(git -C "$1" rev-parse --absolute-git-dir)"/bionic-seal/*.seal 2>/dev/null | wc -l | tr -d ' ')" \
+    "$(ls "$1"/*.plan.md 2>/dev/null | wc -l | tr -d ' ')" >> "$SPY_LOG"
+  _spy_archive_run "$@"
+}
+SPY
+SCRIPT_REAL="$SCRIPT"
+
+PS1="$(mk_fixture seal-arch)"; advance_to "$PS1" 8; rm -f "$PS1/$EPIC_REL"
+expect_eq "SEAL0: precondition: the fixture's run is sealed, one seal in its repository's common git directory" "1" "$(seal_count "$PS1")"
+rm -f "$SPY_LOG"; export SPY_LOG SPY_LOGFILE="$PS1/$LOG_REL"; SCRIPT="$SPY_DIR/close-out.sh"
+run_close "$PS1" run
+SCRIPT="$SCRIPT_REAL"; unset SPY_LOGFILE
+expect_eq "SEAL1: the close that archives exits 0, the plan gone from the project and in the archive" "0|no|yes" \
+  "$CO_RC|$([ -f "$PS1/$PLAN_REL" ] && echo yes || echo no)|$([ -n "$(find "$SANDBOX/seal-arch-archive" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1)" ] && echo yes || echo no)"
+expect_eq "SEAL2: …and no seal stands for the run afterwards" "0" "$(seal_count "$PS1")"
+expect_eq "SEAL3: the seal was lifted once, with the delivery already in the log" "remove: delivered-lines=1" "$(grep '^remove:' "$SPY_LOG" 2>/dev/null)"
+expect_eq "SEAL4: …and no seal stood when the archive was entered, the plan still in place" "archive: seals=0 plan-present=1" "$(grep '^archive:' "$SPY_LOG" 2>/dev/null)"
+expect_eq "SEAL4b: …the seal's lifting before the archive's entry, in the order the spies wrote them" "remove|archive" \
+  "$(sed -n 's/^\([a-z]*\):.*/\1/p' "$SPY_LOG" | paste -sd'|' -)"
+
+# A close whose archive does not move the plan (an open sibling in the epic) is the same close: the delivery stands, the
+# seal is lifted all the same, and the plan stays where it is.
+PS2="$(mk_fixture seal-stay)"; advance_to "$PS2" 8
+expect_eq "SEAL5: precondition: sealed" "1" "$(seal_count "$PS2")"
+run_close "$PS2" run
+expect_eq "SEAL6: a close whose plan stays in an open epic lifts the seal too, the plan in place" "0|0|yes" \
+  "$CO_RC|$(seal_count "$PS2")|$([ -f "$PS2/$PLAN_REL" ] && echo yes || echo no)"
+
+# THE LOCK NOT HAD IS A REFUSAL, NOT A STALE SEAL. A held lock turns the removal away after about two seconds; the close
+# names the seal and moves nothing, the seal stands, and the same close with a dead holder's lock goes through.
+PS3="$(mk_fixture seal-held)"; advance_to "$PS3" 8; rm -f "$PS3/$EPIC_REL"
+mkdir "$PS3/.git/bionic-seal/.reap"; printf '%s\n' "$$" > "$PS3/.git/bionic-seal/.reap/pid"
+expect_eq "SEAL7: precondition: a live holder's lock stands beside the run's seal" "1|yes" \
+  "$(seal_count "$PS3")|$([ -d "$PS3/.git/bionic-seal/.reap" ] && echo yes || echo no)"
+run_close "$PS3" run
+expect_eq "SEAL8: the lock not had refuses the close (rc 2), naming the seal" "2|yes" \
+  "$CO_RC|$(contains "$CO_OUT" "the run's seal could not be lifted")"
+expect_eq "SEAL9: …the seal still stands and the plan was not moved" "1|yes" "$(seal_count "$PS3")|$([ -f "$PS3/$PLAN_REL" ] && echo yes || echo no)"
+sh -c 'exit 0' & SEAL_DEAD=$!; wait "$SEAL_DEAD"
+PS4="$(mk_fixture seal-dead)"; advance_to "$PS4" 8; rm -f "$PS4/$EPIC_REL"
+mkdir "$PS4/.git/bionic-seal/.reap"; printf '%s\n' "$SEAL_DEAD" > "$PS4/.git/bionic-seal/.reap/pid"
+run_close "$PS4" run
+expect_eq "SEAL10: the same close under a dead holder's lock takes it over, lifts the seal and archives" "0|0|no" \
+  "$CO_RC|$(seal_count "$PS4")|$([ -f "$PS4/$PLAN_REL" ] && echo yes || echo no)"
+
+
 finish

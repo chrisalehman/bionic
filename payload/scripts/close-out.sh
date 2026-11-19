@@ -95,7 +95,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh; do
+for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh seal.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -121,6 +121,9 @@ fi
 . "${CO_LIB}/handoff.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/archive.sh"
+# THE SEAL (lib/seal.sh) that vouches for the run's plan and log: close-out lifts it before the archive moves the plan.
+# shellcheck source=/dev/null
+. "${CO_LIB}/seal.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/patrol.sh"
 # shellcheck source=/dev/null
@@ -2090,6 +2093,20 @@ act_archive() {
   return 0
 }
 
+# co_lift_seal -> the run's seal removed, or a refusal. It stands between the delivery's event and the archive's move: the
+# seal names the plan where it is, so a seal left standing would read the move of a closed run as the plan gone, and the
+# lifting before the delivery would leave the delivery's own events unvouched. No home (2) is no seal to lift; the lock
+# not had (75) is refused, because the move that follows would strand a seal that names a plan no longer there.
+co_lift_seal() {
+  local rc=0
+  seal_remove "$PLAN" || rc=$?
+  case "$rc" in
+    0|2) return 0 ;;
+    75)  _co_refuse "the run's seal could not be lifted: its lock was held (exit 75); the plan is closed and was not archived, so say the same close again once the holder is done" ;;
+    *)   _co_refuse "the run's seal could not be lifted (exit $rc); the plan is closed and was not archived" ;;
+  esac
+}
+
 # co_close_archived <the run's log, found before the move> -> the delivery's step restated with the archive's line.
 # The archive moves the plan and never its record, so the plan's new place joins no log: the log found before the move
 # is named to the step's writer, which takes only a log that is there. The restated step carries the delivery's own
@@ -2355,6 +2372,7 @@ do_run() {
                     say "handoff: the closed form (resume point NONE) written to $CO_HO_REL; the run's log names it"
                     say "step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}"
     CO_LOG="$(reader_log "$PLAN" 2>/dev/null)" || _co_refuse "the run's log of $PLAN cannot be found, so the archive's line has nowhere to go; nothing was moved"
+    co_lift_seal
     act_archive
     co_close_archived "$CO_LOG"
                     say "archived: $ARCHIVED_LINE"
