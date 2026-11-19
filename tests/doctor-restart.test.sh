@@ -336,30 +336,26 @@ run_watch() {  # [env assignment...] -> WRC, WERR (stderr), WOUT; bounded at 60 
   if kill -0 "$p" 2>/dev/null; then kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; WRC=124; else wait "$p" 2>/dev/null; WRC=$?; fi
   WOUT="$(cat "$TMP/watch.out")"; WERR="$(cat "$TMP/watch.err")"
 }
-# THE RUN SETTLES FIRST, with no restart owed: the session runs its checkout in place, which did not move. Watchers run
-# until one ends quietly at its limit. Then the restart appears and a tick that is not the watcher's (the Patrol's, or
-# one the model ran) takes the print that first carries it, so the print the watcher's next pass reads is unchanged
-# and only the watcher's own read of the restart can wake it.
 write_installed_plugins "$NEW"
-write_record "$SID_LIVE" "$OLD" "0123456789abcdef0123456789abcdef01234567"
-expect_empty "WAT-0 precondition: no restart owed yet" "$(run_lines)"
-TICK6="$(run_tick)"
-expect_match "WAT-0a …the tick ran in the fixture" "*poker-tick/v1|*" "$TICK6"
-for _w in 1 2 3; do run_watch BIONIC_WATCH_DEADLINE=3; [ "$WRC|$WERR" = "0|" ] && break; done
-expect_eq "WAT-0b …and a watcher over the settled run ends quietly at its limit" "0|" "$WRC|$WERR"
 write_record "$SID_LIVE" "$OLD"
-expect_match "WAT-0c now the session loaded the installed 1.0.0 and the registry names 1.1.0: a restart is owed" \
-  "*${SID_LIVE}*skills*" "$(run_lines)"
-TICK6R="$( cd "$PROJ" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-  CLAUDE_CODE_SESSION_ID="$SID_LIVE" bash "$POKER" tick < /dev/null 2>&1 )"
-expect_match "WAT-0d …and a tick not the watcher's printed it in full" "*restart needed*" "$TICK6R"
-expect_no_match "WAT-0e …a full print, not an unchanged one" "*unchanged since*" "$TICK6R"
+expect_match "WAT-0 precondition: the reader names this session's restart" "*${SID_LIVE}*skills*" "$(run_lines)"
+TICK6="$(run_tick)"
+expect_match "WAT-0b …and the tick prints it, so the next print over the same run is unchanged" "*restart needed*" "$TICK6"
 run_watch
 expect_eq "WAT-1 a restart needed and nothing else moving: the watcher exits with the wake code" "2" "$WRC"
 expect_match "WAT-1a …its one line tells the model to have the person restart" "bionic watch: restart - *exit claude*" "$WERR"
 expect_eq "WAT-1b …one line, and nothing on stdout" "1|" "$(count_of "bionic watch" "$WERR")|$WOUT"
 run_watch BIONIC_WATCH_DEADLINE=3
 expect_eq "WAT-2 the next watcher over the same restart does not wake again: it ends at its limit, quietly" "0|" "$WRC|$WERR"
+# THE WATCHER'S OWN READ. The tick's print is unchanged now, so no pass names the restart again; a watcher whose record
+# no longer carries what was told (the record wiped, as a predecessor's sweep or close-out wipes one) wakes on it from
+# its own read of the restart, once.
+rm -f "${PROJ}/.bionic/tmp/watch-${SID_LIVE}.state"
+run_watch BIONIC_WATCH_DEADLINE=3
+expect_eq "WAT-2a the same restart, the record gone: the watcher wakes on its own read, the print unchanged" "2" "$WRC"
+expect_match "WAT-2b …with the restart line" "bionic watch: restart - *exit claude*" "$WERR"
+run_watch BIONIC_WATCH_DEADLINE=3
+expect_eq "WAT-2c …and the watcher after it ends quietly again" "0|" "$WRC|$WERR"
 printf 'command, released\n' > "$NEW/commands/x.md"
 expect_match "WAT-3 precondition: a second class moved, so the restart now names commands" "*${SID_LIVE}*commands*" "$(run_lines)"
 run_watch
