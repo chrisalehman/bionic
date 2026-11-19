@@ -327,13 +327,12 @@ bind_plan "$V" "$VSID" wave/fixture >/dev/null
 vland() { ( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$1" --by-hand --reason r 2>/dev/null ); }
 VT="$(new_tree "$V" verb-arm)"
 ln -s "${V}/.bionic" "${VT}/.bionic"
-git -C "$V" worktree add -q -b verb-stale "$V/.worktrees/verb-stale" HEAD; rm -rf "$V/.worktrees/verb-stale"
 OUTV="$(vland "$VT")"
 expect_match "the verb lands onto the bound plan's working branch, its .bionic link the tree's only untracked entry" \
   "spawn-worktree: LANDED branch=verb-arm onto=wave/fixture checkout=${V} *" "$OUTV"
 expect_false "the tree is gone" test -d "$VT"
-expect_eq "…its branch stays, the state its link pointed at stands, and git's entries name the landing tree, not it nor a stale one (pruned)" "yes yes 1 0 0" \
-  "$(git -C "$V" show-ref -q --verify refs/heads/verb-arm && echo yes) $([ -f "$V/.bionic/docs/note.md" ] && echo yes) $(cat "$V"/.git/worktrees/*/gitdir 2>/dev/null | grep -c /landing/) $(cat "$V"/.git/worktrees/*/gitdir 2>/dev/null | grep -c /verb-arm/) $(cat "$V"/.git/worktrees/*/gitdir 2>/dev/null | grep -c /verb-stale/)"
+expect_eq "…its branch stays, the state its link pointed at stands, and git's entries name the landing tree, not it" "yes yes 1 0" \
+  "$(git -C "$V" show-ref -q --verify refs/heads/verb-arm && echo yes) $([ -f "$V/.bionic/docs/note.md" ] && echo yes) $(cat "$V"/.git/worktrees/*/gitdir 2>/dev/null | grep -c /landing/) $(cat "$V"/.git/worktrees/*/gitdir 2>/dev/null | grep -c /verb-arm/)"
 
 # THE TREE'S OWN CHECKS, each refused before anything is touched, the tree and every ref kept. The
 # tree landed must sit under `<root>/.worktrees/`, tested on the path SEGMENT, not the prefix string.
@@ -348,7 +347,7 @@ VREFS1="$(refs_of "$V")"
 for c in "$VD dirty-tree" "$VU dirty-tree" "$VN nothing-to-land" "$V not-a-linked-worktree" \
          "$V/.worktrees/never-existed no-such-worktree" "$VX outside-worktrees" "$VY outside-worktrees"; do
   set -- $c; OUTC="$(vland "$1")"; RCC=$?
-  expect_eq "a hand landing of ${1#"$TMP"/} is refused ${2} (exit 2)" "spawn-worktree: REFUSED reason=${2} rc=2" "$(printf %s "$OUTC" | cut -d" " -f1-3) rc=$RCC"
+  expect_eq "a hand landing of ${1##*/} is refused ${2} (exit 2)" "spawn-worktree: REFUSED reason=${2} rc=2" "$(printf %s "$OUTC" | cut -d" " -f1-3) rc=$RCC"
 done
 expect_eq "no ref moved, and the refused tree outside the farm keeps its .bionic link" "$VREFS1 yes" \
   "$(refs_of "$V") $([ -L "$VX/.bionic" ] && echo yes)"
@@ -365,9 +364,13 @@ OUTVU="$( cd "$V" && CLAUDE_CODE_SESSION_ID="verb-unbound-0002" bash "$SPAWN" la
 expect_match "the verb from an unbound session is refused, naming the fallback" \
   "spawn-worktree: REFUSED reason=no-bound-plan state=fallback*" "$OUTVU"
 expect_eq   "no ref moved" "$VBEFORE" "$(refs_of "$V")"
+# A stale entry, its directory gone, planted after the landing tree exists: the removal prunes it.
+git -C "$V" worktree add -q -b verb-stale "$V/.worktrees/verb-stale" HEAD; rm -rf "$V/.worktrees/verb-stale"
 expect_match "the same tree lands from the bound session (the arm discriminates)" \
   "spawn-worktree: LANDED branch=verb-dirty onto=wave/fixture *" \
   "$( cd "$V" && CLAUDE_CODE_SESSION_ID="$VSID" bash "$SPAWN" land "$VD" --by-hand --reason r 2>/dev/null )"
+expect_eq "…and git keeps no entry for the stale tree (pruned), but one for the landing tree" "0 1" \
+  "$(cat "$V"/.git/worktrees/*/gitdir 2>/dev/null | grep -c /verb-stale/) $(cat "$V"/.git/worktrees/*/gitdir 2>/dev/null | grep -c /landing/)"
 
 # T8c (review R2-1, critic C2-1) END TO END through the verb. The verb reads its session id
 # off CLAUDE_CODE_SESSION_ID (`cmd_land`) and uses it for one thing: the target branch.
