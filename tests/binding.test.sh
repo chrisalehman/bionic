@@ -362,4 +362,89 @@ expect_contains "9f a commit under the bound incident is refused (exit 2)" "|rc=
 expect_contains "…judged on the incident's own plan" "incidents/0002-db-outage/0002-db-outage.plan.md" "$G9"
 expect_contains "…for a fact its step truly owes: the Step-3 approval that admits Step 4" "the log holds no Step-3 approval" "$G9"
 
+
+# ============================================================
+section "10 — the binding record beside the seal: written by bind_plan on every binding, to none too"
+# ============================================================
+#
+# Which plan a session is bound to is recorded in the seal's home — `<common git dir>/bionic-seal/`,
+# where the project's own tools do not reach — and `session_plan` believes it over the engaged file.
+# One file a session and state folder: `<sid>.<cksum of the resolved .bionic>.binding`, four lines.
+# FIXTURE FIDELITY: git roots built here; the record is read off disk, never through the reader under
+# test, except where the row is the reader's. fails-when: a binding leaves no record, a refused one
+# moves it, a root with no repository grows a home, two state folders of one repository share a
+# record, a worktree reads another, or a record that cannot be written is reported as written.
+rec_of() {  # <root> -> the one binding record of $SID under the root's seal home, or nothing
+  local f n=0 got=""
+  for f in "$1/.git/bionic-seal/$SID".*.binding; do [ -f "$f" ] && { n=$((n + 1)); got="$f"; }; done
+  [ "$n" -eq 1 ] && printf '%s' "$got"
+}
+plan_read() {  # <root> <sid> -> "<rc>|<session_plan's answer>"
+  bash -c '. "$1" || exit 9; v=$(session_plan "$2" "$3"); printf "%s|%s" "$?" "$v"' _ "$RUNLIB" "$1" "$2" 2>/dev/null
+}
+
+R10="$(make_repo r10)"; P10="$R10/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+page15 "$R10/.bionic/docs/plans/epic-02-demo/wave-02.plan.md" 4; Q10="$R10/.bionic/docs/plans/epic-02-demo/wave-02.plan.md"
+call_bind "$R10" "$SID" "$P10"
+expect_eq "10a bind_plan to an open plan exits 0" "0|" "$BIND_ST|$BIND_WHY"
+REC10="$(rec_of "$R10")"
+expect_true "…and leaves one record for the session in the seal's home" test -n "$REC10"
+expect_eq "…in the four-line layout, naming the session, its state folder and the plan" \
+  "$(printf 'binding/v1\nsession=%s\nstate=%s/.bionic\nplan=%s' "$SID" "$R10" "$P10")" "$(cat "$REC10" 2>/dev/null)"
+
+call_bind "$R10" "$SID" none
+expect_eq "10b a binding to none exits 0" "0|" "$BIND_ST|$BIND_WHY"
+expect_eq "…and rewrites the same record to plan=none" "$REC10|plan=none" "$(rec_of "$R10")|$(sed -n 4p "$REC10" 2>/dev/null)"
+
+call_bind "$R10" "$SID" "$R10/.bionic/docs/plans/no-such.plan.md"
+expect_eq "10c a refused binding exits 1" "1|not-an-open-run" "$BIND_ST|$BIND_WHY"
+expect_eq "…and leaves the record as it was" "plan=none" "$(sed -n 4p "$REC10" 2>/dev/null)"
+
+call_bind "$R10" "$SID" "$Q10"
+expect_eq "10d a change of binding moves the record" "0|plan=$Q10" "$BIND_ST|$(sed -n 4p "$REC10" 2>/dev/null)"
+printf 'plan=%s\nengaged_at=2026-10-04T00:00:00Z\n' "$P10" > "$(marker_of "$R10")"
+expect_eq "…and session_plan believes it over an engaged file naming the other plan" "0|$Q10" "$(plan_read "$R10" "$SID")"
+
+R10N="$SANDBOX/r10-nogit"; mkdir -p "$R10N/.bionic/tmp"; page15 "$R10N/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" 4
+call_bind "$R10N" "$SID" "$R10N/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+expect_eq "10e in a root with no repository the binding is written (exit 0)" \
+  "0|plan=$R10N/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" "$BIND_ST|$(sed -n 1p "$(marker_of "$R10N")")"
+expect_eq "…and no seal home is made for it" "" "$(find "$R10N" -name bionic-seal 2>/dev/null)"
+
+# TWO STATE FOLDERS IN ONE REPOSITORY: one session id, two roots, two records.
+R10S="$R10/sub"; mkdir -p "$R10S/.bionic/tmp"; page15 "$R10S/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" 4
+call_bind "$R10S" "$SID" "$R10S/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+printf 'plan=none\n' > "$(marker_of "$R10S")"; printf 'plan=none\n' > "$(marker_of "$R10")"
+expect_eq "10f one session in two roots of one repository: each root reads its own record" \
+  "0|$R10S/.bionic/docs/plans/epic-01-demo/wave-01.plan.md 0|$Q10" "$(plan_read "$R10S" "$SID") $(plan_read "$R10" "$SID")"
+
+# A LINKED WORKTREE whose state folder is the main checkout's (a writer's tree) reads the main
+# checkout's record: a dispatched agent carries its parent's session id.
+git -C "$R10" -c user.name=f -c user.email=f@x.invalid -c commit.gpgsign=false commit -q --allow-empty -m seed
+W10="$SANDBOX/r10-wt"; git -C "$R10" worktree add -q "$W10" -b wt/r10 2>/dev/null; ln -s "$R10/.bionic" "$W10/.bionic"
+expect_true "10g the worktree is a linked tree of the repository (non-vacuity)" test -f "$W10/.git"
+expect_eq "…and from it the session reads the record the main checkout's binding wrote" "0|$Q10" "$(plan_read "$W10" "$SID")"
+
+# A RECORD THAT CANNOT BE WRITTEN IS A WRITE FAILURE, not a binding.
+R10F="$(make_repo r10f)"; P10F="$R10F/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+: > "$R10F/.git/bionic-seal"
+call_bind "$R10F" "$SID" "$P10F"
+expect_eq "10h a seal home that cannot hold the record: exit 2, record-failed" "2|record-failed" "$BIND_ST|$BIND_WHY"
+rm -f "$R10F/.git/bionic-seal"
+call_bind "$R10F" "$SID" "$P10F"
+expect_eq "…paired: with the obstruction gone the same call writes the record (exit 0)" "0|plan=$P10F" "$BIND_ST|$(sed -n 4p "$(rec_of "$R10F")" 2>/dev/null)"
+
+# ENGAGEMENT GUESSES ONCE. A session the record answers `none` for keeps `none` when its marker is
+# removed: the removal is no first engagement, and the count rule (hooks/engage.sh) is not asked again.
+R10E="$(make_repo r10e)"; P10E="$R10E/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+engage_root() { ( cd "$1" && CLAUDE_CODE_SESSION_ID="$2" bash "$REPO_ROOT/hooks/engage.sh" --root "$1" ) >/dev/null 2>&1; }
+engage_root "$R10E" "s10e-first"
+expect_eq "10i a first engagement in a root with one live run binds it (the count rule, the positive)" \
+  "plan=$P10E" "$(sed -n 1p "$R10E/.bionic/tmp/engaged-s10e-first.state" 2>/dev/null)"
+call_bind "$R10E" "s10e-none" none
+rm -f "$R10E/.bionic/tmp/engaged-s10e-none.state"
+engage_root "$R10E" "s10e-none"
+expect_eq "…a session recorded bound to none, its marker removed, engages again at none" \
+  "plan=none" "$(sed -n 1p "$R10E/.bionic/tmp/engaged-s10e-none.state" 2>/dev/null)"
+
 finish

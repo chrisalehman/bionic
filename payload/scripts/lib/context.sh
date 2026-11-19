@@ -372,10 +372,19 @@ bionic_context() {
     BIONIC_ENGAGED=0
   fi
 
+  # 5b. THE BINDING'S HOME, ONCE. Which run the session is in is the binding recorded beside the
+  # seal (lib/run.sh `session_plan`), whose home costs a git fork to resolve. A hook that will ask
+  # (an engaged one, or one that wants the verdict) resolves it here, in its own shell, so every
+  # later `$(session_plan …)` and `$(session_run …)` inherits the answer instead of forking again.
+  if [ "$BIONIC_ENGAGED" = 1 ] || [ "${BIONIC_CONTEXT_WANT_RUN:-0}" = 1 ]; then
+    { _run_seal && seal_binding_warm "$BIONIC_ROOT"; } >/dev/null 2>&1 || :
+  fi
+
   # 6. THE RUN VERDICT, AS A VALUE — AND ONLY FOR A CALLER THAT ASKED FOR IT
   # (epic-23 wave-14 REQ-4, spec D5 "Hook context"). `session_run` returns 2 on
   # `bound-closed` and 1 on `none`; both are identified sessions, so neither may
-  # become this function's return code.
+  # become this function's return code. The run it names is the one the session's
+  # binding record names when one stands, never one its engaged file names against it.
   #
   # WHY IT IS OPT-IN. This is the most expensive value the preamble computes —
   # the scan walks every candidate under `plans/` and `incidents/` and reads each

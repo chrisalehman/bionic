@@ -44,6 +44,7 @@ bound_marker() {  # <root> <sid> <plan|none>
   local root="$1" sid="$2" plan="$3" path stamp
   if ! bind_plan "$root" "$sid" "$plan"; then
     path=$(engaged_marker_path "$root" "$sid") || return 1
+    bound_marker_unrecord "$root" "$sid"
     mkdir -p "$(dirname "$path")"
     stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || stamp="2026-09-04T00:00:00Z"
     printf 'plan=%s\nengaged_at=%s\n' "$plan" "$stamp" > "$path"
@@ -64,6 +65,7 @@ bound_marker() {  # <root> <sid> <plan|none>
 unbound_marker() {  # <root> <sid> [empty|none|nofield]
   local root="$1" sid="$2" shape="${3:-empty}" f
   f="$root/.bionic/tmp/engaged-$sid.state"
+  bound_marker_unrecord "$root" "$sid"
   mkdir -p "$(dirname "$f")"
   case "$shape" in
     none)    printf 'plan=none\nengaged_at=2026-09-04T00:00:00Z\n' > "$f" ;;
@@ -71,6 +73,14 @@ unbound_marker() {  # <root> <sid> [empty|none|nofield]
     *)       : > "$f" ;;
   esac
   chmod 600 "$f"
+}
+
+# bound_marker_unrecord <root> <sid> -> the session's binding record beside the seal removed.
+# `session_plan` believes that record over the marker, so a marker this file writes by hand is
+# believed only by a session with no record: both direct writes above drop it first, and the
+# planted marker answers as it did before the record existed.
+bound_marker_unrecord() {  # <root> <sid>
+  { _run_seal && seal_binding_drop "$1" "$2"; } >/dev/null 2>&1 || :
 }
 
 declare -F seal_fixture >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/seal-fixture.sh"

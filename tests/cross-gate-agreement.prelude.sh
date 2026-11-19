@@ -462,7 +462,8 @@ engage_sids() {  # <repo> <sid>...
   local r="$1"; shift
   mkdir -p "$r/.bionic/tmp"
   local s
-  for s in "$@"; do : > "$r/.bionic/tmp/engaged-$s.state"; done
+  # Engaged and unbound: a binding record left beside the seal would be believed over the empty marker.
+  for s in "$@"; do { ! declare -F bound_marker_unrecord >/dev/null || bound_marker_unrecord "$r" "$s"; }; : > "$r/.bionic/tmp/engaged-$s.state"; done
 }
 
 # write_live_plan <plan path> <step> — the page a run at 15 holds at <step>, approved

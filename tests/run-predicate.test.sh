@@ -509,4 +509,102 @@ expect_eq "session_plan: an empty sid -> exit 1" 1 "$SP_ST"
 
 # ============================================================
 echo
+section "R8 — session_run <root> <sid>: the binding beside the seal is believed over the engaged file"
+# ============================================================
+#
+# WHY. The engaged file sits in the project's state folder, where any tool can remove it,
+# link it or rewrite it, and before this the run a session was in was whatever that file
+# said. `bind_plan` now also records the binding in the seal's home (the repository's common
+# git directory), and `session_plan` believes that record. The engaged file stays as the
+# switch the hooks read for "is this session engaged"; it no longer names the run.
+#
+# THE WORLD. One git root with two open runs: the plan the session is bound to, and a decoy
+# it is not. The session binds through the real `bind_plan`, then its engaged file is
+# removed, replaced by a link, and rewritten four ways. Every verdict is the bound run's.
+#
+# THE POSITIVES BESIDE IT. A session with no record — the synthetic dry sessions write an
+# engaged file and never call `bind_plan` — is answered from its engaged file exactly as
+# before, in the same root and on the same decoy; so is a session in a root with no git
+# directory, where the binding has no home.
+
+BINDLIB="$REPO_ROOT/payload/scripts/lib/binding.sh"
+SR_OUT=""
+call_session_run() {  # <root> <sid> -> sets SR_OUT to "<rc>|<verdict line>"
+  SR_OUT=$(bash -c '. "$1" || exit 9; v=$(session_run "$2" "$3"); printf "%s|%s" "$?" "$v"' \
+    _ "$LIB" "$1" "$2" 2>"$SANDBOX/.err")
+}
+call_bind_plan() {  # <root> <sid> <plan|none> -> prints the status
+  bash -c '. "$1" && . "$2" || exit 9; bind_plan "$3" "$4" "$5"; printf "%s" "$?"' \
+    _ "$LIB" "$BINDLIB" "$1" "$2" "$3" 2>"$SANDBOX/.err"
+}
+
+R8="$SANDBOX/r8"; mkdir -p "$R8/.bionic/tmp"; git -C "$R8" init -q
+P8=$(mk_run "$R8" plans/epic-a wave-a.plan.md "step|n=4")
+Q8=$(mk_run "$R8" plans/epic-b wave-b.plan.md "step|n=4")
+M8="$R8/.bionic/tmp/engaged-s8.state"
+
+expect_eq "R8: the session binds to its run through bind_plan (exit 0)" 0 "$(call_bind_plan "$R8" s8 "$P8")"
+call_session_run "$R8" s8
+expect_eq "R8: …and reads that run bound-open (the positive every row below is held to)" "0|bound-open $P8" "$SR_OUT"
+mk_marker "$R8" "s8-decoy-control" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$Q8")"
+call_session_run "$R8" s8-decoy-control
+expect_eq "R8: …and the decoy is an open run a marker can name (non-vacuity)" "0|bound-open $Q8" "$SR_OUT"
+
+rm -f "$M8"
+call_session_run "$R8" s8
+expect_eq "R8 removed: the engaged file gone -> still the bound run" "0|bound-open $P8" "$SR_OUT"
+
+ln -s "$R8/.bionic/tmp/engaged-s8-decoy-control.state" "$M8"
+call_session_run "$R8" s8
+expect_eq "R8 link: the engaged file replaced by a link to a marker naming the decoy -> still the bound run" \
+  "0|bound-open $P8" "$SR_OUT"
+rm -f "$M8"
+
+for _r8 in "none|$(printf 'plan=none\nengaged_at=2026-09-04T10:00:00Z\n')" \
+           "no plan line|$(printf 'engaged_at=2026-09-04T10:00:00Z\n')" \
+           "empty|" \
+           "the decoy plan|$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$Q8")"; do
+  mk_marker "$R8" s8 "${_r8#*|}"
+  call_session_run "$R8" s8
+  expect_eq "R8 rewritten to ${_r8%%|*}: -> still the bound run" "0|bound-open $P8" "$SR_OUT"
+done
+call_session_plan "$R8" s8
+expect_eq "R8: …and session_plan names the bound plan under the decoy marker" "0|$P8" "$SP_ST|$SP_OUT"
+
+# A BINDING TO NONE IS A RECORD TOO. The session is answered unbound — the root's newest open
+# run is announced as its fallback — and never bound to the plan its engaged file names.
+expect_eq "R8 none: the session rebinds to none (exit 0)" 0 "$(call_bind_plan "$R8" s8 none)"
+mk_marker "$R8" s8 "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$Q8")"
+call_session_run "$R8" s8
+expect_eq "R8 none: under a marker naming the decoy the verdict is the fallback, not the decoy's" \
+  "fallback" "$(printf '%s' "${SR_OUT#*|}" | cut -d' ' -f1)"
+expect_eq "R8 rebind: binding again through the one writer moves the record (exit 0)" 0 "$(call_bind_plan "$R8" s8 "$Q8")"
+mk_marker "$R8" s8 "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$P8")"
+call_session_run "$R8" s8
+expect_eq "R8 rebind: …and the run it now names is believed over a marker naming the old one" "0|bound-open $Q8" "$SR_OUT"
+
+# NO RECORD, THE ENGAGED FILE ANSWERS: the synthetic dry session's shape, same root, same decoy.
+mk_marker "$R8" "planverb-4242" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$Q8")"
+call_session_run "$R8" "planverb-4242"
+expect_eq "R8 synthetic: a session with no record is answered from its engaged file, as before" \
+  "0|bound-open $Q8" "$SR_OUT"
+mk_marker "$R8" "planverb-4242" "$(printf 'plan=none\nengaged_at=2026-09-04T10:00:00Z\n')"
+call_session_run "$R8" "planverb-4242"
+expect_eq "R8 synthetic: …and its engaged file rewritten to none moves it (the record is what holds a session)" \
+  "fallback" "$(printf '%s' "${SR_OUT#*|}" | cut -d' ' -f1)"
+
+# NO HOME: a root in no git repository keeps no record, and its engaged file answers.
+R8N="$SANDBOX/r8-nogit"; mkdir -p "$R8N/.bionic/tmp"
+P8N=$(mk_run "$R8N" plans/epic-a wave-a.plan.md "step|n=4")
+Q8N=$(mk_run "$R8N" plans/epic-b wave-b.plan.md "step|n=4")
+expect_eq "R8 no home: the session binds (exit 0)" 0 "$(call_bind_plan "$R8N" s8 "$P8N")"
+call_session_run "$R8N" s8
+expect_eq "R8 no home: …and reads the bound run" "0|bound-open $P8N" "$SR_OUT"
+mk_marker "$R8N" s8 "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$Q8N")"
+call_session_run "$R8N" s8
+expect_eq "R8 no home: …and its engaged file, with no record beside a seal, answers as before" \
+  "0|bound-open $Q8N" "$SR_OUT"
+
+# ============================================================
+echo
 finish
