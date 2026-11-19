@@ -17,6 +17,8 @@
 # helpers and constant strings, each block moved whole from the section named above it,
 # with a pointer left where it was.
 
+# shellcheck source=/dev/null
+declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 # The rendered dispatch.md, whose fenced scaffold the suites read: the page the dispatch library's
@@ -494,6 +496,7 @@ make_repo() {
     mkdir -p "$repo/.bionic/docs/record/wave-01-test"
     printf 'run/v1|ev=%s|at=2026-09-07T19:0%sZ\n' 'step|n=1' 1:00 'step|n=2' 2:00 'step|n=3' 3:00 'step|n=4' 4:00 \
       'approval|key=step3|by=dana|said=approved' 5:00 > "$repo/.bionic/docs/record/wave-01-test/run.log"
+    seal_fixture "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "$repo/.bionic/docs/record/wave-01-test/run.log"
     # A LIVE WAVE'S SESSIONS ARE BOUND TO IT (wave-23-fixit-1810, REQ-1, D1). An empty marker
     # beside an open plan is the UNBOUND state, whose `fallback` plan is announced and never
     # acted on — so a fixture that meant "this session is running this wave" and left the
@@ -650,7 +653,8 @@ s21_plant() {  # <tree root> -> plants hooks/ + scripts/lib and echoes the hooks
 s22_set_budget() {
   local plan="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" val="$2"
   awk -v v="$val" 'NR == 1 && $0 == "---" { print; print "parallel-budget: " v; next } { print }' \
-    "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan"
+    "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan" || return
+  seal_fixture "$plan" "$1/.bionic/docs/record/wave-01-test/run.log"
 }
 
 # s22_roster_row <repo> <sid> <name> [claims] [subagent_type] — one launch row in the shipped
@@ -735,9 +739,11 @@ pf_plan() {
     printf 'integration-branch: main\nworking-branch: wave/99-test\n---\n\n# Test wave plan\n'; } > "$(pf_plan_path "$repo")"
   printf 'run/v1|ev=step|n=5|at=2026-09-07T19:06:00Z\n' >> "$l"
   [ -z "$head" ] || printf 'run/v1|ev=proof|kind=floor|head=%s|evidence=record/w99-floor.txt|at=2026-10-04T00:00:00Z\n' "$head" >> "$l"
-  [ "$#" -gt 0 ] || return 0
-  { printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
-    printf '%s\n' "$@" | awk -F' *[|] *' -v lf="$l" '{ print "| " $2 " | " $3 " | " $4 " | " $5 " | " $7 " | " $8 " | " $9 " | " $10 " | — |"
-      if ($12 == "active") print "run/v1|ev=dispatch|row=" $2 "|name=" $6 "|at=2026-09-07T19:07:00Z" >> lf }'; } >> "$(pf_plan_path "$repo")"
+  if [ "$#" -gt 0 ]; then
+    { printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+      printf '%s\n' "$@" | awk -F' *[|] *' -v lf="$l" '{ print "| " $2 " | " $3 " | " $4 " | " $5 " | " $7 " | " $8 " | " $9 " | " $10 " | — |"
+        if ($12 == "active") print "run/v1|ev=dispatch|row=" $2 "|name=" $6 "|at=2026-09-07T19:07:00Z" >> lf }'; } >> "$(pf_plan_path "$repo")" || return
+  fi
+  seal_fixture "$(pf_plan_path "$repo")" "$l"
 }
 

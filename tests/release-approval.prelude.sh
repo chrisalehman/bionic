@@ -119,6 +119,7 @@ fc_plan() {  # <events> [<sed edit>] [<edit function>] -> PFC at current: 8, bou
     } | awk -F'|' 'NF { a = $NF; sub(/^at=/, "", a); printf "%s\t%06d\t%s\n", a, NR, $0 }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2n | cut -f3-
     cat "$FC_EV"; } | sed -e "${2:-}" > "$FC_REC/run.log"
   sed -e "${2:-}" "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+  seal_fixture "$PFC" "$FC_REC/run.log"
   bind_marker "$RFC" "$PFC"
 }
 # THE SETTLED RUN: the whole suite ran green at R, the head, so nothing about the merge is the person's to decide;

@@ -152,11 +152,14 @@ _rh_refused() {
   return 1
 }
 _rh_hand() { printf '# by hand: [%s] %s\n' "$1" "$2" >> "$RH_LOG"; }   # <kind> <what a person or an agent wrote>
+# _rh_sealed -> the run sealed as it stands after a hand write of its plan (tests/lib/seal-fixture.sh): the rehearsal
+# writes the plan beside the write tool, around which every change is a changed run, so it vouches for its own write.
+_rh_sealed() { seal_fixture "$RH_PLAN" "$RH_REC/run.log"; }
 # _rh_row <label> <Tasks line> <id> [--born <b>] -> the orchestrator's edit adding the row, one hand write, then task-add
 _rh_row() { _rh_addrow "$2" "$3" && _rh_poker "$1" task-add "${@:3}"; }
 # _rh_addrow <Tasks line> <id> -> the orchestrator's edit adding the row as the table's last, one hand write
 _rh_addrow() { RH_R="$1" awk '/^## / { t = ($0 ~ /^## Tasks/) } { L[NR] = $0 } t && /^\|/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) print ENVIRON["RH_R"] } }' \
-  "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" && _rh_hand plan "the row $2"; }
+  "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" && _rh_sealed && _rh_hand plan "the row $2"; }
 # _rh_cell <what> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, its columns named by the header
 # in either case, written as text beside the plan and judged by the table check the write hook runs before it replaces it
 _rh_cell() {
@@ -169,6 +172,7 @@ _rh_cell() {
     { print } END { exit !hit }' "$RH_PLAN" > "$RH_PLAN.t" \
     && bash -c '. "$1/units.sh" 2>/dev/null && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" \
     || { rm -f "$RH_PLAN.t"; echo "rehearse $RH_STATE: the edit of $1 was refused: $w" >&2; return 1; }
+  _rh_sealed
   _rh_hand plan "$w: $*"
 }
 _rh_head() { git -C "$RH_ROOT" rev-parse --verify -q "refs/heads/$DOOR_BRANCH"; }
@@ -515,6 +519,7 @@ canonical_sdlc_version: 15
 
 One library change, released.
 PLAN
+  _rh_sealed
   _rh_hand prose "the plan's page at Step 0, $DOOR_PLAN_REL: its header (branches, base, release, rigor, scale, goals, document) and its goal"
   _rh_poker "the plan binds the session" bind "$RH_PLAN" || return 1
   _rh_card step0 "$RH_PLAN" && _rh_approve step0 && _rh_poker "enter Step 1" current 1 || return 1
@@ -608,6 +613,7 @@ SPEC
 |---|---|---|---|---|---|$ts
 | REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |$t1${le:+$le$lt}
 PLAN
+  _rh_sealed
   _rh_hand prose "the plan's Step-3 prose: its rows and its Eval design"
   _rh_card step3 "$RH_PLAN" && _rh_approve plan && _rh_poker "enter Step 4" current 4
 }
@@ -696,6 +702,8 @@ fi
 DOOR_BRANCH="wave/01-x"
 # shellcheck source=/dev/null
 . "${BIONIC_SCRIPTS_DIR}/tests/lib/door.sh" || return 1 2>/dev/null || exit 1
+# shellcheck source=/dev/null
+declare -F seal_fixture >/dev/null 2>&1 || . "${BIONIC_SCRIPTS_DIR}/tests/lib/seal-fixture.sh" || return 1 2>/dev/null || exit 1
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   rehearse "$1" "$WORLD_ROOT/$1"
