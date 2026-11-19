@@ -458,9 +458,11 @@ whole_run_at_head() {
     tmp="$(mktemp -d 2>/dev/null)" || tmp=""
     if [ -n "$tmp" ]; then
       stub="$tmp/plans/${SW_PLAN##*/}"; mkdir -p "$tmp/plans" && : > "$stub"
+      # A fold that fails, like bytes that no longer stand, binds no session: the words must then be this session's.
+      ans=""
       rec="$(reader_log "$stub" 2>/dev/null)" && mkdir -p "${rec%/*}" && seal_vouched "$SW_PLAN" > "$rec" \
-        && ans="$(reader_main "$stub" sessions 2>/dev/null)" \
-        && SAID_BOUND="$(printf '%s\n' "$ans" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) printf "%s ", substr($i, 9) }')"
+        && { ans="$(reader_main "$stub" sessions 2>/dev/null)" || ans=""; }
+      SAID_BOUND="$(printf '%s\n' "$ans" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) printf "%s ", substr($i, 9) }')"
       rm -rf "$tmp"
     fi
     user_said "$SW_WORDS" "$SW_PLAN"; rc=$?
