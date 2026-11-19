@@ -11,6 +11,10 @@
 #             for; the command a write wraps runs between the check and the new seal.
 #   §LOCK     a held lock turns a call away in well under a hook's ten seconds with nothing run; a dead
 #             holder's lock is taken over; honest appends racing each other leave the run clean.
+#   §PLAN     the write hook seals the plan in its after-arm: an admitted Write, then an admitted Edit,
+#             each driven through the before and after arms, leave it clean; an Edit seals and does not
+#             bind; an Edit denied at the before-arm, or admitted there with its tool never run, leaves the
+#             seal as it was; an after-arm whose seal cannot be had still exits 0 and says so.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.
@@ -156,5 +160,120 @@ done
 wait
 expect_eq "eight appends racing each other all landed" 11 "$(wc -l < "$L" | tr -d ' ')"
 expect_eq "and the run verifies clean" clean "$(seal_verify "$P")"
+
+section "PLAN"
+# The write hook seals the plan in its after-arm, and only there. Each tool call is driven as Claude Code
+# makes it: the before-arm's payload, then the tool's own effect on disk (done here by the shell, as the
+# tool would), then the after-arm's payload. A call the before-arm denies, or whose tool never ran, has no
+# after-arm, so it is driven with none.
+. "$(dirname "$0")/lib/plan-fixture.sh"
+GS_HOOK="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
+R="$SB/proj"; mkdir -p "$R"; git -C "$R" init -q
+SID=5e4d3c2b-1a09-4876-9b5c-4d3e2f1a0b9c
+MK="$R/.bionic/tmp/engaged-$SID.state"
+unbind() { mkdir -p "${MK%/*}"; printf 'plan=none\nengaged_at=2026-09-04T00:00:00Z\n' > "$MK"; }
+unbind
+RP="$R/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+plan_fixture "$RP" task "| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | pending |" >/dev/null
+RP="$(cd "${RP%/*}" && pwd -P)/${RP##*/}"
+BODY="$(cat "$RP")
+| a line the orchestrator wrote |"
+NP="${RP%/*}/wave-02-fixture.plan.md"
+plan_fixture "$NP" task "| T1 | 4 | build | another build | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" >/dev/null
+NBODY="$(cat "$NP")"; rm "$NP"
+drive() {  # <event> <tool> <tool_input json> [<tool_response json> [<agent id>]] -> HOOK_RC, HOOK_ERR
+  local in
+  in=$(jq -n --arg s "$SID" --arg c "$R" --arg e "$1" --arg t "$2" --argjson i "$3" \
+         --argjson r "${4:-null}" --arg a "${5:-}" \
+    '{session_id:$s, cwd:$c, hook_event_name:$e, tool_name:$t, tool_input:$i}
+     + (if $r == null then {} else {tool_response:$r} end) + (if $a == "" then {} else {agent_id:$a} end)')
+  HOOK_RC=0
+  HOME="$SB/home" CLAUDE_CODE_SESSION_ID="$SID" bash "$GS_HOOK" <<< "$in" > /dev/null 2> "$SB/hook.err" || HOOK_RC=$?
+  HOOK_ERR="$(cat "$SB/hook.err")"
+}
+edit_input() { jq -n --arg p "$RP" --arg o "$1" --arg n "$2" '{file_path:$p, old_string:$o, new_string:$n, replace_all:false}'; }
+apply_edit() { local b; b="$(cat "$RP")"; printf '%s\n' "${b/"$1"/"$2"}" > "$RP"; }
+seal_bytes() { cat "$R/.git/bionic-seal/"*.seal 2>/dev/null; }
+
+after_arm_runs_for() {  # <tool> -> yes when hooks.json runs the write hook after that tool
+  jq -r --arg t "$1" '[.hooks.PostToolUse[]? | select(any(.hooks[]?; .command | test("canonical-sdlc-governing-skill")))
+    | .matcher | select(. as $m | $t | test("^(" + $m + ")$"))] | if length > 0 then "yes" else "no" end' \
+    "$BIONIC_HOOKS_DIR/hooks.json"
+}
+expect_eq "hooks.json runs the write hook's after-arm for Write" yes "$(after_arm_runs_for Write)"
+expect_eq "and for Edit" yes "$(after_arm_runs_for Edit)"
+expect_eq "and not for Read" no "$(after_arm_runs_for Read)"
+
+# The Write that creates a run's plan binds, and the bind appends its event to the log after the plan
+# is sealed; that append is the appender's to seal, so here only the plan side is read.
+WN=$(jq -n --arg p "$NP" --arg c "$NBODY" '{file_path:$p, content:$c}')
+drive PreToolUse Write "$WN"
+expect_status "the before-arm admits a new plan's first Write" 0 "$HOOK_RC"
+printf '%s\n' "$NBODY" > "$NP"
+drive PostToolUse Write "$WN" '{"type":"create"}'
+expect_status "its after-arm exits 0" 0 "$HOOK_RC"
+expect_eq "the Write that creates a plan binds the session" "plan=$NP" "$(head -1 "$MK")"
+expect_eq "and seals the plan as written" "plan_sum=$(cksum < "$NP")" \
+  "$(grep -h '^plan_sum=' "$R/.git/bionic-seal/${NP##*/}".*.seal 2>/dev/null)"
+seal_remove "$NP"; unbind
+
+WI=$(jq -n --arg p "$RP" --arg c "$BODY" '{file_path:$p, content:$c}')
+drive PreToolUse Write "$WI"
+expect_status "the before-arm admits a Write over the plan" 0 "$HOOK_RC"
+expect_eq "and seals nothing at its admit" none "$(seal_verify "$RP")"
+printf '%s\n' "$BODY" > "$RP"
+drive PostToolUse Write "$WI" '{"type":"update"}'
+expect_status "the after-arm of the Write exits 0" 0 "$HOOK_RC"
+expect_eq "an admitted Write leaves the plan sealed clean" clean "$(seal_verify "$RP")"
+
+SUM0="$(cksum < "$RP")"
+EI="$(edit_input "the first build" "the first build, edited")"
+drive PreToolUse Edit "$EI"
+expect_status "the before-arm admits an Edit of the plan" 0 "$HOOK_RC"
+apply_edit "the first build" "the first build, edited"
+expect_ne "the Edit changed the plan's bytes" "$SUM0" "$(cksum < "$RP")"
+drive PostToolUse Edit "$EI" '{"filePath":"x"}'
+expect_status "the after-arm of the Edit exits 0" 0 "$HOOK_RC"
+expect_eq "an admitted Write then an admitted Edit leave the plan sealed clean" clean "$(seal_verify "$RP")"
+expect_eq "an Edit seals and does not bind" "plan=none" "$(head -1 "$MK")"
+expect_empty "and says nothing" "$HOOK_ERR"
+
+S1="$(seal_bytes)"
+DI="$(edit_input "governing-skill: canonical-sdlc" "")"
+drive PreToolUse Edit "$DI"
+expect_status "the before-arm denies an Edit that drops the governing skill" 2 "$HOOK_RC"
+expect_nonempty "the seal stands before the denied Edit" "$S1"
+expect_eq "a denied Edit with no after-arm leaves the seal as it was" "$S1" "$(seal_bytes)"
+expect_eq "and the plan verifies clean" clean "$(seal_verify "$RP")"
+
+EI2="$(edit_input "the first build, edited" "a build the tool never wrote")"
+drive PreToolUse Edit "$EI2"
+expect_status "the before-arm admits an Edit whose tool then never runs" 0 "$HOOK_RC"
+expect_eq "an admitted Edit that never ran leaves the seal as it was" "$S1" "$(seal_bytes)"
+expect_eq "and the plan verifies clean" clean "$(seal_verify "$RP")"
+
+AI="$(edit_input "the first build, edited" "the first build, edited by an agent")"
+drive PreToolUse Edit "$AI" "" a1b2c3
+apply_edit "the first build, edited" "the first build, edited by an agent"
+drive PostToolUse Edit "$AI" '{"filePath":"x"}' a1b2c3
+expect_eq "a dispatched agent's admitted Edit is sealed too" clean "$(seal_verify "$RP")"
+WU=$(jq -n --arg p "$RP" --arg c "$(cat "$RP")
+| note |" '{file_path:$p, content:$c}')
+drive PreToolUse Write "$WU" "" a1b2c3
+printf '%s\n' "$(jq -r .content <<< "$WU")" > "$RP"
+drive PostToolUse Write "$WU" '{"type":"update"}' a1b2c3
+expect_eq "an agent's Write over the plan is sealed" clean "$(seal_verify "$RP")"
+expect_eq "and moves no binding" "plan=none" "$(head -1 "$MK")"
+
+mkdir -p "$R/.git/bionic-seal/.reap"; printf '%s\n' "$$" > "$R/.git/bionic-seal/.reap/pid"
+S2="$(seal_bytes)"
+LI="$(edit_input "| note |" "| note, under a held lock |")"
+apply_edit "| note |" "| note, under a held lock |"
+drive PostToolUse Edit "$LI" '{"filePath":"x"}'
+expect_status "an after-arm whose seal meets a held lock still exits 0" 0 "$HOOK_RC"
+expect_contains "and says the plan is not sealed" "not sealed" "$HOOK_ERR"
+expect_eq "and the seal is as it was" "$S2" "$(seal_bytes)"
+rm -rf "$R/.git/bionic-seal/.reap"
+expect_eq "so the plan reads changed until it is sealed again" "changed what=plan how=changed" "$(seal_verify "$RP")"
 
 finish
