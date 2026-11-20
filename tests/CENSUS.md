@@ -1412,7 +1412,7 @@ runner-roster.test.sh | §9 the progress knob | keep | tests/run.sh: the progres
 runner-roster.test.sh | §PROGRESS a section boundary inside a running suite writes a line (wave-30 T8; Δ5a, AC-3.8) | keep | tests/lib/assert.sh section(): the append to the runner's progress file deleted, so a running suite writes no §section line; (PR.2) goes red | none (searched '_BIONIC_TEST_PROGRESS_FILE' in tests/)
 runner-roster.test.sh | §10 the header names the head and the dirt of the tree under test (wave-26 T4; D5) | keep | tests/run.sh: the header's dirty= count taken from tracked changes only, so an untracked file reads dirty=0; (10.2) goes red | none (searched '^head=' header rows in tests/)
 runner-roster.test.sh | §ASK a whole run asks the gate once; --serial asks per suite (T12; AC-2.12; wave-32 T2, D1, AC-1.1) | keep | tests/run.sh: the whole-run ask dropped so each worker asks for itself, so the store holds one request per suite; (ASK.2) goes red | none (searched 'key=tests/run.sh' in tests/; close-out-3.test.sh plants that key in a record)
-runner-roster.test.sh | §SCRUB a suite never sees the runner's store (wave-30 T9; REQ-4 AC-4.2; D8) | keep | tests/run.sh: the BIONIC_GATE_DIR scrub on the suite a worker starts deleted, so a suite reads the run's store; (SCRUB.2) goes red | none (searched 'BIONIC_GATE_DIR=unset' in tests/)
+runner-roster.test.sh | §SCRUB a suite never sees the runner's store (wave-30 T9; REQ-4 AC-4.2; D8) | keep | tests/run.sh / payload/scripts/lib/suite.sh: the BIONIC_GATE_DIR, CLAUDE_PROJECT_DIR or CLAUDE_PLUGIN_ROOT scrub on the suite a worker starts deleted, so a suite reads the run's store or the starting hook's roots; (SCRUB.2) goes red | none (searched 'BIONIC_GATE_DIR=unset' in tests/)
 
 ## runner-width.test.sh
 
