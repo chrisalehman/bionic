@@ -189,6 +189,9 @@ What the seal and the gate do not do.
   commit still read the kept facts file: the release approval verb's check for a stale approval and the dispatch wall's
   check of an approval. The gate's judge sets the collector's facts a second time beside the hook, a copy held equal by
   release-approval's §ASKED rows.
+- Only the commit wall believes the binding: the dispatch wall, the write hook, the turn-end walls and the watcher act on
+  the engaged file alone, so with it gone a bound session's plan edits through the tool are not sealed and read as
+  changed at the next commit.
 - The step advance does not compare the run with its seal: its dry commit asks the gate's judge in its own process, so
   a changed run advances as a clean one, while its commits and its publish are still refused.
 - The write hook's note covers only bytes it can predict. A write the tool makes in other bytes than the posted content
