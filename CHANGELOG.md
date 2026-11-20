@@ -123,6 +123,8 @@ under 2.0.0 continues under 2.1.0.
   method's page paid for the two sentences it gained by three cuts in the same page: the Diagrams caveat's list, the
   Handoff parenthesis and the tail of the resume sentence; `approve doctrine-growth` on a row restores them); a wake is
   said once; the sheet counts a review as the card marks it.
+- `debt sites <concept> <kind> "<path>:<line>[, …]" [<plan>]` says a carried debt's sites again: a debt is written once, and
+  nothing could correct a site that had drifted.
 
 ### Timings
 

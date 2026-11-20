@@ -436,7 +436,7 @@ whole_run_at_head() {
     fi
     if ! { declare -F seal_vouched >/dev/null 2>&1 || . "$BIONIC_LIB/seal.sh"; } 2>/dev/null || ! _proof_event_load \
        || ! { declare -F user_said >/dev/null 2>&1 || . "$BIONIC_LIB/said.sh"; } 2>/dev/null; then
-      die "REFUSED — the seal, the reader, the appender or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written. Fix: reinstall the plugin."
+      die "REFUSED — the seal, lib/reader.sh, the appender or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written. Fix: reinstall the plugin."
       exit 2
     fi
     seal_verify "$SW_PLAN" >/dev/null; rc=$?
