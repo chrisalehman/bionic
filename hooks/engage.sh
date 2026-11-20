@@ -31,9 +31,11 @@
 #
 # IT NEVER BLOCKS, AND SPEAKS ONCE. Exit is 0 on every hook path — a trigger that could refuse
 # the skill it exists to notice would be a wall in front of the front door. (The typed verb
-# `engage.sh --root <dir>`, below, exits 2 on its own misuse: no hook ever passes it.) The one thing it
-# says is said to the MODEL, on stdout as `hookSpecificOutput.additionalContext`: when the
-# count rule declined a run because another live session holds it (see THE HELD RUN below).
+# `engage.sh --root <dir>`, below, exits 2 on its own misuse: no hook ever passes it.) What it
+# says is said to the MODEL, once per invocation, as one object on stdout,
+# `hookSpecificOutput.additionalContext`, holding up to two things: why the count rule declined
+# a run another live session holds (see THE HELD RUN below), and, when the invocation's argument
+# is a handoff file, the one resume command to run, whole (see THE RESUME COMMAND below).
 # Registered twice in hooks/hooks.json.
 #
 # [WALL: tests/engage.test.sh]
@@ -358,10 +360,68 @@ bind_plan "$REPO" "$SID" "$PLAN" engage || [ "$BOUND" = 1 ] || bind_plan "$REPO"
 # not the turn, and the reader this sentence is for is the model about to act. The second
 # line is `run_unbound_advisory`'s sentence, unchanged, so it reads as every gate's advisory
 # reads; the first says why the bind it offers is not the obvious move.
+ENGAGE_CTX=""
 if [ -n "$ENGAGE_HELD_BY" ] && [ "$(session_plan "$REPO" "$SID" 2>/dev/null || echo none)" = "none" ]; then
-  ENGAGE_EVENT=$(_jq '.hook_event_name')
   ENGAGE_CTX="bionic: this session was left unbound — the root's one live run is bound to live session $ENGAGE_HELD_BY; bind to it only if this session is joining that run.
 $(run_unbound_advisory "$ENGAGE_HELD_PLAN")"
+fi
+
+# ---------- THE RESUME COMMAND, WHOLE ----------
+#
+# The method's page names the resume command with no folder, and nothing a session is shown
+# after a /clear carries the plugin's root, so a model left to find session-poker.sh searched
+# for it and ran it through a variable. The farm-out wall cannot read a script held in a
+# variable and reads that shape as a suite (payload/scripts/lib/cmd-class.sh, reading 4 of its
+# header), so the resume's first call was refused. This hook knows its own folder; the model
+# does not. So when the invocation's argument is a handoff file, the one command is said here,
+# whole: `bash <this hooks folder, physical>/session-poker.sh resume <the file, absolute>`,
+# each word quoted when it holds a character the shell would split or expand, so the line
+# pasted as written is one command of four words and the wall reads it as no suite.
+#
+# THE ARGUMENT, PER PATH (read off the CLI 2.1.329 bundle): the Skill tool's input is
+# `{skill, args?}`, so PreToolUse carries `tool_input.args`; UserPromptExpansion carries
+# `command_args`, the text typed after the command's name. The whole text, trimmed, is the
+# path, so a file name holding a space is read whole.
+#
+# IS A HANDOFF is the door's reading in hooks/session-start.sh, its three conditions as they
+# stand there: a regular file, not a symlink, whose first line is `bionic-handoff/v1`; a
+# relative path is read against the project root, as the door and the resume verb read it.
+#
+# ANY DOUBT SAYS NOTHING: no argument, a control character in it, a path to no file, a file
+# that fails the door's test, or no session-poker.sh beside this hook. Saying nothing leaves the
+# model where it stood before; saying a command that does not run is a refusal of its own.
+_engage_word() {  # <text> -> the text as one shell word
+  case "$1" in
+    *[!A-Za-z0-9_./:@%+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+if [ "$ROOT_MODE" -eq 0 ]; then
+  ENGAGE_ARG=""
+  case "$(_jq '.hook_event_name')" in
+    PreToolUse)          ENGAGE_ARG=$(_jq '.tool_input.args') ;;
+    UserPromptExpansion) ENGAGE_ARG=$(_jq '.command_args') ;;
+  esac
+  case "$ENGAGE_ARG" in *[[:cntrl:]]*) ENGAGE_ARG="" ;; esac
+  ENGAGE_ARG="${ENGAGE_ARG#"${ENGAGE_ARG%%[![:space:]]*}"}"
+  ENGAGE_ARG="${ENGAGE_ARG%"${ENGAGE_ARG##*[![:space:]]}"}"
+  case "$ENGAGE_ARG" in
+    '') ENGAGE_FILE="" ;;
+    /*) ENGAGE_FILE="$ENGAGE_ARG" ;;
+    *)  ENGAGE_FILE="$REPO/${ENGAGE_ARG#./}" ;;
+  esac
+  ENGAGE_POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)/session-poker.sh" || ENGAGE_POKER=""
+  if [ -n "$ENGAGE_FILE" ] && [ -f "$ENGAGE_FILE" ] && [ ! -L "$ENGAGE_FILE" ] \
+     && [ "$(head -n 1 "$ENGAGE_FILE" 2>/dev/null)" = "bionic-handoff/v1" ] \
+     && [ -n "$ENGAGE_POKER" ] && [ -f "$ENGAGE_POKER" ]; then
+    ENGAGE_CTX="${ENGAGE_CTX:+$ENGAGE_CTX
+}bionic: resume this run with this one command, as written: bash $(_engage_word "$ENGAGE_POKER") resume $(_engage_word "$ENGAGE_FILE")"
+  fi
+fi
+
+# ONE OBJECT, whatever is said: two objects on one hook's stdout are not one answer.
+if [ -n "$ENGAGE_CTX" ]; then
+  ENGAGE_EVENT=$(_jq '.hook_event_name')
   if [ "$ROOT_MODE" -eq 1 ]; then
     # The verb has no event to answer on: its reader is whoever typed it, on stderr.
     printf '%s\n' "$ENGAGE_CTX" >&2
