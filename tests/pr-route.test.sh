@@ -23,6 +23,7 @@
 #   §MERGE    the pass that sees the merge closes the run: the integrate row lands at the merge, the run reads delivered,
 #             and a close that holds wakes once.
 #   §WALL     publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
+#   §STRAY    the whole run a world's tick started detached is ended before the worlds go: none is alive at the end.
 #
 # FIXTURE FIDELITY. Each case is a copy of one door fixture (tests/lib/door.sh): a real repository on its working branch
 # with its bound plan, the plan's header naming `integration-branch: main` as a planner writes it. The remote is a bare
@@ -84,6 +85,26 @@ prr_close() {
 prr_landed() { /usr/bin/grep -c '|ev=published|row=T3|' "$L" 2>/dev/null | tr -d ' '; }
 prr_ask() { bash "$PRR_READER" "$P" asks | /usr/bin/grep "|key=$1|"; }
 prr_seal() { bash -c '. "$1/seal.sh" && seal_verify "$2"' _ "$PRR_LIB" "$P"; }   # -> the seal's line for the case's run
+# prr_strays -> the pid of each live process whose command names a world of this suite and a regression run. The
+# pattern is handed through the environment and split in the program, so the reading's own awk never matches it.
+prr_strays() {
+  PRR_W="$WORLD_ROOT/" ps -axo pid=,command= \
+    | PRR_W="$WORLD_ROOT/" awk -v me="$$" 'index($0, ENVIRON["PRR_W"]) && index($0, "regression" "-run") && $1 != me { print $1 }'
+}
+prr_tree() { local p; for p in "$@"; do printf '%s\n' "$p"; prr_tree $(pgrep -P "$p" 2>/dev/null); done; }   # <pid>... -> each, and all below it
+# prr_reap: what a world's tick started detached is ended before the world goes. The tick hands its whole run to
+# booked.sh, which outlives the pass and the suite; with its world removed under it, its wait at the gate never ends.
+# Each stray and everything below it is asked to end, and what still stands after five seconds is killed.
+prr_reap() {
+  local pids p i=0
+  pids="$(prr_tree $(prr_strays))"; [ -n "$pids" ] || return 0
+  kill $pids 2>/dev/null
+  while [ "$i" -lt 50 ] && [ -n "$(prr_strays)" ]; do sleep 0.1; i=$((i + 1)); done
+  for p in $pids; do kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null; done
+  return 0
+}
+# The suite's own trap, set after the world's, so it calls the world's cleanup itself once the strays are ended.
+trap 'prr_reap; ! declare -F _world_cleanup >/dev/null || _world_cleanup' EXIT
 
 # ============================================================
 section "§CONSENT: publish checks the release approval at the working head before any network"
@@ -537,18 +558,13 @@ section "§STRAY: nothing a world of this suite started outlives the suite"
 # ============================================================
 # fails-when: a regression run a world's tick started detached (§MERGE's merge-held world) is still alive when the
 # suite ends, waiting on a gate whose world is about to go.
-# prr_strays -> the pid of each live process whose command names a world of this suite and a regression run. The
-# pattern is handed through the environment and split in the program, so the reading's own awk never matches it.
-prr_strays() {
-  PRR_W="$WORLD_ROOT/" ps -axo pid=,command= \
-    | PRR_W="$WORLD_ROOT/" awk -v me="$$" 'index($0, ENVIRON["PRR_W"]) && index($0, "regression" "-run") && $1 != me { print $1 }'
-}
 # A stand-in named as a world's regression run, so the reading is proved to see one before it is trusted to see none.
 bash -c 'while :; do sleep 1; done' regression-run "$WORLD_ROOT/stand-in" &
 SR_PID=$!
 expect_eq "SR-0 precondition: the reading names a live process of a world's regression run" "yes" \
   "$(prr_strays | /usr/bin/grep -qx "$SR_PID" && echo yes)"
 kill "$SR_PID" 2>/dev/null; wait "$SR_PID" 2>/dev/null
+prr_reap
 expect_eq "SR-1 at the suite's end no regression run started by a world of this suite is alive" "" \
   "$(prr_strays | paste -sd' ' -)"
 
