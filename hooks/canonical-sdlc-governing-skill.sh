@@ -477,6 +477,32 @@ gs_seal_plan() {
   return 0
 }
 
+# gs_owe_plan — at the before-arm's admit of a plan write, tell the seal the digest of the exact bytes
+# the tool is about to write (lib/seal.sh `seal_owe_plan`).
+#
+# WHY BEFORE THE FILE CHANGES. The after-arm seals the plan only once the tool has written it, and any
+# check of the run between the two (a log line appended, a commit's gate) would otherwise read the
+# honest write as a plan changed around the tool, and the seal keeps a catch until the person rules.
+# Told first, such a check reads those bytes as owed.
+#
+# THE BYTES, NOT THE FILE. A Write's content as posted, an Edit's one replacement applied to the file
+# as it stands, each before any normalization: the note vouches for a plan identical to what this wall
+# judged and nothing else, so a hand change in the window, or the intent of a write that a later hook
+# refused or whose tool failed, leaves every other text caught. Only a plan a seal already stands for
+# is told: the first seal of a run is taken as found, and a worktree's copy of a plan has no seal.
+# Nothing here can refuse the write; a note not left costs the old window and no more.
+gs_owe_plan() {
+  local sum
+  case "$FILE_PATH" in */plans/*|*/incidents/*) ;; *) return 0 ;; esac
+  seal_stands "$FILE_PATH" 2>/dev/null || return 0
+  case "$TOOL:$EDIT_APPLIED" in
+    Write:*) sum="$(set -o pipefail; printf '%s' "$BIONIC_INPUT" | jq -j '.tool_input.content' 2>/dev/null | cksum)" || return 0 ;;
+    Edit:1)  sum="$(printf '%s' "$GS_EDIT_BODY" | cksum)" ;;
+    *)       return 0 ;;
+  esac
+  seal_owe_plan "$FILE_PATH" "$sum" 2>/dev/null || :
+}
+
 if [ "$EVENT" = "PostToolUse" ]; then
   # BOTH WRITE AND EDIT REACH THIS ARM (registered `Write|Edit` in hooks/hooks.json): either one
   # changes a plan and is sealed below. Only a Write can create a run, so only a Write binds.
@@ -839,10 +865,14 @@ _gs_edit_project() {  # <file> -> sets CONTENT and EDIT_APPLIED
     *)  EDIT_APPLIED=0 ;;
   esac
   CONTENT="${_gs_out%?}"
+  # The bytes the tool will write, kept before the normalization below drops trailing newlines:
+  # the seal is told their digest at the admit (gs_owe_plan).
+  GS_EDIT_BODY="$CONTENT"
 }
 
 CONTENT=""
 EDIT_APPLIED=0
+GS_EDIT_BODY=""
 if [ "$TOOL" = "Write" ]; then
   CONTENT=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.content // empty')
 else
@@ -1613,5 +1643,8 @@ if [ -n "$SDLC_VERSION" ]; then
   BIONIC_GITIGNORE="$(bionic_root "$PROJECT_ROOT_FROM_PATH")/.gitignore"
   [ -f "$BIONIC_GITIGNORE" ] || { printf '*\n' > "$BIONIC_GITIGNORE"; } 2>/dev/null
 fi
+
+# The write is admitted: its bytes are the tool's from before they reach the disk (gs_owe_plan).
+gs_owe_plan
 
 exit 0

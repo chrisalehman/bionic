@@ -4,7 +4,7 @@
 # WHAT IT OWNS. One plain record per open run, kept where the project's own tools do not reach: the
 # plan's canonical path and digest, the log's path, length and digest, and a state, clean or changed.
 # A run whose files no longer match their seal is a CHANGED run, and the seal names what changed (the
-# plan or the log) and how (gone, changed, shortened or added to). Six functions:
+# plan or the log) and how (gone, changed, shortened or added to). Seven functions:
 #
 #   seal_verify <plan>
 #       prints ONE line and exits by it:
@@ -31,7 +31,8 @@
 #       not. Only `--vouch run` (the person's word on the run as it stands) seals it clean again,
 #       and never a run whose plan is gone. `--vouch plan` is the write hook's, after a plan write
 #       it admitted: the plan's new digest is taken without being counted as a change, while the log
-#       is still checked and a change already caught is kept. A run with no seal is sealed as found.
+#       is still checked and a change already caught is kept, and the note its before-arm left for
+#       those bytes (seal_owe_plan) is paid. A run with no seal is sealed as found.
 #       Exits: 0 sealed clean; 1 sealed changed; 2 nothing sealed (no seal stood and there is no plan,
 #       or no home, or the seal could not be written); 64 a call out of shape; 75 the lock could not
 #       be had, and then <command> was NOT run. With no home the command still runs: there is no
@@ -65,6 +66,13 @@
 #       0 left; 1 not written; 2 no home. It takes no lock: each note is its own file, made whole by
 #       one mv. `seal_write --vouch plan` leaves the plan's kind of note itself when it meets the lock.
 #
+#   seal_owe_plan <plan> <cksum>
+#       leaves a NOTE beside the seal that the plan is about to be written, by a tool the write hook's
+#       before-arm has just admitted, to bytes whose `cksum` is <cksum>. 0 left; 1 not written; 2 no
+#       home; 64 a call out of shape. Taken before the file changes, so a check made between the
+#       tool's write and the after-arm's seal reads those bytes as the tool's; it vouches for those
+#       bytes alone, never for whatever is on disk next.
+#
 # NOTES OWED BY HONEST WRITERS THAT MET THE LOCK. A writer that cannot have the lock in its wait (many
 # writers at once, a slow machine) still writes, since its act is not the seal's to refuse; without a
 # note the next check would read its line, or its plan, as changed around the tool, and every commit of
@@ -76,6 +84,15 @@
 # `<seal file>.owed.<pid>.<n>`, one line: `log|<the line>` or `plan|<cksum of the plan>`. Notes no
 # seal paid within a minute are dropped at the next seal, and every note goes with the seal. A note is
 # written where the seal is, by the library alone: whoever can write one could rewrite the seal itself.
+#
+# AND BY THE WRITE HOOK, BEFORE A PLAN WRITE IT ADMITTED. Between a tool's write of the plan and its
+# after-arm's seal, any check of the run (a line appended, a commit's gate) would read the plan as
+# changed around the tool and keep that catch in the seal. So the before-arm leaves the digest of the
+# exact bytes the tool will write (`seal_owe_plan`), and such a check reads them as owed. The note is
+# bound by those bytes: a plan that differs from them by one byte, in the window or out of it, is
+# caught as before, and the intent of a write that was refused later or failed vouches for nothing
+# else. The after-arm pays it when it seals those bytes, so an earlier text put back by hand after a
+# later write is caught too.
 #
 #   AND THE BINDING, in the same home: which plan each session is bound to, written by
 #   lib/binding.sh `bind_plan` and believed by lib/run.sh `session_plan` (`seal_binding_*`, see
@@ -250,6 +267,14 @@ seal_owe() {  # <plan> <line> -> 0 the note left, 1 not, 2 no home
   _seal_note "log|$2"
 }
 
+seal_owe_plan() {  # <plan> <cksum: crc length> -> 0 the note left, 1 not, 2 no home, 64 out of shape
+  [ -n "${1:-}" ] || return 64
+  case "${2:-}" in [0-9]*' '[0-9]*) ;; *) return 64 ;; esac
+  case "$2" in *[!0-9\ ]*|*' '*' '*) return 64 ;; esac
+  _seal_place "$1" && mkdir -p "$_SEAL_HOME" 2>/dev/null || return 2
+  _seal_note "plan|$2"
+}
+
 # _seal_settle [all] — after a seal is written, under the lock: the notes it paid go, every note
 # with `all` (the person's word covers the run as it stands), and any note no seal paid in a minute.
 _seal_settle() {
@@ -321,6 +346,9 @@ seal_write() {  # [--vouch plan|run] <plan> <log> [<command> [<arg>…]] -> 0 cl
   esac
   psum=-
   [ ! -f "$_SEAL_PLAN" ] || psum="$(cksum < "$_SEAL_PLAN")"
+  # The admitted write's own note is paid with its seal: left standing, it would read those bytes as
+  # the tool's again once a later write had moved the plan on.
+  [ "$vouch" != plan ] || _seal_owed plan "$psum" || :
   lpath="$(_seal_canon "$log")"
   if [ -f "$lpath" ]; then
     lsum="$(cksum < "$lpath")"; llen="${lsum##* }"; lsum="${lsum%% *}"
