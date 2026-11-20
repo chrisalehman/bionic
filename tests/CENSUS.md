@@ -932,6 +932,14 @@ one-reader.test.sh | §LOADER | keep | payload/scripts/one-reader-check.sh: the 
 one-reader.test.sh | §REPORT | keep | payload/scripts/one-reader-check.sh: the exit not made 1 with the plants, or a refused finding not named once on stderr, or a loader copy alone made a refusal; a count line renamed, reordered or the names count dropped | none (searched 'one-reader-check' and 'loader_copies' in tests/)
 one-reader.test.sh | §READINGS | keep | payload/scripts/readings.sh: the session-poker verb count read from the first `case "$VERB" in` block instead of the last two, so a verb arm added in a scratch commit does not move the count; reading 1 left as the proxy grep so it differs from the check's own parsers=; reading 7 counting the plan's marks instead of the reader's born events, so a record read through its translation differs; the record defaulted instead of named | none (searched 'readings.sh' and 'r2_session_poker_verbs' in tests/)
 
+## opening-line.test.sh
+
+opening-line.test.sh | §TYPED | keep | hooks/opening-line.sh: the line printed as plain stdout instead of `systemMessage`, so it goes to the model and the person sees nothing; stdout is no JSON object and the message reads empty | none (searched 'systemMessage' and 'opening-line' in tests/)
+opening-line.test.sh | §MODEL | keep | hooks/opening-line.sh: the Skill path's name test dropped, so every skill the model calls shows the line ("Skill call naming bionic:sitrep … nothing on stdout") | none (searched 'tool_input.skill' with 'systemMessage' in tests/)
+opening-line.test.sh | §QUIET | keep | hooks/opening-line.sh: the version command's failure not read, so a failing read's output stands in front of the method ("the version command printing and failing … nothing on stdout") | none (searched 'version.sh' with 'systemMessage' in tests/)
+opening-line.test.sh | §AGREE | keep | hooks/opening-line.sh: the spellings it takes made to differ from hooks/engage.sh's (the leading slash not dropped), so a typed `/bionic:canonical-sdlc` engages and shows nothing | none (searched 'engage.sh' with 'opening-line' in tests/)
+opening-line.test.sh | §REGISTRATION | keep | hooks/hooks.json: the typed entry's matcher unanchored at its end, so `canonical-sdlc-x` starts the hook; or either registration of opening-line.sh deleted | none (searched 'opening-line' and 'canonical-sdlc$' in tests/)
+
 ## patrol-duties-gate.test.sh
 
 patrol-duties-gate.test.sh | §Section 1 | duplicate | payload/scripts/lib/stop.sh stop_patrol_duties: the ran-the-tick test inverted, so a tick turn that ran the tick is refused (1, 4); the stop_hook_active pass lost (6) | patrol-duties-gate.test.sh §Section 2
