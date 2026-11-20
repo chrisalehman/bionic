@@ -1692,7 +1692,7 @@ TICK_RULING_ROWS
       local t
       if [ -z "$TICK_PANEL_AT" ]; then
         TICK_PANEL_AT=-; t="${_LA_CACHE_ANS_TS%%.*}"
-        if [ -n "$t" ] && live_agents_since_answer "$TICK_TR" 2>/dev/null | grep -q '^dispatched'; then
+        if [ -n "$t" ] && [ "$(live_agents_since_answer "$TICK_TR" 2>/dev/null | grep -c '^dispatched')" -gt 0 ]; then
           TICK_PANEL_AT="$(iso_epoch "${t%Z}Z")"; [ -n "$TICK_PANEL_AT" ] || TICK_PANEL_AT=-
         fi
       fi
