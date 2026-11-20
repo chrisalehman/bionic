@@ -293,6 +293,8 @@ whole_run_at_head() {
   # Every kind is recorded only on words lib/said.sh `user_said` finds in a prompt the person typed in a session the run
   # recorded; nothing is appended on a miss.
   poker_verb_approve() {
+    # Whether an approval already stands is read from the run's log, never the kept facts (lib/proof.sh `_PROOF_FRESH`).
+    local _PROOF_FRESH=1
     case "$AP_REPLY$AP_WHY" in
       *$'\n'*|*$'\r'*|*'|'*)
         die "REFUSED — an approval is one field of the run's log, and the reply carries a line break or a '|'; give it without one. Nothing was appended."
