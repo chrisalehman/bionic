@@ -340,6 +340,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   append one debt to the run's log per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched \"<concept> [<concept>…]\" [<plan>]   add one to the touches of each unburned item of each <concept>, the run read once (the dispatch wall's one call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt sites <concept> <kind> \"<path>:<line>[, <path>:<line>…]\" [<plan>]   say again where the unburned item of <concept> and <kind> stands: one debt event, its sites replaced, its raising record and touches kept; each site a line of a file under the project's root"
   die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   append each debt: line the continuation carries under ## Deferrals to the run's log as a debt, its touches and its raising record kept"
   die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debts, one line each, burned ones too"
   exit 2
@@ -902,7 +903,7 @@ $1"; shift ;;
   # plan last, which names the run as landing-report's does; without it, the session's bound run.
   debt)
     DEBT_SUB="${1:-}"; [ $# -eq 0 ] || shift
-    DEBT_A=""; DEBT_B=""; DEBT_PLAN_ARG=""
+    DEBT_A=""; DEBT_B=""; DEBT_C=""; DEBT_PLAN_ARG=""
     case "$DEBT_SUB" in
       add)     { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt add takes a record and at most one plan."
                DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
@@ -910,14 +911,16 @@ $1"; shift ;;
                DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
       burn)    { [ $# -ge 2 ] && [ $# -le 3 ]; } || usage "debt burn takes a concept, a row and at most one plan."
                DEBT_A="$1"; DEBT_B="$2"; DEBT_PLAN_ARG="${3:-}" ;;
+      sites)   { [ $# -ge 3 ] && [ $# -le 4 ]; } || usage "debt sites takes a concept, a kind, the sites and at most one plan."
+               DEBT_A="$1"; DEBT_B="$2"; DEBT_C="$3"; DEBT_PLAN_ARG="${4:-}" ;;
       adopt)   { [ $# -ge 1 ] && [ $# -le 2 ]; } || usage "debt adopt takes a continuation and at most one plan."
                DEBT_A="$1"; DEBT_PLAN_ARG="${2:-}" ;;
       list)    [ $# -le 1 ] || usage "debt list takes at most one plan."
                DEBT_PLAN_ARG="${1:-}" ;;
-      *) usage "debt takes add, adopt, touched, burn or list." ;;
+      *) usage "debt takes add, adopt, touched, burn, sites or list." ;;
     esac
     # `touched` takes every concept of one dispatch in its one operand, blank-separated, so the run is read once for all
-    # of them; no concept holds a blank, so the list is unambiguous. Every other operand is one word.
+    # of them; no concept holds a blank, so the list is unambiguous. Every other operand but the sites is one word.
     case "$DEBT_SUB" in
       add|adopt) : ;;
       touched) case "$DEBT_A" in *'|'*|*'	'*) usage "a debt concept is one word, with no | in it; touched takes several, blank-separated." ;; esac

@@ -1806,7 +1806,9 @@ DSP_READINGS
   # touches of every unburned debt of each concept its one operand names, blank-separated, the run read once for all
   # of them (the dispatch wall's advisory calls it once a launch); `burn` writes it burned by
   # <row>; `adopt` reads the `debt:` lines close-out carried under `## Deferrals` of a continuation, the next
-  # run's read-back, and writes each with its touches and raised-by kept, none burned.
+  # run's read-back, and writes each with its touches and raised-by kept, none burned; `sites` says again where the
+  # unburned item of one concept and kind stands, its sites replaced and every other field kept, each site a line of a
+  # file under the project's root. Whether that line holds the concept is the reader's to judge, not the verb's.
   # Exit 0 done; 1 refused, nothing written; 2 the run, the record or its log cannot be found or written.
   poker_verb_debt() {
     REPO="$(project_root "$PWD")"
@@ -1983,6 +1985,44 @@ DSP_READINGS
             say "debt burn — $_dc $_dk burned $DEBT_B"
           fi
         done <<< "$DEBT_HIT"
+        exit 0
+        ;;
+      sites)
+        # Every check reads the register or the disk before the one event is written, so a refusal writes nothing. The
+        # sites are held to the one grammar as the line close-out would carry for the item.
+        DEBT_ITEM="$(printf '%s\n' "$DEBT_HAVE" | awk -F'\t' -v c="$DEBT_A" -v k="$DEBT_B" '$1 == c && $2 == k' | tail -1)"
+        if [ -z "$DEBT_ITEM" ]; then
+          die "REFUSED — the run holds no debt $DEBT_A $DEBT_B, so it has no sites to say again; session-poker.sh debt list prints each concept and kind it holds."
+          exit 1
+        fi
+        IFS='	' read -r _dc _dk _ds _dr _dt _db <<< "$DEBT_ITEM"
+        if [ "$_db" != - ]; then
+          die "REFUSED — debt $_dc $_dk is burned by $_db, and a burned debt's sites stand as they were. Fix: name an unburned debt; session-poker.sh debt list prints each."
+          exit 1
+        fi
+        _dl="debt: $_dc $_dk \"$DEBT_C\" touches=$_dt raised-by=$_dr from=$(proof_plan_slug "$DEBT_PLAN")"
+        if ! debt_line_ok "$_dl"; then
+          die "REFUSED — the sites \"$DEBT_C\" are not <path>:<line>, joined by \", \", so the item's carried line would not parse: $_dl. Fix: say each site as <path>:<line>."
+          exit 1
+        fi
+        if [ "$DEBT_C" = "$_ds" ]; then
+          die "REFUSED — debt $_dc $_dk already stands at \"$_ds\", so nothing would change. Fix: name the sites where the concept stands now."
+          exit 1
+        fi
+        # A path is read from the project's root and stays under it: an absolute path or a `..` segment names no file there.
+        DEBT_SBAD="$(printf '%s\n' "$DEBT_C" | tr ',' '\n' | while read -r _st; do
+          _sp="${_st%:*}"; _sl="${_st##*:}"
+          case "/$_sp/" in //*|*/../*) printf '%s names no file under the project root %s' "$_sp" "$DEBT_ROOT"; break ;; esac
+          [ -f "$DEBT_ROOT/$_sp" ] || { printf '%s names no file under the project root %s' "$_sp" "$DEBT_ROOT"; break; }
+          _sn="$(awk 'END { print NR }' "$DEBT_ROOT/$_sp")"
+          [ "$_sl" -ge 1 ] && [ "$_sl" -le "$_sn" ] || { printf 'the site %s names line %s, and %s has %s' "$_st" "$_sl" "$_sp" "$_sn"; break; }
+        done)"
+        if [ -n "$DEBT_SBAD" ]; then
+          die "REFUSED — $DEBT_SBAD; nothing is written. Fix: name a line of a file under the project's root, by its path from that root."
+          exit 1
+        fi
+        proof_debt_event "$DEBT_PLAN" "concept=$_dc" "kind=$_dk" "sites=$DEBT_C" "raised-by=$_dr" "touches=$_dt" || debt_refuse
+        say "debt sites — $_dc $_dk \"$DEBT_C\", was \"$_ds\""
         exit 0
         ;;
     esac
