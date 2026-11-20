@@ -3441,7 +3441,7 @@ _eg_v15_step_asks() {
          # fetch, over the integration branch as last fetched. A plan naming no integration branch has nothing to read
          # it against, and close-out, the landing's writer, refuses such a plan before it lands a row.
          v="$( { . "$BIONIC_LIB/plan.sh" && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1 \
-                 || { printf 'unread\t-\t-\tlib/line.sh, the merge'"'"'s reader, cannot be loaded'; exit 2; }
+                 || { printf 'unread\t-\t-\tlib/line.sh cannot be loaded'; exit 2; }
                [ -n "$(plan_integration_branch "$PLAN")" ] || exit 0
                line_merge_seen "$PLAN" "$BIONIC_ROOT")" \
            || _eg_v15_ask "Step 8's merge: the integrate row's landing, with no merge read: $(printf '%s' "$v" | cut -f4)"
