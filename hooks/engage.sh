@@ -374,7 +374,7 @@ fi
 # variable and reads that shape as a suite (payload/scripts/lib/cmd-class.sh, reading 4 of its
 # header), so the resume's first call was refused. This hook knows its own folder; the model
 # does not. So when the invocation's argument is a handoff file, the one command is said here,
-# whole: `bash <this hooks folder, physical>/session-poker.sh resume <the file, absolute>`,
+# whole: `bash <this hooks folder as invoked, absolute>/session-poker.sh resume <the file, absolute>`,
 # each word quoted when it holds a character the shell would split or expand, so the line
 # pasted as written is one command of four words and the wall reads it as no suite.
 #
@@ -410,7 +410,7 @@ if [ "$ROOT_MODE" -eq 0 ]; then
     /*) ENGAGE_FILE="$ENGAGE_ARG" ;;
     *)  ENGAGE_FILE="$REPO/${ENGAGE_ARG#./}" ;;
   esac
-  ENGAGE_POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)/session-poker.sh" || ENGAGE_POKER=""
+  ENGAGE_POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-poker.sh" || ENGAGE_POKER=""
   if [ -n "$ENGAGE_FILE" ] && [ -f "$ENGAGE_FILE" ] && [ ! -L "$ENGAGE_FILE" ] \
      && [ "$(head -n 1 "$ENGAGE_FILE" 2>/dev/null)" = "bionic-handoff/v1" ] \
      && [ -n "$ENGAGE_POKER" ] && [ -f "$ENGAGE_POKER" ]; then
