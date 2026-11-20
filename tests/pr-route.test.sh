@@ -152,6 +152,7 @@ section "§OPEN: with the approval at the head, publish pushes, opens one reques
 # a second publish at one head pushes or opens anything, or a new approved head opens a second request.
 prr_case open
 OP_H="$(prr_head)"; OP_MAIN="$(git -C "$R" rev-parse --verify -q refs/heads/main)"; prr_approve "$OP_H"
+expect_eq "OP-0 precondition: the run publish is asked of is sealed and matches its seal" "clean" "$(prr_seal)"
 prr_publish
 expect_eq "OP-1 publish exits 0 and names the request's address" "0|yes" \
   "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -qF "$PRR_URL1" && echo yes)"

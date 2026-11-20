@@ -805,6 +805,15 @@ poker_verb_reviews_part() {
 # by the two functions the step-8 advance asks (lib/proof.sh `proof_approved_head`, judge.sh `cur8_release_holds`).
 # Refused, exit 1, nothing pushed or called.
 #
+# THE SEAL, BEFORE THE CONSENT. The approval is a line of the run's log, and a line appended by hand reads as the
+# person's to every function that folds the log; only the seal (lib/seal.sh) tells the run the tool wrote from one
+# written around it. The commit gate would catch such a line at the next commit, after the branch is on origin, so the
+# bound run is compared with its seal here, before the approval is read, and judged by the gate's own function
+# (lib/walls.sh `wall_run_seal`): a changed run is refused, exit 1, the catch kept in the seal and the gate's ask
+# `seal:changed` opened on the run's register, as hooks/bash-walls.sh does; a seal held past the wait is refused,
+# exit 2, to be run again. `none` and `nohome` are not compared, as the gate does not compare them. Unlike the gate,
+# which steps aside when the seal cannot be loaded, publish refuses then: no wall sees the push it makes.
+#
 # ONCE A HEAD. A request the log holds at this head, branch and base is published already: exit 0, no push, no call.
 # At a new head the branch is pushed and the request the log holds for the branch and base is kept, since a host's
 # request follows its branch: a new event at the new head, the same address, and no second create.
@@ -823,14 +832,54 @@ publish_failed() {  # <working branch> <head> <what failed> <cause> -> the ask o
   die "FAILED — $3: ${cause:-no cause given}. No pull request was recorded; the ask $key waits on the user. Run again once it is mended: bash $HOOK_DIR/session-poker.sh publish"
   exit "$PUBLISH_EXIT_OUTWARD"
 }
+# publish_seal_words <seal line> <plan> <log> -> the commit gate's words for a changed or busy run, from the gate's own
+# function, asked in a subshell so nothing lib/walls.sh defines outlives it: its fact, then the ask it stages (an empty
+# line for busy), then its detail. rc 1 when the library cannot be had or the function judges nothing.
+publish_seal_words() {
+  ( for _ps_l in fold.sh walls.sh; do
+      # shellcheck source=/dev/null
+      . "$BIONIC_LIB/$_ps_l" >/dev/null 2>&1 || exit 1
+    done
+    declare -F wall_run_seal >/dev/null 2>&1 || exit 1
+    BIONIC_SEAL_LINE="$1" BIONIC_SEAL_PLAN="$2" BIONIC_SEAL_LOG="$3" BIONIC_WALL_OWED=""
+    wall_run_seal publish >/dev/null 2>&1
+    [ "$?" -eq 2 ] || exit 1
+    printf '%s\n%s\n%s\n' "$_BF_PEND_FACT" "$BIONIC_WALL_OWED" "$_BF_PEND_DETAIL" )
+}
 poker_verb_publish() {
-  local wb base head ah pr pr_url="" pr_commit="" pr_branch="" pr_base="" rc out err url
+  local wb base head ah pr pr_url="" pr_commit="" pr_branch="" pr_base="" rc out err url sw fact ask detail key title reply
   plan_verb_open publish
   if ! _line_load_proof || ! declare -F proof_approved_head >/dev/null 2>&1 || ! _proof_reader_load \
      || ! declare -F reader_q_pr >/dev/null 2>&1; then
     die "REFUSED — the proof record (lib/proof.sh) or the reader (lib/reader.sh) cannot be loaded from $BIONIC_LIB; nothing was pushed. Fix: reinstall the plugin (claude plugin install bionic@bionic), then run again: bash $HOOK_DIR/session-poker.sh publish"
     exit 2
   fi
+  # The seal, before the consent: the approval is read only from a run that matches its seal.
+  if ! { declare -F seal_verify >/dev/null 2>&1 || _run_seal; } || ! declare -F seal_verify >/dev/null 2>&1; then
+    die "REFUSED — the seal (lib/seal.sh) cannot be loaded from $BIONIC_LIB, so the run cannot be compared with it; nothing was pushed. Fix: reinstall the plugin (claude plugin install bionic@bionic), then run again: bash $HOOK_DIR/session-poker.sh publish"
+    exit 2
+  fi
+  seal_verify "$PV_PLAN" >/dev/null 2>&1
+  case "$SEAL_LINE" in
+    changed*|busy)
+      if ! sw="$(publish_seal_words "$SEAL_LINE" "$PV_PLAN" "$SEAL_LOG")"; then
+        die "REFUSED — the run does not match its seal ($SEAL_LINE), and the commit gate's words for it (lib/walls.sh) cannot be loaded from $BIONIC_LIB; nothing was pushed. Fix: reinstall the plugin (claude plugin install bionic@bionic), then run again: bash $HOOK_DIR/session-poker.sh publish"
+        exit 2
+      fi
+      fact="$(printf '%s\n' "$sw" | sed -n 1p)"; ask="$(printf '%s\n' "$sw" | sed -n 2p)"; detail="$(printf '%s\n' "$sw" | sed '1,2d')"
+      if [ "$SEAL_LINE" = busy ]; then
+        die "REFUSED — $fact, so the run was not compared with it; nothing was pushed and no pull request was opened. Run again: bash $HOOK_DIR/session-poker.sh publish"
+        die "$detail"
+        exit 2
+      fi
+      # The catch is kept in the seal before the ask is written, as the gate keeps it.
+      seal_write "$PV_PLAN" "$SEAL_LOG" >/dev/null 2>&1
+      IFS=$'\t' read -r key title reply <<< "$ask"
+      [ -z "$key" ] || proof_owed open "$key" "$title" "$reply"
+      die "REFUSED — $fact; publish leaves the machine only for a run that matches its seal. Nothing was pushed and no pull request was opened."
+      die "$detail"
+      exit 1 ;;
+  esac
   wb="$(plan_working_branch "$PV_PLAN")"; base="$(plan_integration_branch "$PV_PLAN")"
   if [ -z "$wb" ]; then
     die "REFUSED — the plan's header names no working-branch:, and publish opens the working branch's request against the integration branch. Nothing was pushed. Add it to the header, then run again: bash $HOOK_DIR/session-poker.sh publish"
