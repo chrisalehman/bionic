@@ -422,9 +422,10 @@ prr_watch_world() {  # <name> [bare] -> §OPEN-ONLY's fixture armed and publishe
   prr_approve "$(prr_head)"; prr_publish
   [ "${2:-}" = bare ] || prr_owed
 }
-# prr_pass -> PASS_OUT (the pass's stdout alone), PASS_RC: one watcher pass from the case's project
+# prr_pass [<env assignment>...] -> PASS_OUT (the pass's stdout alone), PASS_RC: one watcher pass from the case's
+# project, the assignments in its environment
 prr_pass() {
-  door_run "$R" env PATH="$RH_GHPATH" HOME="$WORLD_ROOT/$(basename "$R")-home" BIONIC_CLAUDE_HOME="$WORLD_ROOT/$(basename "$R")-home/.claude" \
+  door_run "$R" env PATH="$RH_GHPATH" HOME="$WORLD_ROOT/$(basename "$R")-home" BIONIC_CLAUDE_HOME="$WORLD_ROOT/$(basename "$R")-home/.claude" "$@" \
     bash -c 'bash "$1" tick --watch 2>/dev/null; echo "rc=$?"' _ "$DOOR_POKER"
   PASS_RC="$(printf '%s\n' "$DOOR_OUT" | sed -n '$s/^rc=//p')"; PASS_OUT="$(printf '%s\n' "$DOOR_OUT" | sed '$d')"
 }
@@ -508,7 +509,10 @@ expect_eq "MG-5 …the line names the account close-out wrote, which says the ru
 
 prr_watch_world merge-held bare
 prr_gh pr merge "$PRR_URL1" --merge
-prr_pass
+# The machine read as full for this pass, as it was each time a world's regression run was found outliving the
+# suite: the whole run this world's tick starts detached waits at the gate for room, and §STRAY meets it there.
+prr_pass BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_USED_PCT=99 BIONIC_PROBE_FREE_PCT=1 BIONIC_PROBE_FREE_MB=81 \
+  BIONIC_PROBE_BUSY_CORES=64 BIONIC_PROBE_BUSY_CORES_5M=64 BIONIC_PROBE_LOAD_1M=64 BIONIC_PROBE_SWAP_PCT=0
 expect_eq "MG-6 merged with the close's facts not held: the pass wakes, saying close-out held" "$PRR_WAKE|yes" \
   "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - close-out held (exit [0-9]*): ' && echo yes)"
 expect_eq "MG-6b …nothing landed, the run still at step 8, close-out's refusal in its account" "0|n=8 state=open|yes" \
