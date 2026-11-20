@@ -46,7 +46,7 @@
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step0|step1|step2|step3> <artifact> (the whole card; no stdin)
 #     bash card.sh rigor <word>                         (a rigor level, printed with its meaning)
-#     bash card.sh opening <rigor> [<intent> <scale>]   (the method's opening: the version line, the engaged line, the rigor line)
+#     bash card.sh opening [<rigor> [<intent> <scale>]]   (the method's opening: the version line, the engaged line, the rigor line; with no rigor, the version line and that the triple is not yet declared)
 #     bash card.sh regression <scale> [<plan>]          (the regression line the Step-0 card prints)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
@@ -3650,17 +3650,22 @@ case "$1" in
     exit 1 ;;
   opening)
     # The version line is the version command's own print and has no second source here: a line composed in
-    # this file would drift from the one the command prints. A triple not yet known is said so, never printed
-    # as a placeholder.
+    # this file would drift from the one the command prints. It comes first whatever the opening is given, a
+    # refusal included, so the person's first sight is the version. A triple not yet known is said so, never
+    # printed as a placeholder: a caller that knows no triple passes no rigor.
+    _card_open_version="$(bash "${CARD_SELF_DIR}/version.sh" 2>/dev/null </dev/null | sed -n 1p)"
+    [ -n "$_card_open_version" ] || { echo "card.sh: the version command printed no line" >&2; exit 1; }
+    printf '%s\n' "$_card_open_version"
+    if [ "$#" -eq 1 ]; then
+      printf 'Triple not yet declared.\n'
+      exit 0
+    fi
     [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || _card_usage "opening takes a rigor word and, with it, an intent and a scale (got $(( $# - 1 )) arguments)"
     _card_open_level="$(rigor_level "$2" 2>/dev/null)"
     case "$_card_open_level" in
       single|double) ;;
       *) printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2; exit 1 ;;
     esac
-    _card_open_version="$(bash "${CARD_SELF_DIR}/version.sh" 2>/dev/null </dev/null | sed -n 1p)"
-    [ -n "$_card_open_version" ] || { echo "card.sh: the version command printed no line" >&2; exit 1; }
-    printf '%s\n' "$_card_open_version"
     if [ "$#" -eq 4 ]; then
       printf 'Canonical SDLC engaged — %s · %s rigor · %s\n' "$3" "$_card_open_level" "$4"
     else
