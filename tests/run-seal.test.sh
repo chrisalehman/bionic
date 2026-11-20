@@ -32,6 +32,10 @@
 #             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
 #   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
 #             log and binding untouched: the commit's refusal is the one before, word for word.
+#   §JUDGED   a fact written into the kept facts by hand, plan, log and seal untouched, moves no door: a commit
+#             owing a review at 6, Step 2's approval at 3 or the regression proof at 5 is refused word for word,
+#             publish reads no release approval, and `current 8 --check` and the close's facts refuse as before;
+#             each fact written by its own verb or writer is admitted.
 #   §HONEST   one row each: close-out's archive, the bind verb, a new session id engaging, the step verb's
 #             move down, a record written into the record folder, step 8's wipe of the state folder, and an
 #             honest append that met a held lock: the run verifies clean and no commit is refused for a
@@ -348,10 +352,10 @@ expect_eq "and a hand edit after it is caught" "changed what=plan how=changed" "
 # so every commit of it is refused for that (OWED) until a change to the run is refused for the change.
 . "$(dirname "$0")/lib/bound-marker.sh"
 G="$SB/gate"
-world() {
+world() {  # [<step>] -> a fresh run bound to SID at <step>, 5 when none is named
   rm -rf "$G"; mkdir -p "$G/.bionic/tmp"; git -C "$G" init -q
   git -C "$G" -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m seed; git -C "$G" checkout -q -b feature/x
-  GP="$(plan_fixture --current 5 "$G/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)"; GL="$(plan_fixture_log "$GP")"
+  GP="$(plan_fixture --current "${1:-5}" "$G/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)"; GL="$(plan_fixture_log "$GP")"
   : > "$G/.bionic/tmp/engaged-$SID.state"; bound_marker "$G" "$SID" "$GP"; GM="$G/.bionic/tmp/engaged-$SID.state"
 }
 gate() {  # <command> -> GRC, GLINE: the hook's exit and the first line it printed
@@ -462,13 +466,14 @@ section "KEPT"
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh"
 export TMPDIR="$SB/kept"
 kept() {  # <place|facts> -> each kept file of that kind made to read step 9, delivered, its key kept; then what it serves
-  local f b; for f in "$TMPDIR/bionic-$1-"*/*; do
+  # The gate keeps no facts, so a reader that decides nothing keeps them first, as the tick does.
+  local f b; [ "$1" != facts ] || ( _proof_facts "$GP" >/dev/null ); for f in "$TMPDIR/bionic-$1-"*/*; do
     b="$(sed '2,$ { s/^n=5$/n=9/; s/|n=5|/|n=9|/; s/^state=open$/state=delivered/; }' "$f")" && printf '%s\n' "$b" > "$f"; done
   if [ "$1" = place ]; then proof_step_held "$GP"; else _proof_ask "$GP" reader_q_step "$GP"; fi
 }
 for k in place facts 'place facts'; do
   rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world; gate "git commit -m x"; gate "git commit -m x"; E0="$(cat "$SB/gate.err")"
-  expect_eq "the run as sealed, its kept $k written by the gate: refused" "$OWED" "$GLINE"
+  expect_eq "the run as sealed, its kept $k: refused" "$OWED" "$GLINE"
   for f in $k; do expect_contains "the kept $f rewritten by hand serves delivered" state=delivered "$(kept "$f")"; done
   gate "git commit -m x"
   expect_eq "with the kept $k read delivered, the refusal is the one before, word for word" "$E0" "$(cat "$SB/gate.err")"
@@ -592,5 +597,64 @@ expect_eq "the held append's line is in the log, and the record's heredoc was ad
   "${HL:-}|${HD:-}|$(head -1 "${GL%/*}/T1.md" 2>/dev/null)"
 gated "a hand line beside an honest append that met the lock" "$LA" 'hold; put "an honest line"; printf "run/v1|ev=step|n=9|at=z\n" >> "$GL"; free'
 gated "the honest line's bytes appended again by hand once paid" "$LA" 'hold; put "an honest line"; free; put "the next"; tail -2 "$GL" | head -1 >> "$GL"'
+
+section "JUDGED"
+# fails-when: a door reads a fact from the kept facts, so a line written there by hand, plan, log and seal untouched,
+# admits a commit (a review at 6, Step 2's approval at 3, the regression proof at 5), hands publish its release
+# approval, or admits `current 8 --check` or the close's facts; or the fact written by its own verb is not admitted.
+. "$(dirname "$0")/lib/roster-row.sh"
+export LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib" SB
+keep() {  # <lines> <plan> -> a reader that decides nothing keeps the fold, the lines go into it by hand under its key, and it serves them
+  local f r='. "$1/proof.sh" && _proof_facts "$2"'; bash -c "$r" _ "$LIB" "$2" >/dev/null
+  for f in "$TMPDIR"/bionic-facts-*/*; do A="$1" awk '!d && $0 == "\036" { print ENVIRON["A"]; d = 1 } { print }' "$f" > "$SB/kf" && cat "$SB/kf" > "$f"; done
+  bash -c "$r" _ "$LIB" "$2"
+}
+export -f keep
+up() {  # the world's repository as a reading or a regression run needs it: a runner, a real base, the working branch at the head
+  git -C "$G" config user.name f; git -C "$G" config user.email f@example.com; S0="$(git -C "$G" rev-parse HEAD)"; mkdir -p "$G/tests"
+  printf '.bionic/\n' > "$G/.gitignore"; printf 'true\n' > "$G/tests/a.test.sh"
+  printf '#!/bin/bash\nprintf "Gating suites: a.test.sh\\n  a.test.sh  \\342\\234\\223 PASS\\nGating: 1 passed, 0 failed\\n"\n' > "$G/tests/run.sh"; chmod +x "$G/tests/run.sh"
+  git -C "$G" add -A; git -C "$G" commit -qm work; H="$(git -C "$G" rev-parse HEAD)"; git -C "$G" checkout -q -B wave/01-fixture
+  sed -i.bak "s/^base-sha: .*/base-sha: $S0/" "$GP" && rm -f "$GP.bak"; seal_fixture "$GP" "$GL"
+}
+rd() {  # <question> -> a reader's passing record of it and its roster row, then the review recorded by its verb
+  local q="$1" t=bionic:critic; [ "$q" != evidence ] || t=bionic:auditor
+  { printf 'reviewed: %s..%s\nquestion: %s\nresult: pass\nscope: whole\n' "$S0" "$H" "$q"
+    [ "$q" != structure ] || awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s)
+      print "check: " s " PASS the build row is one line of a library and a one-row suite" }' "$BIONIC_SCRIPTS_DIR/payload/context/checks-structure.md"
+    printf '\nfindings: 0\n\nThe reader read the build row and found nothing.\n'; } > "${GL%/*}/w-$q.md"
+  printf '%s|questions=%s\n' "$(roster_row_fixture session="$SID" name="w-$q" agent_id="a-w-$q" subagent_type="$t" \
+    launched_at=2026-10-01T00:00:00Z deliverable="${GL%/*}/w-$q.md")" "$q" >> "$G/.bionic/tmp/roster-$SID.state"
+  poke proof-add review "record/wave-x/w-$q.md" --question "$q" --reader "w-$q"
+}
+judged() {  # <label> <step> <setup> <kept lines> <the fact's verbs> -> refused; with the lines kept, refused word for word; admitted once the verbs wrote the fact
+  local k; rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world "$2"; up; eval "$3"; gate "git commit -m x"; gate "git commit -m x"
+  E0="$GRC|$(cat "$SB/gate.err")"; expect_status "$1: the run as sealed: refused" 2 "${E0%%|*}"
+  k="$(eval "$4")"; expect_contains "$1: the kept facts, given the lines by hand, serve them" "${k%%$'\n'*}" "$(keep "$k" "$GP")"
+  gate "git commit -m x"; expect_eq "$1: with the lines kept, refused word for word as before" "$E0" "$GRC|$(cat "$SB/gate.err")"
+  eval "$5"; gate "git commit -m x"; expect_status "$1: the fact written by its verb: admitted" 0 "$GRC"
+}
+judged "Step 2's approval at 3" 3 : 'printf "run/v1|ev=approval|by=f|key=step2|said=approved|at=2026-10-04T00:05:00Z\n"' 'typed "$SID" yes; poke approve step2 yes'
+pah() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approved_head "$2" release' _ "$LIB" "$GP"; }
+expect_contains "the release approval at the head, given the kept facts by hand, is served by them" by=intruder "$(keep "run/v1|ev=approval|key=release|by=intruder|head=$H|said=x|at=2026-10-04T02:00:00Z" "$GP")"
+expect_eq "publish's consent reads no kept approval; the approval its writer writes, it reads" "|$H" \
+  "$(pah)|$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approval_event "$2" release by=f "head=$3" said=approved' _ "$LIB" "$GP" "$H" >/dev/null; pah)"
+AC1='printf "fixture evidence\n" > "${GL%/*}/generic-evidence.md"; printf "run/v1|ev=proof|ac=AC-1.1|evidence=record/wave-x/generic-evidence.md|at=2026-10-04T00:30:00Z\n" >> "$GL"; seal_fixture "$GP" "$GL"'
+judged "a passing review of each question at 6" 6 "$AC1" 'for q in evidence adversarial structure; do printf "run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-%s|evidence=record/wave-x/w-%s.md|at=2026-10-04T01:00:00Z\n" "$H" $q $q $q; done' \
+  'for q in evidence adversarial structure; do rd $q; done'
+export BIONIC_GATE_DIR="$SB/gatedir" BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_SWAP_PCT=0
+judged "the regression proof at 5" 5 : 'printf "run/v1|ev=proof|kind=regression|head=%s|evidence=record/wave-x/regression-run-%s.log|at=2026-10-04T01:00:00Z\n" "$H" "$H"' \
+  'poke regression-run; poke proof-add regression "${GL%/*}/regression-run-$H.log"'
+rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"
+CK="$(bash -c '. "$(dirname "$0")/lib/resolve-roots.sh"; require_helpers() { :; }; . "$(dirname "$0")/lib/regression-fixture.sh"
+  . "$(dirname "$0")/lib/roster-row.sh"; . "$(dirname "$0")/close-out.prelude.sh"; . "$(dirname "$0")/lib/bound-marker.sh"
+  PS="$(mk_fixture kept)"; P="$PS/$PLAN_REL"; RL="$(/usr/bin/grep "|ev=proof|kind=regression|" "$PS/$LOG_REL")"
+  /usr/bin/grep -v "|ev=proof|kind=regression|" "$PS/$LOG_REL" > "$PS/l"; mv "$PS/l" "$PS/$LOG_REL"; seal_fixture "$P" "$PS/$LOG_REL"; bound_marker "$PS" kept-1 "$P"
+  ck() { (cd "$PS" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR= BIONIC_CLAUDE_HOME="$SB_HOME/.claude" CLAUDE_CODE_SESSION_ID=kept-1 \
+    bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 --check 2>&1; echo "rc=$?"); run_close "$PS" check; printf "%s\n" "$CO_OUT" | grep "^facts: "; }
+  ck >/dev/null; E0="$(ck)"; k="$(keep "$RL" "$P" | grep -c "kind=regression")"; E1="$(ck)"
+  f="${RL#run/v1|ev=proof|}"; IFS="|" read -ra kv <<< "${f%|at=*}"; LOG_AT=2026-10-04T12:00:00Z bash -c ". \"\$1/run.sh\" && . \"\$1/proof.sh\" && proof_event \"\${@:2}\"" _ "$LIB" "$P" "${kv[@]}"
+  printf "%s|%s|%s|%s" "$k" "$(printf "%s\n" "$E0" | grep -c "would refuse\|^rc=1\|^facts: WOULD REFUSE")" "$([ "$E0" = "$E1" ] && echo same)" "$(ck | grep -c "would advance\|^rc=0\|^facts: every fact")"' "$BIONIC_SCRIPTS_DIR/tests/judged")"
+expect_eq "with the regression proof given the kept facts by hand, current 8 --check and the close's facts refuse word for word; written by its writer, both admit" "1|3|same|3" "$CK"
 
 finish
