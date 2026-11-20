@@ -156,7 +156,8 @@ cur8_approved_head() {
 }
 
 cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judges Step 8 too)
-  local step="$1" wb out rc err
+  # The advance judges on the run's log, never the kept facts the tick reads (lib/proof.sh `_PROOF_FRESH`).
+  local step="$1" wb out rc err _PROOF_FRESH=1
   if ! { declare -F facts_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F facts_state >/dev/null 2>&1; then
     die "REFUSED — current: $step is admitted on the facts the run owes, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
