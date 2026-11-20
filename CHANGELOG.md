@@ -8,6 +8,228 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 2.1.0 — 2026-11-19
+
+This release closes the gaps 2.0.0 shipped with, in five themes. The gate holds: a run changed around the tool is caught
+at the next commit, and work stops until the person rules. The release card says what the reader says. A run that is only
+waiting costs no model turn: a shell watcher, started by the platform's own hooks, replaces the timed job. The tool pushes
+the branch and opens the pull request on the release approval, and sees the merge itself. The release card and the step
+advance are about a third of their 2.0.0 time, every target for them is still missed, and the debts and dead code 2.0.0
+accepted are mostly gone. It is a minor release: the plan format stays at `canonical_sdlc_version: 15`, and a run begun
+under 2.0.0 continues under 2.1.0.
+
+**What you do when you upgrade.**
+- **Restart Claude Code once, with no agent out.** The new hook file registers the watcher (`hooks/watch.sh`) on the turn
+  end and on session start, and widens the write hook's after-arm from Write to Write and Edit. A session takes its hooks
+  when it starts, so one that was running at the upgrade keeps the 2.0.0 hooks. Exit `claude` and start it again: a
+  `/clear` is not a restart. `doctor.sh` and the tick both say "exit claude and start it again" when what is on disk is
+  newer than what the session loaded. Until you do, a dispatch is refused as "this session was never watched", and the
+  refusal names the command that starts a watcher by hand.
+- **A timed job left in a session's table now fails.** The `prompt`, `arm` and `disarm` verbs are gone, so a 2.0.0 job
+  that fires answers `unknown verb`: delete it once with CronDelete, or restart. Nothing on a clock replaces it.
+- **The rule of 1.3.2 is narrowed.** Until now a session with no engaged file was never judged, and the engagement was
+  called a consent boundary. That holds now only for a session the seal does not bind. A session bound to an open run is
+  judged against it until the run closes or the session binds another through the tool, whatever happens to its engaged
+  file, its plan, its log or its binding. Removing, renaming, emptying or replacing any of them with a link no longer
+  lifts a wall.
+- **The seal is a trail, not a lock.** A record of the plan's and the log's digests, in plain text in the repository's
+  common git directory, written by the tool and checked at every commit. It catches a change made around the tool; it
+  does not stop a process that sets out to rewrite it. A run found open with no seal, which is every run open at the
+  upgrade, is sealed as found at its first sight: nothing done to it before that is judged.
+- **A caught change refuses the commit until you rule.** The refusal names what changed and how, opens an ask on the
+  run's register, and names the two replies: `session-poker.sh accept '<your words>'` takes the run as it stands, and
+  `abandon '<your words>'` ends it. Each is refused unless the words are ones you typed in a session of the run. A script
+  of yours that edits a run's plan or log by hand now meets this refusal at the next commit.
+- **Release ends in a pull request.** At task and wave scale the release approval is the consent, `publish` pushes the
+  working branch to `origin` and opens the request against the integration branch through `gh`, and you merge it. No path
+  of the tool merges into the integration branch. `gh` must be installed and signed in; a failed push or request exits 4
+  with the cause and opens an ask for you. The run learns of the merge from the remote.
+- **One setting.** `watch-interval:` in `.bionic/config.yaml` sets the watcher's pass, five minutes by default, and a
+  value above twenty minutes is refused. A project that never set it needs nothing.
+- **Counts that changed.** 41 poker verbs, from 39: `accept`, `abandon`, `judge`, `publish` and `duty` are new, and
+  `prompt`, `arm` and `disarm` are gone. 10 hook scripts are registered, from 9.
+
+### What shipped
+
+**The gate holds.**
+- The seal library, one resolver of the git home, and the seal written by the log's appender and by the write hook's
+  after-arm for Write and for Edit (an Edit seals and does not bind; a write that was denied or failed seals nothing).
+- The commit gate compares the bound run with its seal first, ahead of the engagement test and every costly read, and
+  folds the run's step and open state fresh from the verified log. The binding is recorded beside the seal and believed
+  over the engaged file. Write, Edit or a shell command the wall can read as a write or a delete in the seal's home is
+  refused, engaged or not.
+- `accept` and `abandon` are verbs. Six honest acts are driven through the gate and none is caught: close-out's archive,
+  step 8's wipe, the bind verb, a cleared session engaging again, the step verb's own move down, and a writer's record
+  written into the record folder. A run driven by its verbs alone never reads as changed.
+- The growth wall reads the commit's own arguments and the adds before it in the same call, so `git add <file> && git
+  commit`, `git commit -a` and `git commit <file>` are refused as growth staged in a call of its own is.
+
+**The card tells the record's truth.**
+- The release card numbers every open ask that waits on the person, and the reply closes every ask the card numbered and
+  none it never showed.
+- Four lines are repaired. The bottom line names a criterion owed later and says every criterion is proved only when the
+  reader does. A review whose newest reading is a flag, covered at the head, draws no pass mark and says its result. A
+  carried finding the log holds no deferral of is counted and named apart from those it does. The sheet of a version-15
+  plan names no serves cell. The sitrep's sheet and the card now count a review's mark by one rule.
+- Each of the four repairs was reverted in turn with the mutation script, and its suite went red.
+- One function says whether an advance to a step would pass, by running the gate's judge in process (`session-poker.sh
+  judge <N>…`). The checked advance, the card, the tick and the release card ask it in place of three dry commits through
+  the whole wall. Drawn over the copy before and after that change alone, the card differs in one line, the header's
+  clock time.
+
+**The window is the person's.**
+- `hooks/watch.sh` is registered on the turn end and on session start as a hook that can wake, under a time limit of one
+  day. It takes the session's lock, runs one pass of the tick with no model every five minutes, and exits quiet when
+  nothing needs the model. It wakes with one line of at most 120 characters when a row is ready with room, an agent has
+  reported, an agent is quiet past its cadence, or a reserved request was denied. Near its day's limit, with an agent
+  still out, it wakes once so the turn's end replaces it.
+- When no agent and no background job is out and the run waits only on the person (no open row, nothing ready, no detached
+  run, no pull request open, every open ask the person's), the watch rests at once, spends no turn, and the turn-end hook
+  says so once: `bionic watch: stopped - waiting on you; your reply starts it again`. The turn's end after your reply
+  starts it again; nothing is typed to restore it.
+- The dispatch wall, the turn-end wall, session start and the doctor read the watch record. A watch that is alive or rested
+  on purpose admits a dispatch; no record is refused as never watched; a record that says watching over a dead process is
+  refused as stopped, and the next turn end says so in one line and starts another. A tick that is already running is seen
+  and never started twice.
+- A turn-end refusal whose fix is the agent's goes out as one short fixed line with no error look, `bionic: a duty is owed;
+  run session-poker.sh duty`, and `duty` prints the whole reason. A refusal whose fix is yours keeps its channel and wins
+  when both arise at one turn end. The duty still binds once.
+- A wake for a row quiet past its cadence or its duration, and the restart notice, are each said once for their cause, and
+  a row dispatched after the newest panel answer is no longer named gone. The timed prompt is deleted with its verbs, its marker and every line of
+  resume, handoff, session start, the situation report and close-out that named it.
+
+**The pull request is the road to main.**
+- `session-poker.sh publish` checks the release approval at the working head before any network call, pushes, opens the
+  request, and records it as a published event; done twice at one head it does nothing the second time. The reader answers
+  the run's request (`reader.sh <plan> pr`).
+- One library function says whether the working branch is merged, reading the request's state from the host and the
+  ancestry against the fetched remote branch, and never moving the local one. A squash or rebase merge counts when the host
+  says merged and names a commit the integration branch holds. A request closed unmerged opens an ask. Close-out and step
+  8's gate ask it, and close-out's arm that reported a merge that had not happened is gone.
+- The situation report names an open request as what the run waits on and offers no ready row. While it is open the
+  watcher fetches and stays quiet until the merge can be reached, then the integrate row lands. A tree asked for an
+  integrate row is refused, naming the kind; a removed tree is an event the reader reads. The method says pull request at
+  every scale.
+
+**Faster, and less to carry.**
+- One gate pass is cut: the plan's rows were read 162 times in a pass and are now read once. One pass went from 326.1 s to
+  94.5 s on its own copy, and no verdict of the gate's suites changed.
+- Resume prints one line as each of its steps starts. `card.sh opening <rigor>` prints the method's opening announcement
+  whole, its first line the line the version command prints; the method tells the model to show it first and unaltered.
+- Paid: a row's tree has one fold in the reader, a proof's identity one declaration, and the run log's path one function.
+  The two landing functions nothing called are deleted with their comments and test groups, each rule they pinned moved
+  to the live landing line or dropped with its reason.
+- The fix rows this run's own use found: the close replay follows the pages that no longer name the timed job (and the
+  method's page paid for the two sentences it gained by three cuts in the same page: the Diagrams caveat's list, the
+  Handoff parenthesis and the tail of the resume sentence; `approve doctrine-growth` on a row restores them); a wake is
+  said once; the sheet counts a review as the card marks it.
+
+### Timings
+
+Four timings of the poker's slow verbs, on one copy of the previous wave's record, one run at a time (`speed-baseline.md`,
+`speed-after.md`). Before is 2.0.0's code at a10392e14, after is 2.1.0's at 8ad6397a0. **Every target is missed.**
+
+| timing | before | after | target |
+|---|---|---|---|
+| the release card's preview | 1286.0 s | 355.0 s | 120 s |
+| one checked advance, `current 6 --check` | 305.8 s | 87.8 s | 60 s |
+| one tick with the integrate row open | 989.9 s | 342.9 s | 120 s |
+| `resume` from a handoff | 1100.7 s | 376.9 s | 300 s |
+
+Each is between 0.28 and 0.35 of its before. Each is one run; the baseline's own repeats agreed within 5 percent, and the
+machine was no quieter for the after (load averages of 2.5 to 4.1, against 1.6 to 3.0), so the after figures are if
+anything somewhat high. The targets are round numbers recorded and carried, not a gate. The next two costs of a gate pass
+are `validate_dispatch_ledger`, 69.6 of 131 traced seconds, which reads the whole plan once for each landed or active row
+(232 rows), and `matrix_load`'s criterion cover, 21.7 traced seconds. Neither was cut, since only the largest cost of one
+pass was in scope. A tick over an unchanged digest cost as much as a full one (343.5 s). The second timing is the largest
+of the card's three advances: the card is still about four gate passes.
+
+### Known limits
+
+Stated first because they are what this release leaves on purpose.
+- A commit that never meets the gate is still not judged: one made by a merge, a cherry-pick, an alias or a script. It
+  is older than 2.0.0, and the first item of a wave of its own.
+- The commit wall's ten-second registration is unchanged, and a commit wall that outruns it still admits the commit
+  unjudged. In 2.0.0 a quote-dense command of 200 KB took 23.5 to 25.5 s; it was not measured again in this release.
+- Not done, by decision: notifications (the re-notify of issue 53 among them, and issue 53's other two parts); the rest of
+  issue 56 (the date launches, the double fold of adopt, the one-line sitrep wait, and resume's own costs, which wait on
+  the timing above); issue 54's proof wait, which holds in its ruling case and not its proof case. The dispatch, write and
+  Bash walls still refuse on the error channel, 37 refusals in the previous wave. The lower findings of 2.0.0 stay carried,
+  ten of them on their triggers. No criterion passes or fails by time.
+
+What the seal and the gate do not do.
+- The seal is a trail, not a lock. A process that sets out to rewrite the seal can, and a shell command the wall cannot
+  read (a glob, `rm -rf .git/bionic-*`) can still remove it, after which the run is sealed as found again.
+- A shell write that lands between an admitted Write and its after-arm is sealed with it. The after-arm seals a run found
+  with no seal and logs no line, where the appender logs one. Two plans that share one record: only the first is sealed.
+  A binding record is never swept. A writer that waited out the seal's lock leaves a note of its exact line beside the
+  seal so the next check does not catch it, and whether anything but the appender can write such a note is open.
+- The gate reads the run's step and open state fresh from the log; its other reads of kept answers (approvals, reviews,
+  statuses, trees, walk environments) stay kept. The fresh fold is pinned by no suite row, and the gate's judge sets the
+  collector's facts a second time beside the hook, held equal by one suite row alone.
+- The growth wall does not read stage acts other than add: `git mv`, `git rm`, `git apply --cached`, `update-index` and
+  `read-tree` in the same call. A call that stages only through them is judged on the index as it stands.
+- The step-8 gate now reaches git, and the host on the squash path.
+- A reopened pull request is read open again only by the next fetch. A run delivered but still engaged wakes no model and
+  its watcher passes quietly to its day's limit.
+- A `/clear` writes a load record that reads as a fresh load in a process that reloaded nothing, so the restart line and
+  the watcher's restart wake both go quiet at the first clear after a hook change; restart the process.
+- Only three kinds of wake are said once: a row quiet past its cadence or its duration, a row gone, and the restart. The
+  gate's, the fill's, the stand-down's and the others are as they were.
+- The wake hook registered through a plugin's own hook file was driven on a scratch plugin, on session start and turn end
+  and under a time limit past ten minutes, not on a full day, not for a plugin loaded from the plugin cache, and not on
+  start sources `clear`, `resume` or `compact`. The quiet hour and the thirty minutes with only an ask open are the walk's;
+  it had not run when this entry was written.
+- The sheet's count of reviews with no judge still scores a flag as passed, where the card draws it as not passed. The
+  sheet's ready set leaves out an integrate row while a request is open, and the fill's own ready set does not, so the two
+  can disagree about that row.
+- A tick in a fixture that starts a detached regression run can outlive its suite and its world, and the gate's lock wait
+  has no bound once the store it waits on is deleted. A repository under a folder that holds a `.bionic` directory
+  resolves its project root to that folder, past its own git top level. No page a writer reads says `git stash` is one
+  list for every worktree of the repository.
+- Nine helpers in `worktree.sh` that only the two deleted landing functions called stay, about 340 lines
+  (`_wt_stale_proof`, `_wt_not_current`, `_wt_refuse_not_current`, `_wt_undo_merge`, `_wt_shares_a_file`, `_wt_own_merge`,
+  `_wt_undo_failed_fix`, `_wt_undo_arrival_fix`, `_wt_declared_debt`), because deleting them takes back the room the row
+  exists to give; their removal needs about 340 lines of room or a higher cap on test lines.
+- The diagrams, `diagrams/lifecycle.svg` and `diagrams/hook-chain.svg`, are not redrawn for the watcher or the seal: they
+  still draw the timed job's marker, and the skill says they are not redrawn. The scale table's "Patrol" column keeps its
+  name because `lib/scale.sh` reads it by that name, and comments and usage text in the hooks and libraries still say
+  Patrol or stamp. The close replay's CS-2b title and its section's comment still say "disarming".
+- The one fold of a row's tree changed two edge cases: the order of rows in the gate's collision line when a row names
+  one tree twice with another row's between, and close-out's pending tree removal, which now follows a row's latest tree
+  alone. Close-out's tree-branch read still reads every tree line.
+- Some suites are not on the landing line and were run once on the final commit instead: the close replay and the replay
+  bed are over the bar; eight suites that plant engaged files by hand were not run against the engagement change; the
+  suites that render the card or replay its reply were not run on the card's numbered decisions and its "Also yours" lines
+  at the row, only in the card pass; and the tick's no-roster refusal has no fixture that reaches it.
+
+Debts that stand, by concept, as read at 8ad6397a0 (`debt-sites.md`); each is still the duplication or the unpinned pair
+it was registered as, and the register's cited lines had drifted: a mktemp-redirect-read idiom copied in four places;
+the gate library's usable-cores line written twice; the working-branch refusal's word spelt in code and prose
+and pinned by no test; the rule that a documentation row carries the release, read in several places; the declared version key
+and the header grammar, each read separately by the gate, the write hook and the plan reader; the full pass's green decided in
+two places; the walk's per-path classification written twice; the wrapper over the open reds past the floor written twice;
+a decision's key spelt in two files; the kinds of a writer's row and of a task's role listed in two files; the common git
+directory still resolved privately at fourteen sites (the pin counts them); the line library's loaded-guard copied in
+many places; the five-case rule for a plan's version written in the skill and in the gate; and the walk's proof line,
+which now travels as an event and is read at the gate but pinned by no evidence-gate suite. Three debts the run found
+already paid or gone are not limits: the key reader of the ac block, the open-deferrals reader, and the second reader of the
+proof line (probably paid, not decided).
+
+Still carried from 2.0.0, unchanged: two rows that write the same file are offered at once unless the later names the other
+in its deps; an archived plan read where the archive moved it reads as an open run at step 0; a build row added after the
+review rows is no wait of theirs; where the tick takes a reader answer through a pipe, a failed fold reads as an empty
+answer; a review row at 15 returns to pending after each reading and a row that names it in its deps waits for ever; the
+tick may order a writer stood down while it is inside `spawn-worktree.sh ready` (hold it with `session-poker.sh hold`);
+the kept folds of a run's facts are shared by every project and suite of one user under `$TMPDIR`, so another process can
+evict a live run's fold and cost the next commit wall about 3 seconds more.
+
+### The release
+
+- The plugin reads 2.1.0, and the help and version pages are rendered from their templates by `agents-src/render.sh`.
+- The walk, the whole regression and the reviews of the settled whole are rendered into this entry by the integrate row;
+  they were not run when this entry was written. The Known limits above are trued against what the reviews find.
+
 ## 2.0.0 — 2026-11-16
 
 This is the one-log release. Every act of a run is written once, to one log, `record/<wave>/run.log`; one reader,

@@ -12,7 +12,7 @@
 # It is invoked ON DEMAND, one question per invocation, and holds no process open:
 #
 #     bash <plugin-root>/hooks/session-poker.sh tick       one decision over this roster (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
+#     bash <plugin-root>/hooks/session-poker.sh interval   the configured poker interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh tick --watch   one pass of the tick for the watcher: quiet, or one wake line
 #     bash <plugin-root>/hooks/session-poker.sh interval --watch   the configured watch interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
@@ -32,7 +32,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share, the reserve the person keeps, the cores and the room, or set the share to <n>, 1 to 100, and the reserve to <cores> (the set writes the user-level files)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>' ['<changelog sentence>']   move a finding across the line on words the user typed in this session, a deferral with its sentence (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the run's log)
-#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet for the model, or the Patrol's one-line status (settles ruled decisions on the register)
+#     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet for the model, or the watch's one-line status (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card, drawn from the sheet and the model's judgment, or every reason it is refused (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--machine <caller>] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event unless a machine caller stops it)
 #     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, one handoff event names it (writes the file, and the run's log when bound)
@@ -284,7 +284,7 @@ usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
   die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
+  die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured poker interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh tick --watch   one pass of the tick with no model: exit ${WATCH_RC_QUIET} quiet; exit ${WATCH_RC_WAKE} with one line of at most ${WATCH_LINE_MAX} characters naming the act owed"
   die "  bash ${HOOK_DIR}/session-poker.sh duty       the whole reason of the duty the turn-end hook last named in this session (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval --watch   the configured watch interval, in seconds (watch-interval:, default ${WATCH_INTERVAL_DEFAULT}s, refused above ${WATCH_INTERVAL_MAX}s)"
@@ -325,7 +325,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sheet's pace, correctness and waste (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh release-note [--at <commit>] [--on <ISO-UTC>] [<plan>]   the release entry's ### The landing numbers block: landing-report --rows over the landing record as it stood at the instant, naming the working head (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet: one fact per line, <key>: <value> — the run, the steps, every task with its state, the metrics in numbers, each goal's status, the predicted close and its arithmetic, every ask open on the run's register with what it holds, and every review; the model reads it and the user sees the card; --line prints the Patrol's status, <k> of <m> tasks · owed: <n> on you · <m> on events · close <time> (closes the asks of decisions the ledger ruled)"
+  die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet: one fact per line, <key>: <value> — the run, the steps, every task with its state, the metrics in numbers, each goal's status, the predicted close and its arithmetic, every ask open on the run's register with what it holds, and every review; the model reads it and the user sees the card; --line prints the watch's status, <k> of <m> tasks · owed: <n> on you · <m> on events · close <time> (closes the asks of decisions the ledger ruled)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card: the judgment on stdin, seven lines, one tagged line each (purpose:, call:, grade: <A-F>, point:, ask <key>[, <key>]: <what> — recommend <answer>, close:), checked against the sheet's facts; the card draws every row that is a fact; a card that fails its check prints nothing and exits 1, every reason on stderr"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> --why '<reason>' [--report-only] [--machine <caller>]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one hand event, what=stop-run with its reason, goes to the bound run's log, unless --machine names the tool's own caller (close-out's sweep), whose stop is no act by hand; with no reason the stop is refused and nothing is sent"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
@@ -820,7 +820,7 @@ $1"; shift ;;
     [ "$LR_SC" = no ] || { [ "$LR_ROWS" = no ] && [ "$LR_HH" = no ]; } || usage "landing-report takes --scorecard alone, with at most one plan."
     { [ -z "$LR_SINCE" ] && [ -z "$LR_UNTIL" ]; } || [ "$LR_HH" = yes ] || usage "landing-report takes --since and --until only with --hand-holds: they bound its window."
     ;;
-  # THE SITUATION REPORT. `sitrep [--line] [<plan>]` prints the fact sheet, or with --line the Patrol's status;
+  # THE SITUATION REPORT. `sitrep [--line] [<plan>]` prints the fact sheet, or with --line the watch's status;
   # `sitrep card [<plan>]` draws the card from the sheet and the judgment on stdin. The plan, when named, is the one
   # operand; without it, the session's bound run, as landing-report's. `card` with --line, any other flag or a second
   # operand is a word the verb does not know: the usage error (2).
