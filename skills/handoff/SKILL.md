@@ -8,7 +8,7 @@ loading: deferred
 
 # Handoff
 
-The handoff is one document a fresh session continues from without asking what was going on. Assume this session can be killed the moment the file is written. One verb writes the file: it computes the State (branch, head, uncommitted files, what runs, the agents, and the plan, step, open tasks and Patrol when a run is bound), redacts secrets, and adds the last line. This skill composes the rest and writes nothing else.
+The handoff is one document a fresh session continues from without asking what was going on. Assume this session can be killed the moment the file is written. One verb writes the file: it computes the State (branch, head, uncommitted files, what runs, the agents, and the plan, step, open tasks and watch when a run is bound), redacts secrets, and adds the last line. This skill composes the rest and writes nothing else.
 
 Typed as `/bionic:handoff` with no argument, it hands off whatever this session is doing. With an argument, the argument names what the next session is for (`/bionic:handoff review the parser change`): the document is tailored to that purpose, and the verb puts it in the title and, with no run bound, in the file name.
 
@@ -63,7 +63,7 @@ Typed as `/bionic:handoff` with no argument, it hands off whatever this session 
 
    A refusal is the answer: say it in one line and stop.
 
-3. On success the verb prints one line, the file's last line, and nothing else. It is the one thing the next session needs, and it is your whole closing message: the line in a fenced block, with nothing after it. With a run bound the next session types it to rebind the run, arm its Patrol at a scale that has one and adopt the running agents. Typing it is the consent: the resume engages the session itself when the slash command did not, and says so in its first line. The resume prints about a dozen lines (bound, the step, the agents still open, what landed since, what is owed now, the Patrol) and the path of one recap file holding the rest. With no run the line is `Read <path> whole, then do Next 1.` and goes in the same fence. A second line, saying the plan's pointer was not written, is a warning about the plan, not the file: say it in one sentence above the fence. The last thing you write, with a run bound, is:
+3. On success the verb prints one line, the file's last line, and nothing else. It is the one thing the next session needs, and it is your whole closing message: the line in a fenced block, with nothing after it. With a run bound the next session types it to rebind the run and adopt the running agents; the turn's end starts the watch. Typing it is the consent: the resume engages the session itself when the slash command did not, and says so in its first line. The resume prints about a dozen lines (bound, the step, the agents still open, what landed since, what is owed now, the watch) and the path of one recap file holding the rest. With no run the line is `Read <path> whole, then do Next 1.` and goes in the same fence. A second line, saying the plan's pointer was not written, is a warning about the plan, not the file: say it in one sentence above the fence. The last thing you write, with a run bound, is:
 
    ```
    /bionic:canonical-sdlc <path>
