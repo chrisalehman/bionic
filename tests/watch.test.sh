@@ -386,8 +386,13 @@ wh_start() {
     > "$TMPROOT/wh.in"
   ( cd "$repo" && exec env -u CLAUDE_CODE_SESSION_ID "$@" bash "$WH_HOOK" < "$TMPROOT/wh.in" ) \
     > "$TMPROOT/wh.out" 2> "$TMPROOT/wh.err" &
-  WH_PID=$!
+  WH_PID=$!; WH_ALL="${WH_ALL:-} $WH_PID"
 }
+# wh_reap: every watcher this suite started is ended and waited for. A row that waits on a wake and times out leaves
+# its watcher running; removed with its world under it, a tick it is inside resolves its root to the nearest folder
+# that still exists and writes its digest there, so the worlds go only after every watcher has.
+wh_reap() { local p; for p in ${WH_ALL:-}; do kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; }
+trap 'wh_reap; cleanup' EXIT
 # wh_wait [seconds] -> WH_RC (124 while it still runs), WH_OUT, WH_ERR
 wh_wait() {
   local i=0 n="${1:-$WH_BOUND}"
@@ -705,6 +710,30 @@ poke "$RG2" tick
 expect_eq "ON5 a row dispatched before the panel and absent from it is GONE" "old" \
   "$(printf '%s\n' "$OUT" | sed -n 's/^poker: GONE \([^ ]*\) .*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
 expect_regex "ON5.a …and the one dispatched after it is counted open, not absent" '[|]open=1([|]|$)' "$(printf '%s\n' "$OUT" | grep '^poker-tick/v')"
+
+section "§CLEAN: a watcher a row left running ends before its world is removed, and the temp folder holds no project directory"
+RZ="$(wp_quiet_world wh-clean)"; wh_fast "$RZ"; plant_answer "$WP_TR" fresh "busy:running"
+wh_start "$RZ" Stop; wh_passes "$RZ" 2
+cl_live() { local p; for p in $WH_ALL; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; }
+expect_eq "CL1 the watcher left running passes in its own world: two digests rewritten there" "2" "$WH_SEEN"
+expect_contains "CL1.a …it is running, read by the liveness reader CL2 reads" " $WH_PID" "$(cl_live)"
+expect_true "CL1.b …and its world holds the project directory CL3 looks for" test -d "$RZ/.bionic/tmp"
+wh_reap; rm -rf "$RZ"; sleep 3
+expect_eq "CL2 …and once the worlds go, no watcher this suite started is still running" "" "$(cl_live)"
+expect_false "CL3 …the folder that held its world holds no project directory" test -e "$TMPROOT/.bionic"
+# THE TICK'S ONE ROOT: the shipped tick in a world removed during its pass, after it decided and before its digest is
+# written. The `rm` shim removes the world when the tick drops its print buffer, the step before that write, so the
+# removal lands there every time, with no sleep to win a race.
+mkdir -p "$TMPROOT/clshim" "$TMPROOT/cl-hold"
+printf '#!/bin/bash\nfor a; do case "$a" in *bionic-poker-tick.*.floor) [ -z "${CL_GONE:-}" ] || /bin/rm -rf "$CL_GONE" ;; esac; done\nexec /bin/rm "$@"\n' \
+  > "$TMPROOT/clshim/rm"; chmod +x "$TMPROOT/clshim/rm"
+RT="$(make_repo cl-hold/world)"
+expect_true "CL5 the world the tick runs in holds its project directory" test -d "$RT/.bionic"
+CL_GONE="$RT" PATH="$TMPROOT/clshim:$PATH" poke "$RT" tick
+expect_regex "CL5.a …the tick decided there" '^poker-tick/v1[|]' "$(printf '%s\n' "$OUT" | grep '^poker-tick/v')"
+expect_false "CL5.b …and the world was removed during its pass" test -e "$RT"
+expect_false "CL6 …and the tick made no project directory in the folder that held it" test -e "$TMPROOT/cl-hold/.bionic"
+expect_false "CL4 …nor does the temp folder the suite ran under (${TMPROOT%/*})" test -e "${TMPROOT%/*}/.bionic"
 
 # ============================================================
 finish

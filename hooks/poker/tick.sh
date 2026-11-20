@@ -15,10 +15,12 @@
 # THE DIGEST FILE'S PATH, under the tick's resolved root. The path and its
 # reader, `tick_digest_field`, are lib/patrol.sh's (`tick_digest_path`), which the stop
 # collector calls too (wave-24 T27; critic I3).
+# The root is the one the pass resolved once, `TICK_ROOT`, never asked again at the write: a project
+# removed during the pass would answer the nearest folder that still stands, and the digest would make
+# a `.bionic` there.
 tick_digest_file() {  # <session-id> -> absolute path, or empty
-  local root
-  root="$(tick_state_root)" || return 1
-  tick_digest_path "$root" "$1"
+  [ -n "${TICK_ROOT:-}" ] || return 1
+  tick_digest_path "$TICK_ROOT" "$1"
 }
 
 # The digest file is rewritten whole, under the state directory's write guard. A tick's digest carries `at=`, the
@@ -33,6 +35,8 @@ write_tick_digest() {  # <session-id> <digest> <since> <decision> <duty> [<gate 
   [ -n "$f" ] || return 1
   d="${f%/*}"
   tmp_dir_ok "$d" || return 1
+  # A root whose `.bionic` is gone by the write is a project removed during the pass: nothing is written.
+  [ -d "${d%/tmp}" ] || return 1
   mkdir -p "$d" 2>/dev/null || return 1
   [ -L "$f" ] && return 1
   {
@@ -890,10 +894,11 @@ tick_watch_facts() {  # <file>
     # so the watch pass that ran it stays quiet too. A record that cannot be written leaves the tick as it ran
     # before the record existed: unrecorded, on stderr. The exit trap removes the record; tick_emit, which replaces
     # that trap below, removes it as its last act.
+    # The pass's root is resolved here, once: the running record and the digest are written under it alone.
     TICK_RUN_ROOT=""
-    _tr_root="$(tick_state_root)" || _tr_root=""
-    if [ -n "$_tr_root" ] && tmp_dir_ok "$_tr_root/.bionic/tmp"; then
-      TICK_RUN_ROOT="$_tr_root"
+    TICK_ROOT="$(tick_state_root)" || TICK_ROOT=""
+    if [ -n "$TICK_ROOT" ] && tmp_dir_ok "$TICK_ROOT/.bionic/tmp"; then
+      TICK_RUN_ROOT="$TICK_ROOT"
       _tr_held="$(tick_run_claim "$TICK_RUN_ROOT" "$SESSION_ID" "$$")"
       case $? in
         0) trap 'tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"' EXIT ;;
