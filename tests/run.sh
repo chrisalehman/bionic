@@ -217,7 +217,7 @@ if [ "${1:-}" = "--one" ]; then
     exit 0
   fi
   _one_start="$(date +%s)"
-  # THE SCRUB (wave-30 T9; AC-4.2): this worker keeps BIONIC_GATE_DIR for its own ask and end above and below,
+  # THE SCRUB: this worker keeps BIONIC_GATE_DIR for its own ask and end above and below,
   # but the SUITE PROCESS runs without it or CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT: through the first a suite
   # read the run's store, through the others (a run a hook started carries them) a fixture's hooks judged the session's
   # project. A suite that wants one sets it in its own fixture. The --serial path below scrubs at its own exec the same way.
@@ -871,7 +871,7 @@ run() {  # run <label> <cmd...>   — gating
     ( _gate_ask_for work "$label" \
         || { printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"; exit 75; }
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
-      env -u BIONIC_GATE_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_ROOT "$@" >"$TMP/${label}.out" 2>&1   # the scrub (T9): the ask above keeps the store, the suite does not, nor the roots
+      env -u BIONIC_GATE_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_ROOT "$@" >"$TMP/${label}.out" 2>&1   # the scrub: the ask above keeps the store, the suite does not, nor the roots
       _sr=$?
       _gate_end_for "$_sr"
       exit "$_sr" )
