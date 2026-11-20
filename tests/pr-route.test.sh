@@ -1,8 +1,10 @@
 #!/bin/bash
 # tests/pr-route.test.sh — the pull request route: `session-poker.sh publish` against a bare remote and a stand-in host.
 #
-#   §CONSENT  with no release approval, and with one at an older head, publish exits non-zero before any network: the
-#             bare remote holds no working branch and the stand-in's log is empty.
+#   §CONSENT  with no release approval, with one at an older head, with one appended by hand to a sealed run, and with
+#             the seal held past the wait, publish exits non-zero before any network: the bare remote holds no working
+#             branch and the stand-in's log is empty; the hand-written one is refused in the commit gate's words and
+#             opens its ask.
 #   §OPEN     with the approval at the head, the remote holds the working head, the stand-in's log one create against
 #             the integration branch, the run's log the pull request; the local integration branch is unmoved; at that
 #             head again nothing is pushed or opened; at a new approved head the branch is pushed and the request kept.
@@ -21,6 +23,7 @@
 #   §MERGE    the pass that sees the merge closes the run: the integrate row lands at the merge, the run reads delivered,
 #             and a close that holds wakes once.
 #   §WALL     publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
+#   §STRAY    the whole run a world's tick started detached is ended before the worlds go: none is alive at the end.
 #
 # FIXTURE FIDELITY. Each case is a copy of one door fixture (tests/lib/door.sh): a real repository on its working branch
 # with its bound plan, the plan's header naming `integration-branch: main` as a planner writes it. The remote is a bare
@@ -81,6 +84,27 @@ prr_close() {
 }
 prr_landed() { /usr/bin/grep -c '|ev=published|row=T3|' "$L" 2>/dev/null | tr -d ' '; }
 prr_ask() { bash "$PRR_READER" "$P" asks | /usr/bin/grep "|key=$1|"; }
+prr_seal() { bash -c '. "$1/seal.sh" && seal_verify "$2"' _ "$PRR_LIB" "$P"; }   # -> the seal's line for the case's run
+# prr_strays -> the pid of each live process whose command names a world of this suite and a regression run. The
+# pattern is handed through the environment and split in the program, so the reading's own awk never matches it.
+prr_strays() {
+  PRR_W="$WORLD_ROOT/" ps -axo pid=,command= \
+    | PRR_W="$WORLD_ROOT/" awk -v me="$$" 'index($0, ENVIRON["PRR_W"]) && index($0, "regression" "-run") && $1 != me { print $1 }'
+}
+prr_tree() { local p; for p in "$@"; do printf '%s\n' "$p"; prr_tree $(pgrep -P "$p" 2>/dev/null); done; }   # <pid>... -> each, and all below it
+# prr_reap: what a world's tick started detached is ended before the world goes. The tick hands its whole run to
+# booked.sh, which outlives the pass and the suite; with its world removed under it, its wait at the gate never ends.
+# Each stray and everything below it is asked to end, and what still stands after five seconds is killed.
+prr_reap() {
+  local pids p i=0
+  pids="$(prr_tree $(prr_strays))"; [ -n "$pids" ] || return 0
+  kill $pids 2>/dev/null
+  while [ "$i" -lt 50 ] && [ -n "$(prr_strays)" ]; do sleep 0.1; i=$((i + 1)); done
+  for p in $pids; do kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null; done
+  return 0
+}
+# The suite's own trap, set after the world's, so it calls the world's cleanup itself once the strays are ended.
+trap 'prr_reap; ! declare -F _world_cleanup >/dev/null || _world_cleanup' EXIT
 
 # ============================================================
 section "§CONSENT: publish checks the release approval at the working head before any network"
@@ -106,6 +130,41 @@ expect_eq "CN-4 with the approval at an older head publish exits 1, refused, nam
 expect_eq "CN-5 …the bare remote holds main and no working branch, the stand-in's log is empty, the run's log holds no request" \
   "main||0" "$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
 
+# A release approval appended by hand, at the working head, in the shape the approve verb writes, after the run was
+# sealed: the approval reads as the person's, and only the seal tells it from theirs.
+prr_case consent-forged
+seal_fixture "$P" "$L"
+CN_SEAL0="$(prr_seal)"
+CN_H="$(prr_head)"
+printf 'run/v1|ev=approval|key=release|head=%s|by=x|said=y|at=%s\n' "$CN_H" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$L"
+expect_eq "CN-6 precondition: the run was sealed clean, the hand line reads as the release approved at the working head, and the seal reads the log added to" \
+  "clean|$CN_H|changed what=log how=added" \
+  "$CN_SEAL0|$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approved_head "$2" release' _ "$PRR_LIB" "$P")|$(prr_seal)"
+prr_publish
+expect_eq "CN-7 with the approval written by hand publish exits 1, refused in the commit gate's words for the change" "1|yes" \
+  "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q "REFUSED — the run's log was added to outside the tool" && echo yes)"
+[ "$DOOR_RC" = 1 ] || printf '%s\n' "$DOOR_OUT" | tail -5 | sed 's/^/    | /'
+expect_eq "CN-8 …the bare remote holds main and no working branch, the stand-in's log is empty, the run's log holds no request" \
+  "main||0" "$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
+expect_eq "CN-9 …the change is the gate's ask seal:changed on the run's register, and the seal keeps it caught" \
+  "yes|changed what=log how=added" "$(prr_ask seal:changed >/dev/null && echo yes)|$(prr_seal)"
+
+# The seal held by another writer past the wait, over the person's own approval at the head: a run not compared is
+# not judged, so nothing leaves.
+prr_case consent-busy
+CN_H="$(prr_head)"; prr_approve "$CN_H"
+CN_LOCK="$(cd "$R" && cd "$(git rev-parse --git-common-dir)" && pwd -P)/bionic-seal/.reap"
+mkdir "$CN_LOCK" && printf '%s\n' "$$" > "$CN_LOCK/pid"
+expect_eq "CN-10 precondition: the person approved the working head, and the seal's lock is held by a live writer" "$CN_H|busy" \
+  "$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approved_head "$2" release' _ "$PRR_LIB" "$P")|$(prr_seal)"
+prr_publish
+rm -rf "$CN_LOCK"
+expect_eq "CN-11 with the seal held past the wait publish exits 2, refused in the commit gate's words" "2|yes" \
+  "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q "REFUSED — the run's seal could not be read" && echo yes)"
+[ "$DOOR_RC" = 2 ] || printf '%s\n' "$DOOR_OUT" | tail -5 | sed 's/^/    | /'
+expect_eq "CN-12 …the bare remote holds main and no working branch, the stand-in's log is empty, the run's log holds no request" \
+  "main||0" "$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
+
 # ============================================================
 section "§OPEN: with the approval at the head, publish pushes, opens one request and records it, once a head"
 # ============================================================
@@ -114,6 +173,7 @@ section "§OPEN: with the approval at the head, publish pushes, opens one reques
 # a second publish at one head pushes or opens anything, or a new approved head opens a second request.
 prr_case open
 OP_H="$(prr_head)"; OP_MAIN="$(git -C "$R" rev-parse --verify -q refs/heads/main)"; prr_approve "$OP_H"
+expect_eq "OP-0 precondition: the run publish is asked of is sealed and matches its seal" "clean" "$(prr_seal)"
 prr_publish
 expect_eq "OP-1 publish exits 0 and names the request's address" "0|yes" \
   "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -qF "$PRR_URL1" && echo yes)"
@@ -383,9 +443,10 @@ prr_watch_world() {  # <name> [bare] -> §OPEN-ONLY's fixture armed and publishe
   prr_approve "$(prr_head)"; prr_publish
   [ "${2:-}" = bare ] || prr_owed
 }
-# prr_pass -> PASS_OUT (the pass's stdout alone), PASS_RC: one watcher pass from the case's project
+# prr_pass [<env assignment>...] -> PASS_OUT (the pass's stdout alone), PASS_RC: one watcher pass from the case's
+# project, the assignments in its environment
 prr_pass() {
-  door_run "$R" env PATH="$RH_GHPATH" HOME="$WORLD_ROOT/$(basename "$R")-home" BIONIC_CLAUDE_HOME="$WORLD_ROOT/$(basename "$R")-home/.claude" \
+  door_run "$R" env PATH="$RH_GHPATH" HOME="$WORLD_ROOT/$(basename "$R")-home" BIONIC_CLAUDE_HOME="$WORLD_ROOT/$(basename "$R")-home/.claude" "$@" \
     bash -c 'bash "$1" tick --watch 2>/dev/null; echo "rc=$?"' _ "$DOOR_POKER"
   PASS_RC="$(printf '%s\n' "$DOOR_OUT" | sed -n '$s/^rc=//p')"; PASS_OUT="$(printf '%s\n' "$DOOR_OUT" | sed '$d')"
 }
@@ -469,7 +530,10 @@ expect_eq "MG-5 …the line names the account close-out wrote, which says the ru
 
 prr_watch_world merge-held bare
 prr_gh pr merge "$PRR_URL1" --merge
-prr_pass
+# The machine read as full for this pass, as it was each time a world's regression run was found outliving the
+# suite: the whole run this world's tick starts detached waits at the gate for room, and §STRAY meets it there.
+prr_pass BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_USED_PCT=99 BIONIC_PROBE_FREE_PCT=1 BIONIC_PROBE_FREE_MB=81 \
+  BIONIC_PROBE_BUSY_CORES=64 BIONIC_PROBE_BUSY_CORES_5M=64 BIONIC_PROBE_LOAD_1M=64 BIONIC_PROBE_SWAP_PCT=0
 expect_eq "MG-6 merged with the close's facts not held: the pass wakes, saying close-out held" "$PRR_WAKE|yes" \
   "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - close-out held (exit [0-9]*): ' && echo yes)"
 expect_eq "MG-6b …nothing landed, the run still at step 8, close-out's refusal in its account" "0|n=8 state=open|yes" \
@@ -488,5 +552,20 @@ expect_eq "WL-0 the reader answers a listed verb, amend, as one" "0|amend" "$(WL
 expect_eq "WL-1 the wall reads 'bash hooks/session-poker.sh publish' as a verb only the orchestrator calls" "0|publish" \
   "$(WL 'bash hooks/session-poker.sh publish')"
 expect_eq "WL-2 …and reads a writer's own read, rulings, as none" "1|" "$(WL 'bash hooks/session-poker.sh rulings w-T1')"
+
+# ============================================================
+section "§STRAY: nothing a world of this suite started outlives the suite"
+# ============================================================
+# fails-when: a regression run a world's tick started detached (§MERGE's merge-held world) is still alive when the
+# suite ends, waiting on a gate whose world is about to go.
+# A stand-in named as a world's regression run, so the reading is proved to see one before it is trusted to see none.
+bash -c 'while :; do sleep 1; done' regression-run "$WORLD_ROOT/stand-in" &
+SR_PID=$!
+expect_eq "SR-0 precondition: the reading names a live process of a world's regression run" "yes" \
+  "$(prr_strays | /usr/bin/grep -qx "$SR_PID" && echo yes)"
+kill "$SR_PID" 2>/dev/null; wait "$SR_PID" 2>/dev/null
+prr_reap
+expect_eq "SR-1 at the suite's end no regression run started by a world of this suite is alive" "" \
+  "$(prr_strays | paste -sd' ' -)"
 
 finish
