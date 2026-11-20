@@ -18,7 +18,9 @@
 
 # shellcheck source=/dev/null
 declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
-TMPROOT="$(mktemp -d)"
+# Under TMPDIR by name: macOS's bare `mktemp -d` ignores TMPDIR, and a run given a temp folder of its own must find
+# every world this file builds inside it, and anything a world leaves behind there too.
+TMPROOT="$(sp_t="${TMPDIR:-/tmp}"; mktemp -d "${sp_t%/}/sp.XXXXXX")"
 
 # THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
 # library through the shared loader idiom, whose candidates (2) and (3) read the CLI's
