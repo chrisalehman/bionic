@@ -164,6 +164,20 @@ are `validate_dispatch_ledger`, 69.6 of 131 traced seconds, which reads the whol
 pass was in scope. A tick over an unchanged digest cost as much as a full one (343.5 s). The second timing is the largest
 of the card's three advances: the card is still about four gate passes.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at 358a2df9 by T49, 2026-11-20T03:52:59Z (`critic-adversarial.md`)
+- structure review, whole: flag at 358a2df9 by T49, 2026-11-20T03:53:02Z (`critic-structure.md`)
+- evidence review, whole: fail at 358a2df9 by T48, 2026-11-20T04:21:13Z (`auditor-evidence.md`)
+- adversarial review, piece: flag at 49064dd8 by T49-r2, 2026-11-20T08:43:49Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 49064dd8 by T49-r2, 2026-11-20T08:43:59Z (`critic-structure-2.md`)
+- evidence review, piece: flag at 49064dd8 by T48-r2, 2026-11-20T09:51:36Z (`auditor-evidence-2.md`)
+- adversarial review, piece: flag at 79b043e7 by T49-r3, 2026-11-20T10:39:01Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at 79b043e7 by T49-r3, 2026-11-20T10:39:06Z (`critic-structure-3.md`)
+- evidence review, piece: pass at 79b043e7 by T48-r3, 2026-11-20T15:35:58Z (`auditor-evidence-3.md`)
+
 ### Known limits
 
 Stated first because they are what this release leaves on purpose.
