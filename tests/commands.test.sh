@@ -171,6 +171,41 @@ expect_match "OP1: the version command's line reads" "bionic *" "$OP_VERSION"
 expect_eq "OP2: the first line the opening prints is the line the version command prints" \
   "$OP_VERSION" "$(printf '%s\n' "$OP_OPENING" | sed -n 1p)"
 
+# The version line comes first whenever the version command answers, whatever the opening is given: a model
+# that knows no triple passes no rigor, and a refusal still follows the line. Each shape runs once and its
+# stdout, stderr and status are read from files, so a refusal's words are never read off stdout.
+op_run() {  # <name> <args...>  -> $TMP/op-<name>.{out,err,rc}
+  local n="$1"; shift
+  ( cd "$REPO" && HOME="$TMP" BIONIC_CLAUDE_HOME="$HOME_THIS" CLAUDE_PLUGIN_ROOT="$PAYLOAD" \
+      bash "${PAYLOAD}/scripts/card.sh" opening "$@" >"$TMP/op-$n.out" 2>"$TMP/op-$n.err" </dev/null )
+  echo "$?" >"$TMP/op-$n.rc"
+}
+op_run none
+op_run word notarigor
+op_run two single x
+op_run four single a b c
+
+expect_eq "OP3a: the opening with no argument prints the version command's line first" \
+  "$OP_VERSION" "$(sed -n 1p "$TMP/op-none.out")"
+expect_eq "OP3b: …and exits 0" "0" "$(cat "$TMP/op-none.rc")"
+expect_eq "OP3c: …its second line says the triple is not yet declared" \
+  "Triple not yet declared." "$(sed -n 2p "$TMP/op-none.out")"
+expect_eq "OP3d: …and prints those two lines only, no engaged line and no rigor line" \
+  "2" "$(wc -l <"$TMP/op-none.out" | tr -d ' ')"
+expect_eq "OP4a: a word that is no rigor prints the version command's line first" \
+  "$OP_VERSION" "$(sed -n 1p "$TMP/op-word.out")"
+expect_eq "OP4b: …and still exits 1" "1" "$(cat "$TMP/op-word.rc")"
+expect_match "OP4c: …with its refusal on stderr" "*'notarigor' is no review rigor*" "$(cat "$TMP/op-word.err")"
+expect_eq "OP4d: …and nothing else on stdout" "1" "$(wc -l <"$TMP/op-word.out" | tr -d ' ')"
+expect_eq "OP5a: two arguments print the version command's line first" \
+  "$OP_VERSION" "$(sed -n 1p "$TMP/op-two.out")"
+expect_eq "OP5b: …and keep the usage error, exit 64" "64" "$(cat "$TMP/op-two.rc")"
+expect_match "OP5c: …on stderr" "*usage:*" "$(cat "$TMP/op-two.err")"
+expect_eq "OP6a: four arguments print the version command's line first" \
+  "$OP_VERSION" "$(sed -n 1p "$TMP/op-four.out")"
+expect_eq "OP6b: …and keep the usage error, exit 64" "64" "$(cat "$TMP/op-four.rc")"
+expect_match "OP6c: …on stderr" "*usage:*" "$(cat "$TMP/op-four.err")"
+
 section "§DECISION: /bionic:decision is the decision skill, typed with no argument (wave-33 AC-11.3)"
 
 # WHY A SKILL AND NOT A COMMAND FILE. A plugin skill named `decision` is itself /bionic:decision,
