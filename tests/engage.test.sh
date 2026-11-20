@@ -932,9 +932,10 @@ done
 
 # (d) A ROOT AND A FILE NAME HOLDING A SPACE are printed so the pasted line is one command. The
 # plugin tree is a throwaway copy under a folder with a space (hooks/ beside scripts/lib/, the
-# shape the loader finds first), so the hook's own folder carries the space.
+# shape the loader finds first), so the hook's own folder carries the space and is a link, as a
+# plugin loaded through links is: the command names the link's path, never the target's.
 E10_PLUG="$SANDBOX/plug in/bionic"
-mkdir -p "$E10_PLUG/hooks" "$E10_PLUG/scripts/lib"
+mkdir -p "$E10_PLUG/hooks.real" "$E10_PLUG/scripts/lib"; ln -s hooks.real "$E10_PLUG/hooks"
 cp "$REPO_ROOT"/payload/scripts/lib/*.sh "$E10_PLUG/scripts/lib/"
 cp "$HOOK" "$E10_PLUG/hooks/engage.sh"
 cp "$BIONIC_HOOKS_DIR/session-poker.sh" "$E10_PLUG/hooks/session-poker.sh"
