@@ -2012,8 +2012,7 @@ DSP_READINGS
         # A path is read from the project's root and stays under it: an absolute path or a `..` segment names no file there.
         DEBT_SBAD="$(printf '%s\n' "$DEBT_C" | tr ',' '\n' | while read -r _st; do
           _sp="${_st%:*}"; _sl="${_st##*:}"
-          case "/$_sp/" in //*|*/../*) printf '%s names no file under the project root %s' "$_sp" "$DEBT_ROOT"; break ;; esac
-          [ -f "$DEBT_ROOT/$_sp" ] || { printf '%s names no file under the project root %s' "$_sp" "$DEBT_ROOT"; break; }
+          [[ "/$_sp/" != //* && "/$_sp/" != */../* && -f "$DEBT_ROOT/$_sp" ]] || { printf '%s names no file under the project root %s' "$_sp" "$DEBT_ROOT"; break; }
           _sn="$(awk 'END { print NR }' "$DEBT_ROOT/$_sp")"
           [ "$_sl" -ge 1 ] && [ "$_sl" -le "$_sn" ] || { printf 'the site %s names line %s, and %s has %s' "$_st" "$_sl" "$_sp" "$_sn"; break; }
         done)"
