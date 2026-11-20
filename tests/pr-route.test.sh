@@ -1,8 +1,10 @@
 #!/bin/bash
 # tests/pr-route.test.sh — the pull request route: `session-poker.sh publish` against a bare remote and a stand-in host.
 #
-#   §CONSENT  with no release approval, and with one at an older head, publish exits non-zero before any network: the
-#             bare remote holds no working branch and the stand-in's log is empty.
+#   §CONSENT  with no release approval, with one at an older head, with one appended by hand to a sealed run, and with
+#             the seal held past the wait, publish exits non-zero before any network: the bare remote holds no working
+#             branch and the stand-in's log is empty; the hand-written one is refused in the commit gate's words and
+#             opens its ask.
 #   §OPEN     with the approval at the head, the remote holds the working head, the stand-in's log one create against
 #             the integration branch, the run's log the pull request; the local integration branch is unmoved; at that
 #             head again nothing is pushed or opened; at a new approved head the branch is pushed and the request kept.
@@ -81,6 +83,7 @@ prr_close() {
 }
 prr_landed() { /usr/bin/grep -c '|ev=published|row=T3|' "$L" 2>/dev/null | tr -d ' '; }
 prr_ask() { bash "$PRR_READER" "$P" asks | /usr/bin/grep "|key=$1|"; }
+prr_seal() { bash -c '. "$1/seal.sh" && seal_verify "$2"' _ "$PRR_LIB" "$P"; }   # -> the seal's line for the case's run
 
 # ============================================================
 section "§CONSENT: publish checks the release approval at the working head before any network"
@@ -104,6 +107,41 @@ prr_publish
 expect_eq "CN-4 with the approval at an older head publish exits 1, refused, naming both heads" "1|yes|yes" \
   "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q "${PRR_OLD:0:12}" && echo yes)|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q "$(prr_head | cut -c1-12)" && echo yes)"
 expect_eq "CN-5 …the bare remote holds main and no working branch, the stand-in's log is empty, the run's log holds no request" \
+  "main||0" "$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
+
+# A release approval appended by hand, at the working head, in the shape the approve verb writes, after the run was
+# sealed: the approval reads as the person's, and only the seal tells it from theirs.
+prr_case consent-forged
+seal_fixture "$P" "$L"
+CN_SEAL0="$(prr_seal)"
+CN_H="$(prr_head)"
+printf 'run/v1|ev=approval|key=release|head=%s|by=x|said=y|at=%s\n' "$CN_H" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$L"
+expect_eq "CN-6 precondition: the run was sealed clean, the hand line reads as the release approved at the working head, and the seal reads the log added to" \
+  "clean|$CN_H|changed what=log how=added" \
+  "$CN_SEAL0|$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approved_head "$2" release' _ "$PRR_LIB" "$P")|$(prr_seal)"
+prr_publish
+expect_eq "CN-7 with the approval written by hand publish exits 1, refused in the commit gate's words for the change" "1|yes" \
+  "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q "REFUSED — the run's log was added to outside the tool" && echo yes)"
+[ "$DOOR_RC" = 1 ] || printf '%s\n' "$DOOR_OUT" | tail -5 | sed 's/^/    | /'
+expect_eq "CN-8 …the bare remote holds main and no working branch, the stand-in's log is empty, the run's log holds no request" \
+  "main||0" "$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
+expect_eq "CN-9 …the change is the gate's ask seal:changed on the run's register, and the seal keeps it caught" \
+  "yes|changed what=log how=added" "$(prr_ask seal:changed >/dev/null && echo yes)|$(prr_seal)"
+
+# The seal held by another writer past the wait, over the person's own approval at the head: a run not compared is
+# not judged, so nothing leaves.
+prr_case consent-busy
+CN_H="$(prr_head)"; prr_approve "$CN_H"
+CN_LOCK="$(cd "$R" && cd "$(git rev-parse --git-common-dir)" && pwd -P)/bionic-seal/.reap"
+mkdir "$CN_LOCK" && printf '%s\n' "$$" > "$CN_LOCK/pid"
+expect_eq "CN-10 precondition: the person approved the working head, and the seal's lock is held by a live writer" "$CN_H|busy" \
+  "$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approved_head "$2" release' _ "$PRR_LIB" "$P")|$(prr_seal)"
+prr_publish
+rm -rf "$CN_LOCK"
+expect_eq "CN-11 with the seal held past the wait publish exits 2, refused in the commit gate's words" "2|yes" \
+  "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q "REFUSED — the run's seal could not be read" && echo yes)"
+[ "$DOOR_RC" = 2 ] || printf '%s\n' "$DOOR_OUT" | tail -5 | sed 's/^/    | /'
+expect_eq "CN-12 …the bare remote holds main and no working branch, the stand-in's log is empty, the run's log holds no request" \
   "main||0" "$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
 
 # ============================================================
