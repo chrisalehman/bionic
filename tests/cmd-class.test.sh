@@ -264,14 +264,14 @@ section "C4 — background-suite-guard inside the compound (AC-23, AC-24)"
 # now, and hooks.json registers hooks/bash-walls.sh alone — so a fixture that still drove
 # the guard in front would be driving a registration that does not exist.
 #
-# AND THE VERDICT IS COMPOSED (A-53, A-56.3). Every payload below is suite-class, so
-# farm-out-reminder answers it too, and it always did: on this thread its tier-1 deny has
-# fired on `bash tests/run.sh` since 1.3.2. What the old fixture measured was the guard
-# keeping the OTHER wall off the call. With one process the two answers meet, and the
-# fold composes them into ONE `permissionDecision: deny` carrying BOTH reasons — the deny
-# wire's exit status is 0, with the decision in the JSON. So each row below asserts the
-# arm it is about BY ITS OWN SENTENCE, present or absent, rather than by an exit code
-# that now belongs to the compound.
+# AND THE VERDICT IS COMPOSED (A-53, A-56.3). Every payload below is suite-class and, but
+# for the one main-thread cell, carries an agent's identity, `agent_id` AND `agent_type`,
+# as a dispatched agent's call does. farm-out-reminder leaves on a non-empty `agent_type`
+# (a payload without one is a main-thread payload by its rule, and it denies beside this
+# wall), so the background arm answers an agent's call alone, on the person's channel:
+# exit 2, the refusal on stderr and nothing on stdout. The rows assert the arm they are
+# about BY ITS OWN SENTENCE, present or absent, and the exit code only where the arm's
+# own channel is the claim.
 mk_bash_payload() {  # <cwd> <command> [agent_id] [run_in_background:true|false|omit]
   local bg="${4:-omit}"
   jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" --arg a "${3:-}" \
@@ -282,7 +282,7 @@ mk_bash_payload() {  # <cwd> <command> [agent_id] [run_in_background:true|false|
       tool_input:({command:$cmd}
                   + (if $bg == "omit" then {} else {run_in_background: ($bg == "true")} end)),
       tool_use_id:"toolu_01cmdclass"}
-     + (if $a == "" then {} else {agent_id:$a} end)'
+     + (if $a == "" then {} else {agent_id:$a, agent_type:"test-runner"} end)'
 }
 
 OUT=""; ERR=""; ST=0
@@ -352,28 +352,24 @@ run_compound() {  # <payload> — straight into hooks/bash-walls.sh, as hooks.js
   run_hook "$1" "$BG_GUARD"
 }
 
-# THE DETAIL KNOB IS NOT THIS SECTION'S ANY MORE. `BIONIC_WALL_VERBOSE=1` is the `exit2`
-# channel's rule — one line on the user stream, everything else behind the knob — and the
-# composed verdict here renders on the `deny` channel, whose reason field carries the
-# detail to the model by design (that is what farm-out-reminder's own deny has always
-# done). The knob's behaviour on a wall that blocks ALONE is still driven, in
-# tests/background-suite-guard.test.sh; here the detail is asserted where it actually
-# lands, in $OUT.
+# THE DETAIL KNOB IS NOT THIS SECTION'S. `BIONIC_WALL_VERBOSE=1` is the `exit2` channel's
+# rule — one line on the user stream, everything else behind the knob — and the background
+# arm blocking alone renders on that channel, so the refusal's detail is asserted where it
+# lands, in $ERR. The knob's own behaviour is driven in tests/background-suite-guard.test.sh.
 
 # --- AC-23: agent context + armed + run_in_background true + suite-class -> REFUSED
 run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
 expect_contains "AC-23 a backgrounded suite in an agent context of an armed session is REFUSED" \
-  '"permissionDecision":"deny"' "$OUT"
-expect_eq "AC-23 …on the deny wire, whose status is 0 with the decision in the JSON" 0 "$ST"
-expect_contains "AC-23 …and the refusal names the foreground tee form" "2>&1 | tee" "$OUT"
-expect_contains "AC-23 …quoting the command it refused" "bash tests/run.sh" "$OUT"
+  "suite-run refused — a backgrounded suite's result is never read" "$ERR"
+expect_eq "AC-23 …on the person's channel: exit 2 with nothing on stdout" "2|" "$ST|$OUT"
+expect_contains "AC-23 …and the refusal names the foreground tee form" "2>&1 | tee" "$ERR"
+expect_contains "AC-23 …quoting the command it refused" "bash tests/run.sh" "$ERR"
 
 # --- AC-24: the three cells that must stay silent ---
-# THE THREE CELLS THE BACKGROUND ARM MUST STAY OUT OF. Each is suite-class, so
-# farm-out-reminder answers it — and that is the tier-1 deny it has always given on this
-# thread, not the arm under test. The row is the ABSENCE of the background arm's own
-# sentence, which is the same claim the old `expect_empty` made when the guard kept the
-# other wall off the call.
+# THE THREE CELLS THE BACKGROUND ARM MUST STAY OUT OF. Each is suite-class; the row is the
+# ABSENCE of the background arm's own refusal, read as the call's exit status. The
+# main-thread cell is answered by farm-out-reminder's own deny, which is not the arm
+# under test.
 run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" omit)"
 expect_eq "AC-24 the same command with no run_in_background is ALLOWED by the background arm" 0 "$ST"
 
