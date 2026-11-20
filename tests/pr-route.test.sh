@@ -528,4 +528,24 @@ expect_eq "WL-1 the wall reads 'bash hooks/session-poker.sh publish' as a verb o
   "$(WL 'bash hooks/session-poker.sh publish')"
 expect_eq "WL-2 …and reads a writer's own read, rulings, as none" "1|" "$(WL 'bash hooks/session-poker.sh rulings w-T1')"
 
+# ============================================================
+section "§STRAY: nothing a world of this suite started outlives the suite"
+# ============================================================
+# fails-when: a regression run a world's tick started detached (§MERGE's merge-held world) is still alive when the
+# suite ends, waiting on a gate whose world is about to go.
+# prr_strays -> the pid of each live process whose command names a world of this suite and a regression run. The
+# pattern is handed through the environment and split in the program, so the reading's own awk never matches it.
+prr_strays() {
+  PRR_W="$WORLD_ROOT/" ps -axo pid=,command= \
+    | PRR_W="$WORLD_ROOT/" awk -v me="$$" 'index($0, ENVIRON["PRR_W"]) && index($0, "regression" "-run") && $1 != me { print $1 }'
+}
+# A stand-in named as a world's regression run, so the reading is proved to see one before it is trusted to see none.
+bash -c 'while :; do sleep 1; done' regression-run "$WORLD_ROOT/stand-in" &
+SR_PID=$!
+expect_eq "SR-0 precondition: the reading names a live process of a world's regression run" "yes" \
+  "$(prr_strays | /usr/bin/grep -qx "$SR_PID" && echo yes)"
+kill "$SR_PID" 2>/dev/null; wait "$SR_PID" 2>/dev/null
+expect_eq "SR-1 at the suite's end no regression run started by a world of this suite is alive" "" \
+  "$(prr_strays | paste -sd' ' -)"
+
 finish
