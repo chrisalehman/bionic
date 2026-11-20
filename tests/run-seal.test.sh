@@ -627,12 +627,15 @@ rd() {  # <question> -> a reader's passing record of it and its roster row, then
     launched_at=2026-10-01T00:00:00Z deliverable="${GL%/*}/w-$q.md")" "$q" >> "$G/.bionic/tmp/roster-$SID.state"
   poke proof-add review "record/wave-x/w-$q.md" --question "$q" --reader "w-$q"
 }
-judged() {  # <label> <step> <setup> <kept lines> <the fact's verbs> -> refused; with the lines kept, refused word for word; admitted once the verbs wrote the fact
+# The fact's verbs run in a world of their own: the approve verb reads the kept facts to refuse an approval it is
+# told the run already holds, so a world whose kept file holds the line would refuse the person's own approval.
+judged() {  # <label> <step> <setup> <kept lines> <the fact's verbs> -> refused; with the lines kept, refused word for word; the same run admitted once the verbs wrote the fact
   local k; rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world "$2"; up; eval "$3"; gate "git commit -m x"; gate "git commit -m x"
   E0="$GRC|$(cat "$SB/gate.err")"; expect_status "$1: the run as sealed: refused" 2 "${E0%%|*}"
   k="$(eval "$4")"; expect_contains "$1: the kept facts, given the lines by hand, serve them" "${k%%$'\n'*}" "$(keep "$k" "$GP")"
   gate "git commit -m x"; expect_eq "$1: with the lines kept, refused word for word as before" "$E0" "$GRC|$(cat "$SB/gate.err")"
-  eval "$5"; gate "git commit -m x"; expect_status "$1: the fact written by its verb: admitted" 0 "$GRC"
+  rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world "$2"; up; eval "$3"; eval "$5"; gate "git commit -m x"
+  expect_status "$1: the fact written by its verb: admitted" 0 "$GRC"
 }
 judged "Step 2's approval at 3" 3 : 'printf "run/v1|ev=approval|by=f|key=step2|said=approved|at=2026-10-04T00:05:00Z\n"' 'typed "$SID" yes; poke approve step2 yes'
 pah() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approved_head "$2" release' _ "$LIB" "$GP"; }

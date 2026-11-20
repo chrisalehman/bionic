@@ -1998,7 +1998,8 @@ presence_missing() {
 # holds the merge on in a person's few words.
 FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""; FACTS_SAYS="the run's proofs cannot be read"
 facts_judge() {
-  local out err ah
+  # The close judges on the run's log, never the kept facts the tick reads (lib/proof.sh `_PROOF_FRESH`).
+  local out err ah _PROOF_FRESH=1
   if ! declare -F facts_state >/dev/null 2>&1; then
     FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
     return 0

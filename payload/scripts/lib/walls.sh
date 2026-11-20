@@ -1208,12 +1208,13 @@ eg_step_reads_readings() {
 # eg_plan_reads_readings <plan> -> 0 when the step <plan>'s run stands at is such a step, as the reader answers it
 # (lib/proof.sh `proof_step_held`, loaded by the collector that asks); 1 when it is not, or when the run's place cannot be
 # read, which the gate's own read then refuses by name. FILE SCOPE, for the collector, which asks before the wall's body
-# has run. It decides what the gate is handed, so the place is folded from the log, never the held file; the collector
-# asks in the hook's own shell, and the gate's body is served that fold.
+# has run. It decides what the gate is handed, so the place and the facts are folded from the log, never the held file
+# or the kept one; the collector asks in the hook's own shell, and the deriver and the gate's body are served that fold.
 eg_plan_reads_readings() {
-  local _PROOF_PLACE_FRESH=1
+  local _PROOF_FRESH=1
   [ -f "${1:-}" ] && declare -F proof_step_held >/dev/null 2>&1 || return 1
   proof_step_held "$1" >/dev/null || return 1
+  _proof_facts "$1" >/dev/null 2>&1 || :
   case "$_PROOF_PLACE" in n=*) local n="${_PROOF_PLACE%%$'\n'*}"; eg_step_reads_readings "${n#n=}" ;; *) return 1 ;; esac
 }
 
@@ -2111,12 +2112,13 @@ DOCS_ROOT=$(docs_root "$BIONIC_ROOT")
 # because a plan that lies is a defect in every state and this hook's ordering contract
 # says so — and nothing else in the root is read to replace it.
 #
-# OPEN, AND AT WHICH STEP, ARE FOLDED FROM THE RUN'S LOG, which the seal has vouched for above this gate. The held place
-# and the kept facts under $TMPDIR stay for the hooks that decide nothing about a commit; a file anyone can rewrite there
-# never answers this gate (lib/proof.sh `_PROOF_PLACE_FRESH`). The bound plan is folded once, in this shell, and every
-# later ask of its place below is served that fold.
-_PROOF_PLACE_FRESH=1
-_eg_bound="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" && _run_place "$_eg_bound" >/dev/null 2>&1 || :
+# EVERY FACT THIS GATE READS IS FOLDED FROM THE RUN'S LOG, which the seal has vouched for above this gate: its place,
+# and its approvals, proofs, reviews and statuses. The held place and the kept facts under $TMPDIR stay for the hooks
+# that decide nothing about a commit; a file anyone can rewrite there never answers this gate (lib/proof.sh
+# `_PROOF_FRESH`). The bound plan is folded once, in this shell, and every later ask below is served that fold.
+_PROOF_FRESH=1
+_eg_bound="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" && _run_place "$_eg_bound" >/dev/null 2>&1 \
+  && _proof_facts "$_eg_bound" >/dev/null 2>&1 || :
 EG_RUN=$(session_run "$BIONIC_ROOT" "$BIONIC_SID")
 EG_VERDICT="${EG_RUN%% *}"
 EG_VPATH=""
