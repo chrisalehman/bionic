@@ -34,7 +34,8 @@
 #             log and binding untouched: the commit's refusal is the one before, word for word.
 #   §JUDGED   a fact written into the kept facts by hand, plan, log and seal untouched, moves no door: a commit
 #             owing a review at 6, Step 2's approval at 3 or the regression proof at 5 is refused word for word,
-#             publish reads no release approval, and `current 8 --check` and the close's facts refuse as before;
+#             publish reads no release approval, approve is not refused for an approval the kept file alone holds,
+#             and `current 8 --check` and the close's facts refuse as before;
 #             each fact written by its own verb or writer is admitted.
 #   §HONEST   one row each: close-out's archive, the bind verb, a new session id engaging, the step verb's
 #             move down, a record written into the record folder, step 8's wipe of the state folder, and an
@@ -601,7 +602,8 @@ gated "the honest line's bytes appended again by hand once paid" "$LA" 'hold; pu
 section "JUDGED"
 # fails-when: a door reads a fact from the kept facts, so a line written there by hand, plan, log and seal untouched,
 # admits a commit (a review at 6, Step 2's approval at 3, the regression proof at 5), hands publish its release
-# approval, or admits `current 8 --check` or the close's facts; or the fact written by its own verb is not admitted.
+# approval, refuses the person's approve, or admits `current 8 --check` or the close's facts; or the fact written by its
+# own verb is not admitted.
 . "$(dirname "$0")/lib/roster-row.sh"
 export LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib" SB
 keep() {  # <lines> <plan> -> a reader that decides nothing keeps the fold, the lines go into it by hand under its key, and it serves them
@@ -627,8 +629,7 @@ rd() {  # <question> -> a reader's passing record of it and its roster row, then
     launched_at=2026-10-01T00:00:00Z deliverable="${GL%/*}/w-$q.md")" "$q" >> "$G/.bionic/tmp/roster-$SID.state"
   poke proof-add review "record/wave-x/w-$q.md" --question "$q" --reader "w-$q"
 }
-# The fact's verbs run in a world of their own: the approve verb reads the kept facts to refuse an approval it is
-# told the run already holds, so a world whose kept file holds the line would refuse the person's own approval.
+# The fact's verbs run in a world of their own, whose kept file holds no line by hand, so the admission is the verb's alone.
 judged() {  # <label> <step> <setup> <kept lines> <the fact's verbs> -> refused; with the lines kept, refused word for word; the same run admitted once the verbs wrote the fact
   local k; rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world "$2"; up; eval "$3"; gate "git commit -m x"; gate "git commit -m x"
   E0="$GRC|$(cat "$SB/gate.err")"; expect_status "$1: the run as sealed: refused" 2 "${E0%%|*}"
@@ -642,6 +643,13 @@ pah() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approved_head "$2" re
 expect_contains "the release approval at the head, given the kept facts by hand, is served by them" by=intruder "$(keep "run/v1|ev=approval|key=release|by=intruder|head=$H|said=x|at=2026-10-04T02:00:00Z" "$GP")"
 expect_eq "publish's consent reads no kept approval; the approval its writer writes, it reads" "|$H" \
   "$(pah)|$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_approval_event "$2" release by=f "head=$3" said=approved' _ "$LIB" "$GP" "$H" >/dev/null; pah)"
+rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; world 3; up; A2="run/v1|ev=approval|by=f|key=step2|said=approved|at=2026-10-04T00:05:00Z"
+expect_contains "Step 2's approval, given the kept facts by hand, is served by them" "$A2" "$(keep "$A2" "$GP")"
+typed "$SID" yes; poke approve step2 yes
+expect_eq "the person's approve is not refused for an approval the kept facts alone hold: recorded, once" "0|1" "$PRC|$(/usr/bin/grep -c '|ev=approval|key=step2|' "$GL")"
+poke approve step2 yes
+expect_eq "an approval the log holds is refused as recorded once, the log still holding one" "1|1|1" \
+  "$PRC|$(/usr/bin/grep -c 'already holds the approval step2' "$SB/poke.out")|$(/usr/bin/grep -c '|ev=approval|key=step2|' "$GL")"
 AC1='printf "fixture evidence\n" > "${GL%/*}/generic-evidence.md"; printf "run/v1|ev=proof|ac=AC-1.1|evidence=record/wave-x/generic-evidence.md|at=2026-10-04T00:30:00Z\n" >> "$GL"; seal_fixture "$GP" "$GL"'
 judged "a passing review of each question at 6" 6 "$AC1" 'for q in evidence adversarial structure; do printf "run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-%s|evidence=record/wave-x/w-%s.md|at=2026-10-04T01:00:00Z\n" "$H" $q $q $q; done' \
   'for q in evidence adversarial structure; do rd $q; done'
