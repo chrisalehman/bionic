@@ -932,7 +932,7 @@ one-reader.test.sh | §READINGS | keep | payload/scripts/readings.sh: the sessio
 
 ## opening-line.test.sh
 
-opening-line.test.sh | §TYPED | keep | hooks/opening-line.sh: the line printed as plain stdout instead of `systemMessage`, so it goes to the model and the person sees nothing; stdout is no JSON object and the message reads empty (T1-T4) | none (searched 'systemMessage' and 'opening-line' in tests/)
+opening-line.test.sh | §TYPED | keep | hooks/opening-line.sh: the line printed as plain stdout instead of `systemMessage`, so it goes to the model and the person sees nothing; stdout is no JSON object and the message reads empty | none (searched 'systemMessage' and 'opening-line' in tests/)
 opening-line.test.sh | §MODEL | keep | hooks/opening-line.sh: the Skill path's name test dropped, so every skill the model calls shows the line ("Skill call naming bionic:sitrep … nothing on stdout") | none (searched 'tool_input.skill' with 'systemMessage' in tests/)
 opening-line.test.sh | §QUIET | keep | hooks/opening-line.sh: the version command's failure not read, so a failing read's output stands in front of the method ("the version command printing and failing … nothing on stdout") | none (searched 'version.sh' with 'systemMessage' in tests/)
 opening-line.test.sh | §AGREE | keep | hooks/opening-line.sh: the spellings it takes made to differ from hooks/engage.sh's (the leading slash not dropped), so a typed `/bionic:canonical-sdlc` engages and shows nothing | none (searched 'engage.sh' with 'opening-line' in tests/)
