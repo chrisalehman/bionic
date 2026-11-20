@@ -515,7 +515,7 @@ expect_eq "DEBT-S1 debt sites exits 0 naming the item's sites as they are and as
   "0|poker: debt sites — tree_count duplicate \"$DBT_NEW\", was \"lib/b.sh:2, lib/c.sh:5\"" "$RC|$OUT"
 expect_eq "DEBT-S1b …one event, the newest of the item: concept, kind, raising record and touches kept, the sites replaced" \
   "1|concept=tree_count|kind=duplicate|raised-by=record/wave-01-fixture/dbt-rec.md|sites=$DBT_NEW|touches=2" \
-  "$(( $(wc -l < "$DBT_LOG") - $(wc -l < "$TMPROOT/dbt-before") ))|$(/usr/bin/grep '|ev=debt|concept=tree_count|' "$DBT_LOG" | tail -1 | sed -e 's/^run\/v1|ev=debt|//' -e 's/|at=[^|]*$//')"
+  "$(( $(wc -l < "$DBT_LOG") - $(wc -l < "$TMPROOT/dbt-before") ))|$(/usr/bin/grep '|ev=debt|concept=tree_count|' "$DBT_LOG" | tail -1 | tr '|' '\n' | /usr/bin/grep -vE '^(run/v1|ev=debt|at=.*)$' | sort | paste -sd'|' -)"
 poke "$RSEV" debt list "$PSEV"
 expect_eq "DEBT-S1c …debt list prints the item once, at its new sites" \
   "tree_count duplicate \"$DBT_NEW\" touches=2 raised-by=record/wave-01-fixture/dbt-rec.md" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^tree_count ')"
