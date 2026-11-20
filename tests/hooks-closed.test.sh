@@ -34,6 +34,10 @@ permission-answer PermissionRequest Bash  exit 2 is not honoured on this event: 
 stop Stop -
 stop SubagentStop -
 EOF
+# THE PERSON'S REFUSAL KEEPS ITS CHANNEL: the broken install's words on the person's stream (its exit 2 is above).
+hc "$S/hooks/stop.sh" Stop - false >/dev/null
+expect_eq "stop on Stop, no library: the person's line, whole, on the person's stream" \
+  "bionic: load refused — stop cannot load the bionic library (run /bionic:doctor)" "$(cat "$S/err")"
 for ev in Stop SubagentStop; do
   for a in true null raw; do expect_eq "stop on $ev, no library, stop_hook_active $a: the turn ends" 0 "$(hc "$S/hooks/stop.sh" "$ev" - "$a")"; done
   expect_eq "stop on $ev, no library, no jq: the turn ends" 0 "$(hc "$S/hooks/stop.sh" "$ev" - false "$S/nojq")"
@@ -48,9 +52,9 @@ ha() {
 }
 STUB="$( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/loader.sh" && bionic_loader_pin | sed -n '4p')"
 expect_contains "the stub's line that sources the loader is read" '. "$_bl_l"; bionic_load' "$STUB"
-expect_eq "each of the thirteen hooks holds it" 13 "$(cd "$BIONIC_HOOKS_DIR" && /usr/bin/grep -lxF -- "$STUB" bash-walls.sh \
+expect_eq "each of the fourteen hooks holds it" 14 "$(cd "$BIONIC_HOOKS_DIR" && /usr/bin/grep -lxF -- "$STUB" bash-walls.sh \
   canonical-sdlc-governing-skill.sh dispatch-preflight.sh engage.sh execution-recorder.sh permission-answer.sh preflight-probe.sh \
-  session-poker.sh session-start.sh session-sweeper.sh stop-check.sh stop-orders.sh stop.sh | wc -l | tr -d ' ')"
+  session-poker.sh session-start.sh session-sweeper.sh stop-check.sh stop-orders.sh stop.sh watch.sh | wc -l | tr -d ' ')"
 
 section "OPEN"
 while IFS='|' read -r h p a; do
@@ -68,6 +72,7 @@ session-start|{"session_id":"hc","cwd":"$S","hook_event_name":"SessionStart","so
 session-sweeper||verdict
 stop-check||no-such-agent
 stop-orders||stopped no-such-agent
+watch|{"session_id":"hc","cwd":"$S","hook_event_name":"Stop","stop_hook_active":false}|
 EOF
 
 section "REPAIR"

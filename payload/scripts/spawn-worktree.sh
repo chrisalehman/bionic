@@ -59,23 +59,12 @@
 # taken later. Nor does it force: git's own refusal to discard uncommitted work
 # is a feature this script declines to override.
 #
-# LAND IS ONE ACT, TAKEN THE MOMENT IT IS CALLED (bionic 1.4.0, design ledger C1;
-# wording caught up with the behaviour at wave-20 T8b — landing IS automatic now,
-# `skills/canonical-sdlc/dispatch.md`'s own words, and this comment used to say the
-# opposite of what the code below it does). The MERGE DECISION — whether and when a
-# task's work is ready to land — is the dispatcher's to make, by choosing to call this
-# verb; nothing here decides that on its own. But once called, `land` performs the
-# whole act without asking again: merge the branch --no-ff into the session's bound
-# plan's `working-branch:`, in the checkout that holds that branch, remove the tree,
-# prune — refusing, and saying exactly why, when the session has no bound plan or the
-# plan names no branch, when the tree is dirty, when there is nothing to land, or when
-# a suite is running (D1). The target is the plan's and never the main checkout's
-# current branch (wave-20 T8, REQ-1): a human's feature branch in the main checkout is
-# not where a wave's work goes. There is no target argument, on purpose — a target the
-# operator names is exactly what REQ-1 takes away; a human who needs another one
-# merges by hand. The behaviour lives in payload/scripts/lib/worktree.sh, whose
-# `worktree_land_for_session` is also what `hooks/stop-orders.sh standdown`
-# calls; this verb is a call site.
+# A ROW LANDS BY `ready`, the writer's one verb, through the landing line (lib/line.sh
+# `line_ready`): its tree judged, its suites run on the candidate, the candidate published when
+# green. `land <tree> --by-hand --reason <why>` is a person's landing of a row through the same
+# line's publish (`line_land_by_hand`); a bare `land` refuses. The target is the session's bound
+# plan's `working-branch:`, never the main checkout's current branch, and there is no target
+# argument: a human who needs another one merges by hand. Both verbs are call sites.
 #
 # THE TREE IS RECORDED BY THE ACT THAT MAKES IT (wave-25 T1, REQ-2, D3). `create --for
 # <name>` appends one `workspace/v1` line naming the session, the agent, the tree, its branch
@@ -277,9 +266,7 @@ tree_parent_line() {  # <main-root> <parent-abs> <tree-abs> -> the parent's anch
 exclude_lines() {  # <main-root> <line or empty>... — appends each line the exclude file lacks
   local root="$1" line common exfile want="" said=""
   shift
-  common="$(cd "$root" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-  [ -n "$common" ] || common="$(cd "$root" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)"
-  case "$common" in /*) ;; ?*) common="${root}/${common}" ;; esac
+  common=""; [ -d "$root" ] && common="$(git_common_dir "$root")"
   exfile="${common}/info/exclude"
   for line in "$@"; do
     [ -n "$line" ] || continue
@@ -367,6 +354,10 @@ cmd_create() {
     # shellcheck source=/dev/null
     tree_row="$( . "$LIB_WORKTREE" 2>/dev/null && worktree_tree_row "$main_root" "$sid" "$name" )"
     [ $? -ne 2 ] || _wt_refuse "brief-unrendered row=${tree_row} name=${name} — render the brief first: session-poker.sh brief ${tree_row%%,*} ${name}, then create again"
+    # An integrate row lands as a record, by the tick, so a tree would hold its landing for good.
+    # shellcheck source=/dev/null
+    [ -z "$tree_row" ] || [ "$( . "$LIB_WORKTREE" 2>/dev/null && worktree_row_kind "$(_wt_workspace_plan "$main_root" "$sid")" "$tree_row" )" != integrate ] \
+      || _wt_refuse "integrate-row row=${tree_row} kind=integrate name=${name} — an integrate row takes no tree: dispatch ${name} with none (no spawn-worktree.sh create), and the tick lands its record"
   fi
 
   local base_sha
@@ -507,6 +498,8 @@ cmd_remove() {
 
   local root; root="$(worktree_root "$wt_abs")"
   [ -n "$root" ] || _wt_refuse repo-root-unresolvable
+  # The run the tree's own record names, read before the removal takes the record with the tree.
+  local plan; plan="$( . "$LIB_WORKTREE" 2>/dev/null && _wt_tree_record_plan "$wt_abs" )"
 
   # THE ALIAS (D7) — the one `create` planted, or a legacy link an older
   # bionic left — is untracked as far as git is concerned and would refuse to
@@ -520,6 +513,12 @@ cmd_remove() {
   if ! git -C "$root" worktree remove "$wt_abs" >/dev/null 2>&1; then
     _wt_refuse worktree-remove-refused
   fi
+
+  # The row's tree goes with it: a row still reading a removed tree is skipped by the tick's landing for good.
+  local sid; sid="$( . "${LIB_WORKTREE%/*}/session.sh" 2>/dev/null && session_id 2>/dev/null )" || sid=""
+  # shellcheck source=/dev/null
+  ( . "$LIB_WORKTREE" 2>/dev/null && worktree_tree_gone "$root" "$sid" "$wt_abs" "$plan" ) >/dev/null 2>&1 \
+    || _wt_refuse "tree-event-unwritten path=${wt_abs} branch=${wt_branch} kept=yes — the tree is removed, but its row's tree event could not be written to the run's log, so the row still reads the tree: run /bionic:doctor for why the log refused it"
 
   # kept=yes is not a status field, it is the contract: the merge decision
   # belongs to the orchestrator, so the branch outlives its tree.

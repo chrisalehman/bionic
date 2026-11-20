@@ -175,7 +175,7 @@ physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resol
 # say a Write or Edit is safe, so it refuses it; the refusal names /bionic:doctor, and the
 # Bash wall still admits the four repair commands. On PostToolUse the write has already
 # happened and exit 2 only shows the refusal to the model.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh plan-read.sh units.sh write-gate.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh plan-read.sh units.sh write-gate.sh seal.sh"
 # Find the library through lib/loader.sh beside this hook; payload/scripts/lib/loader.sh says how.
 _bl_dir="$(dirname "$0")"; _bl_l="$_bl_dir/../scripts/lib/loader.sh"; [ -r "$_bl_l" ] || _bl_l="$_bl_dir/../payload/scripts/lib/loader.sh"
 # shellcheck source=/dev/null
@@ -210,6 +210,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "canonical-sdlc-governi
 . "$BIONIC_LIB/units.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/write-gate.sh"
+# THE SEAL (lib/seal.sh): the after-arm below seals the plan a Write or Edit left on disk, so the
+# commit gate can tell a plan the tool wrote from one changed around it.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/seal.sh"
 
 # _gs_refuse <key> [<fact>...] — refuse in lib/write-gate.sh's words, for this artifact.
 _gs_refuse() { write_gate_refuse "$1" "$BASENAME" "$FILE_PATH" "${@:2}"; }
@@ -259,6 +263,24 @@ if [ "$EVENT" != "PostToolUse" ] && [ "$BIONIC_ENGAGED" = 1 ]; then
           write_gate_refuse memory "" "$FILE_PATH" "$TOOL" "$GS_MEM_PATH" "$GS_MEM_PROJECTS" ;;
       esac
       ;;
+  esac
+fi
+
+# ---------- THE SEAL'S HOME ----------
+#
+# The Write/Edit half of the shell wall's refusal (hooks/bash-walls.sh), in the same words, for every
+# session, engaged or not: `<common git dir>/bionic-seal/` holds what vouches for each run, and only the
+# tool's own writers change it, from library code no tool call carries. Screened on the home's name
+# before any fork; the path is folded, then resolved where it lies (lib/grant.sh), and compared with the
+# home git names for the session's root.
+if [ "$EVENT" != "PostToolUse" ]; then
+  case "$FILE_PATH" in
+    *"$SEAL_HOME_NAME"*)
+      # shellcheck source=/dev/null
+      if seal_binding_warm "$BIONIC_ROOT" 2>/dev/null && . "$BIONIC_LIB/grant.sh" 2>/dev/null \
+         && write_gate_in_seal_home "$_SB_COMMON/$SEAL_HOME_NAME" W "$(grant_resolve "$(fold_dots "$FILE_PATH")")"; then
+        write_gate_refuse seal-home "" "$FILE_PATH" "$TOOL" "$FILE_PATH" "$_SB_COMMON/$SEAL_HOME_NAME"
+      fi ;;
   esac
 fi
 
@@ -420,11 +442,70 @@ gs_bind_decline() { log_finding "bind" "$1"; }
 # check and keeps calling it, journal and all.
 gs_bind_decline_unengaged() { echo "canonical-sdlc [bind]: $1" >&2; }
 
+# gs_seal_plan — seal the plan this Write or Edit left on disk (lib/seal.sh `seal_write --vouch
+# plan`), and say so only when the seal could not be made.
+#
+# THE AFTER-ARM IS THE ONLY PLACE A PLAN IS SEALED. Claude Code runs it only for a tool call that
+# was admitted and succeeded, so a write the before-arm denied, a permission refused, or a tool that
+# failed seals nothing. Sealing at the before-arm's admit would record bytes that were never
+# written, and the next commit would read the honest plan as changed.
+#
+# THE FILE ON DISK IS WHAT IS SEALED, never the payload's body: the plan is what the commit gate
+# will compare, and an Edit's payload holds only a fragment of it.
+#
+# ONLY THE PLAN OF AN OPEN RUN (`run_open`), with its log where the reader joins it
+# (`reader_log`): a plan of a delivered run, or a page the walk admits no record for, has no seal
+# for the gate to read, and one made here would be a stray.
+#
+# THE CALLER LEAVES THROUGH `exit 0` WHATEVER THIS ANSWERS. A lock held past its wait leaves the
+# plan's digest owed beside the seal (lib/seal.sh), so the admitted write still reads as the tool's;
+# an unwritable home costs the run a changed reading at its next commit, the safe direction. The line
+# on stderr and in the audit file is how the reader learns the seal was not made. A plan in no
+# repository has no home and no gate to read one, and is not worth a line.
+gs_seal_plan() {
+  local log rc=0
+  [ -f "$GS_BIND_TARGET" ] || return 0
+  run_open "$GS_BIND_TARGET" 2>/dev/null || return 0
+  _run_reader 2>/dev/null && log="$(reader_log "$GS_BIND_TARGET" 2>/dev/null)" || return 0
+  SEAL_WAS=""
+  seal_write --vouch plan "$GS_BIND_TARGET" "$log" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0|1) ;;
+    *) [ "$SEAL_WAS" = nohome ] \
+         || log_finding "seal" "the plan is not sealed (seal_write exit $rc) — $GS_BIND_TARGET" ;;
+  esac
+  return 0
+}
+
+# gs_owe_plan — at the before-arm's admit of a plan write, tell the seal the digest of the exact bytes
+# the tool is about to write (lib/seal.sh `seal_owe_plan`).
+#
+# WHY BEFORE THE FILE CHANGES. The after-arm seals the plan only once the tool has written it, and any
+# check of the run between the two (a log line appended, a commit's gate) would otherwise read the
+# honest write as a plan changed around the tool, and the seal keeps a catch until the person rules.
+# Told first, such a check reads those bytes as owed.
+#
+# THE BYTES, NOT THE FILE. A Write's content as posted, an Edit's one replacement applied to the file
+# as it stands, each before any normalization: the note vouches for a plan identical to what this wall
+# judged and nothing else, so a hand change in the window, or the intent of a write that a later hook
+# refused or whose tool failed, leaves every other text caught. Only a plan a seal already stands for
+# is told: the first seal of a run is taken as found, and a worktree's copy of a plan has no seal.
+# Nothing here can refuse the write; a note not left costs the old window and no more.
+gs_owe_plan() {
+  local sum
+  case "$FILE_PATH" in */plans/*|*/incidents/*) ;; *) return 0 ;; esac
+  seal_stands "$FILE_PATH" 2>/dev/null || return 0
+  case "$TOOL:$EDIT_APPLIED" in
+    Write:*) sum="$(set -o pipefail; printf '%s' "$BIONIC_INPUT" | jq -j '.tool_input.content' 2>/dev/null | cksum)" || return 0 ;;
+    Edit:1)  sum="$(printf '%s' "$GS_EDIT_BODY" | cksum)" ;;
+    *)       return 0 ;;
+  esac
+  seal_owe_plan "$FILE_PATH" "$sum" 2>/dev/null || :
+}
+
 if [ "$EVENT" = "PostToolUse" ]; then
-  # An Edit never binds (AC-9). It changes a plan; it does not create a run — and it is the
-  # one exit that stays silent, because a plan under edit is the commonest Write-adjacent
-  # event in a live run and a line per keystroke is not a diagnostic.
-  [ "$TOOL" = "Write" ] || exit 0
+  # BOTH WRITE AND EDIT REACH THIS ARM (registered `Write|Edit` in hooks/hooks.json): either one
+  # changes a plan and is sealed below. Only a Write can create a run, so only a Write binds.
 
   # ---------- THE ROOT THIS ARM TRUSTS (REQ-2, D5) ----------
   #
@@ -458,6 +539,7 @@ if [ "$EVENT" = "PostToolUse" ]; then
   GS_BIND_TARGET=$(physicalize "$FILE_PATH")
   GS_BIND_DOCS=$(physicalize "$(docs_root "$GS_BIND_SAY_ROOT")")
   GS_BIND_DEFAULT=$(physicalize "$GS_BIND_SAY_ROOT/.bionic/docs")
+  GS_BIND_FOLDED=""
   if [ -n "$GS_BIND_ROOT" ]; then
     case "$GS_BIND_TARGET" in
       "$GS_BIND_DOCS"/*) ;;
@@ -491,11 +573,24 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # STDERR ONLY (R9, wave-18-fixit-185 T3b): the arming partition is the consent boundary,
   # so a session that never invoked the skill causes no durable write here — `log_finding`
   # is for engaged exits, `gs_bind_decline_unengaged` for this one.
+  # NOR IS IT SEALED: the seal is a durable write under the repository's git directory, and an
+  # unengaged session has given no consent to one.
   if [ -z "$GS_BIND_ROOT" ]; then
-    [ "$GS_BIND_SHAPE" = run ] \
+    [ "$TOOL" = Write ] && [ "$GS_BIND_SHAPE" = run ] \
       && gs_bind_decline_unengaged "engagement absent under $GS_BIND_SAY_ROOT"
     exit 0
   fi
+
+  # THE SEAL COMES BEFORE EVERY BIND DECLINE BELOW, because those decide whether a session moves
+  # and not whether the plan changed: a dispatched agent's write and a Write over an existing plan
+  # are admitted writes all the same. A FOLDED target is never sealed: the tool wrote the tree's
+  # copy, and the root's plan, which is what the fold names, was not the file it wrote.
+  [ "$GS_BIND_SHAPE" = run ] && [ -z "$GS_BIND_FOLDED" ] && gs_seal_plan
+
+  # An Edit never binds. It changes a plan; it does not create a run, and from here on
+  # it is silent: a plan under edit is the commonest event in a live run, and a line per
+  # keystroke is not a diagnostic.
+  [ "$TOOL" = "Write" ] || exit 0
 
   case "$GS_BIND_SHAPE" in
     docs)
@@ -770,10 +865,14 @@ _gs_edit_project() {  # <file> -> sets CONTENT and EDIT_APPLIED
     *)  EDIT_APPLIED=0 ;;
   esac
   CONTENT="${_gs_out%?}"
+  # The bytes the tool will write, kept before the normalization below drops trailing newlines:
+  # the seal is told their digest at the admit (gs_owe_plan).
+  GS_EDIT_BODY="$CONTENT"
 }
 
 CONTENT=""
 EDIT_APPLIED=0
+GS_EDIT_BODY=""
 if [ "$TOOL" = "Write" ]; then
   CONTENT=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.content // empty')
 else
@@ -1544,5 +1643,8 @@ if [ -n "$SDLC_VERSION" ]; then
   BIONIC_GITIGNORE="$(bionic_root "$PROJECT_ROOT_FROM_PATH")/.gitignore"
   [ -f "$BIONIC_GITIGNORE" ] || { printf '*\n' > "$BIONIC_GITIGNORE"; } 2>/dev/null
 fi
+
+# The write is admitted: its bytes are the tool's from before they reach the disk (gs_owe_plan).
+gs_owe_plan
 
 exit 0

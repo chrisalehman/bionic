@@ -55,9 +55,10 @@
 # `project_root` of the working directory; the session is `OWED_SID`, else `BIONIC_SID`, else
 # `CLAUDE_CODE_SESSION_ID`. The run is the plan `OWED_PLAN` names, else the session's bound plan
 # (lib/run.sh `session_plan`); a caller that acts for a plan under a session no marker binds to it
-# (the close-out's dry commits) names the plan. A plan names a run only while it is a file whose name
-# ends `.plan.md`: a scratch copy, an archived run or a plan that is gone names none, and its asks stay
-# with the session. No session, no root, or a store or its directory that is a symlink: every
+# (the close-out's dry commits) names the plan. A plan names a run only while its name ends `.plan.md`
+# and it is a file, or, once it is gone, while a seal still stands for it (lib/seal.sh): a changed run's
+# asks outlive its plan, in the log the seal names. A scratch copy, or an archived run, whose seal the
+# close lifted, names none, and its asks stay with the session. No session, no root, or a store or its directory that is a symlink: every
 # function returns 1 and writes nothing. Silent at source time; nothing here prints on stderr, so a
 # caller's output is the same with or without a store.
 #
@@ -86,17 +87,22 @@ if ! declare -F reader_ask_rounds >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/reader
 fi
 
 # owed_register <root> <plan> -> the run's log, `<docs>/record/<run>/run.log`, where its asks are kept, on stdout; rc 1
-# when <plan> names no run: not a file, or a name that does not end `.plan.md` (a scratch copy's does not).
+# when <plan> names no run: a name that does not end `.plan.md` (a scratch copy's does not), or a plan gone with no
+# seal standing. A gone plan's log is the one its seal names, since nothing else still leads to it.
 owed_register() {
   local root="${1:-}" plan="${2:-}" run docs
   [ -n "$root" ] && [ -n "$plan" ] || return 1
   case "$plan" in *.plan.md) ;; *) return 1 ;; esac
-  [ -f "$plan" ] || return 1
+  if [ ! -f "$plan" ]; then
+    { declare -F seal_verify >/dev/null 2>&1 || . "$_OWED_LIB_DIR/seal.sh"; } >/dev/null 2>&1 || return 1
+    seal_verify "$plan" >/dev/null 2>&1
+    [ -n "$SEAL_LOG" ] && printf '%s\n' "$SEAL_LOG"; return
+  fi
   run="$(reader_slug "$plan")" || return 1
   case "$run" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
   declare -F docs_root >/dev/null 2>&1 || return 1
   docs="$(docs_root "$root" 2>/dev/null)" && [ -n "$docs" ] || return 1
-  printf '%s/record/%s/run.log\n' "$docs" "$run"
+  reader_log_in "$docs/record/$run"
 }
 
 # owed_file -> the store's absolute path on stdout: the run's log, else the session's own file; rc 1
@@ -177,9 +183,9 @@ _owed_dir_ok() {
 }
 
 # _owed_lines -> THE ONE LIST (above) of the store _owed_at set: a run's rounds from its plan, by the plan it holds, a
-# session's from its file. rc 1 when it cannot be read. A home that is a link is not read.
+# session's, or a gone plan's, from the file. rc 1 when it cannot be read. A home that is a link is not read.
 _owed_lines() {
-  if [ -n "$_OWED_P" ]; then [ ! -L "$_OWED_F" ] && reader_ask_rounds "$_OWED_P"; return; fi
+  if [ -f "$_OWED_P" ]; then [ ! -L "$_OWED_F" ] && reader_ask_rounds "$_OWED_P"; return; fi
   [ -f "$_OWED_F" ] && [ ! -L "$_OWED_F" ] || return 0
   reader_ask_rounds - < "$_OWED_F"
 }

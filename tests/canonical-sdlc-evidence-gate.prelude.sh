@@ -126,7 +126,9 @@ eg_readings() {  # <plan content> -> the content, with the readings a Step-6+ ru
 # invoked. The unengaged world is its own section at the bottom of the file, driven on
 # the same plans and the same commands, and it is where the marker's absence is proved.
 EG_SID="4c3b2a19-8e7d-4f65-9a0b-1c2d3e4f5061"
-engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$EG_SID.state"; }
+# ENGAGED AND UNBOUND, whatever was bound before: the session's binding record beside the seal
+# is dropped (tests/lib/bound-marker.sh), or it would be believed over the empty marker.
+engage()   { mkdir -p "$1/.bionic/tmp" && { ! declare -F bound_marker_unrecord >/dev/null || bound_marker_unrecord "$1" "$EG_SID"; } && : > "$1/.bionic/tmp/engaged-$EG_SID.state"; }
 unengage() { rm -f "$1/.bionic/tmp/engaged-$EG_SID.state"; }
 
 # THE ENGAGED SESSION IS BOUND TO THE RUN IT IS IN (wave-23-fixit-1810, REQ-1, D1; spec Δ1).
@@ -155,6 +157,7 @@ eg_autobind() {  # <dir> — a project dir, or a linked worktree of one
     printf '%s\n' "$EG_AUTOBOUND" | grep -qxF "$1" || EG_AUTOBOUND="${EG_AUTOBOUND}
 $1"
   else
+    { ! declare -F bound_marker_unrecord >/dev/null || bound_marker_unrecord "$1" "$EG_SID"; }
     : > "$m"
   fi
 }
@@ -337,7 +340,8 @@ EG_PF_DIR="$(mktemp -d)"; cleanup_dirs+=("$EG_PF_DIR")
 #   fixture's events and then each line given; prints its path. The gate reads the run from the log, never the page.
 eg_page() {
   local p; p="$(plan_fixture --current "$2" "$1/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)" || return 1
-  shift 2; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$p")"; printf '%s' "$p"
+  shift 2; [ "$#" -eq 0 ] || { printf '%s\n' "$@" >> "$(plan_fixture_log "$p")" && seal_fixture "$p" "$(plan_fixture_log "$p")"; }
+  printf '%s' "$p"
 }
 # One row of the one table, in plan_fixture's thirteen-cell order: <id> <agent> <status> [<worktree>].
 eg_pf_row() {

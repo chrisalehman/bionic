@@ -908,21 +908,21 @@ expect_eq "ASK.11 …the shim took no number, and the run asked once for itself 
 section "§SCRUB a suite never sees the runner's store (wave-30 T9; REQ-4 AC-4.2; D8)"
 # ============================================================
 #
-# THE CLAIM. A runner and its workers keep BIONIC_GATE_DIR for their own ask and end, but the SUITE
-# PROCESS a worker starts loses it: a suite that reads the gate through the inherited variable read
-# the run's store (the doctor-reads checks did), and a suite that wants a store makes its own fixture.
+# THE CLAIM. A runner and its workers keep BIONIC_GATE_DIR for their own ask and end, but the SUITE PROCESS a worker
+# starts loses it, with CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT: through the first a suite read the run's store, through
+# the others a fixture's hooks judged the project of the hook that started the run. A suite that wants one sets it itself.
 # Driven on a scratch tree carrying the shipped runner: a probe suite prints what it sees of the
-# variable, in the parallel batch and under --serial, while the gate store the run named still
+# three names, in the parallel batch and under --serial, while the gate store the run named still
 # holds the probe's own request (the ask is not scrubbed). Its second half, the timing marker
 # (AC-4.1: the real roster's dry run listed the §EG-DERIVE suite as solo), RETIRED BY WAVE-35 T2
 # (D11): nothing is solo, and tests/runner-width.test.sh §NO-VOID proves the marker ignored.
 TS="$TMPROOT/scrub"; RS_GATE="$TMPROOT/scrub-gate"
 rr_tree "$TS"
-rs_probe() {  # <name> — a green suite that records the gate variable it sees
+rs_probe() {  # <name> — a green suite that records what it sees of the three names
   { printf '#!/bin/bash\n'
     printf 'set -uo pipefail\n'
     printf '. "$(dirname "$0")/lib/assert.sh"\n'
-    printf 'printf "%%s\\n" "BIONIC_GATE_DIR=${BIONIC_GATE_DIR:-unset}" > "$RR_MARKS/%s.seen"\n' "$1"
+    printf 'printf "%%s\\n" "BIONIC_GATE_DIR=${BIONIC_GATE_DIR:-unset} CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-unset} CLAUDE_PLUGIN_ROOT=${CLAUDE_PLUGIN_ROOT:-unset}" > "$RR_MARKS/%s.seen"\n' "$1"
     printf 'section "%s"\n' "$1"
     printf 'expect_eq "%s ran" "x" "x"\n' "$1"
     printf 'finish\n'
@@ -933,7 +933,7 @@ rs_drive() {  # [mode] — the scratch runner started under a store of this sect
   RR_OUT="$( cd "$TS" && RR_MARKS="$RR_MARKS" BIONIC_PRESSURE_RING="$TMPROOT/scrub-ring" \
     BIONIC_NOW_EPOCH="$RR_NOW" BIONIC_TEST_JOBS_CEILING=2 BIONIC_PROBE_FREE_PCT=44 \
     BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
-    env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$RS_GATE" bash tests/run.sh ${1:+"$1"} 2>&1 )"
+    env "${RR_GATE_ENV[@]}" BIONIC_GATE_DIR="$RS_GATE" CLAUDE_PROJECT_DIR="$TS" CLAUDE_PLUGIN_ROOT="$TS/payload" bash tests/run.sh ${1:+"$1"} 2>&1 )"
   RR_RC=$?
 }
 rs_keys() {  # the keys of the requests in the store, each with its code, sorted
@@ -946,8 +946,8 @@ rs_keys() {  # the keys of the requests in the store, each with its code, sorted
 rm -rf "$RS_GATE"; rm -f "$RR_MARKS"/*.seen
 rs_drive
 expect_eq "SCRUB.1 the run is green" "0" "$RR_RC"
-expect_eq "SCRUB.2 the probe in the batch saw no BIONIC_GATE_DIR, though the run was started under one" \
-  "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
+expect_eq "SCRUB.2 the probe in the batch saw none of the three names, though the run was started under all three" \
+  "BIONIC_GATE_DIR=unset CLAUDE_PROJECT_DIR=unset CLAUDE_PLUGIN_ROOT=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
 # SCRUB.4 REWRITTEN BY WAVE-32 T2 (D1, AC-1.1; A-orch-8): a whole run's one ask is the runner's,
 # so the store the run named holds that request; the behaviour change rewrites the pin.
 expect_eq "SCRUB.4 …while the run's own ask landed in the run's store, ended with its code (the ask is not scrubbed)" \
@@ -955,13 +955,13 @@ expect_eq "SCRUB.4 …while the run's own ask landed in the run's store, ended w
 rm -rf "$RS_GATE"; rm -f "$RR_MARKS"/*.seen
 rs_drive --serial
 expect_eq "SCRUB.5 --serial is green" "0" "$RR_RC"
-expect_eq "SCRUB.6 …and its probe saw no BIONIC_GATE_DIR either" "BIONIC_GATE_DIR=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
+expect_eq "SCRUB.6 …and its probe saw none of them either" "BIONIC_GATE_DIR=unset CLAUDE_PROJECT_DIR=unset CLAUDE_PLUGIN_ROOT=unset" "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
 expect_eq "SCRUB.7 …with the ask in the run's store as well" \
   "probe-a.test.sh 0" "$(rs_keys)"
-# PAIRED CONTROL: the probe does print the variable when it is set (the readback is real output, not silence).
+# PAIRED CONTROL: the probe does print each name when it is set (the readback is real output, not silence).
 rm -f "$RR_MARKS/probe-a.seen"
-BIONIC_GATE_DIR=control-store RR_MARKS="$RR_MARKS" bash "$TS/tests/probe-a.test.sh" >/dev/null 2>&1
-expect_eq "SCRUB.8 the probe run by hand under a store reads it back" "BIONIC_GATE_DIR=control-store" \
+BIONIC_GATE_DIR=control-store CLAUDE_PROJECT_DIR=control-proj CLAUDE_PLUGIN_ROOT=control-plug RR_MARKS="$RR_MARKS" bash "$TS/tests/probe-a.test.sh" >/dev/null 2>&1
+expect_eq "SCRUB.8 the probe run by hand under the three reads each back" "BIONIC_GATE_DIR=control-store CLAUDE_PROJECT_DIR=control-proj CLAUDE_PLUGIN_ROOT=control-plug" \
   "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
 
 # ============================================================

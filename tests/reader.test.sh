@@ -38,12 +38,17 @@
 #   §SESSION    an order, a handoff and a session are the log's, each the last of its kind; a session counts once,
 #               by its first act.
 #   §HELD       the run's held place, its order and its sessions answer as the whole fold over every plan this suite built.
+#   §IDENTITY   the reader declares each event type's identifying fields once; a proof's is one line naming its kind,
+#               head, question, criterion and scope.
+#   §PR         the run's pull request is the newest published fact of part pr; a reviews part at the same commit is a
+#               fact of its own, and a run with no request answers nothing.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
 set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/seal-fixture.sh"
 READER="${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh"
 D="$(mktemp -d)/docs"; H="$(printf 'a%.0s' {1..40})"; G="$(printf 'b%.0s' {1..40})"
 plan() {  # <wave> -> a plan whose run log is fed from stdin
@@ -208,6 +213,12 @@ run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=green|at=${t}:38Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=discarded|at=${t}:39Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=u.test.sh|result=discarded|at=${t}:40Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=u.test.sh|result=red|at=${t}:41Z
+run/v1|ev=tree|row=T4|path=/t4|branch=wt/T4|base=c4|at=${t}:42Z
+run/v1|ev=tree|row=T4|path=|branch=wt/T4|base=|why=removed|at=${t}:43Z
+run/v1|ev=tree|row=T2|path=/t2|branch=wt/T2|base=c2|at=${t}:44Z
+run/v1|ev=tree|row=T2|path=|branch=wt/T2|base=|why=removed|at=${t}:45Z
+run/v1|ev=tree|row=T2|path=/t2|branch=wt/T2|base=c2|at=${t}:46Z
+run/v1|ev=tree|row=T3|path=/t3u|branch=wt/T3|base=c0
 EOF
 printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' >> "$D/plans/epic-x/rest.plan.md"
 for r in T1 T2 T3 T4; do printf '| %s | 4 | build | t | — | 30 | R | f | out/%s.md |\n' $r $r >> "$D/plans/epic-x/rest.plan.md"; done
@@ -215,7 +226,7 @@ REST=("holds|holds|rc=0 step 4,T9" "reviews|question|rc=0 adversarial,structure,
   "ledger|verb|rc=0 put,ruled,put" "ledger D1|verb|rc=0 put,ruled" "findings|to|rc=0 carried,fix" "findings fix|ref|rc=0 F1"
   "debts|concept/id/ref|rc=0 F2,c1,d1" "stop|-|rc=0 room=3,session=s1,state=free,at=${t}:21Z,order=given,asks=3,ready="
   "order|-|rc=0 order=given,said=away,at=${t}:24Z" "hands|kind|rc=0 amend,hand" "handoff|-|rc=0 path=/h1,at=${t}:36Z"
-  "status T3|-|rc=0 state=returned,files=f,name=w3,suites=b.test.sh,tree=/t3,branch=wt/T3,base=c0"
+  "status T3|-|rc=0 state=returned,files=f,name=w3,suites=b.test.sh,tree=/t3u,branch=wt/T3,base=c0" "status T2|-|rc=0 state=landed,tree=/t2,branch=wt/T2,base=c2,commit=c2"
   "status T4|-|rc=0 state=pending" "status T1|-|rc=0 state=landed,commit=c1" "ready T4 T1|-|rc=0 " "ready T4 T3|-|rc=1 "
   "ready T3|-|rc=1 " "ready T1|-|rc=1 " "verdicts|result|rc=0 green,red" "verdicts T9|result|rc=0 ")
 pick() {  # <field[/field…]|-> -> each line's first named field, or the whole line, joined by commas
@@ -228,6 +239,9 @@ got="$(rest)"; for r in "${REST[@]}"; do expect_eq "${r%%|*} answers its fold" "
 awk -F'|' -v OFS='|' '{ f = $2; for (i = 2; i < NF; i++) $i = $(i + 1); $NF = f; print }' "$D/record/rest/run.log" | plan restmoved
 cp "$D/plans/epic-x/rest.plan.md" "$D/plans/epic-x/restmoved.plan.md"
 expect_eq "the twelve answer the same with each line's fields moved" "$got" "$(W=restmoved; rest)"
+# A removed tree (T4) holds no tree for the scheduler, one made again (T2) holds it, and an untimed line (T3) replaces none.
+expect_eq "the scheduler's trees: the latest timed tree line of each row" "T2=/t2 T3=/t3 T4=" "$( ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh"
+  _units_live "$D/plans/epic-x/rest.plan.md" ) | awk -F'\t' '$1 ~ /^T[234]$/ { print $1 "=" $4 }' | sort | paste -sd' ' -)"
 ask status 2>/dev/null; expect_status "status with no row exits 2" 2 "$?"
 ask ready 2>/dev/null; expect_status "ready with no row exits 2" 2 "$?"
 
@@ -604,6 +618,9 @@ LT="$(git -C "$LR2" worktree list --porcelain | sed -n 's/^worktree //p' | /usr/
 LP="$LR2/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${LP%/*}"
 printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/20-demo\n---\n# plan\n' > "$LP"
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LP" > "$LR2/.bionic/tmp/engaged-$SID.state"
+# The run is sealed where it is planted, so the landing's line is the log's only hand event: an unsealed open run
+# would be sealed as found at that first append, with a hand line of its own.
+seal_fixture "$LP"
 ( cd "$LR2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SPW" land "$LT" --by-hand --reason 'no Lands-on could be read' ) >/dev/null 2>&1; LH_RC=$?
 expect_eq "a by-hand landing is one published landing of the hand kind with its reason, answered by hands (exit)" \
   "0|hand|no Lands-on could be read" "$LH_RC|$(bash "$READER" "$LP" hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(kind|why)=/) printf "|%s", substr($i, index($i, "=") + 1) }' | cut -c2-)"
@@ -654,5 +671,35 @@ hs_plant; HS_PL="$(/usr/bin/grep -x 'n=7' "$(hs_file)" 2>/dev/null)"
 printf 'run/v1|ev=stop|session=s1|turn=t2|at=2026-10-04T00:04:00Z\n' >> "$HL"
 expect_eq "HS3 a line in no stop event's shape drops the held place too" "n=7|5" "$HS_PL|$(hs_ask)"
 rm -rf "$HS" "$HT"
+
+section "IDENTITY"
+# fails-when: the reader declares a type's identity on two lines (the later silently overriding the earlier, so a reader
+# of the first line is misled), or the proof's one declaration lacks a field the fold needs to tell two proofs apart.
+RL="${READER%/*}/lib/reader.sh"
+id_decl() { awk '$1 == "reader_identity" { print $2 }' "$1"; }
+id_dups() { id_decl "$1" | sort | uniq -d | paste -sd' ' -; }
+expect_match "ID0 meta: the extractor reads the reader's declarations, proof among them" "* proof *" " $(id_decl "$RL" | paste -sd' ' -) "
+expect_eq "ID1 no type's identity is declared twice" "" "$(id_dups "$RL")"
+expect_eq "ID2 a proof is declared once, naming kind, head, question, criterion and scope" "1 reader_identity proof kind head question ac scope" \
+  "$(id_decl "$RL" | grep -c '^proof$') $(grep '^reader_identity proof ' "$RL")"
+ID_PLANT="$(mktemp -d)/reader.sh"; { cat "$RL"; echo 'reader_identity proof kind head question'; } > "$ID_PLANT"
+expect_eq "ID3 a second declaration planted for proof is found" "proof" "$(id_dups "$ID_PLANT")"
+
+section "PR"
+# fails-when: `pr` answers a request the log does not hold, answers an older one over the newest, prints its part or
+# event type, or a request at the reviews part's commit replaces that part's fact (a published fact named by row and
+# commit alone).
+W=pr; plan pr <<EOF
+run/v1|ev=published|row=T1|commit=$G|kind=queue|at=2026-11-03T00:00:01Z
+run/v1|ev=published|part=reviews|commit=$H|branch=wave/x|by=T4|at=2026-11-03T00:00:02Z
+EOF
+PR_NONE="$(ask pr)"; PR_RC=$?
+expect_eq "PR-1 a run with no request: pr prints nothing and exits 1" "1|" "$PR_RC|$PR_NONE"
+printf 'run/v1|ev=published|part=pr|url=https://example.invalid/pull/1|branch=wave/x|commit=%s|base=main|by=publish|at=2026-11-03T00:00:03Z\n' "$G" >> "$D/record/pr/run.log"
+printf 'run/v1|ev=published|part=pr|url=https://example.invalid/pull/1|branch=wave/x|commit=%s|base=main|by=publish|at=2026-11-03T00:00:04Z\n' "$H" >> "$D/record/pr/run.log"
+expect_eq "PR-2 the newest request answers, its fields by name, no ev= or part=" \
+  "base=main branch=wave/x by=publish commit=$H url=https://example.invalid/pull/1 at=2026-11-03T00:00:04Z" "$(ask pr | paste -sd' ' -)"
+expect_eq "PR-3 the reviews part at that commit still stands beside it, and the row's landing" "reviews pr pr|T1" \
+  "$(ask landed | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^part=/) printf "%s%s", (n++ ? " " : ""), substr($i, 6) }')|$(ask landed T1 | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^row=/) print substr($i, 5) }')"
 
 finish

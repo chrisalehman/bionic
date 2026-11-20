@@ -9,7 +9,8 @@
 #   §CLOSE    the replay reaches delivered: through the verbs alone, close-out counting no hand-hold
 #   §WINDOW   after the close, the hand-holds window ends at the delivery's instant, and a decline after the card counts
 #   §SR       a second review naming the fix row's site is written fixed by its landing, no finding-move after it
-#   §PR       the integrate row's pull request goes through a stand-in gh, the only gh on its PATH
+#   §PR       the integrate row's pull request is the publish verb's, through a stand-in gh and a bare remote; no
+#             command of the run is a typed push or create
 #   §ENTRY    the release entry names the review the run failed and fixed; the record names each commit after the fix
 #   §REAL     the sandbox's own real check ran, every hand write is of a kind a run writes, and the log is UTF-8
 #   §LIVE     the plan's live criterion names the close row in its Task column, passes every advance past the Verify
@@ -83,9 +84,10 @@ cr_verbs() { /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z0-9-]*|`[a-z][a-z0-9-
 cr_skill_text() { cat "$BIONIC_SCRIPTS_DIR"/skills/*/SKILL.md "$BIONIC_SCRIPTS_DIR"/skills/canonical-sdlc/*.md "$BIONIC_SCRIPTS_DIR"/skills/canonical-sdlc/steps/*.md "$BIONIC_SCRIPTS_DIR"/agents/*.md 2>/dev/null; }
 cr_skill_verbs() { cr_skill_text | cr_verbs; }
 # cr_hook_verbs -> the poker verbs a hook or script a run executes calls: a call quotes the poker's path, `bash
-# "…session-poker.sh" <verb>` or `bash "$poker" <verb>`, where a sentence it prints names the path bare
-cr_hook_verbs() { /usr/bin/grep -rhoE 'bash "[^"]*(session-poker\.sh|\$\{?poker\}?)" +[a-z][a-z0-9-]*' "$BIONIC_SCRIPTS_DIR/hooks" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null \
-  | sed -E 's/^bash "[^"]*" +/session-poker.sh /' | cr_verbs; }
+# "…session-poker.sh" <verb>` or `bash "$poker" <verb>`, or goes through the card's own door, `_card_poke <verb>`,
+# where a sentence it prints names the path bare
+cr_hook_verbs() { /usr/bin/grep -rhoE '(bash "[^"]*(session-poker\.sh|\$\{?poker\}?)"|_card_poke) +[a-z][a-z0-9-]*' "$BIONIC_SCRIPTS_DIR/hooks" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null \
+  | sed -E 's/^(bash "[^"]*"|_card_poke) +/session-poker.sh /' | cr_verbs; }
 # cr_called -> each poker verb a command of the run calls
 cr_called() { cr_names < "$CR_LOG" | cut -d'|' -f2 | sed -n 's/^session-poker\.sh \([a-z][a-z0-9-]*\).*/\1/p' | LC_ALL=C sort -u; }
 # cr_marks <tag> -> the text of each `# <tag>: ` line in the replay's part
@@ -93,7 +95,7 @@ cr_marks() { cr_part | awk -v t="# ${1}: " 'index($0, t) == 1 { print substr($0,
 # The verbs the replay runs (rehearsal.sh `_rh_replay`), each named `<tool> <verb>`: the tool the command runs and
 # the first bare word of its arguments. A log missing any of them is a replay that did not run that verb, whatever its
 # length. A refusal's follow is not listed: the replay meets one only when a verb refuses.
-CR_VERBS='stop-orders.sh stopped|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|close-out.sh run'
+CR_VERBS='stop-orders.sh stopped|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|session-poker.sh publish|gh pr merge|close-out.sh run'
 # The kinds of hand write the replay makes: the fix writer's launch, its code and report, the user's typed reply.
 CR_HANDS='launch code record typed'
 # cr_names -> for each `$ ` command line on stdin, `<rc>|<tool> <words>`: the tool is the first word naming a script
@@ -226,11 +228,11 @@ if [ "$CR_RC" != 0 ]; then
   sed 's/^/    | /' "$WORLD_ROOT/delivered.err" 2>/dev/null | cut -c1-400 | tail -12
 fi
 if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
-  CL_MAIN="$(git -C "$CR_ROOT" rev-parse --verify -q refs/heads/main)"
-  # Main holds the reviews part's commit, rendered before the pull request on the head the check held and the user
-  # approved; that head is the commit's one parent.
+  # Main is the request's merge commit, and the head it merged is the reviews part's commit, rendered before the pull
+  # request on the head the check held and the user approved; that head is the part commit's one parent.
+  CL_MAIN="$(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/main^2" 2>/dev/null)"
   CL_PART="$(cr_field "$(cr_part_event)" commit)"
-  CL_REL="$(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/main^1" 2>/dev/null)"
+  CL_REL="$(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/main^2^1" 2>/dev/null)"
   expect_eq "CL-2 the fix row born of the finding lands through ready, published by the line (kind=queue)" "0|queue" \
     "$(cr_rc 'the fix row says ready' | tail -1)|$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" { for (i = 4; i <= NF; i++) if ($i ~ /^kind=/) k = substr($i, 6) } END { print k }' <(cr_lines))"
   CL_W="$(cr_ask waive:structure)"
@@ -242,7 +244,7 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$(/usr/bin/grep -q '^run/v1|ev=ask|key=waive:structure|' "$CR_REC/run.log" 2>/dev/null && echo yes)|$(cr_ev_files)"
   expect_eq "CL-4 the release lands with the fix: its published event carries the line's release numbers commit" "yes" \
     "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" && /\|numbers=[0-9a-f]{40}\|/ { f = 1 } END { if (f) print "yes" }' <(cr_lines))"
-  expect_eq "CL-4b …and main holds the reviews part's commit, on the head the release check held (a kind=check line there, not result=fail)" "yes|yes|no" \
+  expect_eq "CL-4b …and main merged the reviews part's commit, on the head the release check held (a kind=check line there, not result=fail)" "yes|yes|no" \
     "$([ -n "$CL_PART" ] && [ "$CL_PART" = "$CL_MAIN" ] && echo yes)|$([ -n "$CL_REL" ] && cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -q "^proved: kind=check head=$CL_REL " && echo yes)|$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep "^proved: kind=check head=${CL_REL:-none} " | tail -1 | /usr/bin/grep -q 'result=fail' && echo yes || echo no)"
   expect_eq "CL-5 the user's reply approves that head: reply exit 0, and the run's approvals of release and merge-unproved (the fix landed past the whole run), asked of the proof library, name it" "0|$CL_REL|$CL_REL" \
     "$(cr_rc "the user's reply to the card at the fix's head" | tail -1)|$(for k in release merge-unproved; do cr_back cr_approved_head "$k"; done | paste -sd'|' -)"
@@ -308,21 +310,32 @@ if cr_reached "SR-0"; then
 fi
 
 # ============================================================
-section "§PR: the integrate row's pull request goes through a stand-in gh"
+section "§PR: the integrate row's pull request is published by the verb, through a stand-in gh and a bare remote"
 # ============================================================
-# fails-when: the replay never reaches the pull request, another gh is on the integrate row's PATH, or the stand-in's
-# log does not hold the pull request against main from the working branch.
-if [ -n "$(cr_rc 'the integrate row opens the pull request')" ]; then
-  expect_eq "PR-1 the integrate row's gh call exits 0 and is answered with the stand-in's address" "0|https://example.invalid/pull/1" \
-    "$(cr_rc 'the integrate row opens the pull request' | tail -1)|$(cr_out 'the integrate row opens the pull request' | tail -1)"
-  expect_contains "PR-2 the stand-in's log holds the pull request from the working branch into main" \
-    "pr create --base main --head $DOOR_BRANCH" "$(cat "$CR_DIR/bin/gh.log" 2>/dev/null)"
+# fails-when: the replay never reaches the publish, another gh is on its PATH, the stand-in's log does not hold one
+# request against main from the working branch, the remote does not hold the head the run's log names, the person's merge
+# leaves main without the reviews part, or a command of the run is a typed push or a typed create.
+if [ -n "$(cr_rc 'the integrate row publishes the pull request')" ]; then
+  PR_EV="$(cr_lines | /usr/bin/grep '|ev=published|part=pr|' | tail -1)"
+  PR_HEAD="$(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/$DOOR_BRANCH")"
+  expect_eq "PR-1 the publish exits 0 and names the stand-in's address" "0|yes" \
+    "$(cr_rc 'the integrate row publishes the pull request' | tail -1)|$(cr_out 'the integrate row publishes the pull request' | /usr/bin/grep -qF 'https://example.invalid/pull/1' && echo yes)"
+  expect_eq "PR-2 the stand-in's log holds one request, from the working branch into main" "1|1" \
+    "$(/usr/bin/grep -c '^pr create ' "$CR_DIR/bin/gh.log" 2>/dev/null | tr -d ' ')|$(/usr/bin/grep -c "^pr create --base main --head $DOOR_BRANCH " "$CR_DIR/bin/gh.log" 2>/dev/null | tr -d ' ')"
   expect_eq "PR-3 the stand-in is the only gh on that PATH" "gh is $CR_DIR/bin/gh" \
     "$(cr_out "the gh on the integrate row's PATH")"
-  expect_eq "PR-4 the person's merge through it leaves main holding the reviews part's commit, whose parent is the head the release check held" "0|yes|yes" \
-    "$(cr_rc 'the person merges the pull request' | tail -1)|$([ "$(cr_field "$(cr_part_event)" commit)" = "$(git -C "$CR_ROOT" rev-parse --verify -q refs/heads/main)" ] && echo yes)|$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -q "^proved: kind=check head=$(git -C "$CR_ROOT" rev-parse --verify -q 'refs/heads/main^1' 2>/dev/null) " && echo yes)"
+  expect_eq "PR-4 the run's log holds the request, at the working head the bare remote holds, the part's commit" \
+    "https://example.invalid/pull/1|$DOOR_BRANCH|main|publish|$PR_HEAD|$PR_HEAD|$PR_HEAD" \
+    "$(cr_field "$PR_EV" url)|$(cr_field "$PR_EV" branch)|$(cr_field "$PR_EV" base)|$(cr_field "$PR_EV" by)|$(cr_field "$PR_EV" commit)|$(git -C "$CR_DIR/remote.git" rev-parse --verify -q "refs/heads/$DOOR_BRANCH")|$(cr_field "$(cr_part_event)" commit)"
+  expect_eq "PR-5 the person's merge through it leaves main a merge commit of the reviews part's commit, whose parent is the head the release check held" "0|yes|yes" \
+    "$(cr_rc 'the person merges the pull request' | tail -1)|$([ "$(cr_field "$(cr_part_event)" commit)" = "$(git -C "$CR_ROOT" rev-parse --verify -q 'refs/heads/main^2' 2>/dev/null)" ] && echo yes)|$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -q "^proved: kind=check head=$(git -C "$CR_ROOT" rev-parse --verify -q 'refs/heads/main^2^1' 2>/dev/null) " && echo yes)"
+  PR_CMDS="$(/usr/bin/grep '^\$ ' "$CR_LOG" 2>/dev/null)"
+  expect_eq "PR-6 the run's commands, read whole, hold the publish and the person's merge" "1|1" \
+    "$(printf '%s\n' "$PR_CMDS" | /usr/bin/grep -c 'session-poker\.sh publish$')|$(printf '%s\n' "$PR_CMDS" | /usr/bin/grep -c ' gh pr merge ')"
+  expect_eq "PR-6b …and no typed push and no typed create" "" \
+    "$(printf '%s\n' "$PR_CMDS" | /usr/bin/grep -E 'git( -C [^ ]+)? push|gh pr create')"
 else
-  expect_eq "PR-0 the replay reached the integrate row's pull request, so this section can be read" "reached" "not reached"
+  expect_eq "PR-0 the replay reached the integrate row's publish, so this section can be read" "reached" "not reached"
 fi
 
 # ============================================================
@@ -461,8 +474,8 @@ section "§SESSION: a session's own bookkeeping stays out of the log"
 CS_ACTS="$(cr_all_rcs | awk -F'|' '$2 ~ /^the skill is invoked|, tick [0-9]+$|^the Patrol is disarmed/ { print NR "|" $2 }')"
 # cs_added <n> -> the lines the command numbered <n> added to the run's log, from the logs kept on each side of it
 cs_added() { local b="$CR_DIR/logs/$(($1 - 1)).log"; [ "$1" -gt 1 ] || b=/dev/null; diff "$b" "$CR_DIR/logs/$1.log" 2>/dev/null | sed -n 's/^> //p'; }
-expect_eq "CS-1 the run engages (which arms the Patrol), ticks and disarms, each a command of the run" "yes|yes|yes" \
-  "$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q '|the skill is invoked' && echo yes)|$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q ', tick [0-9]*$' && echo yes)|$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q '|the Patrol is disarmed' && echo yes)"
+expect_eq "CS-1 the run engages (which arms the Patrol) and ticks, each a command of the run, and has no command that disarms" "yes|yes|yes" \
+  "$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q '|the skill is invoked' && echo yes)|$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q ', tick [0-9]*$' && echo yes)|$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep -q '|the Patrol is disarmed' || echo yes)"
 CS_TICKS="$(printf '%s\n' "$CS_ACTS" | /usr/bin/grep ', tick [0-9]*$' | while IFS='|' read -r n l; do cs_added "$n"; done)"
 expect_eq "CS-2 what a tick adds is the run's own facts, the regression row it landed among them, never a stop or a line of its own" "yes|" \
   "$(/usr/bin/grep -q '^run/v1|ev=published|row=T3|' <<< "$CS_TICKS" && echo yes)|$(/usr/bin/grep -E -v '^run/v1\|ev=[a-z]+\|' <<< "$CS_TICKS"; /usr/bin/grep '^run/v1|ev=stop|' <<< "$CS_TICKS")"
@@ -505,11 +518,14 @@ if cr_reached "CN-0"; then
   CN_P="$CR_ROOT/$DOOR_PLAN_REL"; CN_L="$CR_REC/run.log"; mkdir -p "${CN_P%/*}" && cp "$CR_PLAN" "$CN_P"
   { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/reader.sh" && reader_events "$CN_P" )
     printf 'run/v1|ev=cancel|of=step|n=9|at=2099-01-01T00:00:00Z\n'; } > "$WORLD_ROOT/cn.log" && mv "$WORLD_ROOT/cn.log" "$CN_L"
+  # The plan put back and its log rewritten are the world as this section plants it, over a run sealed before its close.
+  seal_fixture "$CN_P" "$CN_L"
   cn_facts() { door_run "$CR_ROOT" env HOME="$CR_DIR/home" BIONIC_CLAUDE_HOME="$CR_DIR/home/.claude" \
     bash "$CR_ROOT/payload/scripts/close-out.sh" "$CN_P" check; printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -m1 '^facts: '; }
   expect_eq "CN-1 reopened at Step 8, close-out reads the release approved: every fact holds at the branch's head" \
     "facts: every fact the run owes holds at $(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/$DOOR_BRANCH")" "$(cn_facts)"
   printf 'run/v1|ev=cancel|of=approval|key=release|at=2099-01-01T00:00:01Z\n' >> "$CN_L"
+  seal_fixture "$CN_P" "$CN_L"
   expect_contains "CN-2 …and with that approval cancelled in the log, it reads the release as not approved" \
     "no approved: release line names a head" "$(cn_facts)"
   rm -f "$CN_L" "$CN_P"

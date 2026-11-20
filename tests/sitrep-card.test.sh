@@ -770,6 +770,15 @@ expect_eq "BI1 a point saying 1 green and 11 red refuses the card: exit 1, nothi
 expect_eq "BI1b …naming each number beside its word" "1|1" "$(sc_why 'says 1 beside "green"')|$(sc_why 'says 11 beside "red"')"
 sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^point: 11 suites green and 1 red;/point: 11 green and 1 red;/')"
 expect_eq "BI1c control: the same point in the sheet's order draws" "0|" "$SC_RC|$SC_ERR"
+SC_NP="$(printf '%s\n' "$SC_OWED" | sed 's/^reviews: 0 passed, 0 failed, 1 running — \(.*\)count passed, failed, running/reviews: 2 passed, 0 failed, 5 not passed, 0 running — \1count passed, failed, not passed, running/')"
+expect_eq "BI1d precondition: the planted sheet holds a not passed count on its reviews line" "1" "$(printf '%s\n' "$SC_NP" | /usr/bin/grep -c '^reviews: 2 passed, 0 failed, 5 not passed, 0 running — ')"
+sc_card "$SC_NP" "$SC_J_OWED
+point: 2 reviews passed and 5 not passed."
+expect_eq "BI1e a not passed count beside its words draws, and the Correctness row draws the count whole" "0|1" \
+  "$SC_RC|$(printf '%s\n' "$SC_OUT" | /usr/bin/grep -cF '2 reviews passed, 0 failed, 5 not passed, 0 running')"
+sc_card "$SC_NP" "$SC_J_OWED
+point: 5 reviews passed."
+expect_eq "BI1f …and the not passed count said as passed refuses the card" "1|1" "$SC_RC|$(sc_why 'says 5 beside "passed"')"
 sc_card "$SC_OWED" "$SC_J_OWED
 point: 57 suites ran today."
 expect_eq "BI2 a number no sheet value holds refuses the card, naming it" "1|1" "$SC_RC|$(sc_why 'says 57')"

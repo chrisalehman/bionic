@@ -428,20 +428,43 @@ expect_true "5.16 …and a live session's tick digest is kept" \
 # trees in `workspaces-<sid>.state` (payload/scripts/lib/worktree.sh) and
 # hooks/permission-answer.sh queues the reserved requests the tick escalates in
 # `gate-<sid>.state`. Both are `<class>-<sid>.state` like every class above, so a dead
-# session's copies are residue the sweep removes and a live one's are kept.
+# session's copies are residue the sweep removes and a live one's are kept. So are the turn-end
+# hook's `duty-<sid>.state` and `stop-said-<sid>.state`.
 R5F="$(make_repo r5f)"
 live_home 5f "$SID_LIVE"; H5F="$CLAUDE_HOME"
-plant_session "$R5F" "$SID_LIVE" workspaces gate
-plant_session "$R5F" "$SID_DEAD" workspaces gate
+plant_session "$R5F" "$SID_LIVE" workspaces gate duty stop-said
+plant_session "$R5F" "$SID_DEAD" workspaces gate duty stop-said
 poke "$R5F" "$H5F" "$SID_SELF" sweep
 expect_eq "5.17 a sweep over a workspaces-and-gate-only session completes (exit 0)" "0" "$RC"
 expect_contains "5.18 …and counts the session that holds only those two files dead" "|dead=1|" "$OUT"
-for c in workspaces gate; do
+for c in workspaces gate duty stop-said; do
   expect_false "5.19 ($c) a dead session's $c state is swept" \
     test -e "$(f_of "$R5F" "$c" "$SID_DEAD")"
   expect_true "5.20 ($c) …and a live session's $c state is kept" \
     test -f "$(f_of "$R5F" "$c" "$SID_LIVE")"
 done
+
+# THE tick-run CLASS. A running tick records its process in `tick-run-<sid>.state` (hooks/poker/tick.sh); a dead
+# session's copy is residue the sweep removes, and a live session's is kept, so close-out's wipe spares it too.
+R5T="$(make_repo r5t)"
+live_home 5t "$SID_LIVE"; H5T="$CLAUDE_HOME"
+plant_session "$R5T" "$SID_LIVE" tick-run
+plant_session "$R5T" "$SID_DEAD" tick-run
+poke "$R5T" "$H5T" "$SID_SELF" sweep
+expect_contains "5.20t a sweep over a tick-run-only session counts it dead" "|dead=1|" "$OUT"
+expect_false "5.20u a dead session's tick-run record is swept" test -e "$(f_of "$R5T" tick-run "$SID_DEAD")"
+expect_true "5.20v …and a live session's is kept" test -f "$(f_of "$R5T" tick-run "$SID_LIVE")"
+
+# THE watch CLASS. The watcher keeps its record in `watch-<sid>.state` (hooks/watch.sh); a dead session's copy is
+# residue the sweep removes, and a live session's is kept, so close-out's wipe spares it too.
+R5W="$(make_repo r5w)"
+live_home 5w "$SID_LIVE"; H5W="$CLAUDE_HOME"
+plant_session "$R5W" "$SID_LIVE" watch
+plant_session "$R5W" "$SID_DEAD" watch
+poke "$R5W" "$H5W" "$SID_SELF" sweep
+expect_contains "5.20w a sweep over a watch-only session counts it dead" "|dead=1|" "$OUT"
+expect_false "5.20x a dead session's watch record is swept" test -e "$(f_of "$R5W" watch "$SID_DEAD")"
+expect_true "5.20y …and a live session's is kept" test -f "$(f_of "$R5W" watch "$SID_LIVE")"
 
 # THE start-clock CLASS (wave-27 T68; review pass 47 S1, A-orch-137). hooks/execution-recorder.sh
 # writes one clock file per start, `start-clock-<sid>.<agent id>.state`; a dead session's go with

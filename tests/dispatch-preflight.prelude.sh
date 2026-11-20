@@ -17,6 +17,8 @@
 # helpers and constant strings, each block moved whole from the section named above it,
 # with a pointer left where it was.
 
+# shellcheck source=/dev/null
+declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 # The rendered dispatch.md, whose fenced scaffold the suites read: the page the dispatch library's
@@ -451,6 +453,13 @@ make_repo_seed() {
 }
 make_repo_seed
 
+# watch_rested <repo> <sid> -> the session's watch record, resting because the run waits on the person: the shape
+# hooks/watch.sh leaves (payload/scripts/lib/patrol.sh, THE WATCH RECORD).
+watch_rested() {
+  mkdir -p "$1/.bionic/tmp"
+  printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$1/.bionic/tmp/watch-$2.state"
+}
+
 # make_repo <name> <active-wave:yes|no> -> echoes the repo path
 make_repo() {
   local name="$1" wave="$2"
@@ -468,18 +477,15 @@ make_repo() {
   fi
   git -C "$repo" commit -qm seed 2>/dev/null
   if [ "$wave" = "yes" ]; then
-    # A live wave has a live Patrol: it is armed at engagement, before the first dispatch
-    # (skills/canonical-sdlc/SKILL.md §Dispatch). Every wave-active fixture therefore
-    # carries a fresh stamp for the session ids this suite dispatches with, and the S21
-    # arms remove or backdate it to drive the arming wall. Without this the wall would be
-    # under test in every case in the file rather than in its own section.
+    # A live wave is watched. Every wave-active fixture carries a rested watch for the session ids
+    # this suite dispatches with, so the watch wall is under test in its own section alone.
     mkdir -p "$repo/.bionic/tmp"
     local _psid
     for _psid in "${SID_A:-}" "${SID_B:-}" "${SID_DEAD:-}" "${SID_LIVE:-}"; do
       [ -n "$_psid" ] || continue
-      printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" > "$repo/.bionic/tmp/patrol-$_psid.state"
-      chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+      # …AND A WATCH, rested on purpose: the dispatch wall admits a watch that is alive or that rested
+      # (hooks/watch.sh writes this record), so §WATCH alone drives the watch's other states.
+      watch_rested "$repo" "$_psid"
       # A LIVE WAVE HAS AN ENGAGED SESSION (task-engaged-session). The gate asks
       # `engaged_session` before it asks anything else, so a fixture without this marker is
       # silent for a reason that has nothing to do with the wall under test — every
@@ -494,6 +500,7 @@ make_repo() {
     mkdir -p "$repo/.bionic/docs/record/wave-01-test"
     printf 'run/v1|ev=%s|at=2026-09-07T19:0%sZ\n' 'step|n=1' 1:00 'step|n=2' 2:00 'step|n=3' 3:00 'step|n=4' 4:00 \
       'approval|key=step3|by=dana|said=approved' 5:00 > "$repo/.bionic/docs/record/wave-01-test/run.log"
+    seal_fixture "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "$repo/.bionic/docs/record/wave-01-test/run.log"
     # A LIVE WAVE'S SESSIONS ARE BOUND TO IT (wave-23-fixit-1810, REQ-1, D1). An empty marker
     # beside an open plan is the UNBOUND state, whose `fallback` plan is announced and never
     # acted on — so a fixture that meant "this session is running this wave" and left the
@@ -587,8 +594,7 @@ write_attestation() {
 # HOISTED FROM THE SECTIONS (wave-30 T1). Read by sections in more than one shard.
 # ======================================================================================
 
-# ---- from S21: s21_stamp_path, s21_backdate, s21_iso, s21_idle_tr, s21_busy_tr, s21_stale_payload ----
-s21_stamp_path() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "$2"; }
+# ---- from S21: s21_backdate, s21_iso ----
 
 s21_backdate() {  # <file> <seconds ago>
   local ts
@@ -596,35 +602,9 @@ s21_backdate() {  # <file> <seconds ago>
   touch -t "$ts" "$1"
 }
 
-# ---------- the transcript the staleness half reads (REQ-1, AC-1.1/1.2) ----------
-#
-# THE STALENESS HALF IS AN IDLE-TIME PREDICATE NOW (ADR-028). A session cron fires only
-# while the session is idle, so a stamp past the fire window is a DEATH only when an idle
-# gap at least that long has passed since it with no tick in it; a stamp that went stale
-# under a long busy turn is an advisory and the dispatch proceeds. Every armed-but-dead
-# fixture below therefore carries a transcript with a real gap, and the busy fixture carries
-# one without. The suite's default transcript (`S5_LIVE_TRANSCRIPT`, fixed 2026-09-05
-# timestamps) predates every stamp this section backdates, so it reads as BUSY and is the
-# right default for every fixture here that is not about the staleness half at all.
-#
-# RELATIVE TO NOW, REBUILT AT EACH CALL: the gap has to fall after the stamp, and the stamp
-# is backdated by between 50 and 4000 seconds. Nothing here sleeps.
 s21_iso() {  # <seconds ago>
   date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
     || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
-}
-
-s21_idle_tr() {  # -> path of a transcript whose last turn opened after a long idle gap
-  { printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
-      "$(s21_iso 10000)"
-    printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"carry on"}}\n' \
-      "$(s21_iso 1)"
-  } > "$SANDBOX/.s21-idle.jsonl"
-  printf '%s' "$SANDBOX/.s21-idle.jsonl"
-}
-
-s21_stale_payload() {  # <sid> <repo> -> a dispatch payload carrying the idle transcript
-  mk_agent_payload "$1" "$2" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$(s21_idle_tr)"
 }
 
 # ---- from S21: s21_plant ----
@@ -650,7 +630,8 @@ s21_plant() {  # <tree root> -> plants hooks/ + scripts/lib and echoes the hooks
 s22_set_budget() {
   local plan="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" val="$2"
   awk -v v="$val" 'NR == 1 && $0 == "---" { print; print "parallel-budget: " v; next } { print }' \
-    "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan"
+    "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan" || return
+  seal_fixture "$plan" "$1/.bionic/docs/record/wave-01-test/run.log"
 }
 
 # s22_roster_row <repo> <sid> <name> [claims] [subagent_type] — one launch row in the shipped
@@ -735,9 +716,11 @@ pf_plan() {
     printf 'integration-branch: main\nworking-branch: wave/99-test\n---\n\n# Test wave plan\n'; } > "$(pf_plan_path "$repo")"
   printf 'run/v1|ev=step|n=5|at=2026-09-07T19:06:00Z\n' >> "$l"
   [ -z "$head" ] || printf 'run/v1|ev=proof|kind=floor|head=%s|evidence=record/w99-floor.txt|at=2026-10-04T00:00:00Z\n' "$head" >> "$l"
-  [ "$#" -gt 0 ] || return 0
-  { printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
-    printf '%s\n' "$@" | awk -F' *[|] *' -v lf="$l" '{ print "| " $2 " | " $3 " | " $4 " | " $5 " | " $7 " | " $8 " | " $9 " | " $10 " | — |"
-      if ($12 == "active") print "run/v1|ev=dispatch|row=" $2 "|name=" $6 "|at=2026-09-07T19:07:00Z" >> lf }'; } >> "$(pf_plan_path "$repo")"
+  if [ "$#" -gt 0 ]; then
+    { printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+      printf '%s\n' "$@" | awk -F' *[|] *' -v lf="$l" '{ print "| " $2 " | " $3 " | " $4 " | " $5 " | " $7 " | " $8 " | " $9 " | " $10 " | — |"
+        if ($12 == "active") print "run/v1|ev=dispatch|row=" $2 "|name=" $6 "|at=2026-09-07T19:07:00Z" >> lf }'; } >> "$(pf_plan_path "$repo")" || return
+  fi
+  seal_fixture "$(pf_plan_path "$repo")" "$l"
 }
 

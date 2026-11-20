@@ -1,28 +1,7 @@
 #!/bin/bash
-# ONE STALENESS ARITHMETIC FOR THE PATROL STAMP — the FIRE WINDOW.
-#
-# WHAT THIS SUITE OWNS, AND WHAT CHANGED. It used to own a constant:
-# `payload/scripts/lib/patrol.sh`'s `PATROL_STALE_MULTIPLIER`, "the stamp is stale
-# past twice the poker interval" held in one exported name instead of an inline
-# literal at three sites. That judgment call is retired. A session cron fires only
-# while the session is IDLE, so a stamp older than any multiple of the interval says
-# one of two things and the arithmetic could not tell them apart: the job is gone, or
-# the orchestrator has been working. On 2026-09-15 a death notice blocked a healthy
-# session on a 2459s stamp against a 2400s limit because its orchestrator was busy.
-#
-# WHAT REPLACED IT. `patrol_fire_window` — the interval plus the scheduler's jitter,
-# which the CronCreate contract bounds at a tenth of the period — is the longest idle
-# span in which the cron is GUARANTEED one opportunity to fire, and it is the ONE
-# threshold in the payload. Past it a stamp is worth READING THE TRANSCRIPT about and
-# is not, on its own, a verdict: `patrol_verdict` answers that, over idle gaps.
-# Wave-15 moved the two BLOCKING readers (the stop library's revive notice, the
-# dispatch wall's staleness half) onto the pair; wave-16 moved the two REPORTING
-# readers — `patrol_stamp_state`, which is doctor's reading, and the session-start
-# banner — and deleted the constant behind them.
-#
-# SO THE ROWS BELOW PIN THE NEW TRUTH: the constant has no definition and no reader,
-# every reader of "how stale is stale" calls the library's predicate, and the fire
-# window's arithmetic is written exactly once.
+# THE SESSION-KEYED STATE CLASSES AND THEIR ONE OWNER RULE (payload/scripts/lib/patrol.sh
+# PATROL_STATE_CLASSES): every class's file names its session up to the first dot, and the
+# sweep and close-out's wipe read that owner the same way.
 #
 # SOURCED, DIRECTLY (patrol.sh's own header: "Sourced, never executed" — no
 # top-level code runs on source, only assignments and function definitions,
@@ -52,60 +31,6 @@ sourced() {  # <fn-or-expr...> — run against a clean copy of patrol.sh's globa
   bash -c '. "$1"; shift; "$@"' _ "$PATROL_SH" "$@" 2>/dev/null
 }
 
-section "Section 2: patrol_stamp_state measures against the fire window"
-
-# No hooks/session-poker.sh beside this fixture repo, so patrol_interval falls
-# back to its own default (1200s, PATROL_INTERVAL_DEFAULT) —
-# the constant the poker takes its own default from. The rows read `interval=` and `limit=`
-# back out of the record and compare the second against the LIBRARY's own
-# `patrol_fire_window`, so a change to either the default or the window's
-# arithmetic is still caught in agreement rather than against a number typed here.
-STAMP_OUT="$(sourced patrol_stamp_state "$REPO_FIX" "fixture-session")"
-SECS="$(printf '%s' "$STAMP_OUT" | sed -n 's/.*interval=\([0-9]*\).*/\1/p')"
-LIMIT="$(printf '%s' "$STAMP_OUT" | sed -n 's/.*limit=\([0-9]*\).*/\1/p')"
-WINDOW="$(sourced patrol_fire_window "$SECS")"
-
-case "$SECS" in
-  ''|*[!0-9]*) no "4: patrol_stamp_state's interval field is a number" "got: $STAMP_OUT" ;;
-  *) ok "4: patrol_stamp_state's interval field is a number" ;;
-esac
-expect_eq "5: limit = patrol_fire_window(interval)" "$WINDOW" "$LIMIT"
-expect_eq "6: with the real last-resort default, that limit is 1320 and not 2400" \
-  "1320" "$LIMIT"
-expect_regex "7: patrol_verdict answers every field its callers read, by key" '^verdict=[a-z]+\|ref=[0-9]+\|gap=[0-9]+\|window=[0-9]+\|reason=' \
-  "$(sourced patrol_verdict "$TMP/no-such-stamp" "$TMP/no-such-transcript" "$SECS")"
-
-section "Section 3: every reader of \"how stale is stale\" calls the predicate"
-#
-# FOUR READERS, ONE PREDICATE. Two BLOCK — the stop library's revive notice and the
-# dispatch wall's staleness half, moved at wave-15 — and two REPORT: this library's own
-# `patrol_stamp_state` (doctor's reading) and the session-start banner, moved here. The rows
-# assert the CALL rather than a spelling of the arithmetic, which is what makes them hold
-# whatever the window's number becomes.
-# COUNTED AS A CALL, NEVER AS A MENTION: this file DEFINES `patrol_verdict`, so a bare
-# containment row here would pass on the definition alone and prove nothing about the
-# reading. `$(patrol_verdict ` is the call, and `patrol_stamp_state` is its one site.
-DP="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
-SS="${BIONIC_HOOKS_DIR}/session-start.sh"
-
-expect_eq "8: …and it thresholds on the library's fire window" "yes" \
-  "$(grep -qF 'patrol_fire_window' "$PATROL_SH" && echo yes || echo no)"
-expect_eq "9: the session-start banner asks the same predicate" "yes" \
-  "$(grep -qF 'patrol_verdict' "$SS" && echo yes || echo no)"
-expect_eq "10: …and takes its threshold from the same function" "yes" \
-  "$(grep -qF 'patrol_fire_window' "$SS" && echo yes || echo no)"
-
-# THE WALL NO LONGER MULTIPLIES ANYTHING. Both spellings the old row accepted are absent:
-# the constant, and a literal in its place.
-# …because it asks the predicate instead. Paired with 11, so the absence above rests on a
-# file this suite can prove it read.
-expect_eq "12: …it calls patrol_verdict, which owns the threshold" "yes" \
-  "$(grep -qF 'patrol_verdict' "$DP" && echo yes || echo no)"
-# AND NO READER RECOMPUTES IT. The banner and doctor are in this row now beside the two
-# walls: a reader that spelled `+ iv / 10` again would be the old literal under a new name.
-# `/ 10` AND NOT A DIGIT AFTER IT: `_rs_started_ms / 1000` in doctor.sh is a millisecond
-# conversion, and a substring match counted it as a second copy of the jitter arithmetic.
-
 section "Section 4: one owner rule for every class: the name up to its first dot (wave-27 T68; review pass 47 S1, A-orch-137)"
 
 # THE PER-START CLOCK FILE IS A CLASS (start-clock-<sid>.<agent id>.state). A session id holds no
@@ -120,6 +45,8 @@ OW_CLASSES="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$PATROL_SH")"
 expect_nonempty "OW0 PATROL_STATE_CLASSES is read off patrol.sh (the extractor works)" "$OW_CLASSES"
 expect_contains "OW1 start-clock is one of the classes" " start-clock " " $OW_CLASSES "
 expect_contains "OW1b owed is one of the classes (the person's ledger, T11/T12: a live neighbour's open items are spared by close-out's wipe)" " owed " " $OW_CLASSES "
+expect_contains "OW1c tick-run is one of the classes (a running tick's record: close-out's wipe spares a live session's)" " tick-run " " $OW_CLASSES "
+expect_contains "OW1d watch is one of the classes (the watch record: close-out's wipe spares a live session's)" " watch " " $OW_CLASSES "
 OW_CO_FN="$(sed -n '/^_co_tmp_owner() {/,/^}/p' "$CO_SH")"
 expect_nonempty "OW2 close-out's owner reader is read off close-out.sh (the extractor works)" "$OW_CO_FN"
 OW_BAD_P=""; OW_BAD_C=""; OW_SEEN=0

@@ -492,6 +492,36 @@ expect_eq "DEBT-L7d …and a burned item is touched no more (exit 1, unchanged)"
 poke "$RSEV" debt list "$PSEV"
 expect_eq "DEBT-L8 debt list prints each debt as the reader holds it, the touch and the burn read from the log" \
   '0|tree_count duplicate "lib/b.sh:2, lib/c.sh:5" touches=2 raised-by=record/wave-01-fixture/dbt-rec.md|log_shim one-case-abstraction "lib/a.sh:4" touches=1 raised-by=record/wave-01-fixture/dbt-rec.md burned=T9' "$RC|$(printf '%s\n' "$OUT" | paste -sd'|' -)"
+# `debt sites` says an unburned item's sites again; a site is a line of a file at the project's root.
+mkdir -p "$RSEV/dsite"; printf '%s\n' a b c > "$RSEV/dsite/n.sh"; printf 'm\n' > "$RSEV/dsite/m.sh"
+DBT_NEW='dsite/n.sh:3, dsite/m.sh:1'
+cp "$DBT_LOG" "$TMPROOT/dbt-before"
+for c in 'no_such_concept duplicate@dsite/n.sh:1@holds no debt no_such_concept duplicate' \
+         'tree_count one-case-abstraction@dsite/n.sh:1@holds no debt tree_count one-case-abstraction' \
+         'log_shim one-case-abstraction@dsite/n.sh:1@is burned by T9' \
+         'tree_count duplicate@dsite/n.sh@are not <path>:<line>' \
+         'tree_count duplicate@dsite/n.sh:1,dsite/m.sh:1@are not <path>:<line>' \
+         'tree_count duplicate@lib/b.sh:2, lib/c.sh:5@already stands at "lib/b.sh:2, lib/c.sh:5"' \
+         'tree_count duplicate@dsite/n.sh:1, dsite/none.sh:1@dsite/none.sh names no file' \
+         'tree_count duplicate@dsite/n.sh:4@names line 4, and dsite/n.sh has 3' \
+         'tree_count duplicate@dsite/n.sh:0@names line 0, and dsite/n.sh has 3'; do
+  ck="${c%%@*}"; rest="${c#*@}"; st="${rest%%@*}"; want="${rest#*@}"
+  poke "$RSEV" debt sites "${ck%% *}" "${ck#* }" "$st" "$PSEV"
+  expect_eq "DEBT-S2 debt sites $ck \"$st\": refused (exit 1) naming why, the log byte-identical" "1|1|same" \
+    "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -cF -- "$want")|$(cmp -s "$TMPROOT/dbt-before" "$DBT_LOG" && echo same)"
+done
+poke "$RSEV" debt sites tree_count duplicate "$DBT_NEW" "$PSEV"
+expect_eq "DEBT-S1 debt sites exits 0 naming the item's sites as they are and as they were" \
+  "0|poker: debt sites — tree_count duplicate \"$DBT_NEW\", was \"lib/b.sh:2, lib/c.sh:5\"" "$RC|$OUT"
+expect_eq "DEBT-S1b …one event, the newest of the item: concept, kind, raising record and touches kept, the sites replaced" \
+  "1|concept=tree_count|kind=duplicate|raised-by=record/wave-01-fixture/dbt-rec.md|sites=$DBT_NEW|touches=2" \
+  "$(( $(wc -l < "$DBT_LOG") - $(wc -l < "$TMPROOT/dbt-before") ))|$(/usr/bin/grep '|ev=debt|concept=tree_count|' "$DBT_LOG" | tail -1 | tr '|' '\n' | /usr/bin/grep -vE '^(run/v1|ev=debt|at=.*)$' | sort | paste -sd'|' -)"
+poke "$RSEV" debt list "$PSEV"
+expect_eq "DEBT-S1c …debt list prints the item once, at its new sites" \
+  "tree_count duplicate \"$DBT_NEW\" touches=2 raised-by=record/wave-01-fixture/dbt-rec.md" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^tree_count ')"
+expect_eq "DEBT-S1d …and so does the reader's debts question" "sites=$DBT_NEW" \
+  "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$PSEV" debts | /usr/bin/grep '|concept=tree_count|' | /usr/bin/grep -o 'sites=[^|]*')"
+rm -rf "$RSEV/dsite"
 poke "$RSEV" debt
 expect_eq "DEBT-L9 debt with no subcommand is a usage error (exit 2)" "2" "$RC"
 poke "$RSEV" debt touched

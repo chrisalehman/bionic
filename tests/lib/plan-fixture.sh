@@ -19,6 +19,10 @@
 # `## Eval design`, and the run's log (`plan_fixture_log`) holding what the agent, worktree and status
 # cells say. Its step is a number and its plan sits under plans/, where the reader finds a log.
 #
+# SEALED. Each builder here ends by sealing the plan and the log it wrote (tests/lib/seal-fixture.sh), so the
+# run it leaves is one the product's seal vouches for; a test that writes more by hand after it calls
+# `seal_fixture` itself.
+#
 # HOOK-VALID. The frontmatter is the whole set hooks/canonical-sdlc-governing-skill.sh demands of a
 # plan (the version, intent, rigor, scale, the opt-in and discriminator flags, model_plan), so a
 # fixture that writes this through the Write hook is admitted, and a test may say so.
@@ -59,6 +63,7 @@ plan_fixture() {  # [--current <step>] <path> <task|wave> [<row>...]
     printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
     printf '| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |\n'
   } > "$path" || return 1
+  seal_fixture "$path" "$(plan_fixture_log "$path")"
   printf '%s' "$path"
 }
 
@@ -109,4 +114,7 @@ plan_fixture_themes() {  # <plan> [<status>...]
       discharged) printf 'run/v1|ev=proof|kind=eval|ac=%s|head=%040d|rc=0|at=2026-10-06T10:00:00Z\n' "$a" 1 >> "$log" ;;
       waived) printf 'run/v1|ev=waiver|ac=%s|head=%040d|by=fixture|said=waive it|at=2026-10-06T10:00:00Z\n' "$a" 1 >> "$log" ;;
     esac; done
+  seal_fixture "$plan" "$log"
 }
+
+declare -F seal_fixture >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/seal-fixture.sh"

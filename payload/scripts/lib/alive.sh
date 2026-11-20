@@ -21,10 +21,13 @@
 # read says.
 #
 #   alive_run <pid> <start>                 rc 0 alive (an empty start is an older record: kill -0)
+#   alive_since <pid>                       -> the start a record of <pid> carries; nothing when it is gone
 #   alive_session <sid>                     rc 0 alive
 #   alive_sessions                          -> session=<sid>|pid=<pid>|cwd=<path>, one per live session
 #   alive_note <sid>                        rc 0 when <sid>'s process is recorded; dead records go
 #   alive_agent <sid> <transcript> <name>   rc 1 when <sid> is dead, else `live_row_open`'s code
+#   alive_holder <sid>                      -> the pid of the CLI process whose file names <sid> now
+#   alive_current <pid>                     -> the conversation the CLI process <pid> holds now
 #
 # BASH 3.2, jq for the CLI's files: without jq no session file is read, and only the caller's own
 # session reads alive.
@@ -40,6 +43,9 @@ done
 unset _alive_dep
 
 alive_run() { _slots_live "${1:-}" "${2:-}"; }
+
+# The writer's half of the rule: a record that names a process stores this, and alive_run compares against it.
+alive_since() { _slots_since "${1:-}"; }
 
 _alive_records() { printf '%s/bionic/alive' "$(claude_home)"; }
 
@@ -78,6 +84,20 @@ _alive_find() {
     [ "$_A_SID" = "$1" ] && return 0
   done
   return 1
+}
+
+# A process outlives its conversation: `/clear` rewrites the CLI's file under a new id. So a reader that must follow
+# its session asks once which process holds it, and after that which conversation that process holds now.
+alive_holder() {  # <sid>
+  [ -n "${1:-}" ] && _alive_find "$1" || return 1
+  printf '%s\n' "$_A_PID"
+}
+alive_current() {  # <pid>
+  local f
+  case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+  f="$(claude_home)/sessions/$1.json"
+  command -v jq >/dev/null 2>&1 && [ -f "$f" ] && _alive_cli "$f" || return 1
+  printf '%s\n' "$_A_SID"
 }
 
 alive_session() {  # <sid>

@@ -449,6 +449,13 @@ EOF
   esac
 }
 
+wall_seal_home() {  # <event> -> 0 nothing · 2 block
+  [ -n "$BIONIC_SEAL_HIT" ] || return 0
+  write_gate_say seal-home "" "" command "$BIONIC_SEAL_HIT" "$BIONIC_SEAL_HOME"
+  fold_block exit2 write "$WG_FACT" "$WG_FIX" "$WG_DETAIL"
+  return 2
+}
+
 # ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
 #
 # HARD BLOCK: Prevents AI from pushing to main/master branches.
@@ -1201,10 +1208,13 @@ eg_step_reads_readings() {
 # eg_plan_reads_readings <plan> -> 0 when the step <plan>'s run stands at is such a step, as the reader answers it
 # (lib/proof.sh `proof_step_held`, loaded by the collector that asks); 1 when it is not, or when the run's place cannot be
 # read, which the gate's own read then refuses by name. FILE SCOPE, for the collector, which asks before the wall's body
-# has run.
+# has run. It decides what the gate is handed, so the place and the facts are folded from the log, never the held file
+# or the kept one; the collector asks in the hook's own shell, and the deriver and the gate's body are served that fold.
 eg_plan_reads_readings() {
+  local _PROOF_FRESH=1
   [ -f "${1:-}" ] && declare -F proof_step_held >/dev/null 2>&1 || return 1
   proof_step_held "$1" >/dev/null || return 1
+  _proof_facts "$1" >/dev/null 2>&1 || :
   case "$_PROOF_PLACE" in n=*) local n="${_PROOF_PLACE%%$'\n'*}"; eg_step_reads_readings "${n#n=}" ;; *) return 1 ;; esac
 }
 
@@ -1344,6 +1354,55 @@ printed a reason above this line, that is the cause. The commit is still refused
   return 0
 }
 
+# wall_gate_judge <repo> <session> <step> <command> -> the evidence gate's verdict on <command>, a Bash call of
+# <session> run in <repo>, with <step> pending in the run's facts (BIONIC_DRY_STEP), judged in a subshell of the caller:
+# on stderr what hooks/bash-walls.sh prints on stderr for that call, and its exit. 0 when the gate admits it or the
+# session is not one the walls judge; 2 when it refuses. A caller that asks whether an advance would pass asks this in
+# place of feeding the whole wall a synthetic payload, so the fold its shell already holds (lib/proof.sh
+# `_proof_facts`) is read again by nothing, and no process is started for the ask.
+# THE FACTS ARE THE COLLECTOR'S. hooks/bash-walls.sh gathers what the gate reads (the context, the event, the open
+# debts and the readings' derived results of the bound plan) before it folds the walls; this sets each the same way
+# from the same predicates, in the same order, and nothing else. A fact gathered here and not there, or there and not
+# here, would be a second judgment of one commit: tests/release-approval.test.sh §ASKED holds this verdict to the whole
+# wall's for one dry commit, line for line. Only the gate is folded: the other walls judge a push, a database, a
+# suite, a memory path or a writer's ruling, and a `git commit` with no agent behind it is none of those.
+# The libraries the collector loads (context, fold, git-argv, refuse, root, run, session, units and this file) are
+# the caller's to load, in the subshell it asks from, so the caller's own state is not changed by the ask.
+wall_gate_judge() {
+  ( set -o pipefail
+    cd "$1" 2>/dev/null || exit 2
+    export BIONIC_DRY_STEP="$3" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$2" BIONIC_WALL_VERBOSE=1
+    COMMAND="$4"
+    BIONIC_INPUT="$(jq -n --arg s "$2" --arg cwd "$1" --arg c "$4" \
+      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+        tool_input: {command: $c}, tool_use_id: "toolu_planverb"}')" || exit 2
+    unset _BIONIC_JQ_STATE
+    bionic_context 2>/dev/null || exit 0
+    [ "$BIONIC_ENGAGED" = 1 ] || exit 0
+    EVENT=$(bionic_jq .hook_event_name)
+    [ -n "$EVENT" ] || EVENT="PreToolUse"
+    BIONIC_MEM_PROJECTS=""; BIONIC_WRITE_TARGETS=""
+    BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_ORIGIN=""; BIONIC_DEBTS_OPEN=""; BIONIC_READINGS=""
+    case "$COMMAND" in
+      *commit*)
+        if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ] && [ "$_EG_CWD_SRC" != moving ]; then
+          BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
+          BIONIC_DEBTS_ORIGIN="$BIONIC_DEBTS_PLAN"
+          if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_readings_derived >/dev/null 2>&1 && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"; then
+            BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" 2>/dev/null)" || BIONIC_READINGS=""
+          fi
+          local _wg_rec
+          if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_debt_record >/dev/null 2>&1 \
+             && _wg_rec="$(proof_debt_record "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT")"; then
+            BIONIC_DEBTS_OPEN="$(proof_debts_read "$_wg_rec")"
+          fi
+        fi ;;
+    esac
+    BIONIC_RULINGS_UNREAD=""; BIONIC_RULINGS_WRITER=""
+    bionic_fold "$EVENT" wall_evidence_gate >/dev/null
+  )
+}
+
 # Per-tier required evidence keys — ONE POINTER PER MATRIX ROW (wave-31 T6; REQ-5, D5). Every tier owes
 # `evidence:`, the AC block's proof path under record/; a T4 row owes `user-confirmed:` as well, the one thing
 # only a user can write. The per-tier readings that used to ride beside the pointer were written by the agent that
@@ -1435,7 +1494,21 @@ matrix_load() {  # <plan> [head]
   case "$rc" in 0) ;; 1) MATRIX_CELLS="" ;; *) return 2 ;; esac
   MATRIX_TASKS="$(plan_read_criterion_task "$1" 2>/dev/null)" || MATRIX_TASKS=""
   MATRIX_TASKS_OF="$1"
+  # The plan's `## Tasks` rows (lib/units.sh `units_rows`) are held too: every criterion's owing step and openness is read
+  # from them, each asked in a subshell that can keep no fold, so asking per criterion folds the run once a criterion.
+  MATRIX_UROWS_OF="$1"; MATRIX_UROWS_RC=0
+  MATRIX_UROWS="$(units_rows "$1" 2>/dev/null)" || MATRIX_UROWS_RC=1
   return 0
+}
+
+# _matrix_urows <plan> -> 0 with _MATRIX_UROWS set to `units_rows <plan>`, the answer matrix_load holds when it loaded this
+# plan, else asked now; 1 when units_rows has none. Held only under both keys, so a load of another plan in a scope that
+# kept its own MATRIX_TASKS_OF is never read as this one's.
+_matrix_urows() {
+  if [ "${MATRIX_TASKS_OF:-}" = "$1" ] && [ "${MATRIX_UROWS_OF:-}" = "$1" ]; then
+    _MATRIX_UROWS="${MATRIX_UROWS:-}"; return "${MATRIX_UROWS_RC:-1}"
+  fi
+  _MATRIX_UROWS="$(units_rows "$1" 2>/dev/null)"
 }
 
 # matrix_fails_when_missing <plan> -> the first criterion, in the reader's order (lib/reader.sh `reader_criteria`, no
@@ -1510,7 +1583,8 @@ matrix_owing_step() {  # <plan> <AC> -> the step number, or nothing
   val="$(matrix_criterion_task "$1" "$2")"
   [ -n "$val" ] || return 0
   if [ "$val" = 9 ]; then printf '9\n'; return 0; fi
-  rows="$(units_rows "$1" 2>/dev/null)" || return 0
+  _matrix_urows "$1" || return 0
+  rows="$_MATRIX_UROWS"
   for id in $(printf '%s' "$val" | tr ',' ' '); do
     rec="$(awk -F'\t' -v i="$id" '$1 == i { print; exit }' <<< "$rows")"
     [ -n "$rec" ] || continue
@@ -1527,7 +1601,8 @@ matrix_owing_step() {  # <plan> <AC> -> the step number, or nothing
 # row prints nothing. The status is read through the same `units_rows` the owing step is.
 matrix_owing_open() {
   local id rec s rows
-  rows="$(units_rows "$1" 2>/dev/null)" || return 0
+  _matrix_urows "$1" || return 0
+  rows="$_MATRIX_UROWS"
   for id in $(matrix_criterion_task "$1" "$2" | tr ',' ' '); do
     rec="$(awk -F'\t' -v i="$id" '$1 == i { print; exit }' <<< "$rows")"
     [ -n "$rec" ] || continue
@@ -1588,7 +1663,7 @@ matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"
 # order: owed at Step 9, and its Eval design row's eval is the close's measure (matrix_close_eval).
 # close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF ac tier status ev aud conf w
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC ac tier status ev aud conf w
   matrix_load "$PLAN" || return 2
   while IFS=$'\037' read -r ac tier status ev aud conf w; do
     [ -n "$ac" ] && [ "$status" = pending ] || continue
@@ -1696,7 +1771,7 @@ matrix_row_owes() {
 # lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read. A fourth argument,
 # any word, prints only those that also await their person (`matrix_row_awaits`, fed as the commit gate feeds it).
 matrix_unruled() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF RIGOR ac tier status ev aud conf waiver defer
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC RIGOR ac tier status ev aud conf waiver defer
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
   matrix_load "$PLAN" "${3:-}" || return 2
@@ -1871,11 +1946,14 @@ bionic_context 2>/dev/null || exit 0
 # EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
 # foreign or unshaped session key, no key at all. The marker is the one artifact whose
 # PRESENCE opens a wall, so the fail direction is inverted here on purpose, and it is
-# inverted against this file's own fail-CLOSED posture on the library: the arming
-# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
-# which never consented is the defect this guard exists to remove.
+# inverted against this file's own fail-CLOSED posture on the library: a wall that binds a
+# session which never consented is the defect this guard exists to remove. Consent is the
+# binding, though, not the marker (D3): hooks/bash-walls.sh hands this gate the plan the
+# session's binding record holds it to (BIONIC_BOUND_PLAN), and a session holding one is
+# judged whatever became of its marker, which any tool can remove or replace with a link.
+# The context resolved again above reads the marker alone, so the handed plan is asked too.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-[ "$BIONIC_ENGAGED" = 1 ] || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || [ -n "${BIONIC_BOUND_PLAN:-}" ] || exit 0
 
 # ---------- JURISDICTION (wave-19 REQ-9, D10; ADR-031 amended): whose repository is this? ----------
 #
@@ -2033,6 +2111,14 @@ DOCS_ROOT=$(docs_root "$BIONIC_ROOT")
 # So the closed plan stays THE plan here — the hygiene refusals below still judge it,
 # because a plan that lies is a defect in every state and this hook's ordering contract
 # says so — and nothing else in the root is read to replace it.
+#
+# EVERY FACT THIS GATE READS IS FOLDED FROM THE RUN'S LOG, which the seal has vouched for above this gate: its place,
+# and its approvals, proofs, reviews and statuses. The held place and the kept facts under $TMPDIR stay for the hooks
+# that decide nothing about a commit; a file anyone can rewrite there never answers this gate (lib/proof.sh
+# `_PROOF_FRESH`). The bound plan is folded once, in this shell, and every later ask below is served that fold.
+_PROOF_FRESH=1
+_eg_bound="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" && _run_place "$_eg_bound" >/dev/null 2>&1 \
+  && _proof_facts "$_eg_bound" >/dev/null 2>&1 || :
 EG_RUN=$(session_run "$BIONIC_ROOT" "$BIONIC_SID")
 EG_VERDICT="${EG_RUN%% *}"
 EG_VPATH=""
@@ -2280,7 +2366,7 @@ Fix: run the commit again; the fold's own line above names why it failed."
 }
 _eg_refuse_lowered() {
   local s found="declares canonical_sdlc_version: $SDLC_VERSION"
-  s="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+  s="$(_run_place "$PLAN")" || _eg_v15_unreadable
   case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
   [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
   [ -n "$FRONTMATTER" ] || found="has no header on its first line"
@@ -2751,13 +2837,17 @@ _eg_commit_repo() {
 # (`_eg_commit_repo`). The common case costs one `git diff --cached --quiet` over the set's
 # directories; the sums are taken only when something there is staged.
 #
-# A RESIDUAL, NAMED AND NOT CLOSED: `git commit -a` and `git commit <pathspec>` stage at commit time,
-# after this PreToolUse wall has read the index, so a growth committed that way passes here.
-# Refusing those spellings is a different wall's job.
+# WHAT THE CALL ITSELF STAGES IS READ, NOT ONLY WHAT IS STAGED BEFORE IT. This wall runs before the
+# command, so `git add f && git commit`, `git commit -a` and `git commit f` stage after it has looked.
+# The acts the call makes (lib/git-argv.sh `git_commit_stage`) are run on a copy of the index, in a
+# temporary file the real index never sees, and both sums read that copy: the commit is judged on
+# what it will hold, in the words a separate add is judged in. The copy writes the blobs the call's
+# own add would write, and nothing else. A call that stages nothing reads the index itself.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_net_zero() {
   local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a written="" row_waits=0 lacks="" fix_id fix_cell base=HEAD
-  local -a dirs=()
+  local acts idx="" src
+  local -a dirs=() words=()
   _eg_commit_repo; dir="$_EG_REPO"
   # A MERGE IN A ROW'S TREE IS MEASURED AGAINST THE PARENT THAT IS NOT THE ROW'S OWN (wave-33 T15, D10). A row's tree
   # that merges the working branch in commits that branch's content on top of its own, and growth already landed there
@@ -2766,14 +2856,24 @@ validate_net_zero() {
   # charged what it adds to it. A tree no row owns keeps HEAD: the parent that is not a row's there is HEAD itself.
   if [ -n "${_EG_RID:-}" ] && git -C "$dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then base=MERGE_HEAD; fi
   while IFS= read -r line; do dirs+=("$line"); done < <(loaded_set | sed 's|/[^/]*$||' | sort -u)
+  acts="$(git_commit_stage "$COMMAND")"
+  if [ -n "$acts" ] && idx="$(mktemp "${TMPDIR:-/tmp}/bionic-index.XXXXXX")"; then
+    src="$(git -C "$dir" rev-parse --path-format=absolute --git-path index 2>/dev/null)"
+    { [ -f "$src" ] && cp "$src" "$idx"; } || rm -f "$idx"
+    local GIT_INDEX_FILE="$idx"; export GIT_INDEX_FILE
+    # No act may wait on a person: an editor refuses and input is empty, so an interactive add stages nothing.
+    while IFS="$GIT_ARGV_US" read -r -a words; do
+      [ "${#words[@]}" -eq 0 ] || GIT_EDITOR=false git -C "$dir" "${words[@]}" </dev/null >/dev/null 2>&1
+    done <<< "$acts"
+  fi
   # rc 0: nothing staged under the set; rc 1: something is; anything else (no HEAD, no repository)
   # leaves nothing to compare against, and the arm is silent.
   git -C "$dir" diff --cached --quiet "$base" -- "${dirs[@]}" >/dev/null 2>&1; rc=$?
-  [ "$rc" -eq 1 ] || return 0
+  [ "$rc" -eq 1 ] || { rm -f "$idx"; return 0; }
   # The doctrine is bionic's (D13): only bionic's own source tree, named by the manifest HEAD holds, is
   # held to net zero; a user project's agents/*.md and skills/ files are its own (wave-31 T42).
   [ "$(git -C "$dir" show HEAD:payload/.claude-plugin/plugin.json 2>/dev/null \
-        | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || return 0
+        | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')" = bionic ] || { rm -f "$idx"; return 0; }
 
   sums="$( { loaded_set_sizes "$dir" "$base" | awk '{ print "b\t" $0 }'
              loaded_set_sizes "$dir" index | awk '{ print "a\t" $0 }'; } \
@@ -2785,6 +2885,7 @@ validate_net_zero() {
           printf "0\t%d\t%d\t%d\n", ta - tb, tb, ta
           for (f in p) if (a[f] + 0 > b[f] + 0) printf "1\t%s\t%d\t%d\n", f, b[f], a[f]
         }' | sort)"
+  [ -z "$idx" ] || { rm -f "$idx"; unset GIT_INDEX_FILE; }
   line="${sums%%$'\n'*}"
   IFS=$'\t' read -r _ delta before after <<< "$line"
   [ "${delta:-0}" -gt 0 ] 2>/dev/null || return 0
@@ -2839,7 +2940,7 @@ Grew:${grown}"
 }
 
 # The step is the run's newest step event: an integer, or 8b, the adversarial critic's step.
-_eg_step="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+_eg_step="$(_run_place "$PLAN")" || _eg_v15_unreadable
 CURRENT="$(sed -n 's/^n=//p' <<< "$_eg_step")"
 [ -n "$CURRENT" ] || refuse exit2 commit "the run's log holds no step" "record the run's step" \
 "canonical-sdlc plan at version 15: the run's log holds no step event, so the step this commit is judged at is not known.
@@ -3094,15 +3195,15 @@ _eg_row_for_worktree() {
   _eg_v15_row_for_tree "$_want"
 }
 
-# At 15 a tree is the row's latest tree event; a row in flight (any state between its dispatch and its
-# landing) is what the table's `active` was. Two rows naming one tree collide as they do in the table.
+# At 15 a tree is the row's latest tree event, as the reader folds it (lib/reader.sh `reader_trees`); a row in flight
+# (any state between its dispatch and its landing) is what the table's `active` was. Two rows naming one tree collide
+# as they do in the table.
 _eg_v15_tree_rows() {  # <plan> <tree name> -> the rows whose latest tree it is, comma-joined; asked through _proof_ask
-  local f
-  f="$(reader_facts "$1")" || return 2
-  printf '%s\n' "$f" | awk -F'|' -v w="$2" "$_READER_AWK"'
-    ev() == "tree" { p = line_kv("path"); sub(/\/$/, "", p); n = split(p, q, "/"); r = line_kv("row")
-      if (tolower(q[n]) == tolower(w)) { if (!(r in s)) o[++k] = r; s[r] = 1 } else if (r in s) delete s[r] }
-    END { for (i = 1; i <= k; i++) if (o[i] in s) printf "%s%s", (c++ ? ", " : ""), o[i] }'
+  local t
+  t="$(reader_trees "$1")" || return 2
+  printf '%s\n' "$t" | awk -F'|' -v w="$2" "$_READER_AWK"'
+    { p = line_kv("path"); sub(/\/$/, "", p); n = split(p, q, "/") }
+    p != "" && tolower(q[n]) == tolower(w) { printf "%s%s", (c++ ? ", " : ""), line_kv("row") }'
 }
 _eg_v15_row_for_tree() {  # <tree name> -> _EG_ROW / _EG_ROW_DUP as _eg_row_for_worktree sets them
   local ids id st cells  # a tree whose row the plan lacks names no row, as in the table
@@ -3332,18 +3433,28 @@ _eg_v15_step_asks() {
          *) for p in $(printf '%s' "$v" | tr ',' ' '); do [ -f "$DOCS_ROOT/$p" ] || [ -f "$BIONIC_ROOT/$p" ] || miss=1; done ;;
        esac
        [ -z "$miss" ] || _eg_v15_ask "Step 7's document: the header's adrs: naming records that stand, or none with its reason" ;;
-    8) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+    8) st="$(_run_place "$PLAN")" || _eg_v15_unreadable
        for r in $(plan_read_rows "$PLAN" Tasks 2>/dev/null | awk -F'\t' '{ id = ""; k = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^id=/) id = substr($i, 4); if ($i ~ /^kind=/) k = substr($i, 6) } if (k == "integrate") print id }'); do
          miss="${miss:-1}"; v="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$r")"; [ "${v#*state=landed}" = "$v" ] || miss=0
        done
-       ! plan_parked_why "$PLAN" >/dev/null 2>&1 || miss=0
+       if plan_parked_why "$PLAN" >/dev/null 2>&1; then miss=0
+       elif [ "$miss" = 0 ]; then
+         # A landing stands for a merge only while the merge can be read: the one reader of it is asked, here with no
+         # fetch, over the integration branch as last fetched. A plan naming no integration branch has nothing to read
+         # it against, and close-out, the landing's writer, refuses such a plan before it lands a row.
+         v="$( { . "$BIONIC_LIB/plan.sh" && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1 \
+                 || { printf 'unread\t-\t-\tlib/line.sh cannot be loaded'; exit 2; }
+               [ -n "$(plan_integration_branch "$PLAN")" ] || exit 0
+               line_merge_seen "$PLAN" "$BIONIC_ROOT")" \
+           || _eg_v15_ask "Step 8's merge: the integrate row's landing, with no merge read: $(printf '%s' "$v" | cut -f4)"
+       fi
        [ "${miss:-0}" = 0 ] || _eg_v15_ask "Step 8's merge: the integrate row's landing"
        v="$(_proof_ask "$PLAN" _eg_v15_trees "$PLAN")" || _eg_v15_unreadable
        for p in $v; do [ ! -e "$BIONIC_ROOT/$p" ] || _eg_v15_ask "Step 8's trees: $p still stands"; done
        case "$st" in *$'\ncleanup=n/a'*) : ;;
          *$'\ncleanup='*$'\ntmp-wiped='*$'\ntasks-completed='*) : ;;
          *) _eg_v15_ask "Step 8's cleanup, tmp-wiped and tasks-completed, given to its step by close-out" ;; esac ;;
-    9) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+    9) st="$(_run_place "$PLAN")" || _eg_v15_unreadable
        case "$st" in *state=delivered*) : ;; *) _eg_v15_ask "Step 9's delivery, given to its step by close-out" ;; esac
        if deploy_target_named; then
          for v in deployed verified monitored; do case "$st" in *$'\n'"$v="*) : ;; *) miss="${miss:+$miss, }$v" ;; esac; done
@@ -3352,8 +3463,8 @@ _eg_v15_step_asks() {
   esac
 }
 _eg_v15_trees() {  # <plan> -> each path the run's latest tree events name, one per line; asked through _proof_ask
-  local f; f="$(reader_facts "$1")" || return 2
-  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "tree" { t[line_kv("row")] = line_kv("path") } END { for (r in t) if (t[r] != "") print t[r] }'
+  local t; t="$(reader_trees "$1")" || return 2
+  printf '%s\n' "$t" | awk -F'|' "$_READER_AWK"'{ p = line_kv("path") } p != "" { print p }'
 }
 
 _eg_v15_step_asks
@@ -4493,11 +4604,13 @@ return 0
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs one of these `session-poker.sh`
 # verbs: `amend`, `extend`, `task-add` and `hold` (a roster row, or a row's birth); `current` (the
 # run's step); `proof-add` (a proof the gates judge by); `approve` and `waive` (each written on the
-# user's word); `release-check` (the check's fact); `finding-move` (a finding across the line);
+# user's word); `accept` and `abandon` (the person's word on a run changed around the tool, which seals it
+# again or ends it); `release-check` (the check's fact); `finding-move` (a finding across the line);
 # `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
 # writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
 # user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
-# row's own writer); and `decisions` (a decision put or ruled writes the run's design ledger and
+# row's own writer); `publish` (the push and the pull request, whose only consent is the release approval it checks, so
+# no writer's call of it reaches the network); and `decisions` (a decision put or ruled writes the run's design ledger and
 # its register, and the read goes with the verb; a writer reads neither). `ruling-ack` and
 # `rulings` are the writer's own reads and are NOT on the list. 1 otherwise. Every name on the
 # list is a verb the poker dispatches: a verb it no longer has fails there on its own, so its name
@@ -4572,7 +4685,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|accept|abandon|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
@@ -6323,5 +6436,59 @@ keeps what it learns where the run can see it: a judgment call goes in
 record/<wave>/assumptions.md, and a correction that should outlive the run goes to the user
 as a rule proposal (record/<wave>/user-rules-proposed.md), for the rules file that owns it.
 Nothing that gates or reviews this run reads the store. Reading it stays open."
+  return 2
+}
+
+# ─── wall_run_seal — a run changed around the tool admits no commit ─────────
+#
+# A run's plan and log are vouched for by their seal (lib/seal.sh). When they no longer match it,
+# the run on disk is not the run the tool kept: a step, a proof or an approval written by hand, or
+# a plan or log moved, cut or removed, would otherwise be judged as the run's own work, or end the
+# judging altogether. So the commit is refused, naming what changed and how, until the person rules
+# on the change. A seal that could not be read in time is refused too, and the commit can be run
+# again: the lock is held for milliseconds, and a reading skipped is a change admitted.
+#
+# A PREDICATE OVER THREE FACTS IT IS HANDED. hooks/bash-walls.sh, the collector, gathers them for a
+# commit, as its first act after the context and before anything costly:
+#   BIONIC_SEAL_LINE   the line lib/seal.sh `seal_verify` gave for the bound plan
+#   BIONIC_SEAL_PLAN   that plan, as the session's binding names it
+#   BIONIC_SEAL_LOG    the log the seal names, which outlives a plan that is gone
+# Any line but `changed …` and `busy` is nothing to judge here.
+#
+# THE ASK. A change is an ask of the person until they rule, so the refusal stages one, `seal:changed`, in
+# BIONIC_WALL_OWED as the gate stages its own, and the collector opens it on the run's register: the log the
+# seal names, which lib/owed.sh `owed_register` finds through the seal when the plan is gone. One key a
+# run: a second change while it is open is the same need, and a change after the ruling is a new round.
+wall_run_seal() {  # <event> -> 0 nothing · 2 block
+  local _w _h _fact _r
+  case "${BIONIC_SEAL_LINE:-}" in
+    busy)
+      fold_block exit2 commit "the run's seal could not be read" "run the commit again" \
+"The seal of the run this session is bound to was held by another writer for longer than the
+check waits, so the run could not be compared with it, and a run not compared is not judged.
+Plan:  ${BIONIC_SEAL_PLAN:-}"
+      return 2 ;;
+    changed*) ;;
+    *) return 0 ;;
+  esac
+  _w="${BIONIC_SEAL_LINE#*what=}"; _w="${_w%% *}"; _h="${BIONIC_SEAL_LINE##*how=}"
+  case "$_h" in
+    gone)  _fact="the run's $_w is gone" ;;
+    added) _fact="the run's $_w was added to outside the tool" ;;
+    *)     _fact="the run's $_w was $_h outside the tool" ;;
+  esac
+  _r="session-poker.sh accept '<their words>' or session-poker.sh abandon '<their words>'"
+  BIONIC_WALL_OWED="seal:changed"$'\t'"changed run: $_w $_h"$'\t'"$_fact: the person rules, by $_r"
+  fold_block exit2 commit "$_fact" "only the person can rule" \
+"The run this session is bound to no longer matches its seal: $_fact.
+Plan:  ${BIONIC_SEAL_PLAN:-}
+Log:   ${BIONIC_SEAL_LOG:-}
+Seal:  $BIONIC_SEAL_LINE
+Its plan and its log hold only what the tool wrote; a line written by hand, or a file moved, cut
+or removed, is not the run's own work, so no commit of this run is admitted until the person
+rules on the change. Tell them what changed and wait for their word, one of two replies:
+  session-poker.sh accept '<their words>'    the run as it now stands is theirs, sealed again
+  session-poker.sh abandon '<their words>'   the run ends here
+Until then the change is the ask seal:changed on the run's register, in the log above."
   return 2
 }

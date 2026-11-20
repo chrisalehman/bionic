@@ -31,7 +31,11 @@
 #
 # AND, SINCE wave-session-bound-run (2026-09-04, spec AC-1/AC-3/AC-6), the session's own
 # answer — see the ENGAGEMENT section below for why the root-keyed answer was not enough:
-#   session_plan <root> <sid> -> the marker's `plan=` value; exit 1 when there is no binding.
+#   session_plan <root> <sid> -> the session's bound plan: the binding recorded beside the
+#                                seal when one stands, else the marker's `plan=` value; exit 1
+#                                when there is no binding.
+#   session_binding <root> <sid> -> the recorded binding alone (a plan or `none`); exit 1 when
+#                                no record stands.
 #   session_run <root> <sid>  -> one of `bound-open <p>` (0), `bound-closed <p>` (2),
 #                                `fallback <p>` (0), `none` (1).
 #
@@ -802,8 +806,34 @@ engaged_session() {
 
 # ---------- THE SESSION'S OWN RUN ----------
 
-# session_plan <root> <sid> -> the marker's `plan=` value on stdout, exit 0; exit 1 and
-# silent when there is no binding to report.
+# session_binding <root> <sid> -> the plan the session's binding record names, or `none`, on
+# stdout, exit 0; exit 1 and silent when no record stands: a root in no repository, a session
+# that never bound through `bind_plan`, or a record out of shape. The record lives in the seal's
+# home (lib/seal.sh, THE BINDING), which is loaded, beside this file, the first time.
+session_binding() {
+  engaged_marker_path "$1" "$2" >/dev/null || return 1
+  _run_seal && seal_binding_warm "$1" || return 1
+  seal_binding_get "$1" "$2"
+}
+
+_run_seal() {  # -> 0 once lib/seal.sh, beside this file, is loaded in this shell
+  declare -F seal_binding_get >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$(cd "$(_run_self_dir)" && pwd -P)/seal.sh" >/dev/null 2>&1
+  declare -F seal_binding_get >/dev/null 2>&1
+}
+
+# session_plan <root> <sid> -> the session's bound plan on stdout, exit 0; exit 1 and silent
+# when there is no binding to report.
+#
+# THE RECORD BESIDE THE SEAL IS BELIEVED OVER THE MARKER (the seal holds the binding). The
+# marker sits in the project's state folder, where a tool can remove it, replace it with a link
+# or rewrite it; the record `bind_plan` keeps in the seal's home cannot be reached that way. So
+# when a record stands it is the answer, `none` included, whatever the marker says, and a marker
+# that disagrees is not believed and is not a changed run. When no record stands (a root in no
+# repository, a synthetic dry session that writes its marker by hand, every fixture that plants
+# one) the marker answers exactly as below. The marker stays the engagement switch
+# (`engaged_session`): only which run, never whether, is taken from the record.
 #
 # NOT A VERDICT, DELIBERATELY. It reports what the marker says and stops; `session_run`
 # decides what that means. FOUR SHAPES ARE "NO BINDING", and all four are states the fleet
@@ -822,8 +852,14 @@ engaged_session() {
 # with a trailing CR: every consumer compares that value against a path.
 session_plan() {
   local root="$1" sid="$2"
-  local f
+  local f rec
   f=$(engaged_marker_path "$root" "$sid") || return 1
+  # The home is resolved here, in this shell, so the substitution below inherits it.
+  if _run_seal && seal_binding_warm "$root" && rec=$(seal_binding_get "$root" "$sid"); then
+    [ "$rec" != none ] || return 1
+    printf '%s\n' "$rec"
+    return 0
+  fi
   [ -L "$f" ] && return 1
   [ -f "$f" ] || return 1
   local lines val

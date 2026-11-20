@@ -76,6 +76,7 @@ ck_plan() {  # <current> <proof lines> [<row>...] -> PCK, the run at 15 those pr
     "$PCK" > "$PCK.t" && mv "$PCK.t" "$PCK"
   printf '%s\n' "$proofs" | while IFS= read -r l; do [ -z "$l" ] || sp_fact "$PCK" "$l"; done
   printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-12T13:00:00Z\n' >> "$(plan_fixture_log "$PCK")"
+  seal_fixture "$PCK"
   bind_marker "$RCK" "$PCK"
 }
 ck_tree() {  # -> one cksum line per file in the fixture repository outside .git: what a write would change
@@ -272,7 +273,7 @@ ET_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 et_plan() {  # <proof lines> <integrate status> [no-document] -> PCK at current: 8, T1 landed and the integrate row T3, bound
   ck_plan 8 "$1" '| T1 | 4 | build | the x writer | implementor | — | | 30 | REQ-1 | lib/x.sh | — | — | landed |' \
     "| T3 | 8 | integrate | merge into main | orchestrator | approval:release, approval:merge | | 10 | REQ-1 | — | — | — | $2 |"
-  [ -z "${3:-}" ] || { /usr/bin/grep -v '^adrs: ' "$PCK" > "$PCK.t" && mv "$PCK.t" "$PCK"; }
+  [ -z "${3:-}" ] || { /usr/bin/grep -v '^adrs: ' "$PCK" > "$PCK.t" && mv "$PCK.t" "$PCK"; seal_fixture "$PCK"; }
   new_roster "$RCK"
 }
 ET_CARD="${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh"
@@ -497,7 +498,7 @@ expect_contains "NR-2 the row reading the unruled D3 prints its WAIT, naming the
 expect_contains "NR-3 the row waiting on the open T2 prints its WAIT, naming it" "poker: WAIT T3 — waits for T2 (active)" "$OUT"
 expect_absent "NR-4 …and the tick prints no decline (NR-1 read this same output)" "decline" "$OUT"
 s31_stop "$RNR" "$(s31_transcript "$RNR" "carry on")"
-expect_eq "NR-5 the control: T4 ready and nothing launched, the wall refuses the turn" "block" "$(s31_decision)"
+expect_eq "NR-5 the control: T4 ready and nothing launched, the wall refuses the turn" "duty" "$(s31_decision)"
 expect_contains "NR-5b …naming T4 alone" "ready with room: T4 " "$(s31_reason)"
 
 # T4 launched: every row left waits, the tick offers none, and the wall ends the turn.
@@ -551,7 +552,7 @@ st_at 4; forget_digest "$RST"
 poke_pressure "$RST" 8192 1.0 tick
 expect_eq "ST-4 at current: 4 the same table fills" "poker: FILL T1" "$(nr_fill)"
 s31_stop "$RST" "$(s31_transcript "$RST" "carry on")"
-expect_eq "ST-5 …the wall refuses the turn that left it" "block" "$(s31_decision)"
+expect_eq "ST-5 …the wall refuses the turn that left it" "duty" "$(s31_decision)"
 expect_eq "ST-6 …and the table reader names T1" "T1" "$(st_ready)"
 
 # ============================================================
@@ -780,8 +781,8 @@ AS="$(ab_k 'approval|key=step1|')"; expect_eq "AS-2 …each under its own key, t
 CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RAB" approve step1 'yes again'; expect_eq "AS-3 a second approve step1 is refused as recorded once, nothing appended" "1|1|yes" "$RC|$(ab_k 'approval|key=step1|' | grep -c .)|$(ab_said "$OUT" 'recorded once')"
 RAB="$(make_repo approved-15)"; ( cd "$RAB" && git commit -q --allow-empty -m init && git checkout -q -b wave/01-fixture ); git -C "$RAB" config user.name "Dana Fixture"
 PAB="$(plan_fixture --current 3 "$RAB/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)"; bound_marker "$RAB" "$SID" "$PAB"
-L5="$(plan_fixture_log "$PAB")"; /usr/bin/grep -v 'ev=approval' "$L5" > "$L5.t" && mv "$L5.t" "$L5"
-said_as typed "$RAB" approved; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RAB" approve plan 'approved'; AS="$RC|$(ab_k approval | grep -c .)"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:04:00Z\n' >> "$L5"; s34_gate "$RAB"
+L5="$(plan_fixture_log "$PAB")"; /usr/bin/grep -v 'ev=approval' "$L5" > "$L5.t" && mv "$L5.t" "$L5"; seal_fixture "$PAB" "$L5"
+said_as typed "$RAB" approved; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RAB" approve plan 'approved'; AS="$RC|$(ab_k approval | grep -c .)"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:04:00Z\n' >> "$L5"; seal_fixture "$PAB" "$L5"; s34_gate "$RAB"
 expect_eq "AS-4 the plan's approval answers the steps before it: at 15 with none of theirs it is taken, the only one, and a commit at Step 4 admitted" "0|1|0" "$AS|$GATE_RC"
 POKE_BOUND="$AB_BOUND_WAS"
 

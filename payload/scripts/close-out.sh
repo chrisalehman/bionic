@@ -57,10 +57,10 @@
 # SYNTHETIC id, never the live one: removing the live session's marker at the end would
 # disengage the session that is running this script.
 #
-# TWO ACTS ARE INSTRUCTIONS AND SAY SO. `TaskUpdate` and `CronDelete` are model tools;
-# a shell script cannot call either. Printing the exact instruction is the whole of what
-# this script can honestly do for them, and printing it in the same line shape as the
-# seven acts it does perform is what keeps the report readable as one thing.
+# ONE ACT IS AN INSTRUCTION AND SAYS SO. `TaskUpdate` is a model tool; a shell script
+# cannot call it. Printing the exact instruction is the whole of what this script can
+# honestly do for it, and printing it in the same line shape as the acts it does perform
+# is what keeps the report readable as one thing.
 #
 # THE ARCHIVE COMES LAST, AFTER THE GATE, AND THAT IS NOT THE ORDER THE ACTS ARE NUMBERED
 # IN. `archive_run` moves a run only when every plan under its slug reads CLOSED to
@@ -95,7 +95,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh; do
+for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh seal.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -121,6 +121,9 @@ fi
 . "${CO_LIB}/handoff.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/archive.sh"
+# THE SEAL (lib/seal.sh) that vouches for the run's plan and log: close-out lifts it before the archive moves the plan.
+# shellcheck source=/dev/null
+. "${CO_LIB}/seal.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/patrol.sh"
 # shellcheck source=/dev/null
@@ -382,17 +385,15 @@ PARKED=no
 if PARKED_WHY="$(plan_parked_why "$PLAN")"; then PARKED=yes; fi
 
 # THE SCALE (wave-38 T16; D25, AC-5.1): the plan's `scale:`, read at the wave row when it names none or one the profile
-# does not hold. Its branch cell shapes the worktree census below; its integrate cell is the act.
+# does not hold. Its branch cell shapes the worktree census below; its integrate cell names a branch still waiting on its pull request.
 CO_SCALE="$(plan_frontmatter_get "$PLAN" scale)"
 scale_cell "$CO_SCALE" branch >/dev/null 2>&1 || CO_SCALE=wave
 
-# THE INTEGRATE ACT IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). `merge` (wave, epic): the working
-# branch must be reachable from the integration branch before the tail runs, as before. `pr` (task):
-# close-out merges nothing; an unmerged working branch is not refused, and the act prints the one
-# `gh pr create` command for it against the integration branch and records it in the continuation.
-# It never runs it: opening a pull request is an outward act, the person's.
-CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=merge
-CO_PR_CMD="gh pr create --base $INTEGRATION --head $WORKING --fill"
+# THE MERGE IS READ, NEVER ASSUMED, AT EVERY SCALE. close-out merges nothing: the merge act is a readback of
+# lib/line.sh `line_merge_seen`, which reads the integration branch on the remote and the host's word on the run's pull
+# request, and the tail runs only once that says merged. A working branch nothing merged holds the run, whatever the
+# scale's integrate cell; the cell says only how the closed form names a branch still waiting on its pull request.
+CO_INTEGRATE="$(scale_cell "$CO_SCALE" integrate 2>/dev/null)" || CO_INTEGRATE=pr
 # co_pr_owed -> 0 when the act is `pr` and the working branch exists and is not yet reachable from the integration
 # branch; a branch that is gone was merged and deleted, so nothing is owed
 co_pr_owed() {
@@ -400,24 +401,9 @@ co_pr_owed() {
   git -C "$ROOT" rev-parse --verify -q "refs/heads/$WORKING" >/dev/null 2>&1 || return 1
   ! git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null
 }
-# co_pr_line <working short sha> <integration short sha> -> the merge line of the `pr` act
-co_pr_line() {
-  printf 'pr — %s (not run; %s @ %s is not merged into %s @ %s)' "$CO_PR_CMD" "$WORKING" "${1:-?}" "$INTEGRATION" "${2:-?}"
-}
-# co_into -> how the working branch reaches the integration branch: `merged`, or `to be pulled` while the PR is owed
-co_into() { if co_pr_owed; then printf 'to be pulled'; else printf 'merged'; fi; }
-# co_pr_section -> the continuation's record of the act: the integrate row's acts, in the order it does them. The reviews
-# part comes first because the push and the pull request carry the branch's tip, and a part rendered after them is on no
-# branch the pull request names. A plan with no integrate row has no part to render and records the push and the pull
-# request alone.
-co_pr_section() {
-  local row
-  row="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$3 == "integrate" { print $1; exit }')"
-  printf '## Pull request\n\nclose-out merged nothing (the %s scale integrates by pull request). Run these in this order:\n\n' "$CO_SCALE"
-  [ -z "$row" ] || printf '    bash %s reviews-part %s\n' "$(co_poker)" "$row"
-  printf '    git push -u origin %s\n    %s\n' "$WORKING" "$CO_PR_CMD"
-}
-
+# co_into -> how the working branch reaches the integration branch: `merged`, or `to be pulled` while the PR is owed; a
+# close that read the merge says merged, since the local integration branch is not where a remote merge shows
+co_into() { if [ -z "${CO_MERGE_COMMIT:-}" ] && co_pr_owed; then printf 'to be pulled'; else printf 'merged'; fi; }
 # THE CLOSED FORM'S RESUME POINT AND BRANCH LINE (wave-38 T15, AC-4.3; the one writer since wave-38 T37, D23): a
 # delivered run has nothing to resume; a parked one resumes from its branch, which is kept; a pull request owed is "to be
 # pulled". close-out writes both into the closed handoff, and session-poker.sh `handoff` on a closed plan prints what
@@ -498,22 +484,54 @@ MERGE_LINE=""
 co_parked_merge_line() {
   printf 'parked on %s @ %s — not merged into %s (%s)' "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$INTEGRATION" "$PARKED_WHY"
 }
+# co_merge_read -> the merge as lib/line.sh `line_merge_seen` reads it, after its own fetch: CO_MERGE_RC (0 merged, 1 not
+# merged, 3 the request closed unmerged, 2 unread), CO_MERGE_COMMIT (the commit a landing names, empty unless merged),
+# CO_MERGE_REF (the integration branch read), CO_MERGE_WHY and CO_MERGE_WS (the working head, short)
+CO_MERGE_RC=2; CO_MERGE_COMMIT=""; CO_MERGE_REF=""; CO_MERGE_WHY=""; CO_MERGE_WS=""
+co_merge_read() {
+  local out c
+  CO_MERGE_COMMIT=""; CO_MERGE_WS="$(git -C "$ROOT" rev-parse --short "refs/heads/$WORKING" 2>/dev/null)"
+  if co_line_load && declare -F line_merge_seen >/dev/null 2>&1; then
+    out="$(line_merge_seen "$PLAN" "$ROOT" --fetch)"; CO_MERGE_RC=$?
+  else
+    out="$(printf 'unread\t-\t%s\t%s/line.sh, the merge'"'"'s reader, cannot be loaded' "$INTEGRATION" "$CO_LIB")"; CO_MERGE_RC=2
+  fi
+  c="$(printf '%s' "$out" | cut -f2)"
+  CO_MERGE_REF="$(printf '%s' "$out" | cut -f3)"; CO_MERGE_WHY="$(printf '%s' "$out" | cut -f4-)"
+  [ "$CO_MERGE_RC" -ne 0 ] || CO_MERGE_COMMIT="$c"
+  [ -n "$CO_MERGE_REF" ] && [ "$CO_MERGE_REF" != - ] || CO_MERGE_REF="$INTEGRATION"
+  return 0
+}
+# co_merge_verdict -> the merge line: what merged it, or `WOULD REFUSE — ` and why nothing has; rc 0 merged, 1 not
+co_merge_verdict() {
+  local short
+  short="$(git -C "$ROOT" rev-parse --short "$CO_MERGE_COMMIT" 2>/dev/null || printf '%s' "${CO_MERGE_COMMIT:0:7}")"
+  case "$CO_MERGE_RC|$CO_MERGE_WHY" in
+    0\|reached) printf '%s @ %s reachable from %s @ %s' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_REF" "$short" ;;
+    0\|host\ *) printf '%s @ %s merged into %s by the pull request %s as %s' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_REF" "${CO_MERGE_WHY#host }" "$short" ;;
+    1\|*) printf 'WOULD REFUSE — %s @ %s is not reachable from %s (%s)' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_REF" "$CO_MERGE_WHY"; return 1 ;;
+    3\|*) printf 'WOULD REFUSE — %s @ %s is not merged: %s; reopen it, or park the run with a ## Wake Note' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_WHY"; return 1 ;;
+    *) printf 'WOULD REFUSE — whether %s @ %s is merged cannot be read: %s' "$WORKING" "${CO_MERGE_WS:-?}" "$CO_MERGE_WHY"; return 1 ;;
+  esac
+}
+# co_merge_holds -> the few words a merge not seen holds the run for, the ask's title
+co_merge_holds() {
+  case "$CO_MERGE_RC" in
+    1) printf 'the working branch is not merged' ;;
+    3) printf 'the pull request was closed unmerged' ;;
+    *) printf 'the merge cannot be read' ;;
+  esac
+}
 act_merge() {
-  local ws is
-  ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
-  is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  [ -n "$ws" ] || _co_refuse "the plan's working-branch '$WORKING' is not a branch in $ROOT"
-  [ -n "$is" ] || _co_refuse "the plan's integration-branch '$INTEGRATION' is not a branch in $ROOT"
-  if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
-    MERGE_LINE="$WORKING @ $ws reachable from $INTEGRATION @ $is"
+  local verdict
+  git -C "$ROOT" rev-parse --verify -q "refs/heads/$WORKING" >/dev/null 2>&1 \
+    || _co_refuse "the plan's working-branch '$WORKING' is not a branch in $ROOT"
+  co_merge_read
+  if verdict="$(co_merge_verdict)"; then
+    MERGE_LINE="$verdict"
     return 0
   fi
-  if co_pr_owed; then
-    MERGE_LINE="$(co_pr_line "$ws" "$is")"
-    return 0
-  fi
-  _co_held "the working branch is not merged" \
-    "$WORKING @ $ws is not reachable from $INTEGRATION @ $is — merge the working branch before the tail runs"
+  _co_held "$(co_merge_holds)" "${verdict#WOULD REFUSE — } — the tail runs once the merge is seen"
 }
 
 # ─── Act 1b: the rows the merge lands (wave-36 T14; D13, AC-7.7; C70) ─────────
@@ -522,8 +540,8 @@ act_merge() {
 # rows still `pending dispatch`, and the act that wiped the engaged marker had also taken the only way to write them.
 # The rows the merge lands are the plan's open (pending or active) `## Tasks` rows of kind `integrate` (the merge
 # itself) and `close` (the row units.sh's `merge` read binds to that merge); a build row still open is not landed
-# here, because nothing showed its work on the branch. Each is landed by one `published` event at the integration
-# head, of the close kind and by close-out, through the line's writer (lib/line.sh `line_published_event`); no cell is written.
+# here, because nothing showed its work on the branch. Each is landed by one `published` event at the merge commit the
+# merge act read (the integration tip that reaches the working head, or the host's merge commit), of the close kind and by close-out, through the line's writer (lib/line.sh `line_published_event`); no cell is written.
 # The session must be bound to this plan, and `run` refuses before its first act when it is not. Act 3 keeps the
 # engaged marker for every verb a refusal later in the tail leaves to the person; the marker goes last.
 LANDS_LINE=""
@@ -556,8 +574,8 @@ act_lands() {  # <rows> -> each landed by one published event at the integration
     LANDS_LINE="none — no open integrate or close row"
     return 0
   fi
-  ih="$(git -C "$ROOT" rev-parse --verify -q "${INTEGRATION}^{commit}" 2>/dev/null)" \
-    || _co_refuse "the integration branch '$INTEGRATION' names no commit to land rows $rows at"
+  ih="$CO_MERGE_COMMIT"
+  [ -n "$ih" ] || _co_refuse "no merge was read, so rows $rows have no commit to land at"
   co_line_load || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
   for id in $rows; do
     line_published_event "$PLAN" "row=$id" "commit=$ih" kind=close by=close-out why=merged >/dev/null \
@@ -566,7 +584,7 @@ act_lands() {  # <rows> -> each landed by one published event at the integration
   # The readback: the act's own result, asked of the units helper rather than assumed from the writes.
   left="$(co_lands_rows)"
   [ -z "$left" ] || _co_refuse "rows $left still read open after their landing was written — the run's log is not as written"
-  LANDS_LINE="$rows at $INTEGRATION @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)"
+  LANDS_LINE="$rows at $CO_MERGE_REF @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)"
 }
 
 # ─── Act 2: worktree branches ────────────────────────────────────────────────
@@ -1005,19 +1023,32 @@ $entry
 
 # act_disengage -> close-out's LAST act: this session's engaged marker (its binding) removed, after the continuation,
 # the epic row, the blocks, the archive and the notice, so any refusal before it left the session engaged (wave-36 T14).
+# The session's binding RECORD beside the seal outvotes the marker (lib/run.sh `session_plan`), so it goes with the
+# marker on every road that has a session key, the marker found or not: left standing, the closed-out session would read
+# as bound to the plan it closed. A record that survives its removal is a refusal, as the marker's is.
 act_disengage() {
-  local m
-  if [ -z "$CO_SID" ] || ! m="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)"; then
+  local m="" rec="" rc=0
+  if [ -z "$CO_SID" ]; then
     say "disengaged: no session key — no engaged marker to remove"
     return 0
   fi
+  seal_binding_drop "$ROOT" "$CO_SID" || rc=$?
+  case "$rc" in
+    0) rec=" and its binding record dropped" ;;
+    2) rec="" ;;
+    *) _co_refuse "the session's binding record could not be dropped (exit $rc)" ;;
+  esac
+  if ! m="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)"; then
+    say "disengaged: no engaged marker path for this session${rec:+ —$rec}"
+    return 0
+  fi
   if [ ! -e "$m" ] && [ ! -L "$m" ]; then
-    say "disengaged: this session holds no engaged marker — nothing to remove"
+    say "disengaged: this session holds no engaged marker — nothing to remove${rec:+;$rec}"
     return 0
   fi
   rm -f "$m" 2>/dev/null
   [ ! -e "$m" ] && [ ! -L "$m" ] || _co_refuse "the engaged marker $m survived its removal"
-  say "disengaged: $m removed — close-out's last act; this session is no longer engaged"
+  say "disengaged: $m removed${rec} — close-out's last act; this session is no longer engaged"
 }
 
 # ─── Act 4: the task list ────────────────────────────────────────────────────
@@ -1029,9 +1060,9 @@ TASKS_LINE="mark every 4/*, 5–9 entry completed (TaskUpdate)"
 #
 # THE CONTINUATION IS WRITTEN WHOLE (wave-33 T8; D8, AC-3.3). Every field this script can derive it
 # writes: the commit it closed at, the task count (the plan's build rows), the regression result (the
-# floor's proof line), the reviews (the review proof lines), the ADRs (the spec's or the plan's `adrs:`)
-# and the Patrol job (this session's transcript, or no sentence at all). The wave-32 close completed
-# fourteen marks by hand (A-orch-50); five remain, and they are the ones only a person decides: the
+# floor's proof line), the reviews (the review proof lines) and the ADRs (the spec's or the plan's `adrs:`).
+# A close once completed
+# fourteen marks by hand; five remain, and they are the ones only a person decides: the
 # first decision put to the user, what was ruled at the close, the next wave's version and ideas file, and
 # its carry-overs. `co_owed_line` names each of them in the close-out output. A template that invented
 # plausible values for those would produce a continuation that read true and was not.
@@ -1408,24 +1439,10 @@ co_reviews_text() {
   printf 'Reviews: %s. ADRs: %s.' "${revs:-none recorded}" "$adrs"
 }
 
-# co_patrol_sentence -> the sentence naming this session's Patrol job(s), or nothing. The id is the one
-# the platform minted, read from this session's transcript with lib/patrol.sh's own scan: a patrol job
-# (its prompt runs the poker's tick) that no CronDelete has named. No session id, no transcript or no such
-# job is no sentence: the id is not guessed.
-co_patrol_sentence() {
-  local tr ids n
-  [ -n "$CO_SID" ] || return 0
-  tr="$(patrol_transcript "$CO_SID")" || return 0
-  ids="$(_patrol_scan "$tr" "" 2>/dev/null | awk -F'\t' '$1 == "JOB" && $5 == "patrol" && $2 != "?" { printf "%s%s", (n++ ? ", " : ""), $2 } END { print "" }')"
-  [ -n "$ids" ] || return 0
-  n="$(printf '%s' "$ids" | awk -F', ' '{ print NF }')"
-  if [ "$n" = 1 ]; then printf 'Patrol job %s deleted and the stamp disarmed at close.' "$ids"
-  else printf 'Patrol jobs %s deleted and the stamp disarmed at close.' "$ids"; fi
-}
-
 continuation_template() {
-  local sha tasks regress reviews patrol inherited acts head resume ws line at ev whole_text
-  sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  local sha tasks regress reviews inherited acts head resume ws line at ev whole_text
+  # The integration branch at the merge this close read; the local branch only when no merge was read (a parked run).
+  sha="$(git -C "$ROOT" rev-parse --short "${CO_MERGE_COMMIT:-$INTEGRATION}" 2>/dev/null)"
   acts="$(co_hand_acts_section)"
   inherited="$(co_inherited_section)" \
     || _co_refuse "the run's facts cannot be read, so the inherited debt it carries is not known; run close-out again"
@@ -1447,7 +1464,6 @@ continuation_template() {
     fi
   fi
   reviews="$(co_reviews_text)"
-  patrol="$(co_patrol_sentence)"
   # A PARKED RUN SAYS SO IN ITS HEADER (wave-38 T15; AC-4.3): parked, where the work is, and why; nothing was merged.
   if [ "$PARKED" = yes ]; then
     ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
@@ -1488,12 +1504,12 @@ $acts
 $(co_governed_section)
 ${inherited:+
 $inherited
-}$(! co_pr_owed || { printf '\n'; co_pr_section; })
+}
 $(co_scorecard_section)
 
 ## Resume instruction
 
-$resume${patrol:+ $patrol} The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
+$resume The epic plan (\`${EPIC_PLAN#"$DROOT"/}\`) carries this wave's row;
 this file is the wave-local copy.
 CONT_TEMPLATE
 }
@@ -1547,11 +1563,6 @@ act_continuation_write() {
     fi
     co_cont_sections write
     [ -z "$CO_SEC_MSG" ] || CONT_LINE="$CONT_LINE; added $CO_SEC_MSG"
-    if co_pr_owed && ! co_cont_has_heading "## Pull request"; then
-      { printf '\n'; co_pr_section; } >> "$CONT" 2>/dev/null \
-        || _co_refuse "could not append the pull request command to the continuation at $CONT"
-      CONT_LINE="$CONT_LINE; added the ## Pull request section"
-    fi
     return 0
   fi
   git -C "$ROOT" rev-parse --short "$INTEGRATION" >/dev/null 2>&1 \
@@ -1662,12 +1673,6 @@ co_epic_print() {
   say "epic-edit: add the row above to the shipped table of ${EPIC_PLAN##*/} by an edit of your own; this close writes no plan (a plan with no shipped table takes the header $EPIC_SHIPPED_HEADER and its rule line first)"
 }
 
-# ─── Act 8: the Patrol ───────────────────────────────────────────────────────
-#
-# CronDelete is a model tool and `disarm` is a hook verb; both sides have to be stopped
-# (dispatch.md:24), so both are named in one line.
-PATROL_LINE="CronDelete the bionic-patrol job, then: bash $(plugin_root)/hooks/session-poker.sh disarm"
-
 # ─── Act 9: the step's events ────────────────────────────────────────────────
 #
 # WHAT THE CLOSE GIVES ITS STEPS is written through the step's one writer (lib/proof.sh `proof_step_event`): at 8 what
@@ -1694,9 +1699,10 @@ co_close_facts() {
   local ih id
   printf '8|cleanup=done|tmp-wiped=%s entries under %s (not yet wiped)|tasks-completed=%s' "$(tmp_count)" "$TMP_DIR" "$TASKS_LINE"
   [ "$PARKED" = no ] || return 0
-  ih="$(git -C "$ROOT" rev-parse --verify -q "${INTEGRATION}^{commit}" 2>/dev/null)"
-  for id in $(co_lands_rows); do printf '\npublished|row=%s|commit=%s|kind=close|by=close-out|why=merged' "$id" "$ih"; done
-  co_facts tree | awk -F'|' "$_READER_AWK"'ev() == "tree" { p = line_kv("path"); sub(/\/$/, "", p); if (p != "" && p != "—") print line_kv("row") "\t" p }' \
+  # A row is landed only on a merge read: with none, the judgment folds no landing, as the run would write none.
+  ih="$CO_MERGE_COMMIT"
+  [ -z "$ih" ] || for id in $(co_lands_rows); do printf '\npublished|row=%s|commit=%s|kind=close|by=close-out|why=merged' "$id" "$ih"; done
+  co_ask reader_trees | awk -F'|' "$_READER_AWK"'{ p = line_kv("path"); sub(/\/$/, "", p); if (p != "" && p != "—") print line_kv("row") "\t" p }' \
     | while IFS=$'\t' read -r id p; do
         git -C "$ROOT" show-ref --verify --quiet "refs/heads/wt/${p##*/}" && printf '\ntree|row=%s|path=' "$id"
       done
@@ -1820,16 +1826,16 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
   tmp="$CO_HO_FILE.close-out.$$"
   {
     printf 'bionic-handoff/v1\n%s\n\n' "$title"
-    CO_HO_STATE="$(printf 'written: %s\ninstant: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s\npatrol: %s' \
+    CO_HO_STATE="$(printf 'written: %s\ninstant: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s' \
         "$CO_HO_CLOCK" "$CO_HO_WRITTEN" "${PLAN#"$ROOT"/}" "$(co_resume_point)" "$(co_branch_line | sed 's/^branch: //')" \
-        "$CONT_REL" "$PATROL_LINE")" \
+        "$CONT_REL")" \
       awk -v secs="$HANDOFF_SECTIONS" -v old="$old" '
         BEGIN {
           n = split(secs, h, "|"); for (i = 1; i <= n; i++) H[h[i]] = 1
           # an old-shape file: its five human lines go to the section that holds their kind of thing
           M["mid-flight"] = "Open"; M["order"] = "Next"; M["rulings"] = "Decisions"; M["lessons"] = "Findings"; M["risks"] = "Open"
           # the keys the closed State writes itself: an old line under one of them is kept, marked "was"
-          K["written"] = K["instant"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = K["patrol"] = 1
+          K["written"] = K["instant"] = K["plan"] = K["resume point"] = K["working branch"] = K["continuation"] = 1
         }
         FNR == 1 { next }
         old {
@@ -1992,7 +1998,8 @@ presence_missing() {
 # holds the merge on in a person's few words.
 FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""; FACTS_SAYS="the run's proofs cannot be read"
 facts_judge() {
-  local out err ah
+  # The close judges on the run's log, never the kept facts the tick reads (lib/proof.sh `_PROOF_FRESH`).
+  local out err ah _PROOF_FRESH=1
   if ! declare -F facts_state >/dev/null 2>&1; then
     FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
     return 0
@@ -2090,6 +2097,20 @@ act_archive() {
   return 0
 }
 
+# co_lift_seal -> the run's seal removed, or a refusal. It stands between the delivery's event and the archive's move: the
+# seal names the plan where it is, so a seal left standing would read the move of a closed run as the plan gone, and the
+# lifting before the delivery would leave the delivery's own events unvouched. No home (2) is no seal to lift; the lock
+# not had (75) is refused, because the move that follows would strand a seal that names a plan no longer there.
+co_lift_seal() {
+  local rc=0
+  seal_remove "$PLAN" || rc=$?
+  case "$rc" in
+    0|2) return 0 ;;
+    75)  _co_refuse "the run's seal could not be lifted: its lock was held (exit 75); the plan is closed and was not archived, so say the same close again once the holder is done" ;;
+    *)   _co_refuse "the run's seal could not be lifted (exit $rc); the plan is closed and was not archived" ;;
+  esac
+}
+
 # co_close_archived <the run's log, found before the move> -> the delivery's step restated with the archive's line.
 # The archive moves the plan and never its record, so the plan's new place joins no log: the log found before the move
 # is named to the step's writer, which takes only a log that is there. The restated step carries the delivery's own
@@ -2132,18 +2153,14 @@ do_check() {
     co_would "facts: WOULD REFUSE — $FACTS_WHY" "$FACTS_SAYS"
     [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
   fi
-  ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
-  is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if [ "$PARKED" = yes ]; then
     verdict="parked ($PARKED_WHY)"
-  elif git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
-    verdict="$WORKING @ ${ws:-?} reachable from $INTEGRATION @ ${is:-?}"
-  elif co_pr_owed; then
-    verdict="$(co_pr_line "$ws" "$is")"
   else
-    verdict="WOULD REFUSE — $WORKING @ ${ws:-?} is not reachable from $INTEGRATION @ ${is:-?}"
+    co_merge_read
+    verdict="$(co_merge_verdict)"
   fi
-  case "$verdict" in "WOULD REFUSE"*) co_would "merge: $verdict" "the working branch is not merged" ;; *) say "merge: $verdict" ;; esac
+  case "$verdict" in "WOULD REFUSE"*) co_would "merge: $verdict" "$(co_merge_holds)" ;; *) say "merge: $verdict" ;; esac
+  is="$(git -C "$ROOT" rev-parse --short "$CO_MERGE_COMMIT" 2>/dev/null)"
   CO_LANDS="$(co_lands_rows)"
   if [ "$PARKED" = yes ]; then
     say "rows-landed: none — parked, no merge lands a row"
@@ -2151,8 +2168,10 @@ do_check() {
     say "rows-landed: none — no open integrate or close row"
   elif [ -n "$(co_lands_refusal "$CO_LANDS")" ]; then
     co_would "rows-landed: WOULD REFUSE — $(co_lands_refusal "$CO_LANDS")" "this session is not bound to the run"
+  elif [ -z "$CO_MERGE_COMMIT" ]; then
+    say "rows-landed: none — run lands $CO_LANDS only once the merge is seen"
   else
-    say "rows-landed: run would land $CO_LANDS at $INTEGRATION @ ${is:-?}"
+    say "rows-landed: run would land $CO_LANDS at $CO_MERGE_REF @ ${is:-?}"
   fi
 
   # THE CENSUS NAMES ITS SOURCE, NOT JUST ITS RESULT (D5). `wt_branches` reads the
@@ -2218,7 +2237,6 @@ do_check() {
   else
     co_epic_print
   fi
-  say "patrol: $PATROL_LINE"
   co_handoff_where
   if [ "$PARKED" = yes ]; then
     say "handoff: would write the closed form ($(co_resume_point)) to $CO_HO_REL; the run's log would name it"
@@ -2333,7 +2351,6 @@ do_run() {
   act_continuation; say "continuation: $CONT_LINE"
                     say "$(co_owed_line)"
   co_epic_print
-                    say "patrol: $PATROL_LINE"
   # ORDER: step 8's event -> the attestation -> step 9's. The attestation judges the run while it is
   # still OPEN at 8; delivering first would close it, and the gate checks no evidence of a closed run. A refusal here
   # leaves step 8 standing in the log with what the close cleaned, and no delivery.
@@ -2355,6 +2372,7 @@ do_run() {
                     say "handoff: the closed form (resume point NONE) written to $CO_HO_REL; the run's log names it"
                     say "step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}"
     CO_LOG="$(reader_log "$PLAN" 2>/dev/null)" || _co_refuse "the run's log of $PLAN cannot be found, so the archive's line has nowhere to go; nothing was moved"
+    co_lift_seal
     act_archive
     co_close_archived "$CO_LOG"
                     say "archived: $ARCHIVED_LINE"

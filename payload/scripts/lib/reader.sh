@@ -12,6 +12,8 @@
 #   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place,
 #     save a step's: a step written again is the run taken back to it, so the step a run stands at is the last written;
 #     and save a hand's: an act taken by hand again at another time is another act, so two timed ones are two facts;
+#   - a row's tree is one fact, so a tree made again after its removal stands; an untimed tree line keeps all its
+#     fields as its identity, so it replaces no timed one;
 #   - a later line with the same identifying fields and another value replaces the earlier, and takes its place;
 #   - a discarded verdict replaces no earlier verdict, whatever its commit, and one with none before it stands
 #     as the discarded run it was; a red or a green after it replaces it as any later line does;
@@ -43,6 +45,7 @@ declare -F line_lines >/dev/null 2>&1 || . "$_READER_LIB_DIR/line.sh"
 # The record's field reader, read by name; `ev()` is its event, for the `run/v1` shape the fold prints.
 _READER_AWK="${_LINE_FIELDS_AWK}"'
 function ev() { return line_kv("ev") }
+function is_pr() { return ev() == "published" && line_kv("part") == "pr" }
 '
 
 READER_QUESTIONS=""
@@ -56,9 +59,13 @@ reader_identity() {  # <event type> <field>… -> the fields that name one fact 
 }
 reader_identity step n
 reader_identity approval key
-reader_identity proof kind head question
+# A criterion's proof names it by `ac=`, so two criteria proved at one head by one kind are two facts, not one
+# replacing the other; `scope=` keeps a proof of one scope from replacing another's at the same head.
+reader_identity proof kind head question ac scope
 reader_identity ask key round
-reader_identity published row commit
+# A part of the release is told from a row's landing and from another part by `part=`: the reviews part's commit is the
+# head a publish pushes, so the two name one commit and are still two facts.
+reader_identity published row commit part
 
 # THE RECORD'S NAME is one rule, and every library that names a run's record asks it (lib/proof.sh `proof_plan_slug`,
 # the name thirty-odd call sites ask, among them): the plan's file name less .plan.md, but an epic's plan,
@@ -94,10 +101,15 @@ reader_record() {  # <plan> -> its record directory; 2 when the plan sits where 
   printf '%s/record/%s\n' "${dir%/*}" "$READER_SLUG"
 }
 
+# THE LOG'S PATH has one home, here: a record directory holds the run's log under one name, and every place that wants
+# the path asks one of these two, so no second spelling of it can drift from the reader's.
+reader_log_in() {  # <record directory> -> the path of the run log it holds
+  printf '%s/run.log\n' "${1%/}"
+}
 reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none; above 2 when the lookup died
   local rec
   rec="$(reader_record "${1:-}")" || return
-  printf '%s/run.log\n' "$rec"
+  reader_log_in "$rec"
 }
 
 # A KEY OF A FOLD THAT READS NO TURN'S END: a stop event comes at every turn, so the log is summed less those alone. Only
@@ -137,6 +149,7 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       id = named
       if (named in idk) { m = split(idk[named], ik, ","); for (i = 1; i < m; i++) id = id SUBSEP ik[i] "=" f[ik[i]] }
       else id = id SUBSEP body
+      if (t == "tree" && f["at"] == "") id = id SUBSEP body
       # two review records are two readings, even of one question at one head and scope; a later run of a check
       # or a regression at a head still replaces the earlier one
       if (named == "proof" && f["kind"] == "review") id = id SUBSEP "evidence=" f["evidence"]
@@ -314,6 +327,8 @@ reader_identity order
 reader_identity handoff
 # One drop stands per row: a drop said again with other words replaces the first.
 reader_identity drop row
+# One tree stands per row: a removal is the row's tree event with an empty path, and a tree made again replaces it.
+reader_identity tree row
 
 # A ROW'S WORK IS NO LONGER OWED when a drop of it stands and it has not landed. This is the one rule: the questions
 # below and the fill (lib/units.sh `_units_live`) put it before their own program over the facts they already fold, so
@@ -328,7 +343,8 @@ function dropped(r) { return (r in _dropped) && !(r in _landed) }
 # their own program, as they put the drop rule. Per row, in fact order: `_row_state` the latest of dispatched, candidate,
 # ready, returned, stalled and landed; `_row_held` the latest of a timed launch (active) and a landing, the scheduler's
 # own; `_row_name` the timed launch's name; `_row_dispatch` the last dispatch line; `_row_commit` the landing's commit;
-# `_row_tree` the last tree line, and `_row_tree_held` the last one with an instant, the scheduler's own.
+# `_row_tree` the last tree line, `_row_tree_nr` its place among the facts, and `_row_tree_held` the last one with an
+# instant, the scheduler's own.
 _READER_ROW_AWK='
 { _r = line_kv("row"); _e = (_r == "") ? "" : ev() }
 _r != "" && !(_r in _row_seen) { _row_seen[_r] = 1; _row_order[++_rows] = _r }
@@ -340,8 +356,18 @@ _e == "dispatch" { _row_state[_r] = "dispatched"; _row_held[_r] = "active"; _row
 _e == "published" { _row_state[_r] = _row_held[_r] = "landed"; _row_commit[_r] = line_kv("commit") }
 _e == "candidate" || _e == "ready" || _e == "returned" || _e == "stalled" { _row_state[_r] = _e }
 # an untimed tree line: the same act wrote one per tree cell, so it records the tree and holds none for the scheduler
-_e == "tree" { _row_tree[_r] = $0; if (line_kv("at") != "") _row_tree_held[_r] = $0 }
+_e == "tree" { _row_tree[_r] = $0; _row_tree_nr[_r] = NR; if (line_kv("at") != "") _row_tree_held[_r] = $0 }
 '
+
+# A ROW'S TREE IS ASKED HERE by every site outside the reader that needs one, so a tree is the same row's tree to the
+# commit gate, to its step 8 and to the close: the row fold's latest tree line of each row, in the order those lines
+# were set, which is the order two rows naming one tree are named in.
+reader_trees() {  # <plan> -> each row's latest tree fact, in fact order; 2 when the facts cannot be read
+  local f
+  f="$(reader_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK$_READER_ROW_AWK"'
+    END { for (r in _row_tree) at[_row_tree_nr[r]] = r; for (i = 1; i <= NR; i++) if (i in at) print _row_tree[at[i]] }'
+}
 
 _reader_of() {  # <plan> <type> [<field> <value>] -> the standing facts of <type>, of <field>=<value> when a value is given
   reader_facts "$1" | awk -F'|' -v t="$2" -v k="${3:-}" -v v="${4:-}" "$_READER_AWK"'
@@ -468,6 +494,16 @@ reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no
       n = split(deps, d, " "); for (i = 1; i <= n; i++) if (!(d[i] in _landed) && !dropped(d[i])) exit 1 }'
 }
 
+# THE RUN'S PULL REQUEST is a published fact of its own part, `part=pr`, written by the publish verb with the request's
+# address, the branch it carries, the head pushed and the base it is against. A later publish at another head is another
+# fact; the newest stands. Its state, open, merged or closed, is the host's, and no line of the log holds it.
+reader_question pr value reader_q_pr
+reader_q_pr() {  # <plan> -> the newest request's fields as key=value lines, `ev=` and `part=` dropped; nothing, 1, for none
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+    is_pr() { l = $0 }
+    END { if (l == "") exit 1; n = split(l, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|part)=/) print p[i] }'
+}
+
 reader_question handoff value reader_q_handoff
 reader_q_handoff() {  # <plan> -> the latest handoff: path= and at=
   _reader_last "$1" handoff
@@ -516,9 +552,6 @@ reader_q_criterion() {  # <plan> <id> -> its Eval design row as key=value, one p
   plan_read_row "$1" 'Eval design' Criterion "$2"
 }
 
-# A criterion's proof names it by `ac=`, so two criteria proved at one head by one kind are two facts, not
-# one replacing the other. This later entry for the type is the one the fold reads.
-reader_identity proof kind head question ac scope
 reader_question cell value reader_q_cell
 reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>, or state=pending; 1 not in the plan
   _reader_needs cell '<criterion>' "${2:-}" || return 2
@@ -589,7 +622,8 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
   # approval:plan by Step 3's approval once the run is at Step 4; a proof by one of its kind that did not
   # fail; step:<n> by the run reaching Step <n>. Any other wait (an external token, an id the table
   # lacks) is never met here. A dropped row is owed no more, as the fill has it: it is never ready, and
-  # a wait on it is met as a landing meets it.
+  # a wait on it is met as a landing meets it. An integrate row is not ready once the run's pull request is
+  # published: its act is done and what is left is the merge, which is the person's and the close's.
   local waits
   waits="$(plan_read_waits "$1" "${2:-}")" || return 1
   { printf '%s\n\034\n' "$waits"; reader_facts "$1"; } | awk -F'|' "$_READER_AWK$_READER_DROP_AWK"'
@@ -602,8 +636,9 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
       return 0
     }
     $0 == "\034" { facts = 1; next }
-    !facts { split($0, w, "\t"); if (w[2] == "kind") ord[++n] = w[1]; else { nw[w[1]]++; wt[w[1], nw[w[1]]] = w[2]; wv[w[1], nw[w[1]]] = w[3] }; next }
+    !facts { split($0, w, "\t"); if (w[2] == "kind") { ord[++n] = w[1]; kd[w[1]] = w[3] } else { nw[w[1]]++; wt[w[1], nw[w[1]]] = w[2]; wv[w[1], nw[w[1]]] = w[3] }; next }
     ev() == "published" { landed[line_kv("row")] = 1 }
+    is_pr() { pr = 1 }
     ev() == "dispatch" { held[line_kv("row")] = 1 }
     ev() == "approval" { appr[line_kv("key")] = 1 }
     ev() == "step" { cur = line_kv("n") }
@@ -611,6 +646,7 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
     END {
       for (i = 1; i <= n; i++) {
         r = ord[i]; if ((r in landed) || (r in held) || dropped(r)) continue
+        if (pr && kd[r] == "integrate") continue
         for (k = 1; k <= nw[r]; k++) if (!met(wt[r, k], wv[r, k])) break
         if (k > nw[r]) print r
       }

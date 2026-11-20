@@ -8,6 +8,528 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 2.1.0 — 2026-11-19
+
+This release closes the gaps 2.0.0 shipped with, in five themes. The gate holds: a run changed around the tool is caught
+at the next commit, and work stops until the person rules. The release card says what the reader says. A run that is only
+waiting costs no model turn: a shell watcher, started by the platform's own hooks, replaces the timed job. The tool pushes
+the branch and opens the pull request on the release approval, and sees the merge itself. The release card and the step
+advance are about a third of their 2.0.0 time, every target for them is still missed, and the debts and dead code 2.0.0
+accepted are mostly gone. It is a minor release: the plan format stays at `canonical_sdlc_version: 15`, and a run begun
+under 2.0.0 continues under 2.1.0.
+
+**What you do when you upgrade.**
+- **Restart Claude Code once, with no agent out.** The new hook file registers the watcher (`hooks/watch.sh`) on the turn
+  end and on session start, and widens the write hook's after-arm from Write to Write and Edit. A session takes its hooks
+  when it starts, so one that was running at the upgrade keeps the 2.0.0 hooks. Exit `claude` and start it again: a
+  `/clear` is not a restart. `doctor.sh` and the tick both say "exit claude and start it again" when what is on disk is
+  newer than what the session loaded. Until you do, a dispatch is refused as "this session was never watched", and the
+  refusal names the command that starts a watcher by hand.
+- **A timed job left in a session's table now fails.** The `prompt`, `arm` and `disarm` verbs are gone, so a 2.0.0 job
+  that fires answers `unknown verb`: delete it once with CronDelete, or restart. Nothing on a clock replaces it.
+- **The rule of 1.3.2 is narrowed.** Until now a session with no engaged file was never judged, and the engagement was
+  called a consent boundary. That holds now only for a session the seal does not bind. A session bound to an open run has
+  its commits judged against it until the run closes or the session binds another through the tool, whatever happens to
+  its engaged file, its plan, its log or its binding. Removing, renaming, emptying or replacing any of them with a link
+  no longer lifts the commit wall, since the Bash hook believes the binding. The dispatch wall, the write hook, the
+  turn-end walls and the watcher still act on the engaged file alone, so with it gone they step aside for that session,
+  and its plan edits through the tool are not sealed and read as changed at the next commit.
+- **The seal is a trail, not a lock.** A record of the plan's and the log's digests, in plain text in the repository's
+  common git directory, written by the tool and checked at every commit. It catches a change made around the tool; it
+  does not stop a process that sets out to rewrite it. A run found open with no seal, which is every run open at the
+  upgrade, is sealed as found at its first sight: nothing done to it before that is judged.
+- **A caught change refuses the commit until you rule.** The refusal names what changed and how, opens an ask on the
+  run's register, and names the two replies: `session-poker.sh accept '<your words>'` takes the run as it stands, and
+  `abandon '<your words>'` ends it. Each is refused unless the words are ones you typed in a session of the run. A script
+  of yours that edits a run's plan or log by hand now meets this refusal at the next commit.
+- **Release ends in a pull request.** At task and wave scale the release approval is the consent, `publish` pushes the
+  working branch to `origin` and opens the request against the integration branch through `gh`, and you merge it. No path
+  of the tool merges into the integration branch. `gh` must be installed and signed in; a failed push or request exits 4
+  with the cause and opens an ask for you. The run learns of the merge from the remote.
+- **One setting.** `watch-interval:` in `.bionic/config.yaml` sets the watcher's pass, five minutes by default, and a
+  value above twenty minutes is refused. A project that never set it needs nothing.
+- **Counts that changed.** 41 poker verbs, from 39: `accept`, `abandon`, `judge`, `publish` and `duty` are new, and
+  `prompt`, `arm` and `disarm` are gone. 11 hook scripts are registered, from 9.
+
+### What shipped
+
+**The gate holds.**
+- The seal library, one resolver of the git home, and the seal written by the log's appender and by the write hook's
+  after-arm for Write and for Edit (an Edit seals and does not bind; a write that was denied or failed seals nothing).
+- The commit gate compares the bound run with its seal first, ahead of the engagement test and every costly read. The
+  binding is recorded beside the seal and believed over the engaged file. Write, Edit or a shell command the wall can
+  read as a write or a delete in the seal's home is refused, engaged or not.
+- `publish` asks the seal too, before it reads the release approval: a changed run is refused with the gate's words,
+  pushes nothing, and opens the same ask.
+- No judgment reads a kept fact. The commit gate, the step advance, publish, close-out and the approve verb fold the
+  run's facts from the log the seal vouches for and neither read nor write the kept facts file, so a line written into
+  it by hand moves none of them. A commit on a copy of this run's log costs about 1.2 s less for it. The tick, the cards
+  and the situation report keep the kept file.
+- A plan write through the tool is not caught as a change around it. The write hook's before-arm tells the seal the
+  digest of the bytes the tool will write, so a log append or a commit that checks the run inside the write reads them
+  as the tool's.
+- `accept` and `abandon` are verbs. Six honest acts are driven through the gate and none is caught: close-out's archive,
+  step 8's wipe, the bind verb, a cleared session engaging again, the step verb's own move down, and a writer's record
+  written into the record folder. A run driven by its verbs alone never reads as changed.
+- The growth wall reads the commit's own arguments and the adds before it in the same call, so `git add <file> && git
+  commit`, `git commit -a` and `git commit <file>` are refused as growth staged in a call of its own is.
+
+**The card tells the record's truth.**
+- The release card numbers every open ask that waits on the person, and the reply closes every ask the card numbered and
+  none it never showed.
+- Four lines are repaired. The bottom line names a criterion owed later and says every criterion is proved only when the
+  reader does. A review whose newest reading is a flag, covered at the head, draws no pass mark and says its result. A
+  carried finding the log holds no deferral of is counted and named apart from those it does. The sheet of a version-15
+  plan names no serves cell. The sitrep's sheet and the card now count a review's mark by one rule.
+- Each of the four repairs was reverted in turn with the mutation script, and its suite went red.
+- One function says whether an advance to a step would pass, by running the gate's judge in process (`session-poker.sh
+  judge <N>…`). The checked advance, the card, the tick and the release card ask it in place of three dry commits through
+  the whole wall. Drawn over the copy before and after that change alone, the card differs in one line, the header's
+  clock time.
+
+**The window is the person's.**
+- `hooks/watch.sh` is registered on the turn end and on session start as a hook that can wake, under a time limit of one
+  day. It takes the session's lock, runs one pass of the tick with no model every five minutes, and exits quiet when
+  nothing needs the model. It wakes with one line of at most 120 characters when a row is ready with room, an agent has
+  reported, an agent is quiet past its cadence, or a reserved request was denied. Near its day's limit, with an agent
+  still out, it wakes once so the turn's end replaces it.
+- When no agent and no background job is out and the run waits only on the person (no open row, nothing ready, no detached
+  run, no pull request open, every open ask the person's), the watch rests at its next pass, spends no turn, and the turn-end hook
+  says so once: `bionic watch: stopped - waiting on you; your reply starts it again`. The turn's end after your reply
+  starts it again; nothing is typed to restore it.
+- The dispatch wall, the turn-end wall, session start and the doctor read the watch record. A watch that is alive or rested
+  on purpose admits a dispatch; no record is refused as never watched; a record that says watching over a dead process is
+  refused as stopped, and the next turn end says so in one line and starts another. A tick that is already running is seen
+  and never started twice.
+- A turn-end refusal whose fix is the agent's goes out as one short fixed line with no error look, `bionic: a duty is owed;
+  run session-poker.sh duty`, and `duty` prints the whole reason. A refusal whose fix is yours keeps its channel and wins
+  when both arise at one turn end. The duty still binds once.
+- A wake for a row quiet past its cadence or its duration, and the restart notice, are each said once for their cause, and
+  a row dispatched after the newest panel answer is no longer named gone. The timed prompt is deleted with its verbs, its marker and every line of
+  resume, handoff, session start, the situation report and close-out that named it.
+
+**The pull request is the road to main.**
+- `session-poker.sh publish` checks the release approval at the working head before any network call, pushes, opens the
+  request, and records it as a published event; done twice at one head it does nothing the second time. The reader answers
+  the run's request (`reader.sh <plan> pr`).
+- One library function says whether the working branch is merged, reading the request's state from the host and the
+  ancestry against the fetched remote branch, and never moving the local one. A squash or rebase merge counts when the host
+  says merged and names a commit the integration branch holds. A request closed unmerged opens an ask. Close-out and step
+  8's gate ask it, and close-out's arm that reported a merge that had not happened is gone.
+- The situation report names an open request as what the run waits on and offers no ready row. While it is open the
+  watcher fetches and stays quiet until the merge can be reached, then the integrate row lands. A tree asked for an
+  integrate row is refused, naming the kind; a removed tree is an event the reader reads. The method says pull request at
+  every scale.
+
+**Faster, and less to carry.**
+- One gate pass is cut: the plan's rows were read 162 times in a pass and are now read once. One pass went from 326.1 s to
+  94.5 s on its own copy, and no verdict of the gate's suites changed.
+- Resume prints one line as each of its steps starts. When the method is invoked with a handoff file, the engage hook
+  hands the model the resume command whole: absolute, through the plugin's hooks folder as it was invoked, in the form
+  the Bash wall admits.
+- `card.sh opening [<rigor>]` prints the method's opening announcement whole, its first line the line the version
+  command prints. A hook of its own, `hooks/opening-line.sh`, also shows that line under the typed command, before the
+  model's first word, behind the prefix the host puts before a hook's message (`UserPromptExpansion says:`). It is
+  registered on the Skill tool too, which no walk reached. So a model that shows the card as told puts the line in the
+  window twice.
+- A suite run by this repository's runner or by a landing, and so the whole regression the tick starts, runs without
+  the project root or the plugin root of whoever started it.
+- Paid: a row's tree has one fold in the reader, a proof's identity one declaration, and the run log's path one function.
+  The two landing functions nothing called are deleted with their comments and test groups, each rule they pinned moved
+  to the live landing line or dropped with its reason.
+- The fix rows this run's own use found: the close replay follows the pages that no longer name the timed job (and the
+  method's page paid for the two sentences it gained by three cuts in the same page: the Diagrams caveat's list, the
+  Handoff parenthesis and the tail of the resume sentence; `approve doctrine-growth` on a row restores them); a wake is
+  said once; the sheet counts a review as the card marks it.
+- `debt sites <concept> <kind> "<path>:<line>[, …]" [<plan>]` says a carried debt's sites again: a debt is written once, and
+  nothing could correct a site that had drifted.
+
+### Timings
+
+Four timings of the poker's slow verbs, on one copy of the previous wave's record, one run at a time (`speed-baseline.md`,
+`speed-after.md`). Before is 2.0.0's code at a10392e14, after is 2.1.0's at 8ad6397a0. **Every target is missed.**
+
+| timing | before | after | target |
+|---|---|---|---|
+| the release card's preview | 1286.0 s | 355.0 s | 120 s |
+| one checked advance, `current 6 --check` | 305.8 s | 87.8 s | 60 s |
+| one tick with the integrate row open | 989.9 s | 342.9 s | 120 s |
+| `resume` from a handoff | 1100.7 s | 376.9 s | 300 s |
+
+Each is between 0.28 and 0.35 of its before. Each is one run; the baseline's own repeats agreed within 5 percent, and the
+machine was no quieter for the after (load averages of 2.5 to 4.1, against 1.6 to 3.0), so the after figures are if
+anything somewhat high. The targets are round numbers recorded and carried, not a gate. The next two costs of a gate pass
+are `validate_dispatch_ledger`, 69.6 of 131 traced seconds, which reads the whole plan once for each landed or active row
+(232 rows), and `matrix_load`'s criterion cover, 21.7 traced seconds. Neither was cut, since only the largest cost of one
+pass was in scope. A tick over an unchanged digest cost as much as a full one (343.5 s). The second timing is the largest
+of the card's three advances: the card is still about four gate passes.
+
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at 358a2df9 by T49, 2026-11-20T03:52:59Z (`critic-adversarial.md`)
+- structure review, whole: flag at 358a2df9 by T49, 2026-11-20T03:53:02Z (`critic-structure.md`)
+- evidence review, whole: fail at 358a2df9 by T48, 2026-11-20T04:21:13Z (`auditor-evidence.md`)
+- adversarial review, piece: flag at 49064dd8 by T49-r2, 2026-11-20T08:43:49Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 49064dd8 by T49-r2, 2026-11-20T08:43:59Z (`critic-structure-2.md`)
+- evidence review, piece: flag at 49064dd8 by T48-r2, 2026-11-20T09:51:36Z (`auditor-evidence-2.md`)
+- adversarial review, piece: flag at 79b043e7 by T49-r3, 2026-11-20T10:39:01Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at 79b043e7 by T49-r3, 2026-11-20T10:39:06Z (`critic-structure-3.md`)
+- evidence review, piece: pass at 79b043e7 by T48-r3, 2026-11-20T15:35:58Z (`auditor-evidence-3.md`)
+
+### Known limits
+
+Stated first because they are what this release leaves on purpose.
+- A commit that never meets the gate is still not judged: one made by a merge, a cherry-pick, an alias or a script. It
+  is older than 2.0.0, and the first item of a wave of its own.
+- The commit wall's ten-second registration is unchanged, and a commit wall that outruns it still admits the commit
+  unjudged. In 2.0.0 a quote-dense command of 200 KB took 23.5 to 25.5 s; it was not measured again in this release.
+- Not done, by decision: notifications (the re-notify of issue 53 among them, and issue 53's other two parts); the rest of
+  issue 56 (the date launches, the double fold of adopt, the one-line sitrep wait, and resume's own costs, which wait on
+  the timing above); issue 54's proof wait, which holds in its ruling case and not its proof case. The dispatch, write and
+  Bash walls still refuse on the error channel, 37 refusals in the previous wave. The lower findings of 2.0.0 stay carried,
+  ten of them on their triggers. No criterion passes or fails by time.
+
+What the seal and the gate do not do.
+- The seal is a trail, not a lock. A process that sets out to rewrite the seal can, and a shell command the wall cannot
+  read (a glob, `rm -rf .git/bionic-*`) can still remove it, after which the run is sealed as found again.
+- A shell write that lands between an admitted Write or Edit and its after-arm, with no check between them, is sealed
+  with it. The after-arm seals a run found with no seal and logs no line, where the appender logs one. Two plans that
+  share one record: only the first is sealed. A binding record is never swept. A writer that waited out the seal's lock,
+  and the write hook at its admit of a plan write, each leave a note of the exact bytes beside the seal so the next check
+  does not catch them; a note is a plain file, as open as the seal to a process set on writing one.
+- Every judgment folds the run's facts fresh from the log, pinned by run-seal's §JUDGED. Two readers that decide no
+  commit still read the kept facts file: the release approval verb's check for a stale approval and the dispatch wall's
+  check of an approval. The gate's judge sets the collector's facts a second time beside the hook, a copy held equal by
+  release-approval's §ASKED rows.
+- Only the commit wall believes the binding: the dispatch wall, the write hook, the turn-end walls and the watcher act on
+  the engaged file alone, so with it gone a bound session's plan edits through the tool are not sealed and read as
+  changed at the next commit.
+- The step advance does not compare the run with its seal: its dry commit asks the gate's judge in its own process, so
+  a changed run advances as a clean one, while its commits and its publish are still refused.
+- The write hook's note covers only bytes it can predict. A write the tool makes in other bytes than the posted content
+  or the one-match splice, or one whose permission prompt is held past the minute the note lives, is caught as a change
+  if a check lands inside it, and only the person clears it.
+- The growth wall does not read stage acts other than add: `git mv`, `git rm`, `git apply --cached`, `update-index` and
+  `read-tree` in the same call. A call that stages only through them is judged on the index as it stands.
+- The step-8 gate now reaches git, and the host on the squash path.
+- A reopened pull request is read open again only by the next fetch. A run delivered but still engaged wakes no model and
+  its watcher passes quietly to its day's limit.
+- A `/clear` writes a load record that reads as a fresh load in a process that reloaded nothing, so the restart line and
+  the watcher's restart wake both go quiet at the first clear after a hook change; restart the process.
+- Only three kinds of wake are said once: a row quiet past its cadence or its duration, a row gone, and the restart. The
+  gate's, the fill's, the stand-down's and the others are as they were.
+- The wake hook was walked in fresh sessions that loaded the checkout's hooks through a plugin folder of links: an hour
+  with a writer out and no model turn, thirty minutes resting on the person with none, and a dispatch admitted after the
+  reply with nothing typed. Not driven: a full day, a plugin loaded from the plugin cache, a session whose plugin root is
+  the checkout itself, the start sources `clear`, `resume` and `compact`, and a watcher inside a dispatched agent.
+- The stop line, `bionic watch: stopped - waiting on you; …`, was not seen in a live session: at the turn end where the
+  walk's session came to rest nothing was shown, and which rest the watcher read was not recorded. The suite holds it.
+- Every stand-down wake says `met: TaskStop it, or keep it up with the hold verb`, also for a writer whose work is not
+  done and for a load stand-down the hold verb refuses.
+- While a pull request is open the watcher's pass is a whole tick every five minutes, whose cost grows with the record:
+  about 343 s on the previous wave's, about 12.5 s on this run's.
+- A whole regression the tick starts inherits the hook's environment, and `regression-run` hands its project root and
+  plugin root to a project's own regression command; this repository's runner drops them, another project's may not,
+  so its tick-started run can be red where a shell's is green.
+- The tick says nothing when it declines to start the whole regression because a row is ready or a writer's row is
+  open.
+- The sheet's count of reviews with no judge still scores a flag as passed, where the card draws it as not passed. The
+  sheet's ready set leaves out an integrate row while a request is open, and the fill's own ready set does not, so the two
+  can disagree about that row.
+- A tick in a fixture that starts a detached regression run can outlive its suite and its world, and the gate's lock wait
+  has no bound once the store it waits on is deleted. A repository under a folder that holds a `.bionic` directory
+  resolves its project root to that folder, past its own git top level. No page a writer reads says `git stash` is one
+  list for every worktree of the repository.
+- The release check's cap on test lines left the branch one line of room, so the later fix rows wrote their tests in
+  joined lines: run-seal's §JUDGED holds rows of up to 550 characters that check three or four things in one expected
+  string, and a red prints the joint value. Nine helpers in `worktree.sh` that only the two deleted landing functions
+  called stay, about 340 lines (`_wt_stale_proof`, `_wt_not_current`, `_wt_refuse_not_current`, `_wt_undo_merge`,
+  `_wt_shares_a_file`, `_wt_own_merge`, `_wt_undo_failed_fix`, `_wt_undo_arrival_fix`, `_wt_declared_debt`), because
+  deleting them takes back the room the row exists to give; their removal needs about 340 lines of room or a higher cap.
+- The method's page still spells the opening's rigor as required, so a model with no triple passes one of its own and
+  the card prints that rigor as engaged. A relative handoff path is read by the engage hook against the project root
+  alone, where resume also reads it against the docs root, so a docs-root spelling gets no resume command handed. The
+  step-8 page still says the integrate row runs the push and `gh pr create`, beside the sentence giving both to publish.
+- At a tool call on the main thread a refusal shared with the person's wall leaves on exit 2, whose detail is cut at
+  twelve lines, so the farm-out refusal's tee form can fall behind the cut.
+- The version line names the commit the session loaded, or the installed plugin's, not the working tree's head, so in a
+  checkout run in place it can trail the tree. A changed hook file is live only after the process is restarted.
+- A ruling sent to a writer before a `/clear` is not shown again to it once the next session adopts it, and the
+  writer's acknowledgement verb cannot reach the old session's roster.
+- The runner's scrub for a tree without the plugin library (`tests/run.sh`, the worker's `env -u`) is reached by no row.
+- This release's check ran under the last tagged release's copy of the check, 1.30.0's, since 2.0.0 has no tag. That
+  copy held no Known limits and no landing numbers to the plan (`no plan … names release: 2.1.0`), though the plan names
+  it.
+- The diagrams, `diagrams/lifecycle.svg` and `diagrams/hook-chain.svg`, are not redrawn for the watcher or the seal: they
+  still draw the timed job's marker, and the skill says they are not redrawn. The scale table's "Patrol" column keeps its
+  name because `lib/scale.sh` reads it by that name, and comments and usage text in the hooks and libraries still say
+  Patrol or stamp. The close replay's CS-2b title and its section's comment still say "disarming".
+- The one fold of a row's tree changed two edge cases: the order of rows in the gate's collision line when a row names
+  one tree twice with another row's between, and close-out's pending tree removal, which now follows a row's latest tree
+  alone. Close-out's tree-branch read still reads every tree line.
+- Some suites are not on the landing line and were run once on the final commit instead: the close replay and the replay
+  bed are over the bar; eight suites that plant engaged files by hand were not run against the engagement change; the
+  suites that render the card or replay its reply were not run on the card's numbered decisions and its "Also yours" lines
+  at the row, only in the card pass; and the tick's no-roster refusal has no fixture that reaches it.
+
+Debts that stand, by concept. Their sites were read at 49064dd8a (`debt-sites.md`), and the four raised after it at
+79b043e74; each is still the duplication or the unpinned pair it was registered as. The four later ones: the seal's
+judgment of a bound run, written in the commit hook and again in publish and missing from the step advance; "is a
+handoff", read inline in four places that read a relative path two ways; the skill-name test, copied from the engage
+hook into the opening-line hook under a test that holds them equal; and the set of names a suite never sees from its
+starter, written at three sites. The others: a process record's claim written three times; the watch record read twice;
+the pull request's ask key spelt twice; the bound-session rule written in the Bash hook and the wall library; a
+mktemp-redirect-read idiom copied in four places; the gate library's usable-cores line written twice; the working-branch
+refusal's word spelt in code and prose and pinned by no test; the rule that a documentation row carries the release,
+read in several places; the declared version key and the header grammar, each read separately by the gate, the write
+hook and the plan reader; the full pass's green decided in two places; the walk's per-path classification written twice;
+the wrapper over the open reds past the floor written twice; a decision's key spelt in two files; the kinds of a
+writer's row and of a task's role listed in two files; the common git directory still resolved privately at fourteen
+sites (the pin counts them); the line library's loaded-guard copied in many places; the five-case rule for a plan's
+version written in the skill and in the gate; and the walk's proof line, which now travels as an event and is read at
+the gate but pinned by no evidence-gate suite. Three debts the run found already paid or gone are not limits: the key
+reader of the ac block, the open-deferrals reader, and the second reader of the proof line (probably paid, not decided).
+
+Still carried from 2.0.0, unchanged: two rows that write the same file are offered at once unless the later names the other
+in its deps; an archived plan read where the archive moved it reads as an open run at step 0; a build row added after the
+review rows is no wait of theirs; where the tick takes a reader answer through a pipe, a failed fold reads as an empty
+answer; a review row at 15 returns to pending after each reading and a row that names it in its deps waits for ever; the
+tick may order a writer stood down while it is inside `spawn-worktree.sh ready` (hold it with `session-poker.sh hold`);
+the kept folds of a run's facts are shared by every project and suite of one user under `$TMPDIR`, so another process can
+evict a live run's fold and cost the next commit wall about 3 seconds more.
+
+### The release
+
+- The plugin reads 2.1.0, and the help and version pages are rendered from their templates by `agents-src/render.sh`.
+- The walk ran: three walks of fresh sessions (the watcher's hour, the rest on the person, the reply and the duty line;
+  then the opening, twice more) and a look at every criterion at the settled head, 68 of 68 confirmed (`walk-5.md`).
+  AC-9.4 was restated on the person's ruling D38, not waived, after the turn-end duty to run a tick was deleted; its
+  not-refused half is seen by a static search and not driven.
+- The whole regression is green at 79b043e74, `Gating: 137 passed, 0 failed`, started by the tick under a hook's
+  environment (`regression-run-79b043e74f312ebbee15aff75e5d4a9e118c9763.log`).
+- The three questions are read at that head: evidence pass, adversarial and structure each a flag with nothing at S1 or
+  S2. The Known limits above are trued against them. The reviews part is still the integrate row's to render.
+- The 14 findings deferred to this release carry no stated sentence, so `known-limits-part` rendered nothing and the
+  Known limits above are written by hand.
+
+### The landing numbers
+
+`landing-report --rows` at 79b043e74f312ebbee15aff75e5d4a9e118c9763 on 2026-11-20T20:06:42Z:
+
+```
+landings: queue=57 hand=0 git=0 · ready-to-landed median=6.7m p75=15.6m max=151.0m · runs: green=147 red=2 none=0 discarded=2 red-then-green=0 run=822 reused=0 absent=0 · waited median=136s · killed=0
+T3 queue ready=2026-11-19T03:25:23Z landed=2026-11-19T03:25:41Z minutes=0.3 runs=1 waited=8s wait=0.1 prove=0.2 rework=0.0 width=2
+  run-seal.test.sh green promised=8s actual=10s ratio=1.25
+T35 queue ready=2026-11-19T03:35:15Z landed=2026-11-19T03:37:26Z minutes=2.2 runs=2 waited=8s wait=0.1 prove=2.0 rework=0.0 width=2
+  watch.test.sh green promised=28s actual=33s ratio=1.18
+  session-poker-2.test.sh green promised=95s actual=122s ratio=1.28
+T9 queue ready=2026-11-19T04:09:13Z landed=2026-11-19T04:16:13Z minutes=7.0 runs=3 waited=123s wait=2.0 prove=5.0 rework=0.0 width=1
+  canonical-sdlc-governing-skill.test.sh green promised=29s actual=30s ratio=1.03
+  run-seal.test.sh green promised=19s actual=18s ratio=0.95
+  hook-timeout.test.sh green promised=239s actual=246s ratio=1.03
+T26 queue ready=2026-11-19T04:23:17Z landed=2026-11-19T04:28:49Z minutes=5.5 runs=3 waited=253s wait=4.2 prove=1.3 rework=0.0 width=1
+  pr-route.test.sh green promised=20s actual=22s ratio=1.10
+  reader.test.sh green promised=34s actual=38s ratio=1.12
+  render.test.sh green promised=15s actual=17s ratio=1.13
+T36 queue ready=2026-11-19T04:28:06Z landed=2026-11-19T04:43:40Z minutes=15.6 runs=3 waited=809s wait=13.5 prove=2.1 rework=0.0 width=1
+  stop.test.sh green promised=88s actual=94s ratio=1.07
+  patrol-stale.test.sh green promised=3s actual=3s ratio=1.00
+  session-sweep.test.sh green promised=22s actual=25s ratio=1.14
+T5 queue ready=2026-11-19T04:43:23Z landed=2026-11-19T04:47:57Z minutes=4.6 runs=3 waited=136s wait=2.3 prove=2.3 rework=0.0 width=1
+  bash-walls.test.sh green promised=56s actual=55s ratio=0.98
+  reader.test.sh green promised=37s actual=33s ratio=0.89
+  rehearsal.test.sh green promised=38s actual=49s ratio=1.29
+T37 queue ready=2026-11-19T04:52:39Z landed=2026-11-19T04:58:23Z minutes=5.7 runs=2 waited=10s wait=0.2 prove=5.6 rework=0.0 width=2
+  watch.test.sh green promised=76s actual=140s ratio=1.84
+  sitrep.test.sh green promised=173s actual=334s ratio=1.93
+T11 queue ready=2026-11-19T05:00:31Z landed=2026-11-19T05:08:30Z minutes=8.0 runs=3 waited=11s wait=0.2 prove=1.5 rework=6.3 width=1
+  run-predicate.test.sh green promised=7s actual=8s ratio=1.14
+  cross-gate-agreement-1.test.sh green promised=32s actual=37s ratio=1.16
+  binding.test.sh green promised=41s actual=41s ratio=1.00
+T8 queue ready=2026-11-19T05:07:43Z landed=2026-11-19T05:10:12Z minutes=2.5 runs=2 waited=60s wait=1.0 prove=0.5 rework=1.0 width=1
+  log.test.sh green promised=8s actual=8s ratio=1.00
+  run-seal.test.sh green promised=18s actual=19s ratio=1.06
+T10 queue ready=2026-11-19T06:17:26Z landed=2026-11-19T07:33:33Z minutes=76.1 runs=2 waited=4138s wait=69.0 prove=7.2 rework=0.0 width=1
+  close-out-1.test.sh green promised=238s actual=404s ratio=1.70
+  run-seal.test.sh green promised=20s actual=25s ratio=1.25
+T7 queue ready=2026-11-19T07:17:06Z landed=2026-11-19T07:51:34Z minutes=34.5 runs=3 waited=1542s wait=25.7 prove=8.8 rework=0.0 width=1
+  reader.test.sh green promised=37s actual=38s ratio=1.03
+  sitrep.test.sh green promised=300s actual=379s ratio=1.26
+  stop.test.sh green promised=103s actual=106s ratio=1.03
+T6 queue ready=2026-11-19T07:21:19Z landed=2026-11-19T08:03:11Z minutes=41.9 runs=4 waited=1982s wait=33.0 prove=8.8 rework=0.0 width=1
+  bash-walls.test.sh discarded promised=62s actual=- ratio=-
+  bash-walls.test.sh green promised=63s actual=61s ratio=0.97
+  binding.test.sh green promised=43s actual=42s ratio=0.98
+  landing-line-1.test.sh green promised=394s actual=416s ratio=1.06
+T38 queue ready=2026-11-19T07:50:29Z landed=2026-11-19T08:16:05Z minutes=25.6 runs=6 waited=781s wait=13.0 prove=12.6 rework=0.0 width=1
+  watch.test.sh green promised=118s actual=276s ratio=2.34
+  hook-timeout.test.sh green promised=246s actual=240s ratio=0.98
+  hooks-closed.test.sh green promised=4s actual=3s ratio=0.75
+  doctor-restart.test.sh green promised=195s actual=206s ratio=1.06
+  patrol-stale.test.sh green promised=3s actual=3s ratio=1.00
+  session-sweep.test.sh green promised=22s actual=22s ratio=1.00
+T27 queue ready=2026-11-19T08:03:06Z landed=2026-11-19T08:24:46Z minutes=21.7 runs=3 waited=843s wait=14.1 prove=7.6 rework=0.0 width=1
+  pr-route.test.sh green promised=45s actual=58s ratio=1.29
+  close-out-1.test.sh green promised=282s actual=358s ratio=1.27
+  shell-lint.test.sh red promised=37s actual=38s ratio=1.03
+T39 queue ready=2026-11-19T09:59:05Z landed=2026-11-19T10:03:57Z minutes=4.9 runs=5 waited=44s wait=0.7 prove=3.5 rework=0.6 width=1
+  dispatch-preflight.test.sh green promised=56s actual=64s ratio=1.14
+  dispatch-preflight-3.test.sh green promised=21s actual=21s ratio=1.00
+  patrol-revive.test.sh green promised=38s actual=46s ratio=1.21
+  session-start.test.sh green promised=24s actual=32s ratio=1.33
+  doctor-patrol.test.sh green promised=33s actual=44s ratio=1.33
+T41 queue ready=2026-11-19T10:36:40Z landed=2026-11-19T10:40:16Z minutes=3.6 runs=1 waited=21s wait=0.3 prove=3.2 rework=0.0 width=1
+  pr-route.test.sh green promised=158s actual=194s ratio=1.23
+T31 queue ready=2026-11-19T11:22:55Z landed=2026-11-19T11:31:20Z minutes=8.4 runs=1 waited=426s wait=7.1 prove=1.3 rework=0.0 width=1
+  one-reader.test.sh green promised=86s actual=78s ratio=0.91
+T12 queue ready=2026-11-19T11:28:13Z landed=2026-11-19T11:34:37Z minutes=6.4 runs=4 waited=208s wait=3.5 prove=2.9 rework=0.0 width=1
+  run-seal.test.sh green promised=53s actual=53s ratio=1.00
+  bash-walls.test.sh green promised=47s actual=61s ratio=1.30
+  canonical-sdlc-evidence-gate.test.sh green promised=24s actual=26s ratio=1.08
+  cross-gate-agreement-1.test.sh green promised=28s actual=34s ratio=1.21
+T13 queue ready=2026-11-19T12:54:16Z landed=2026-11-19T12:55:48Z minutes=1.5 runs=1 waited=19s wait=0.3 prove=1.2 rework=0.0 width=1
+  run-seal.test.sh green promised=65s actual=72s ratio=1.11
+T34 queue ready=2026-11-19T13:00:35Z landed=2026-11-19T13:32:20Z minutes=31.8 runs=6 waited=1071s wait=17.9 prove=13.9 rework=0.0 width=1
+  worktree.test.sh green promised=52s actual=62s ratio=1.19
+  stop-orders.test.sh green promised=18s actual=20s ratio=1.11
+  landing-line-1.test.sh green promised=342s actual=398s ratio=1.16
+  landing-line-2.test.sh green promised=192s actual=212s ratio=1.10
+  spawn-worktree.test.sh green promised=46s actual=59s ratio=1.28
+  one-reader.test.sh green promised=79s actual=77s ratio=0.97
+T14 queue ready=2026-11-19T13:25:20Z landed=2026-11-19T13:33:53Z minutes=8.6 runs=2 waited=428s wait=7.1 prove=1.4 rework=0.0 width=1
+  run-seal.test.sh discarded promised=72s actual=- ratio=-
+  run-seal.test.sh green promised=63s actual=74s ratio=1.17
+T40 queue ready=2026-11-19T11:20:50Z landed=2026-11-19T13:51:49Z minutes=151.0 runs=10 waited=8219s wait=137.0 prove=14.0 rework=0.0 width=1
+  refuse.test.sh green promised=3s actual=6s ratio=2.00
+  fold.test.sh green promised=1s actual=3s ratio=3.00
+  stop.test.sh green promised=96s actual=112s ratio=1.17
+  watch.test.sh green promised=303s actual=309s ratio=1.02
+  hooks-closed.test.sh green promised=3s actual=3s ratio=1.00
+  refuse.test.sh green promised=6s actual=5s ratio=0.83
+  fold.test.sh green promised=3s actual=2s ratio=0.67
+  stop.test.sh green promised=112s actual=102s ratio=0.91
+  watch.test.sh green promised=292s actual=289s ratio=0.99
+  hooks-closed.test.sh green promised=3s actual=2s ratio=0.67
+T15 queue ready=2026-11-19T13:47:35Z landed=2026-11-19T13:54:17Z minutes=6.7 runs=2 waited=276s wait=4.6 prove=2.1 rework=0.0 width=1
+  run-seal.test.sh green promised=85s actual=86s ratio=1.01
+  reader.test.sh green promised=33s actual=39s ratio=1.18
+T16 queue ready=2026-11-19T14:03:19Z landed=2026-11-19T14:15:12Z minutes=11.9 runs=4 waited=347s wait=5.8 prove=3.5 rework=2.6 width=1
+  run-seal.test.sh green promised=94s actual=103s ratio=1.10
+  bash-walls.test.sh green promised=61s actual=63s ratio=1.03
+  canonical-sdlc-governing-skill.test.sh green promised=31s actual=30s ratio=0.97
+  cmd-class.test.sh red promised=8s actual=9s ratio=1.12
+T18 queue ready=2026-11-19T14:18:52Z landed=2026-11-19T14:20:48Z minutes=1.9 runs=1 waited=28s wait=0.5 prove=1.5 rework=0.0 width=1
+  plan-page.test.sh green promised=139s actual=87s ratio=0.63
+T25 queue ready=2026-11-19T14:30:19Z landed=2026-11-19T14:30:51Z minutes=0.5 runs=2 waited=16s wait=0.3 prove=0.3 rework=0.0 width=2
+  commands.test.sh green promised=2s actual=2s ratio=1.00
+  render.test.sh green promised=13s actual=14s ratio=1.08
+T24 queue ready=2026-11-19T14:48:15Z landed=2026-11-19T15:04:11Z minutes=15.9 runs=1 waited=572s wait=9.5 prove=6.4 rework=0.0 width=1
+  sitrep.test.sh green promised=395s actual=384s ratio=0.97
+T17 queue ready=2026-11-19T15:13:54Z landed=2026-11-19T15:17:31Z minutes=3.6 runs=2 waited=26s wait=0.4 prove=3.2 rework=0.0 width=1
+  run-seal.test.sh green promised=128s actual=132s ratio=1.03
+  rehearsal.test.sh green promised=60s actual=57s ratio=0.95
+T28 queue ready=2026-11-19T15:26:00Z landed=2026-11-19T15:30:25Z minutes=4.4 runs=2 waited=226s wait=3.8 prove=0.7 rework=0.0 width=1
+  scale-profile.test.sh green promised=20s actual=21s ratio=1.05
+  render.test.sh green promised=17s actual=17s ratio=1.00
+T30 queue ready=2026-11-19T16:01:18Z landed=2026-11-19T16:10:56Z minutes=9.6 runs=3 waited=52s wait=0.9 prove=8.8 rework=0.0 width=1
+  spawn-worktree.test.sh green promised=65s actual=79s ratio=1.22
+  landing-line-1.test.sh green promised=409s actual=403s ratio=0.99
+  reader.test.sh green promised=39s actual=42s ratio=1.08
+T32 queue ready=2026-11-19T16:19:27Z landed=2026-11-19T16:22:29Z minutes=3.0 runs=1 waited=145s wait=2.4 prove=0.6 rework=0.0 width=1
+  reader.test.sh green promised=38s actual=36s ratio=0.95
+T33 queue ready=2026-11-19T17:01:50Z landed=2026-11-19T17:05:02Z minutes=3.2 runs=1 waited=90s wait=1.5 prove=1.4 rework=0.3 width=1
+  one-reader.test.sh green promised=68s actual=82s ratio=1.21
+T4 queue ready=2026-11-19T17:07:54Z landed=2026-11-19T17:09:39Z minutes=1.8 runs=1 waited=22s wait=0.4 prove=1.4 rework=0.0 width=1
+  one-reader.test.sh green promised=80s actual=82s ratio=1.02
+T29 queue ready=2026-11-19T17:45:18Z landed=2026-11-19T17:52:09Z minutes=6.8 runs=1 waited=21s wait=0.3 prove=6.5 rework=0.0 width=1
+  sitrep.test.sh green promised=386s actual=389s ratio=1.01
+T42 queue ready=2026-11-19T18:27:30Z landed=2026-11-19T18:43:25Z minutes=15.9 runs=11 waited=74s wait=1.2 prove=14.7 rework=0.0 width=1
+  patrol-revive.test.sh green promised=12s actual=10s ratio=0.83
+  patrol-duties-gate.test.sh green promised=48s actual=49s ratio=1.02
+  patrol-stale.test.sh green promised=3s actual=4s ratio=1.33
+  handoff-file.test.sh green promised=69s actual=67s ratio=0.97
+  session-start.test.sh green promised=29s actual=24s ratio=0.83
+  stop.test.sh green promised=95s actual=98s ratio=1.03
+  session-poker-2.test.sh green promised=109s actual=126s ratio=1.16
+  hook-adoption.test.sh green promised=8s actual=9s ratio=1.12
+  doctor-patrol.test.sh green promised=34s actual=36s ratio=1.06
+  dispatch-preflight-3.test.sh green promised=16s actual=15s ratio=0.94
+  close-out-1.test.sh green promised=405s actual=435s ratio=1.07
+T43 queue ready=2026-11-19T19:32:13Z landed=2026-11-19T19:32:49Z minutes=0.6 runs=1 waited=20s wait=0.3 prove=0.3 rework=0.0 width=2
+  render.test.sh green promised=15s actual=15s ratio=1.00
+T22 queue ready=2026-11-19T20:41:09Z landed=2026-11-19T20:48:55Z minutes=7.8 runs=3 waited=91s wait=1.5 prove=6.2 rework=0.0 width=1
+  release-approval-2.test.sh green promised=250s actual=346s ratio=1.38
+  card.test.sh green promised=179s actual=250s ratio=1.40
+  canonical-sdlc-evidence-gate.test.sh green promised=31s actual=28s ratio=0.90
+T19 queue ready=2026-11-19T20:41:28Z landed=2026-11-19T20:57:42Z minutes=16.2 runs=2 waited=473s wait=7.9 prove=8.3 rework=0.0 width=1
+  release-approval-2.test.sh green promised=346s actual=298s ratio=0.86
+  card.test.sh green promised=250s actual=201s ratio=0.80
+T20 queue ready=2026-11-19T20:41:22Z landed=2026-11-19T21:10:32Z minutes=29.2 runs=2 waited=1030s wait=17.2 prove=11.2 rework=0.8 width=1
+  release-approval-2.test.sh green promised=337s actual=308s ratio=0.91
+  sitrep.test.sh green promised=389s actual=361s ratio=0.93
+T23 queue ready=2026-11-19T22:06:32Z landed=2026-11-19T22:15:01Z minutes=8.5 runs=4 waited=238s wait=4.0 prove=4.5 rework=0.0 width=1
+  canonical-sdlc-evidence-gate.test.sh green promised=29s actual=29s ratio=1.00
+  bash-walls.test.sh green promised=57s actual=63s ratio=1.11
+  cross-gate-agreement-1.test.sh green promised=38s actual=38s ratio=1.00
+  run-seal.test.sh green promised=135s actual=138s ratio=1.02
+T53 queue ready=2026-11-19T23:06:29Z landed=2026-11-19T23:14:01Z minutes=7.5 runs=1 waited=436s wait=7.3 prove=0.3 rework=0.0 width=1
+  render.test.sh green promised=15s actual=15s ratio=1.00
+T55 queue ready=2026-11-19T23:38:51Z landed=2026-11-19T23:46:05Z minutes=7.2 runs=2 waited=22s wait=0.4 prove=6.9 rework=0.0 width=1
+  sitrep.test.sh green promised=319s actual=358s ratio=1.12
+  sitrep-card.test.sh green promised=51s actual=53s ratio=1.04
+T54 queue ready=2026-11-19T23:48:16Z landed=2026-11-19T23:53:45Z minutes=5.5 runs=3 waited=21s wait=0.3 prove=5.1 rework=0.0 width=2
+  watch.test.sh green promised=220s actual=307s ratio=1.40
+  notify.test.sh green promised=79s actual=109s ratio=1.38
+  stop.test.sh green promised=98s actual=92s ratio=0.94
+T56 queue ready=2026-11-20T01:17:14Z landed=2026-11-20T01:28:51Z minutes=11.6 runs=3 waited=298s wait=5.0 prove=6.7 rework=0.0 width=1
+  session-poker-4.test.sh green promised=259s actual=275s ratio=1.06
+  one-reader.test.sh green promised=79s actual=81s ratio=1.03
+  shell-lint.test.sh green promised=39s actual=39s ratio=1.00
+T46 queue ready=2026-11-20T01:27:00Z landed=2026-11-20T01:42:35Z minutes=15.6 runs=3 waited=714s wait=11.9 prove=3.7 rework=0.0 width=1
+  release-check.test.sh green promised=89s actual=94s ratio=1.06
+  detect-probes.test.sh green promised=13s actual=15s ratio=1.15
+  name-scan.test.sh green promised=106s actual=110s ratio=1.04
+T58 queue ready=2026-11-20T01:47:28Z landed=2026-11-20T01:48:54Z minutes=1.4 runs=2 waited=26s wait=0.4 prove=1.0 rework=0.0 width=1
+  words.test.sh green promised=13s actual=14s ratio=1.08
+  shell-lint.test.sh green promised=38s actual=45s ratio=1.18
+T59 queue ready=2026-11-20T03:32:16Z landed=2026-11-20T03:37:33Z minutes=5.3 runs=2 waited=20s wait=0.3 prove=5.0 rework=0.0 width=3
+  watch.test.sh green promised=180s actual=296s ratio=1.64
+  engage.test.sh green promised=18s actual=21s ratio=1.17
+T62 queue ready=2026-11-20T05:24:15Z landed=2026-11-20T05:33:28Z minutes=9.2 runs=1 waited=545s wait=9.1 prove=0.1 rework=0.0 width=1
+  cmd-class.test.sh green promised=9s actual=7s ratio=0.78
+T63 queue ready=2026-11-20T05:32:57Z landed=2026-11-20T05:34:00Z minutes=1.1 runs=1 waited=59s wait=1.0 prove=0.1 rework=0.0 width=1
+  commands.test.sh green promised=2s actual=3s ratio=1.50
+T60 queue ready=2026-11-20T06:28:37Z landed=2026-11-20T06:35:10Z minutes=6.5 runs=2 waited=161s wait=2.7 prove=3.9 rework=0.0 width=1
+  pr-route.test.sh green promised=207s actual=217s ratio=1.05
+  words.test.sh green promised=13s actual=13s ratio=1.00
+T66 queue ready=2026-11-20T06:48:51Z landed=2026-11-20T06:51:51Z minutes=3.0 runs=1 waited=142s wait=2.4 prove=0.6 rework=0.0 width=1
+  engage.test.sh green promised=39s actual=38s ratio=0.97
+T65 queue ready=2026-11-20T06:50:14Z landed=2026-11-20T07:09:21Z minutes=19.1 runs=4 waited=826s wait=13.8 prove=5.3 rework=0.0 width=2
+  canonical-sdlc-governing-skill.test.sh green promised=51s actual=51s ratio=1.00
+  run-seal.test.sh green promised=161s actual=136s ratio=0.84
+  canonical-sdlc-governing-skill.test.sh green promised=37s actual=49s ratio=1.32
+  run-seal.test.sh green promised=81s actual=132s ratio=1.63
+T67 queue ready=2026-11-20T07:07:16Z landed=2026-11-20T07:26:17Z minutes=19.0 runs=6 waited=539s wait=9.0 prove=10.0 rework=0.0 width=2
+  opening-line.test.sh green promised=4s actual=4s ratio=1.00
+  hook-timeout.test.sh green promised=277s actual=296s ratio=1.07
+  hooks-closed.test.sh green promised=2s actual=3s ratio=1.50
+  opening-line.test.sh green promised=3s actual=4s ratio=1.33
+  hook-timeout.test.sh green promised=231s actual=294s ratio=1.27
+  hooks-closed.test.sh green promised=2s actual=2s ratio=1.00
+T69 queue ready=2026-11-20T07:49:16Z landed=2026-11-20T07:50:14Z minutes=1.0 runs=1 waited=21s wait=0.3 prove=0.6 rework=0.0 width=1
+  engage.test.sh green promised=38s actual=36s ratio=0.95
+T61 queue ready=2026-11-20T08:24:04Z landed=2026-11-20T08:27:06Z minutes=3.0 runs=3 waited=20s wait=0.3 prove=2.7 rework=0.0 width=3
+  run-seal.test.sh green promised=102s actual=161s ratio=1.58
+  one-reader.test.sh green promised=41s actual=78s ratio=1.90
+  bash-walls.test.sh green promised=42s actual=57s ratio=1.36
+T71 queue ready=2026-11-20T10:13:10Z landed=2026-11-20T10:16:13Z minutes=3.0 runs=1 waited=20s wait=0.3 prove=2.7 rework=0.0 width=1
+  run-seal.test.sh green promised=165s actual=162s ratio=0.98
+T70 queue ready=2026-11-20T10:28:39Z landed=2026-11-20T10:31:05Z minutes=2.4 runs=1 waited=20s wait=0.3 prove=0.4 rework=1.7 width=2
+  runner-roster.test.sh green promised=21s actual=23s ratio=1.10
+```
+
 ## 2.0.0 — 2026-11-16
 
 This is the one-log release. Every act of a run is written once, to one log, `record/<wave>/run.log`; one reader,

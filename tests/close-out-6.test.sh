@@ -102,17 +102,6 @@ run_close "$FB" run
 expect_eq "FILL.15 the same plan with an adrs: line closes (rc 0) and the cell and the continuation name the ADR" "0/052/yes" \
   "$CO_RC/$(printed_adr_cell)/$(contains "$(cat "$FB/$CONT_REL")" "ADRs: 052.")"
 
-# THE PATROL JOB, from this session's transcript, when it is known: the id the platform minted, still undeleted.
-FP="$(mk_fixture fill-p)"; advance_to "$FP" 8
-FP_SID="closeout-fill-sid"
-mkdir -p "$SB_HOME/.claude/projects/-fixture-fill"
-FP_TR="$SB_HOME/.claude/projects/-fixture-fill/$FP_SID.jsonl"
-jq -nc '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_cron1",name:"CronCreate",input:{cron:"*/30 * * * *",recurring:true,prompt:"Patrol tick (bionic). Run: bash /abs/hooks/session-poker.sh tick"}}]}}' > "$FP_TR"
-jq -nc '{type:"user",isSidechain:false,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_cron1",content:"Scheduled recurring job pj7c91ab (*/30 * * * *) — Patrol tick"}]}}' >> "$FP_TR"
-expect_contains "FILL.16 precondition: the transcript scan yields the Patrol job, kind patrol" "JOB	pj7c91ab	" \
-  "$(bash -c '. "$1/roots.sh" && . "$1/patrol.sh" && _patrol_scan "$2" ""' _ "$REPO_ROOT/payload/scripts/lib" "$FP_TR")"
-run_close_as "$FP_SID" "$FP" run
-
 # A LANDING REPORT THAT CANNOT BE READ is a sentence, not a mark: the plugin root's poker is a stub that fails.
 FQ="$(mk_fixture fill-q)"; advance_to "$FQ" 8
 FQ_PLUG="$SANDBOX/fill-q-plugin"
@@ -169,42 +158,9 @@ expect_absent "REF-5b A-orch-16 close-out reads the branch through the one reade
   "names no working-branch" "$CO_OUT"
 
 # ============================================================
-section "§ORDER — the integrate row publishes the reviews part before the push and the pull request (REQ-15 AC-15.2; the integrate row's own part)"
+section "§ORDER — close-out publishes the reviews part before its merge readback, so the readback reads the branch the part is on"
 # ============================================================
-# At pr dealing close-out merges nothing and opens nothing: it records, in the continuation's `## Pull request`, the
-# acts the integrate row does, in the order it does them: `reviews-part <row>`, then the push, then `gh pr create`. The part
-# is first because the push and the pull request carry the branch's tip, and a part rendered after them is on no branch
-# the pull request names.
-# FIXTURE FIDELITY: mk_task_pr_fixture's task-scale plan (integrate cell `pr`), gaining the integrate row a task plan
-# carries at Step 8 (landed, so the rows-landed act has nothing to bind a session for) and the release approval it is
-# asked; the continuation is the one the run writes.
-# fails-when: the continuation names the push or `gh pr create` before `reviews-part <row>`, omits the verb, names another
-#   row, or the section stops naming `gh pr create`.
-ord_pos() {  # <file> <needle> -> the 1-based line number of the needle's first line in the `## Pull request` section, or empty
-  awk -v n="$2" '/^## / { s = ($0 == "## Pull request"); next } s && index($0, n) { print NR; exit }' "$1"
-}
-PPO="$(mk_task_pr_fixture order-pr "fix/x")"
-awk '{ print } /^\| T1 \|/ { print "| T3 | 8 | integrate | open the pull request | — | 10 | AC-1 | none | — |" }' "$PPO/$PLAN_REL" > "$PPO/$PLAN_REL.o" \
-  && mv "$PPO/$PLAN_REL.o" "$PPO/$PLAN_REL" && printf 'run/v1|ev=%s|at=2026-10-04T12:30:00Z\n' "dispatch|row=T3|name=orchestrator" "published|row=T3" >> "$PPO/$LOG_REL" \
-  && release_approved "$PPO"
-expect_contains "ORDER-0 precondition: the plan carries the integrate row the section names" "| T3 | 8 | integrate |" "$(cat "$PPO/$PLAN_REL")"
-run_close "$PPO" run
-expect_eq "ORDER-1 the task-scale run closes" "0" "$CO_RC"
-OR_PART="$(ord_pos "$PPO/$CONT_REL" 'session-poker.sh reviews-part T3')"
-OR_PUSH="$(ord_pos "$PPO/$CONT_REL" 'git push')"
-OR_PR="$(ord_pos "$PPO/$CONT_REL" 'gh pr create --base main --head fix/x')"
-expect_nonempty "ORDER-1b precondition: the section names the part, the push and the pull request (positions $OR_PART $OR_PUSH $OR_PR)" "$OR_PART$OR_PUSH$OR_PR"
-expect_eq "ORDER-2 the continuation records reviews-part <integrate row> first, then the push, then gh pr create" "yes" \
-  "$([ -n "$OR_PART" ] && [ -n "$OR_PUSH" ] && [ -n "$OR_PR" ] && [ "$OR_PART" -lt "$OR_PUSH" ] && [ "$OR_PUSH" -lt "$OR_PR" ] && echo yes || echo no)"
-expect_contains "ORDER-3 the push names the working branch" "git push -u origin fix/x" "$(cat "$PPO/$CONT_REL")"
-# the plan with no integrate row names no verb to run, and still records the push before the pull request
-PPN="$(mk_task_pr_fixture order-pr-norow "fix/x")"
-run_close "$PPN" run
-expect_absent "ORDER-4 a plan with no integrate row names no reviews-part" "reviews-part" "$(cat "$PPN/$CONT_REL")"
-expect_eq "ORDER-4b …and still records the push before gh pr create" "yes" \
-  "$(a="$(ord_pos "$PPN/$CONT_REL" 'git push')"; b="$(ord_pos "$PPN/$CONT_REL" 'gh pr create')"; [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && echo yes || echo no)"
-
-# AT MERGE DEALING close-out merges nothing either: its merge act is a readback that the working branch is reachable from the
+# close-out merges nothing: its merge act is a readback that the working branch is reachable from the
 # integration branch, and the person's merge came first. When close-out itself renders the part (no integrate row did), it
 # publishes it BEFORE that readback, so the readback reads the branch the part is on, and holds until that tip is merged.
 # FIXTURE FIDELITY: mk_fixture's wave-scale plan (integrate cell `merge`) at Step 8 with the release entry committed on the
@@ -218,7 +174,7 @@ ord_fixture() {  # <name> -> a wave-scale project at Step 8 whose release entry 
   p="$(mk_fixture "$1")" && advance_to "$p" 8 || return 1
   wt="$p-wave"
   awk '{ print } /^adrs: none$/ && !d { print "release: 9.9.9"; d = 1 }' "$p/$PLAN_REL" > "$p/$PLAN_REL.r" \
-    && mv "$p/$PLAN_REL.r" "$p/$PLAN_REL"
+    && mv "$p/$PLAN_REL.r" "$p/$PLAN_REL" && seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '# Changelog\n\n## 9.9.9 — 2026-10-22\n\nThe prose a person wrote.\n\n### Known limits\n\n- one limit\n' > "$wt/CHANGELOG.md"
   fixture_git "$wt" add CHANGELOG.md && fixture_git "$wt" commit -q -m "the release entry" >/dev/null 2>&1 \
     && fixture_git "$p" merge -q --no-ff -m "merge the release" wave/01-fixture >/dev/null 2>&1 || return 1

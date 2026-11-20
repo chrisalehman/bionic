@@ -949,4 +949,74 @@ wh() { bash -c '. "$1"; . "$2"; shift 2; write_gate_header_fault "$@"; echo "rc=
 assert_eq "WG-4 the header's first fault is named; a whole header has none" "rc=0 bad-scale huge|rc=0 mode|rc=1 " \
   "$(wh '' build double huge '' 0 '' 0 '' 0 '')|$(wh x build double wave '' 0 '' 0 '' 0 '')|$(wh '' build double wave '' 0 '' 0 '' 0 '')"
 assert_eq "WG-3 a key that is none of these says nothing, rc 2" "2 " "$(wg nope x /p >/dev/null; echo "$?") $(wg nope x /p 2>/dev/null)"
+
+section "WINDOW: a plan write the hook admitted is the tool's from before the file changes"
+# Each tool call as Claude Code makes it: the before-arm, the tool's exact bytes on disk, the after-arm. Between
+# the last two, one check of the run of the kind the product makes all day (an append through lib/log.sh, or a
+# commit's gate, the real bash-walls.sh); the commit after is read against the step's own verdict, never a change.
+# FIXTURE FIDELITY: a real git world, its plan and log from plan-fixture.sh (sealed), bound by bound-marker.sh.
+# ANTI-VACUITY: every row reading no change sits beside rows in the same worlds that read one (WN-4 to WN-7).
+. "$(dirname "$0")/lib/plan-fixture.sh"
+WN_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"; WN_SB=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$WN_SB"); WN_N=0
+WN_OWED="bionic: commit refused — a fact this step owes is missing (record each fact named)"
+WN_PC="bionic: commit refused — the run's plan was changed outside the tool (only the person can rule)"
+wn_world() {  # a fresh world: a run at step 5 bound to the session, its plan WN_P and log WN_L sealed
+  WN_N=$((WN_N + 1)); WN_G="$WN_SB/g$WN_N"; mkdir -p "$WN_G/.bionic/tmp"; git -C "$WN_G" init -q
+  git -C "$WN_G" -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m seed; git -C "$WN_G" checkout -q -b feature/x
+  WN_P="$(plan_fixture --current 5 "$WN_G/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)"; WN_L="$(plan_fixture_log "$WN_P")"
+  : > "$WN_G/.bionic/tmp/engaged-$GS_SID.state"; bound_marker "$WN_G" "$GS_SID" "$WN_P"
+}
+wn_arm() {  # <PreToolUse|PostToolUse> <Write|Edit> <tool_input json> -> WN_RC
+  WN_RC=0; jq -n --arg s "$GS_SID" --arg c "$WN_G" --arg e "$1" --arg t "$2" --argjson i "$3" '{session_id:$s, cwd:$c,
+    hook_event_name:$e, tool_name:$t, tool_input:$i} + (if $e == "PostToolUse" then {tool_response:{type:"update"}} else {} end)' \
+    | HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" >/dev/null 2>&1 || WN_RC=$?
+}
+wn_edit_in() { jq -n --arg p "$WN_P" --arg o "$1" --arg n "$2" '{file_path:$p, old_string:$o, new_string:$n, replace_all:false}'; }
+wn_made_edit() {  # <old> <new>: the Edit tool's bytes; the new string unquoted, as bash 3.2 keeps a quoted one's quotes
+  local b n="$2"; b="$(cat "$WN_P"; printf x)"; b="${b%x}"; printf '%s' "${b/"$1"/$n}" > "$WN_P"
+}
+wn_append() { ( RUN_LOG="$WN_L"; . "$WN_LIB/log.sh"; log_append run "log=.bionic/tmp/runs/x-$WN_N.log" ) >/dev/null 2>&1 || :; }
+wn_gate() {  # -> WN_GLINE: a commit's gate, its first line
+  jq -n --arg s "$GS_SID" --arg c "$WN_G" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"git commit -m x"}}' | HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" CLAUDE_PROJECT_DIR= \
+    BIONIC_PLUGINS_DIR="$WN_SB/np" bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" >/dev/null 2>"$WN_SB/gate.err" || :
+  WN_GLINE="$(head -1 "$WN_SB/gate.err")"
+}
+wn_verify() { ( . "$WN_LIB/seal.sh"; seal_verify "$WN_P" ) 2>/dev/null || :; }
+wn_edit() {  # <old> <new> <check in the window: append|gate|none> [hand] — one admitted Edit, whole
+  local in; in="$(wn_edit_in "$1" "$2")"; wn_arm PreToolUse Edit "$in"; WN_PRE="$WN_RC"; wn_made_edit "$1" "$2"
+  [ -z "${4:-}" ] || printf '| a hand line |\n' >> "$WN_P"
+  case "$3" in append) wn_append ;; gate) wn_gate; WN_MID="$WN_GLINE" ;; esac; wn_arm PostToolUse Edit "$in"
+}
+wn_world; wn_gate
+assert_eq "WN-0 the world is honest before any tool call" "$WN_OWED|clean" "$WN_GLINE|$(wn_verify)"
+wn_edit "fixture plan" "fixture plan, a ruling added" append
+expect_nonempty "WN-1 the log took the window's line" "$(/usr/bin/grep -F "log=.bionic/tmp/runs/x-$WN_N.log" "$WN_L")"
+wn_gate
+assert_eq "WN-1 an admitted Edit with an append in its window verifies clean, its commit refused only for the fact owed" \
+  "0|clean|$WN_OWED" "$WN_PRE|$(wn_verify)|$WN_GLINE"
+wn_world; wn_edit "fixture plan" "fixture plan, a ruling added" gate; wn_gate
+assert_eq "WN-2 a commit's gate in the window reads the plan as the tool's, and so does the next" "$WN_OWED|$WN_OWED" "$WN_MID|$WN_GLINE"
+wn_world; wn_edit "fixture plan" "fixture plan, a ruling added" append; wn_edit "a ruling added" "a ruling added at 9:36" append
+WN_BODY="$(cat "$WN_P"; printf x)"; WN_BODY="${WN_BODY%x}| a line the orchestrator wrote |
+"
+WN_IN="$(jq -n --arg p "$WN_P" --arg c "$WN_BODY" '{file_path:$p, content:$c}')"
+wn_arm PreToolUse Write "$WN_IN"; WN_PRE="$WN_RC"; printf '%s' "$WN_BODY" > "$WN_P"; wn_append; wn_arm PostToolUse Write "$WN_IN"; wn_gate
+assert_eq "WN-3 two Edits back to back and a Write, each with an append in its window, verify clean; the commit is not refused for them" \
+  "0|clean|$WN_OWED" "$WN_PRE|$(wn_verify)|$WN_GLINE"
+wn_world; wn_edit "fixture plan" "fixture plan, a ruling added" append hand; wn_gate
+assert_eq "WN-4 a hand line beside the admitted Edit, in its window, is caught" "0|$WN_PC" "$WN_PRE|$WN_GLINE"
+wn_world; wn_edit "fixture plan" "fixture plan, a first ruling" none; cp "$WN_P" "$WN_SB/first.plan"
+wn_edit "a first ruling" "a second ruling" none; WN_V="$(wn_verify)"; cp "$WN_SB/first.plan" "$WN_P"; wn_gate
+assert_eq "WN-5 two admitted Edits verify clean; the first one's text put back by hand after the second is caught" \
+  "clean|$WN_PC" "$WN_V|$WN_GLINE"
+wn_world; printf '| a hand line |\n' >> "$WN_P"; wn_gate
+assert_eq "WN-5 a hand line with no tool call near it is caught" "$WN_PC" "$WN_GLINE"
+wn_world; WN_BAD="$(sed 's/^governing-skill: .*$//' "$WN_P")"
+wn_arm PreToolUse Write "$(jq -n --arg p "$WN_P" --arg c "$WN_BAD" '{file_path:$p, content:$c}')"
+printf '%s' "$WN_BAD" > "$WN_P"; wn_append; wn_gate
+assert_eq "WN-6 a Write the before-arm refused leaves nothing standing: its bytes, written by hand, are caught" "2|$WN_PC" "$WN_RC|$WN_GLINE"
+wn_world; wn_arm PreToolUse Edit "$(wn_edit_in "fixture plan" "fixture plan, never written")"
+printf '| a hand line |\n' >> "$WN_P"; wn_append; wn_gate
+assert_eq "WN-7 an Edit admitted whose tool then fails vouches for no other bytes: a hand change is caught" "0|$WN_PC" "$WN_RC|$WN_GLINE"
 finish

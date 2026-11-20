@@ -46,6 +46,7 @@
 #     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
 #     bash card.sh <step0|step1|step2|step3> <artifact> (the whole card; no stdin)
 #     bash card.sh rigor <word>                         (a rigor level, printed with its meaning)
+#     bash card.sh opening [<rigor> [<intent> <scale>]]   (the method's opening: the version line, the engaged line, the rigor line; with no rigor, the version line and that the triple is not yet declared)
 #     bash card.sh regression <scale> [<plan>]          (the regression line the Step-0 card prints)
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
@@ -2370,10 +2371,8 @@ _card_stem() {  # <path> -> the name without `.<kind>.md`: wave-01-x.plan.md -> 
 # the runner inherits it, and a fixture's card would then open nothing for any writer who ran that suite.
 # A render that reopened any of these put "Blocked on you" on the sitrep for an answer already given.
 _card_writer() {  # -> 0 when the working tree is a linked tree marked with a dispatched writer's name
-  local out common gitdir
-  out="$(git rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 1
-  { IFS= read -r common; IFS= read -r gitdir; } <<< "$out"
-  [ -n "$gitdir" ] && [ "$gitdir" != "$common" ] && [ -s "$gitdir/bionic-agent" ]
+  local gitdir
+  gitdir="$(git_linked_dir "$PWD")" && [ -s "$gitdir/bionic-agent" ]
 }
 _card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or the renderer is a writer
   local facts
@@ -2425,8 +2424,9 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
 # refused on, because the tick asks them too. `early <plan>` asks, cheapest first: an open reader row on the
 # session's roster (an auditor or a critic, not acked) or a reader row past the landed release whose reading is not
 # registered, an owed reading unregistered at the working head
-# (lib/units.sh `_units_readings_state`, the tick's own reading), and `current <N> --check` for 6, 7 and 8 (the
-# check-only advance; its exit is read and its verdict line is the reason, never a second judgment here). On the
+# (lib/units.sh `_units_readings_state`, the tick's own reading), and the check-only advance to 6, 7 and 8, asked of the
+# advance's own judge once for the three (`session-poker.sh judge 6 7 8`, each answer what `current <N> --check` prints;
+# its exit is read and its verdict line is the reason, never a second judgment here). On the
 # first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
 # on stdout, one `settles: <key>` line per item a red check owes that the page settles with a decision of the
 # user's (`waive:<question>` or `row:<AC>`), so the page opens each on the person's ledger.
@@ -2525,12 +2525,20 @@ CF_POST
       *) CARD_EARLY_WHY="the reviews cannot be judged at $head8: $st"; return 1 ;;
     esac
   fi
-  # (3) THE ADVANCES TO 6, 7 AND 8, CHECKED BY THE ADVANCE ITSELF. A red check is early unless every refusal it
-  # prints is one the page settles with a decision (`_card_settles`): its lines are read as the check captured
-  # them, never judged again here.
+  # (3) THE ADVANCES TO 6, 7 AND 8, CHECKED BY THE ADVANCE'S OWN JUDGE. One ask of the judge (`judge 6 7 8`,
+  # hooks/poker/judge.sh `advance_judge`) answers the three in one process, each step's answer the lines its checked
+  # advance prints, closed by `judged <N> exit <rc>`. A red check is early unless every refusal it prints is one the
+  # page settles with a decision (`_card_settles`): its lines are read as the judge printed them, never judged again
+  # here. An answer the ask did not close is read as that step's check exiting with the ask's own exit.
   CF_SETTLE=""
+  local judged jrc
+  judged="$(_card_poke judge 6 7 8)"; jrc=$?
   for n in 6 7 8; do
-    out="$(_card_poke current "$n" --check)"; rc=$?
+    out="$(printf '%s\n' "$judged" | awk -v n="$n" '
+      index($0, "poker: judged ") == 1 { if ($3 == n) { printf "%s", b; exit } b = ""; next }
+      { b = b $0 "\n" }')"
+    rc="$(printf '%s\n' "$judged" | awk -v n="$n" 'index($0, "poker: judged ") == 1 && $3 == n && $4 == "exit" { print $5; exit }')"
+    [ -n "$rc" ] || { out="$judged"; rc="$jrc"; [ "$rc" -ne 0 ] || rc=2; }
     [ "$rc" -eq 0 ] && continue
     _card_settles "$out" && continue
     line="$(printf '%s\n' "$out" | awk 'NF { print; exit }')"; line="${line#poker: }"
@@ -2692,6 +2700,8 @@ CF_CHECKED
 #   title       <project> <release> <clock> <head8> <tasks landed> <tasks>
 #   early       <why the card is early>          preview          (a fact each, at most once)
 #   criteria    <in the matrix> <waived by you>  miss <AC>        (a miss per criterion not proved)
+#   owed        <AC> <close|later>               (one per criterion owed by the close or at a later step: pending,
+#               neither proved nor a decision)
 #   check       <path>                           (one per file of the declared release check the release changes)
 #   aside       <an item of the user's outside the run>
 #   decision    <kind> <key> <default|other> <subject> <default label> <other label> <default phrase> <other phrase>
@@ -2701,7 +2711,8 @@ CF_CHECKED
 #   goal        <status> <mark> <name> <reading> <evidence>
 #   sofar | handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
 #   findings    <n> <fixed> <awaiting your decision> <carried> <the rows that fix them, space-separated>
-#   finding     <F|A|C> <severity> <sentence>
+#               [<the carried findings no deferral in the run's log holds, `<question> #<n>`, `;`-separated>]
+#   finding     <F|A|C|R> <severity> <sentence>          (R: carried by its record alone)
 #
 # Decisions, misses, goals, reviews and findings print in the order they came. A fact the renderer does not know,
 # or no title, refuses the card (64, nothing drawn): a card that silently dropped a fact would ask the user to
@@ -2752,8 +2763,8 @@ _card_release_dec_of() {  # <key> -> the decision number the card gives it; 1 wh
 _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on stderr on a fact it does not know
   local l t title=0
   RL_EARLY=""; RL_PREVIEW=no; RL_ACT=0; RL_ACW=0; RL_REPLY=""; RL_N=0; RL_SF=""; RL_HH=""; RL_TR=""; RL_TACC=""; RL_TREG=""
-  RL_FN=0; RL_FNF=0; RL_FNA=0; RL_FNC=0; RL_FROWS=""
-  RL_MISS=(); RL_CHK=(); RL_ASIDE=(); RL_GOAL=(); RL_REVIEW=(); RL_FIND=()
+  RL_FN=0; RL_FNF=0; RL_FNA=0; RL_FNC=0; RL_FROWS=""; RL_FUNL=()
+  RL_MISS=(); RL_OWC=(); RL_OWL=(); RL_CHK=(); RL_ASIDE=(); RL_GOAL=(); RL_REVIEW=(); RL_FIND=()
   RL_DKIND=(); RL_DKEY=(); RL_DPICK=(); RL_DSUBJ=(); RL_DLAB=(); RL_OLAB=(); RL_DPH=(); RL_OPH=()
   while IFS= read -r l || [ -n "$l" ]; do
     [ -n "$l" ] || continue
@@ -2766,6 +2777,11 @@ _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on std
       preview) RL_PREVIEW=yes ;;
       criteria) RL_ACT="${CARD_CELLS[1]:-0}"; RL_ACW="${CARD_CELLS[2]:-0}" ;;
       miss) RL_MISS[${#RL_MISS[@]}]="${CARD_CELLS[1]:-}" ;;
+      owed)
+        case "${CARD_CELLS[2]:-}" in
+          close) RL_OWC[${#RL_OWC[@]}]="${CARD_CELLS[1]:-}" ;;
+          *) RL_OWL[${#RL_OWL[@]}]="${CARD_CELLS[1]:-}" ;;
+        esac ;;
       check) RL_CHK[${#RL_CHK[@]}]="${CARD_CELLS[1]:-}" ;;
       aside) RL_ASIDE[${#RL_ASIDE[@]}]="${CARD_CELLS[1]:-}" ;;
       decision)
@@ -2782,7 +2798,8 @@ _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on std
       review) RL_REVIEW[${#RL_REVIEW[@]}]="${CARD_CELLS[1]:-}" ;;
       findings)
         RL_FN="${CARD_CELLS[1]:-0}"; RL_FNF="${CARD_CELLS[2]:-0}"; RL_FNA="${CARD_CELLS[3]:-0}"; RL_FNC="${CARD_CELLS[4]:-0}"
-        RL_FROWS="${CARD_CELLS[5]:-}" ;;
+        RL_FROWS="${CARD_CELLS[5]:-}"
+        IFS=';' read -r -a RL_FUNL <<< "${CARD_CELLS[6]:-}" ;;
       finding) RL_FIND[${#RL_FIND[@]}]="${l#finding"$CARD_TAB"}" ;;
       *) printf "card.sh: unknown release fact '%s' — card.sh release takes the facts its header names\n" "$t" >&2; return 64 ;;
     esac
@@ -2811,8 +2828,16 @@ _card_release_bottom() {
       else l="$l (decisions $(_card_list 6 "${nums[@]}"))"; fi
     fi
     _card_hang 2 "- $l."
-  elif [ "$RL_ACW" -gt 0 ]; then _card_hang 2 "- Every criterion is proved or waived by you."
-  elif [ "$RL_ACT" -gt 0 ]; then _card_hang 2 "- Every criterion is proved."
+  fi
+  # A CRITERION OWED BY THE CLOSE OR AT A LATER STEP IS PENDING: it is named as owed, and the line that says the
+  # criteria are proved speaks of the others alone, so the card never says all are while the reader answers one pending.
+  [ "${#RL_OWC[@]}" -eq 0 ] || _card_hang 2 "- $(_card_plural "${#RL_OWC[@]}" criterion criteria) owed by the close: $(_card_list 6 "${RL_OWC[@]}")."
+  [ "${#RL_OWL[@]}" -eq 0 ] || _card_hang 2 "- $(_card_plural "${#RL_OWL[@]}" criterion criteria) owed at a later step: $(_card_list 6 "${RL_OWL[@]}")."
+  n=$(( ${#RL_OWC[@]} + ${#RL_OWL[@]} )); l=""; [ "$n" -eq 0 ] || l=" other"
+  if [ "${#RL_MISS[@]}" -gt 0 ]; then :
+  elif [ "$n" -gt 0 ] && [ "$RL_ACT" -le "$n" ]; then :
+  elif [ "$RL_ACW" -gt 0 ]; then _card_hang 2 "- Every$l criterion is proved or waived by you."
+  elif [ "$RL_ACT" -gt 0 ]; then _card_hang 2 "- Every$l criterion is proved."
   else _card_hang 2 "- The matrix holds no criterion."; fi
   # An early run puts no decision: the acting render refuses it, so a preview says what the user will owe, never that
   # they owe it now, and the card says one thing.
@@ -2885,8 +2910,9 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
     [ "$RL_FNF" -eq 0 ] || lab="$RL_FNF fixed"
     [ "$RL_FNA" -eq 0 ] || lab="${lab:+$lab · }$RL_FNA for your decision"
     [ "$RL_FNC" -eq 0 ] || lab="${lab:+$lab · }$RL_FNC carried"
+    [ "${#RL_FUNL[@]}" -eq 0 ] || lab="${lab:+$lab · }${#RL_FUNL[@]} carried by their records alone"
     _card_hang 0 "Findings — $RL_FN: $lab"
-    for g in F A C; do
+    for g in F A C R; do
       lines=""
       for ((i = 0; i < ${#RL_FIND[@]}; i++)); do
         _card_split "${RL_FIND[$i]}"
@@ -2899,6 +2925,8 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
            [ -z "$RL_FROWS" ] || lab="Fixed by $(_card_list 6 $RL_FROWS)" ;;
         A) lab="Awaiting your decision" ;;
         C) lab="Carried as known limits" ;;
+        # THE CARRIED COUNT IS THE LOG'S: the findings no deferral in the log holds are named in one line, apart.
+        R) lab="Carried by their records alone, with no deferral in the run's log: $(_card_list 6 "${RL_FUNL[@]}")" ;;
       esac
       _card_hang 0 "$lab"
       while IFS= read -r sent; do [ -z "$sent" ] || _card_hang 7 "$sent"; done <<< "$lines"
@@ -2989,14 +3017,14 @@ CARD_SITREP_WORDS="landed=work.landed,pace.work-landed left=work.left remaining=
 dropped=waste.dropped,work.dropped work=pace.work-landed forecast=pace.time-used,clock.forecast \
 elapsed=clock.elapsed,pace.time-used h=clock.forecast,clock.elapsed hours=clock.forecast,clock.elapsed \
 suites=tests.suites-run,tests.suites-total suite=tests.suites-run,tests.suites-total green=tests.suites-run \
-red=tests.suites-run total=tests.suites-total reviews=reviews review=reviews passed=reviews failed=reviews \
+red=tests.suites-run total=tests.suites-total reviews=reviews review=reviews passed=reviews failed=reviews notpassed=reviews \
 findings=findings.open,asks finding=findings.open,asks discarded=waste.runs-discarded \
 waiting=waste.waiting-on-you,asks chain=close.chain goals=goals goal=goals met=goals notmet=goals \
 notmeasured=goals oncourse=goals items=asks item=asks carried=asks rulings=asks step=steps steps=steps wave=run.wave \
 criteria=goal.* discharged=goal.*"
 # The words the sheet itself sets after its numbers, so a number set before one is that number: 11 green, 1 red; 4
-# passed, 2 failed; 0 of 4 met, 4 on course; 14 items, 8 carried findings, 6 rulings given.
-CARD_SITREP_PLACED="green red passed failed met notmet notmeasured oncourse items carried rulings"
+# passed, 2 failed, 1 not passed; 0 of 4 met, 4 on course; 14 items, 8 carried findings, 6 rulings given.
+CARD_SITREP_PLACED="green red passed failed notpassed met notmet notmeasured oncourse items carried rulings"
 
 # _card_sitrep_sheet <sheet file> -> its facts as tab-separated records, in the sheet's order: `R <key> <value>` per
 # run. and close. fact; `S <n> <name> <state> <tasks>` per step; `T <id> <step> <state> <desc> <note>` per
@@ -3097,7 +3125,7 @@ _card_bind() {
     function tokenize(s,   L, i, j, c, b, a, bb, aa) {
       nt = 0; split("", tt); split("", tv)
       s = " " tolower(s) " "
-      gsub(/not met/, "notmet", s); gsub(/not measured/, "notmeasured", s); gsub(/on course/, "oncourse", s)
+      gsub(/not met/, "notmet", s); gsub(/not measured/, "notmeasured", s); gsub(/not passed/, "notpassed", s); gsub(/on course/, "oncourse", s)
       if (judging) s = names(s)
       L = length(s); i = 1
       while (i <= L) {
@@ -3620,6 +3648,31 @@ case "$1" in
     rigor_print "$2" && exit 0
     printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2
     exit 1 ;;
+  opening)
+    # The version line is the version command's own print and has no second source here: a line composed in
+    # this file would drift from the one the command prints. It comes first whatever the opening is given, a
+    # refusal included, so the person's first sight is the version. A triple not yet known is said so, never
+    # printed as a placeholder: a caller that knows no triple passes no rigor.
+    _card_open_version="$(bash "${CARD_SELF_DIR}/version.sh" 2>/dev/null </dev/null | sed -n 1p)"
+    [ -n "$_card_open_version" ] || { echo "card.sh: the version command printed no line" >&2; exit 1; }
+    printf '%s\n' "$_card_open_version"
+    if [ "$#" -eq 1 ]; then
+      printf 'Triple not yet declared.\n'
+      exit 0
+    fi
+    [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || _card_usage "opening takes a rigor word and, with it, an intent and a scale (got $(( $# - 1 )) arguments)"
+    _card_open_level="$(rigor_level "$2" 2>/dev/null)"
+    case "$_card_open_level" in
+      single|double) ;;
+      *) printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2; exit 1 ;;
+    esac
+    if [ "$#" -eq 4 ]; then
+      printf 'Canonical SDLC engaged — %s · %s rigor · %s\n' "$3" "$_card_open_level" "$4"
+    else
+      printf 'Canonical SDLC engaged — %s rigor · intent and scale not yet declared\n' "$_card_open_level"
+    fi
+    rigor_print "$2"
+    exit 0 ;;
   regression)
     [ "$#" -ge 2 ] && [ "$#" -le 3 ] || _card_usage "regression takes a scale and an optional plan (got $(( $# - 1 )) arguments)"
     if _card_regression_line "$2" "${3:-}"; then

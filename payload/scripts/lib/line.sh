@@ -198,6 +198,100 @@ line_hand_event() {  # <plan> <what> <why> [<key=value>...] -> 0 appended, 1 not
   line_event "$plan" hand "what=$what" "$@" "why=$w"
 }
 
+# THE MERGE IS READ REMOTELY. Whether the working branch is merged is asked here and nowhere else: close-out's run and
+# its check, and step 8's gate, ask it. The integration branch is the remote's, `origin`: ancestry is tested against
+# refs/remotes/origin/<integration>, which a fetch fills, and the local integration branch is never moved or read, so a
+# person's pull is no part of the answer. A project with no remote named origin has only its local branch, and that is
+# what it is read against.
+#
+# A merge is seen two ways. The working head reachable from the integration branch is a merge, whatever made it. A squash
+# or a rebase leaves the head unreachable for good, so the host's word is asked too, of the request the run's log holds
+# for this branch and base: MERGED, naming a merge commit the integration branch holds, while the request carries the
+# working head itself (a head past it holds work the merge did not take). A request the host says was closed unmerged is
+# no merge and is the person's to rule: reopen it or park the run.
+#
+#   line_merge_seen <plan> <root> [--fetch]
+#     prints one line, four tab-separated fields: <verdict> <commit or -> <the branch read> <detail>, and returns
+#       0  merged    the commit the landing names: the integration tip read (detail `reached`), or the host's merge
+#                    commit (detail `host <address>`)
+#       1  unmerged  nothing merged it yet: the request is open, or none is recorded, or the host's merge is not yet
+#                    on the branch read, or the request does not carry the working head
+#       3  closed    the host says the request was closed unmerged
+#       2  unread    the answer cannot be had: a header key missing, no working head, a fetch or the host failing
+#   --fetch fetches origin's integration branch first, and keeps the ask `pr-closed:<branch>` on the run's register:
+#   opened (waiting on the user) when the request reads closed, closed when it reads open or merged. Without it nothing
+#   is written and nothing leaves the machine unless the head is unreachable and a request is recorded: then the host
+#   is asked. The gate reads it so.
+line_merge_seen() {
+  local plan="${1:-}" root="${2:-}" mode="${3:-}" wb ib head ref name tip pr url pc pb pbase err ans st oid
+  _line_load_run && _line_load_proof && { declare -F plan_integration_branch >/dev/null 2>&1 || . "$_LINE_LIB_DIR/plan.sh" 2>/dev/null; } \
+    && declare -F plan_integration_branch >/dev/null 2>&1 \
+    || { printf 'unread\t-\t-\tthe plan readers (lib/run.sh, lib/proof.sh, lib/plan.sh) cannot be loaded\n'; return 2; }
+  wb="$(plan_working_branch "$plan")"; ib="$(plan_integration_branch "$plan")"
+  [ -n "$wb" ] || { printf 'unread\t-\t-\tthe plan names no working branch in its header\n'; return 2; }
+  [ -n "$ib" ] || { printf 'unread\t-\t-\tthe plan names no integration branch in its header\n'; return 2; }
+  head="$(proof_branch_head "$plan" "$root" 2>/dev/null)" || head=""
+  [ -n "$head" ] || { printf 'unread\t-\t%s\tthe working branch %s names no commit in %s\n' "$ib" "$wb" "$root"; return 2; }
+  ref="refs/heads/$ib"; name="$ib"
+  if git -C "$root" remote get-url origin >/dev/null 2>&1; then
+    ref="refs/remotes/origin/$ib"; name="origin/$ib"
+    if [ "$mode" = --fetch ]; then
+      # The refspec names the remote-tracking ref alone, so the fetch can move nothing under refs/heads.
+      err="$(GIT_TERMINAL_PROMPT=0 git -C "$root" fetch --quiet origin "+refs/heads/$ib:refs/remotes/origin/$ib" 2>&1 >/dev/null)" \
+        || { printf 'unread\t-\t%s\tthe fetch of %s from origin failed: %s\n' "$name" "$ib" "$(printf '%s' "$err" | tr '\t\n' '  ')"; return 2; }
+    fi
+  fi
+  tip="$(git -C "$root" rev-parse --verify -q "$ref^{commit}" 2>/dev/null)" \
+    || { printf 'unread\t-\t%s\t%s names no commit in %s\n' "$name" "$name" "$root"; return 2; }
+  if git -C "$root" merge-base --is-ancestor "$head" "$tip" 2>/dev/null; then
+    _line_merge_ask "$plan" "$root" "$mode" "$wb" close
+    printf 'merged\t%s\t%s\treached\n' "$tip" "$name"; return 0
+  fi
+  pr="$(_proof_ask "$plan" reader_q_pr "$plan" 2>/dev/null)" || pr=""
+  url="$(printf '%s\n' "$pr" | sed -n 's/^url=//p')"; pc="$(printf '%s\n' "$pr" | sed -n 's/^commit=//p')"
+  pb="$(printf '%s\n' "$pr" | sed -n 's/^branch=//p')"; pbase="$(printf '%s\n' "$pr" | sed -n 's/^base=//p')"
+  if [ -z "$url" ] || [ "$pb" != "$wb" ] || [ "$pbase" != "$ib" ]; then
+    printf 'unmerged\t-\t%s\tno pull request of %s against %s is recorded\n' "$name" "$wb" "$ib"; return 1
+  fi
+  command -v gh >/dev/null 2>&1 || { printf 'unread\t-\t%s\tgh, the host'"'"'s command line tool, is not on the PATH, so the state of %s cannot be read\n' "$name" "$url"; return 2; }
+  err="$(mktemp "${TMPDIR:-/tmp}/merge-seen.XXXXXX")" || { printf 'unread\t-\t%s\tno temporary file for gh'"'"'s errors\n' "$name"; return 2; }
+  ans="$(cd "$root" && GH_PROMPT_DISABLED=1 gh pr view "$url" --json state,mergeCommit --jq '.state + " " + (.mergeCommit.oid // "-")' < /dev/null 2> "$err")" \
+    || { printf 'unread\t-\t%s\tthe host could not say the state of %s: %s\n' "$name" "$url" "$(tr '\t\n' '  ' < "$err")"; rm -f "$err"; return 2; }
+  rm -f "$err"
+  st="${ans%% *}"; oid="${ans#* }"
+  case "$st" in
+    MERGED)
+      _line_merge_ask "$plan" "$root" "$mode" "$wb" close
+      if [ "$pc" != "$head" ]; then
+        printf 'unmerged\t-\t%s\t%s was merged at %s, and the working head %s is past it\n' "$name" "$url" "${pc:0:12}" "${head:0:12}"; return 1
+      fi
+      if [ -n "$oid" ] && [ "$oid" != - ] && git -C "$root" merge-base --is-ancestor "$oid" "$tip" 2>/dev/null; then
+        printf 'merged\t%s\t%s\thost %s\n' "$oid" "$name" "$url"; return 0
+      fi
+      printf 'unmerged\t-\t%s\tthe host says %s merged as %s, which %s does not hold yet\n' "$name" "$url" "${oid:0:12}" "$name"; return 1 ;;
+    CLOSED)
+      _line_merge_ask "$plan" "$root" "$mode" "$wb" open "$url"
+      printf 'closed\t-\t%s\tthe pull request %s was closed unmerged\n' "$name" "$url"; return 3 ;;
+  esac
+  _line_merge_ask "$plan" "$root" "$mode" "$wb" close
+  printf 'unmerged\t-\t%s\tthe pull request %s is %s\n' "$name" "$url" "$(printf '%s' "${st:-of no state}" | tr '[:upper:]' '[:lower:]')"
+  return 1
+}
+# line_merge_ask_key <working branch> -> the register's key of a request closed unmerged: each character outside
+# [A-Za-z0-9._-] written `:`, as the publish verb writes its own `pr:` key
+line_merge_ask_key() { printf 'pr-closed:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }
+_line_merge_ask() {  # <plan> <root> <mode> <working branch> <open|close> [<address>] -> always 0; acts under --fetch alone
+  [ "$3" = --fetch ] && _line_load_owed || return 0
+  local key; key="$(line_merge_ask_key "$4")"
+  case "$5" in
+    open) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${CLAUDE_CODE_SESSION_ID:-merge-seen-$$}" owed_open "$key" \
+            "the pull request was closed unmerged" \
+            "$6 of $4 was closed without a merge: reopen it, or park the run with a ## Wake Note" >/dev/null 2>&1 ;;
+    close) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${CLAUDE_CODE_SESSION_ID:-merge-seen-$$}" owed_close "$key" "merge-seen" >/dev/null 2>&1 ;;
+  esac
+  return 0
+}
+
 # THE RECORD, READ AS ONE. A run's landing facts are its log's (`run.log` in the record directory), and no other file
 # of the record holds one. Every reader of the record reads it here, through `line_lines`, and asks `line_held` whether
 # it stands; a log that is a link is read as absent, as the readers that guard the record against a link always read it.
@@ -1191,8 +1285,8 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   c="$(_wt_bionic_committed "$root" "$acc" "$head")" && {
     c="${c%/}"; _wt_refuse_bionic "$wt" "$branch" "$onto" "${c%% *}" "${c#* }" "$(_wt_bionic_kind "$root" "$acc")"; return 2
   }
-  rec="$(line_record "$plan")" && _wt_proofs_prove "${rec%/*}/run.log" || {
-    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:+${rec%/*}/run.log} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, land again"; return 2
+  rec="$(line_record "$plan")" && _wt_proofs_prove "$rec" || {
+    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, land again"; return 2
   }
   row="$(_wt_proofs_row "$root" "$plan" "$wt")" || row="$branch"
   case "$row" in *'|'*) _wt_refuse "row-unwritable branch=${branch}"; return 2 ;; esac
@@ -1247,7 +1341,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" = 0 ] || return 2
   [ -z "$suites" ] || printf 'verdicts: %s green at %s, from %s\n' "$suites" "$g" "$vlog"
-  _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "${rec%/*}/run.log" || return $?
+  _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec" || return $?
   # What is owed, when the row has an agent on this session's roster (T6): its task, then its stop.
   [ -z "$LINE_MARKED" ] || _line_owed "$row" "$LINE_PUBLISHED" "$LINE_MARKED"
 }
@@ -1465,8 +1559,8 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   case "$debt" in *' until '?*) LINE_DEBT_TOKEN="${debt#* until }" ;; esac
   debt="${debt%% *}"; case "$debt" in ?*.test.sh) : ;; *) debt=- ;; esac
   case "${name}${debt}" in *'|'*|'') _wt_refuse "row-unwritable branch=${branch}"; return 2 ;; esac
-  rec="$(line_record "$plan")" && _wt_proofs_prove "${rec%/*}/run.log" || {
-    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:+${rec%/*}/run.log} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, say ready again"; return 2
+  rec="$(line_record "$plan")" && _wt_proofs_prove "$rec" || {
+    _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, say ready again"; return 2
   }
   LINE_SID="$lsid"   # the session the publish's plan write and roster mark run under: the one holding the launch line
   _LINE_WITHIN="$within"   # the --within the waiting: reasons name (T31)

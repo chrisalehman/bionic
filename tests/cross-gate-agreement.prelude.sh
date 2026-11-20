@@ -55,6 +55,7 @@ export BIONIC_WALL_VERBOSE=1
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
+. "$(dirname "$0")/lib/duty-read.sh"
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
@@ -375,8 +376,8 @@ verdict_er() {  # <repo> -> yes|no|other:<detail>
 # — §J drives the gate's verdict/gate agreement, not its wave detection (Step-6 critic D-1).
 # Its observable is a Stop over a roster carrying ONE unmet contract that has LANDED (its
 # agent_id is absent from the payload's background_tasks): with a wave active the gate
-# reaches the verdict, reads UNMET and refuses (exit 2); with no wave it exits 0 before ever
-# taking a verdict. So exit-2-with-the-refusal <=> yes and exit-0 <=> no, the same predicate
+# reaches the verdict, reads UNMET and refuses on the duty channel (tests/lib/duty-read.sh);
+# with no wave it says nothing. So the duty with the refusal <=> yes, the same predicate
 # the other four answer. The gate resolves the sweeper as its own sibling, so a MUTATED copy
 # of it (§A2) must sit beside a sweeper — $MUTDIR carries one. The roster is re-seeded per
 # call under $SID_LG, off verdict_er's $SID_A file — which also clears the sweep's own
@@ -396,10 +397,11 @@ verdict_lg() {  # <repo> -> yes|no|other:<detail>
       agent_id=alg-probe-0001 launched_at=2026-08-05T00:00:00Z \
       deliverable=.bionic/docs/record/never-lg.md tool_use_id=toolu_LGPROBE
   } > "$roster"
-  out=$(mk_stopsweep_payload "$repo" "$SID_LG" false | bash "$PARTY_LG" 2>&1); st=$?
+  out=$(mk_stopsweep_payload "$repo" "$SID_LG" false | bash "$PARTY_LG" 2>/dev/null); st=$?
   case "$st" in
-    0) echo no ;;
-    2) if printf '%s' "$out" | grep -qF "bionic: stop refused — a dispatched agent's contract is unmet"; then echo yes; else echo "other:block-no-detail"; fi ;;
+    0) if [ "$(duty_channel "$out")" != duty ]; then echo no
+       elif duty_reason "$out" "$(duty_path "$repo" "$SID_LG")" | grep -qF "a dispatched agent's contract is unmet"; then echo yes
+       else echo "other:duty-no-detail"; fi ;;
     *) echo "other:exit-$st" ;;
   esac
 }
@@ -420,33 +422,27 @@ write_plan() {  # <path> <state-body>
     printf '%s\n' "$2"
     case "$2" in *approved-by:*) ;; *) printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n' ;; esac
     printf '\n- Step 3: prior evidence\n'
-  } > "$1"
+  } > "$1" || return
+  seal_fixture "$1"
 }
 
-# A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). hooks/dispatch-preflight.sh refuses a
-# dispatch whose session carries no fresh Patrol stamp, so a repo fixture without one answers
-# "refused" to every question this suite asks about roster rows, identity chains and progress
-# paths — the arming wall would be under test in every section instead of in its own (§P,
-# which removes the stamp deliberately). This is the fixture equivalent of an engagement
-# arming the Patrol before the first dispatch. Written under the MAIN repository always: the
-# stamp shares the roster's pinned root, which §N.3 depends on and would break by planting
-# a phantom `.bionic` in a worktree.
+# A LIVE WAVE IS WATCHED. hooks/dispatch-preflight.sh refuses a dispatch no watch stands
+# behind, so a repo fixture without one answers "refused" to every question this suite asks
+# about roster rows, identity chains and progress paths. Written under the MAIN repository
+# always: the records share the roster's pinned root, which §N.3 depends on and would break by
+# planting a phantom `.bionic` in a worktree.
 arm_patrol() {  # <repo> <session-id>...
   local repo="$1"; shift
   mkdir -p "$repo/.bionic/tmp"
   local sid
   for sid in "$@"; do
-    printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" > "$repo/.bionic/tmp/patrol-$sid.state"
-    chmod 600 "$repo/.bionic/tmp/patrol-$sid.state"
+    # A WATCH THAT RESTED ON PURPOSE, which the dispatch wall admits as it admits a live one.
+    printf 'state=resting\nwhy=person\nat=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$repo/.bionic/tmp/watch-$sid.state"
     # …AND AN ENGAGED SESSION (task-engaged-session). Since this wave every gate this suite
     # drives asks `engaged_session` before it asks anything else, so a fixture without the
     # marker answers every question in this file the same way — silence — and the whole
-    # suite would be green over nothing. The marker travels with the stamp for the same
-    # reason the stamp travels with the plan: SKILL.md arms the Patrol AT engagement, so a
-    # world that has one has both. A marker already there is KEPT: a binding written before
-    # the Patrol was armed is the session's, and re-arming must not unbind it
-    # (wave-23-fixit-1810 T1 — an unbound session's fallback plan is never acted on).
+    # suite would be green over nothing. A marker already there is KEPT: a binding written
+    # before is the session's, and this must not unbind it.
     [ -f "$repo/.bionic/tmp/engaged-$sid.state" ] || : > "$repo/.bionic/tmp/engaged-$sid.state"
   done
 }
@@ -461,7 +457,8 @@ engage_sids() {  # <repo> <sid>...
   local r="$1"; shift
   mkdir -p "$r/.bionic/tmp"
   local s
-  for s in "$@"; do : > "$r/.bionic/tmp/engaged-$s.state"; done
+  # Engaged and unbound: a binding record left beside the seal would be believed over the empty marker.
+  for s in "$@"; do { ! declare -F bound_marker_unrecord >/dev/null || bound_marker_unrecord "$r" "$s"; }; : > "$r/.bionic/tmp/engaged-$s.state"; done
 }
 
 # write_live_plan <plan path> <step> — the page a run at 15 holds at <step>, approved

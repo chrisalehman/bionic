@@ -18,6 +18,10 @@
 # (`payload/scripts/lib/binding.sh`). `plan` is validated exactly as engage.sh's own
 # dispatch validates it: an absolute path that `open_runs "$root"` lists at the
 # instant of the call, or the literal `none` (always accepted, never validated).
+# Then the bound run is sealed as it is found when no seal stands for it
+# (`seal_fixture --found`, tests/lib/seal-fixture.sh): a binding writes neither the
+# plan nor the log, so it vouches for neither, and a hand write made before it with
+# no `seal_fixture` call stays a caught change.
 #
 # THE FALLBACK, AND WHY IT IS HERE, NOT A SECOND WRITER. Several existing fixtures
 # bind deliberately to a plan that is no longer an open run — DELIVERED
@@ -38,14 +42,15 @@
 # sites) gets it, unchanged, through the first branch.
 bound_marker() {  # <root> <sid> <plan|none>
   local root="$1" sid="$2" plan="$3" path stamp
-  if bind_plan "$root" "$sid" "$plan"; then
-    return 0
+  if ! bind_plan "$root" "$sid" "$plan"; then
+    path=$(engaged_marker_path "$root" "$sid") || return 1
+    bound_marker_unrecord "$root" "$sid"
+    mkdir -p "$(dirname "$path")"
+    stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || stamp="2026-09-04T00:00:00Z"
+    printf 'plan=%s\nengaged_at=%s\n' "$plan" "$stamp" > "$path"
+    chmod 600 "$path" || return
   fi
-  path=$(engaged_marker_path "$root" "$sid") || return 1
-  mkdir -p "$(dirname "$path")"
-  stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || stamp="2026-09-04T00:00:00Z"
-  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$stamp" > "$path"
-  chmod 600 "$path"
+  [ "$plan" = none ] || seal_fixture --found "$plan"
 }
 
 # unbound_marker <root> <sid> [empty|none|nofield] -> the three shapes that are NOT
@@ -60,6 +65,7 @@ bound_marker() {  # <root> <sid> <plan|none>
 unbound_marker() {  # <root> <sid> [empty|none|nofield]
   local root="$1" sid="$2" shape="${3:-empty}" f
   f="$root/.bionic/tmp/engaged-$sid.state"
+  bound_marker_unrecord "$root" "$sid"
   mkdir -p "$(dirname "$f")"
   case "$shape" in
     none)    printf 'plan=none\nengaged_at=2026-09-04T00:00:00Z\n' > "$f" ;;
@@ -69,6 +75,15 @@ unbound_marker() {  # <root> <sid> [empty|none|nofield]
   chmod 600 "$f"
 }
 
+# bound_marker_unrecord <root> <sid> -> the session's binding record beside the seal removed.
+# `session_plan` believes that record over the marker, so a marker this file writes by hand is
+# believed only by a session with no record: both direct writes above drop it first, and the
+# planted marker answers as it did before the record existed.
+bound_marker_unrecord() {  # <root> <sid>
+  { _run_seal && seal_binding_drop "$1" "$2"; } >/dev/null 2>&1 || :
+}
+
+declare -F seal_fixture >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/seal-fixture.sh"
 if ! type -t bind_plan >/dev/null 2>&1; then
   . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh"
   . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/binding.sh"

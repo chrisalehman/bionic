@@ -26,8 +26,13 @@
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
-#                 the tree holds none.
-#   §LOADER       the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
+#                 the tree holds none. The tree event is folded in the reader alone: a second fold planted in a
+#                 script is found beside it, and the checkout holds the reader's one.
+#   §DEAD         a planted name of a removed landing function is found by its line; the checkout names neither.
+#   §LOGPATH      the run log's path is joined in the reader alone: a planted second join is found by its line.
+#   §GITHOME      a second resolution of the common git directory planted in a hook is found by its file; the checkout holds
+#                 none beside the root library's `git_common_dir`.
+#   §LOADER      the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
 #                 tree; a copy planted in a hook file is listed and counted.
 #   §REPORT       with the plants the check exits 1, refusing each finding of the four kinds once; a loader copy
 #                 alone refuses nothing; it ends on the seven count lines, in their order.
@@ -178,8 +183,8 @@ for t in published run returned ready candidate verdict; do expect_eq "$t: one w
 # The functions that call a type's one writer, each `<file>:<function>`, read over the scratch copy.
 calls() { awk -v t="line_$1_event" -v s="$S/" 'FNR == 1 { f = "-" } match($0, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/) { f = substr($0, RSTART, RLENGTH); gsub(/[ \t()]/, "", f) }
   f != t && $0 !~ /^[ \t]*#/ && index($0, t " ") { p = FILENAME; sub(s, "", p); print p ":" f }' $(find "$S/hooks" "$S/payload/scripts" -name '*.sh') | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//'; }
-expect_eq "published: the queue's landing, a counted merge, a record row's, a part's, the close's two and the card's projection each call the one writer" \
-  "hooks/poker/line.sh:part_land hooks/poker/line.sh:record_row_land payload/scripts/card.sh:_card_project payload/scripts/close-out.sh:act_lands payload/scripts/close-out.sh:co_reviews_publish payload/scripts/lib/line.sh:_line_count_git payload/scripts/lib/line.sh:line_publish" "$(calls published)"
+expect_eq "published: the queue's landing, a counted merge, a record row's, a part's, the publish verb's, the close's two and the card's projection each call the one writer" \
+  "hooks/poker/line.sh:part_land hooks/poker/line.sh:poker_verb_publish hooks/poker/line.sh:record_row_land payload/scripts/card.sh:_card_project payload/scripts/close-out.sh:act_lands payload/scripts/close-out.sh:co_reviews_publish payload/scripts/lib/line.sh:_line_count_git payload/scripts/lib/line.sh:line_publish" "$(calls published)"
 expect_eq "decision and debt: one writer each, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_decision_event|payload/scripts/lib/proof.sh proof_debt_event|" \
   "$(w1 decision)|$(w1 debt)|$(pair decision)$(pair debt)"
 expect_eq "order, handoff and bind: one writer each, the facts library's, and no second" \
@@ -245,7 +250,7 @@ DPIECES="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 1
   for k in $(dispatch_keys); do dispatch_say "$k" @ @ @ @ @ @ @ @ @ @ && printf "%s\n" "$DISPATCH_FACT"; done' _ "$L" | tr '@' '\n' | awk 'length($0) >= 10')"
 pieces_in() { awk '!/^[ \t]*#/' "$1" > "$S/.code"; printf '%s\n' "$DPIECES" | while IFS= read -r p; do /usr/bin/grep -qF -- "$p" "$S/.code" && printf '%s\n' "$p"; done; }
 DKEYS="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" && for k in $(dispatch_keys); do dispatch_say "$k" @ && [ -n "$DISPATCH_FACT" ] && echo "$k"; done' _ "$L" | grep -c .)"
-expect_eq "the dispatch library says a fact under a key for each of the wall's 44 refusals" 44 "$DKEYS"
+expect_eq "the dispatch library says a fact under a key for each of the wall's 43 refusals" 43 "$DKEYS"
 expect_eq "every piece of those facts is found in the library's own text" "$(printf '%s\n' "$DPIECES" | grep -c .)" "$(pieces_in "$L/dispatch.sh" | grep -c .)"
 expect_eq "no fact of the dispatch library is found in the wall's file" "" "$(pieces_in "$S/hooks/dispatch-preflight.sh")"
 expect_eq "the stop hook's file, which answers the stop of an agent, lists no refusal" "0" "$(own stop | grep -c .)"
@@ -263,6 +268,49 @@ section "FOLDS"
 expect_eq "a fold through a pipe, an unread \$( ) and a local's \$( ) are named; one whose exit is read and a stand-in are not" "1 2 3" \
   "$(printf '%s\n' "$AFTER" | sed -n 's|^unheard	payload/scripts/lib/planted-folds\.sh:||p' | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "the unheard count rises by three over the tree, which holds none" "0 3" "$(count "$BEFORE" unheard_folds) $(count "$AFTER" unheard_folds)"
+# A row's tree is folded from its events by the reader alone; every other site asks the reader for it.
+tree_folds() { ( cd "$1" && /usr/bin/grep -n 'ev() *== *"tree"\|_e *== *"tree"' payload/scripts/lib/*.sh payload/scripts/*.sh | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//' ); }
+TF="$S/tree-fold/payload/scripts"; mkdir -p "$TF/lib"; cp "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" "$TF/lib/reader.sh"
+printf '%s\n' "planted_trees() { awk -F'|' 'ev() == \"tree\" { t[line_kv(\"row\")] = \$0 }'; }" > "$TF/planted-tree.sh"
+expect_eq "a fold of the tree event planted in a script is found beside the reader's" "payload/scripts/lib/reader.sh payload/scripts/planted-tree.sh" "$(tree_folds "$S/tree-fold")"
+expect_eq "the checkout folds the tree event once, in the reader" "payload/scripts/lib/reader.sh" "$(tree_folds "$BIONIC_SCRIPTS_DIR")"
+
+section "LOGPATH"
+# The run log's path is joined in the reader alone: a line that puts the file's name after a directory is a second builder.
+# A comment and a case arm or a `%` strip that only reads a given path's name are no join.
+joins() { ( cd "$1" && /usr/bin/grep -rnE '[^%#/]/run\.log' hooks payload/scripts \
+  | /usr/bin/grep -vE '^payload/scripts/lib/reader\.sh:|^[^:]*:[0-9]+:[[:space:]]*#|\*[^ ()"]*/run\.log\)' | cut -d: -f1,2 | tr '\n' ' ' | sed 's/ $//' ); }
+mkdir -p "$S/logpath/hooks" "$S/logpath/payload/scripts/lib"
+printf '%s\n' '# the log is DIR/run.log' 'case "$1" in */record/*/run.log) ;; esac' 'rec="${log%/run.log}"' \
+  'planted_log() { RUN_LOG="${x%/*}/run.log" log_append t; }' > "$S/logpath/payload/scripts/p.sh"
+printf '%s\n' 'log="$d"/run.log' > "$S/logpath/hooks/h.sh"
+printf '%s\n' 'printf "%s/run.log\n" "$rec"' > "$S/logpath/payload/scripts/lib/reader.sh"
+expect_eq "a join planted in a script and a hook is found by its line; a comment, a case arm, a strip and the reader's own are not" \
+  "hooks/h.sh:1 payload/scripts/p.sh:4" "$(joins "$S/logpath")"
+expect_eq "the checkout joins the log's name to a path in the reader alone" "" "$(joins "$BIONIC_SCRIPTS_DIR")"
+expect_eq "the reader joins it once" 1 "$(/usr/bin/grep -vE '^[[:space:]]*#' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" | /usr/bin/grep -cE '[^%#/]/run\.log')"
+
+section "DEAD"
+dead() { ( cd "$1" && /usr/bin/grep -rnwE 'worktree_land|worktree_land_for_session' payload hooks skills agents-src agents 2>/dev/null | cut -d: -f1,2 | tr '\n' ' ' | sed 's/ $//' ); }
+mkdir -p "$S/dead/payload/scripts"; printf '%s\n' 'f() { :; }' '# worktree_land_for_session lands a tree' > "$S/dead/payload/scripts/p.sh"
+expect_eq "a planted comment naming a removed landing function is found by its file and line" "payload/scripts/p.sh:2" "$(dead "$S/dead")"
+expect_eq "the checkout's code, hooks, skills and agents name neither removed landing function" "" "$(dead "$BIONIC_SCRIPTS_DIR")"
+
+section "GITHOME"
+# The common git directory is resolved by lib/root.sh's `git_common_dir` and by no other code. A line that is not a
+# comment and names `git-common-dir` is a resolution of its own, counted by file so that a line moving is no change.
+# The root library is the resolver's own file. The files below resolve it for themselves and are carried as a debt;
+# the pin refuses a line beyond them.
+git_homes() { ( cd "$1" && /usr/bin/grep -rnE -- 'git-common-dir' payload/scripts hooks 2>/dev/null \
+  | awk -F: '{ t = $0; sub(/^[^:]*:[^:]*:/, "", t); if (t !~ /^[ \t]*#/) print $1 }' | /usr/bin/grep -vx 'payload/scripts/lib/root\.sh' \
+  | LC_ALL=C sort | uniq -c | awk '{ printf "%s:%s ", $2, $1 }' | sed 's/ $//' ); }
+CARRIED="hooks/canonical-sdlc-governing-skill.sh:3 hooks/dispatch-preflight.sh:2 hooks/poker/plan.sh:1 hooks/poker/sitrep.sh:1 hooks/session-poker.sh:1 payload/scripts/booked.sh:1 payload/scripts/lib/stop.sh:1 payload/scripts/lib/walls.sh:4"
+expect_eq "the checkout resolves the common git directory for itself only in the carried files" "$CARRIED" "$(git_homes "$S")"
+printf '%s\n' '# asks --git-common-dir in a comment' 'f() { git_common_dir "$1"; }' > "$L/planted-home.sh"
+expect_eq "a comment naming the flag and a caller of the function are no resolution of their own" "$CARRIED" "$(git_homes "$S")"
+printf '%s\n' 'g() { git -C "$1" rev-parse --git-common-dir; }' >> "$L/planted-home.sh"
+expect_eq "a second resolution planted beyond them is found by its file" "$(printf '%s\n' $CARRIED payload/scripts/lib/planted-home.sh:1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')" "$(git_homes "$S")"
+rm -f "$L/planted-home.sh"
 
 section "LOADER"
 expect_eq "the loader block's mark is found in one file, the loader's own" "payload/scripts/lib/loader.sh" \

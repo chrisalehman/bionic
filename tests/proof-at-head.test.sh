@@ -51,6 +51,7 @@ pah_world() {
   PAH_F="$(fixture_git "$p" rev-parse wave/01-fixture)"
   log="$p/$LOG_REL"
   sed '/|ev=proof|kind=regression|/d' "$log" > "$log.n" && mv "$log.n" "$log"
+  seal_fixture "$plan" "$log"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
     LOG_AT=2026-10-04T12:00:00Z proof_event "$2" kind=regression "head=$3" "evidence=record/wave-01-fixture/regression-run-$3.log" ${4:+"owed=$4"}' \
     _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" || return 1
@@ -75,11 +76,13 @@ pah_world() {
     } >> "$log"
     k=$((k + 1))
   done
+  seal_fixture "$plan" "$log"
   PAH_H="$(fixture_git "$p" rev-parse wave/01-fixture)"
   if [ "$n" -gt 0 ]; then
     fixture_git "$p" merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1 || return 1
     # The landings cover the head and no pass ran at it, so the merge close-out delivers is the person's word at H.
     sed "s/|ev=proof|kind=review|head=$PAH_F|/|ev=proof|kind=review|head=$PAH_H|/" "$log" > "$log.n" && mv "$log.n" "$log"
+    seal_fixture "$plan" "$log"
     bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
       LOG_AT=2026-10-04T14:00:00Z proof_approval_event "$2" merge-unproved by=fixture "head=$3" "said=merge it"' \
       _ "$PAH_LIB" "$plan" "$PAH_H" || return 1
@@ -276,7 +279,7 @@ expect_eq "LOG-7 the base is the header's, a commit other than the one a line of
 
 section "§KEEP: the kept fold is served only from a directory this user alone can write, and its files are bounded"
 # fails-when: a fold planted under the right key is served from a directory others can write or through a link, the user's own fold is not served to a second process, or a file per plan is kept for ever, or a failed fold, or a kept file pruned between two reads, is kept as the run's facts; or a fold that failed reaches the judge or a reader of it as no proof, or a lookup that died as a whole run.
-pk() { TMPDIR="$PK/$1" bash -c '. "$1/proof.sh" && proof_approved_head "$2" release' _ "$PAH_LIB" "$PL_PLAN"; }  # <dir> -> a fresh process's `release` approval head, TMPDIR $PK/<dir>
+pk() { TMPDIR="$PK/$1" bash -c '. "$1/proof.sh" && _proof_approved_head "$2" release' _ "$PAH_LIB" "$PL_PLAN"; }  # <dir> -> a fresh process's `release` approval head as a reader that decides nothing reads it, TMPDIR $PK/<dir>
 PK="$SANDBOX/keep"; PK_D="bionic-facts-$(id -u)"; mkdir -p "$PK/ok" "$PK/open/$PK_D" "$PK/away" "$PK/link" "$PK/full/$PK_D"; pk ok; PK_F="$(ls "$PK/ok/$PK_D")"; awk -v l="$(printf 'run/v1|ev=approval|key=release|by=intruder|head=%s|said=x|at=2026-10-04T14:00:00Z' "$PL_H")" '$0 == "\036" && !d { print l; d = 1 } { print }' "$PK/ok/$PK_D/$PK_F" > "$PK/ok.f" && cat "$PK/ok.f" > "$PK/ok/$PK_D/$PK_F"
 cp "$PK/ok/$PK_D/$PK_F" "$PK/open/$PK_D/"; chmod 777 "$PK/open/$PK_D"; cp -R "$PK/ok/$PK_D" "$PK/away/"; ln -s "$PK/away/$PK_D" "$PK/link/$PK_D"; for i in $(seq 40); do : > "$PK/full/$PK_D/$i"; done; touch -t 202601010000 "$PK/full/$PK_D"/*; chmod 700 "$PK/full/$PK_D"; pk full
 expect_eq "KEEP-1 the user's own kept fold (mode 700) is served to a second process, the approval planted in it read" "drwx------|$PL_H" "$(ls -ld "$PK/ok/$PK_D" | cut -c1-10)|$(pk ok)"

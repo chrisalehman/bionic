@@ -890,7 +890,6 @@ room_wall_repo() {  # <name> <open writers> <budget line or ""> -> a task-scale 
   write_attestation "$r" "$SID_A"
   p="$r/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   sed 's/^scale: wave$/scale: task/' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
-  rm -f "$r/.bionic/tmp/patrol-$SID_A.state"
   while [ "$k" -lt "$2" ]; do k=$((k + 1)); s22_roster_row "$r" "$SID_A" "W-$k"; done
   [ -z "$3" ] || s22_set_budget "$r" "$3"
   printf '%s' "$r"

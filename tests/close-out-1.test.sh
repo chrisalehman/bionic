@@ -80,7 +80,7 @@ section "ANY-BRANCH — T11 (AC-9.2): a column-less TASK-scale plan closes on an
 mk_task_scale_fixture() {
   local name="$1" working="$2" p
   p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"; advance_to "$p" 8
-  sed -i.bak 's/^scale: wave$/scale: task/' "$p/$PLAN_REL" && rm -f "$p/$PLAN_REL.bak"
+  sed -i.bak 's/^scale: wave$/scale: task/' "$p/$PLAN_REL" && rm -f "$p/$PLAN_REL.bak"; seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   (
     in_fixture "$p" || exit 1
     git checkout -q -b "$working"
@@ -104,21 +104,28 @@ run_close "$PAB" run
 expect_eq "AB4: run on fixit/x closes with rc 0" "0" "$CO_RC"
 expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
 
-# The integrate act is the scale's cell: at task scale, `pr`, so an unmerged fix/x closes, merging nothing, and the
-# `gh pr create` command is printed and recorded, never run.
+# At task scale too the merge is read, never assumed: an unmerged fix/x holds the run, close-out merges nothing and
+# lands no row, and check says the merge would refuse. The fixture has no remote, so the integration branch read is the
+# local main, and the run's log records no pull request.
+# fails-when: run closes, or a row is landed as merged, while fix/x is not reachable from main; or close-out moves main.
 # mk_task_pr_fixture: hoisted to tests/close-out.prelude.sh (a later part reads it)
 PPR="$(mk_task_pr_fixture ppr "fix/x")"
 PPR_MAIN="$(git -C "$PPR" rev-parse main)"
-expect_eq "PR0: the fixture's fix/x is not reachable from main (so the PR act is what passes)" "no" \
+expect_eq "PR0: the fixture's fix/x is not reachable from main (so the hold is what is read)" "no" \
   "$(git -C "$PPR" merge-base --is-ancestor fix/x main && echo yes || echo no)"
 run_close "$PPR" check
-expect_eq "PR1: check on an unmerged task-scale fix/x is not refused" "0" "$CO_RC"
+expect_eq "PR1: check on an unmerged task-scale fix/x says the merge would refuse, naming no request" "0|yes" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q '^merge: WOULD REFUSE — fix/x @ [0-9a-f]* is not reachable from main (no pull request of fix/x against main is recorded)' && echo yes)"
 run_close "$PPR" run
-expect_eq "PR3: run closes with rc 0" "0" "$CO_RC"
-expect_eq "PR4: …prints the command" "yes" "$(contains "$CO_OUT" "gh pr create --base main --head fix/x")"
-expect_eq "PR5: …records it in the continuation" "yes" \
-  "$(grep -qF 'gh pr create --base main --head fix/x' "$PPR/$CONT_REL" 2>/dev/null && echo yes || echo no)"
+expect_eq "PR3: run holds (exit 2), saying fix/x is not reachable from main" "2|yes" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q 'fix/x @ [0-9a-f]* is not reachable from main' && echo yes)"
+expect_eq "PR4: …and writes no continuation, the run's step still 8" "no|n=8" \
+  "$([ -f "$PPR/$CONT_REL" ] && echo yes || echo no)|$(co_step_answer "$PPR" | sed -n 1p)"
 expect_eq "PR6: …and merges nothing: main is where it was" "$PPR_MAIN" "$(git -C "$PPR" rev-parse main)"
+git -C "$PPR" merge -q --no-ff -m "the pull request's merge" fix/x >/dev/null 2>&1
+run_close "$PPR" run
+expect_eq "PR7: once main holds fix/x the same run closes, its merge line the readback, its continuation written" "0|yes|yes" \
+  "$CO_RC|$(contains "$CO_OUT" "merge: fix/x @ ")|$([ -f "$PPR/$CONT_REL" ] && echo yes || echo no)"
 
 # ============================================================
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"
@@ -149,10 +156,6 @@ expect_eq "1k: …in the 1.7.1 shape — the five headings" "yes" \
 expect_eq "1l: …and it leaves the orchestrator's unknowns marked" "yes" \
   "$(contains "$(cat "$P1/$CONT_REL")" "<fill")"
 expect_eq "1m: act 6 — shipped-row: prints the wave's row for the orchestrator's edit" "yes" "$(contains "$CO_OUT" "shipped-row: | 01 | ")"
-expect_eq "1p: act 8 — patrol: names CronDelete and the disarm verb" "yes" \
-  "$(contains "$CO_OUT" "patrol: CronDelete")"
-expect_eq "1q: …and the disarm command" "yes" \
-  "$(contains "$CO_OUT" "session-poker.sh disarm")"
 HO_REL="$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$P1/$PLAN_REL" handoff 2>/dev/null | sed -n 's/^path=//p')"
 expect_eq "1r2: …under the file's kind line" "bionic-handoff/v1" "$(sed -n 1p "$P1/$HO_REL" 2>/dev/null)"
 expect_eq "1r3: …whose last line is the one door, naming the file" "/bionic:canonical-sdlc $HO_REL" "$(tail -1 "$P1/$HO_REL" 2>/dev/null)"
@@ -204,6 +207,7 @@ expect_eq "1ar: the step's writer takes a run's log that is there, and refuses o
 # it cleaned, the run open at 8; the close run again delivers on that step and appends no emptier one over it.
 PS="$(mk_fixture p-again)"
 printf 'run/v1|ev=step|n=8|cleanup=done|tmp-wiped=7 entries under the first close|tasks-completed=%s|at=2026-10-04T12:30:00Z\n' "$TASKS_WORDS" >> "$PS/$LOG_REL"
+seal_fixture "$PS/$PLAN_REL" "$PS/$LOG_REL"
 run_close "$PS" run
 expect_eq "1aq: the second close delivers on the step 8 that stood, its wipe kept: one step 8 in the log" "0|yes|1|n=9" \
   "$CO_RC|$(contains "$(co_step_answer "$PS" 8)" "tmp-wiped=7 entries under the first close")|$(grep -c '|ev=step|n=8|' "$PS/$LOG_REL")|$(co_step_answer "$PS" | sed -n 1p)"
@@ -351,7 +355,7 @@ delivered_line() { co_step_answer "$1" | sed -n 's/^delivered=//p'; }
 
 PV1="$(mk_fixture ver1)"; advance_to "$PV1" 8
 awk -v r="$RELV" '{ print } /^walk: exempt$/ { print "release: " r }' "$PV1/$PLAN_REL" > "$PV1/plan.tmp" \
-  && mv "$PV1/plan.tmp" "$PV1/$PLAN_REL"
+  && mv "$PV1/plan.tmp" "$PV1/$PLAN_REL"; seal_fixture "$PV1/$PLAN_REL" "$PV1/$LOG_REL"
 run_close "$PV1" run
 expect_eq "VER2: run with release: closes rc 0" "0" "$CO_RC"
 DL1="$(delivered_line "$PV1")"
@@ -415,6 +419,7 @@ expect_eq "E2E11: …the plan untouched and wt/01-x still standing (nothing was 
 # A RELEASE THAT WOULD SPLIT A CELL (A-orch-28): a `|` in `release:` is refused before any act.
 PR="$(mk_fixture e2e-pipe)"; advance_to "$PR" 8
 sed 's/^archive-root: /release: 1.2|3\narchive-root: /' "$PR/$PLAN_REL" > "$PR/$PLAN_REL.n" && mv "$PR/$PLAN_REL.n" "$PR/$PLAN_REL"
+seal_fixture "$PR/$PLAN_REL" "$PR/$LOG_REL"
 PR_SHA="$(sha_of "$PR/$PLAN_REL")"
 run_close "$PR" run
 expect_eq "E2E14: A-orch-28 run refuses a release holding a | (rc 2)" "2" "$CO_RC"
@@ -427,6 +432,7 @@ co_hold_state() {  # <project> -> open|closed, the state of the run's latest hol
 }
 expect_eq "E2E17: the refused close holds the merge on the run's register" "open" "$(co_hold_state "$PR")"
 sed 's/^release: 1\.2|3$/release: 1.2.3/' "$PR/$PLAN_REL" > "$PR/$PLAN_REL.n" && mv "$PR/$PLAN_REL.n" "$PR/$PLAN_REL"
+seal_fixture "$PR/$PLAN_REL" "$PR/$LOG_REL"
 run_close "$PR" run
 expect_eq "E2E18: …and the close that delivers releases it" "0|closed" "$CO_RC|$(co_hold_state "$PR")"
 
@@ -507,6 +513,7 @@ section "DEPLOY — a run that names a deploy target is delivered only with what
 dp_fixture() {  # <name> <deploy target> -> a fixture at step 8 whose plan names that target
   local p; p="$(mk_fixture "$1")"; advance_to "$p" 8
   sed "s|^deploy_target: n/a\$|deploy_target: $2|" "$p/$PLAN_REL" > "$p/$PLAN_REL.d" && mv "$p/$PLAN_REL.d" "$p/$PLAN_REL"
+  seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"
 }
 dp_close() {  # <project> <verb> [<option> <value>]... -> CO_OUT and CO_RC, as run_close with the options after the verb
@@ -549,5 +556,94 @@ expect_eq "DP8: …given none, check owes none and run closes as before, no depl
   "$(contains "$DP_CK" "deploy: none owed")|$CO_RC|$(contains "$(co_step_answer "$PDO")" "delivered=")|$(contains "$(co_step_answer "$PDO")" "deployed=")"
 expect_eq "DP9: the deploy writes no new event type: both closes leave the same set" "$(dp_events "$PDO")" "$(dp_events "$PDN")"
 expect_nonempty "DP9b: …and the set is read" "$(dp_events "$PDN")"
+
+# ============================================================
+section "SEAL — close-out lifts the run's seal after the delivery is logged and before the archive moves the plan"
+# ============================================================
+# The seal vouches for a plan and a log; the archive moves the plan, so a seal left standing would read the honest
+# move as a plan gone. The ORDER is read from a copy of the scripts with two spies: the library's `seal_remove` notes
+# whether the delivery is in the run's log when it is called, and `archive_run` notes whether a seal still stands when
+# it is entered. Both spies call the real functions on.
+seal_count() { ls "$1"/.git/bionic-seal/*.seal 2>/dev/null | wc -l | tr -d ' '; }
+SPY_DIR="$SANDBOX/scripts-spy"; SPY_LOG="$SANDBOX/seal-spy.log"
+rm -rf "$SPY_DIR"; cp -R "$REPO_ROOT/payload/scripts" "$SPY_DIR"
+cat >> "$SPY_DIR/lib/seal.sh" <<'SPY'
+eval "_spy_$(declare -f seal_remove)"
+seal_remove() {
+  printf 'remove: delivered-lines=%s\n' "$(grep -c '|ev=step|n=9|.*delivered=' "$SPY_LOGFILE" 2>/dev/null)" >> "$SPY_LOG"
+  if [ -n "${SPY_HOLD:-}" ] && _seal_place "$1"; then mkdir -p "$_SEAL_HOME/.reap"; printf '%s\n' "$SPY_HOLD" > "$_SEAL_HOME/.reap/pid"; fi
+  _spy_seal_remove "$@"
+}
+SPY
+cat >> "$SPY_DIR/lib/archive.sh" <<'SPY'
+eval "_spy_$(declare -f archive_run)"
+archive_run() {
+  printf 'archive: seals=%s plan-present=%s\n' "$(ls "$(git -C "$1" rev-parse --absolute-git-dir)"/bionic-seal/*.seal 2>/dev/null | wc -l | tr -d ' ')" \
+    "$(ls "$1"/*.plan.md 2>/dev/null | wc -l | tr -d ' ')" >> "$SPY_LOG"
+  _spy_archive_run "$@"
+}
+SPY
+SCRIPT_REAL="$SCRIPT"
+
+PS1="$(mk_fixture seal-arch)"; advance_to "$PS1" 8; rm -f "$PS1/$EPIC_REL"
+expect_eq "SEAL0: precondition: the fixture's run is sealed, one seal in its repository's common git directory" "1" "$(seal_count "$PS1")"
+rm -f "$SPY_LOG"; export SPY_LOG SPY_LOGFILE="$PS1/$LOG_REL"; SCRIPT="$SPY_DIR/close-out.sh"
+run_close "$PS1" run
+SCRIPT="$SCRIPT_REAL"; unset SPY_LOGFILE
+expect_eq "SEAL1: the close that archives exits 0, the plan gone from the project and in the archive" "0|no|yes" \
+  "$CO_RC|$([ -f "$PS1/$PLAN_REL" ] && echo yes || echo no)|$([ -n "$(find "$SANDBOX/seal-arch-archive" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1)" ] && echo yes || echo no)"
+expect_eq "SEAL2: …and no seal stands for the run afterwards" "0" "$(seal_count "$PS1")"
+expect_eq "SEAL3: the seal was lifted once, with the delivery already in the log" "remove: delivered-lines=1" "$(grep '^remove:' "$SPY_LOG" 2>/dev/null)"
+expect_eq "SEAL4: …and no seal stood when the archive was entered, the plan still in place" "archive: seals=0 plan-present=1" "$(grep '^archive:' "$SPY_LOG" 2>/dev/null)"
+expect_eq "SEAL4b: …the seal's lifting before the archive's entry, in the order the spies wrote them" "remove|archive" \
+  "$(sed -n 's/^\([a-z]*\):.*/\1/p' "$SPY_LOG" | paste -sd'|' -)"
+
+# A close whose archive does not move the plan (an open sibling in the epic) is the same close: the delivery stands, the
+# seal is lifted all the same, and the plan stays where it is.
+PS2="$(mk_fixture seal-stay)"; advance_to "$PS2" 8
+expect_eq "SEAL5: precondition: sealed" "1" "$(seal_count "$PS2")"
+run_close "$PS2" run
+expect_eq "SEAL6: a close whose plan stays in an open epic lifts the seal too, the plan in place" "0|0|yes" \
+  "$CO_RC|$(seal_count "$PS2")|$([ -f "$PS2/$PLAN_REL" ] && echo yes || echo no)"
+
+# THE LOCK NOT HAD IS A REFUSAL, NOT A STALE SEAL. A held lock turns the removal away after about two seconds; the close
+# names the seal and moves nothing, the seal stands, and the same close with a dead holder's lock goes through. The
+# lock is taken by the spy as the lift begins: held from the start, it turns the close away at its gate, which
+# compares the run with its seal under that same lock, and the lift would never be reached.
+PS3="$(mk_fixture seal-held)"; advance_to "$PS3" 8; rm -f "$PS3/$EPIC_REL"
+expect_eq "SEAL7: precondition: the run's seal stands, and no lock is held before the close" "1|no" \
+  "$(seal_count "$PS3")|$([ -d "$PS3/.git/bionic-seal/.reap" ] && echo yes || echo no)"
+export SPY_LOG SPY_LOGFILE="$PS3/$LOG_REL" SPY_HOLD="$$"; SCRIPT="$SPY_DIR/close-out.sh"
+run_close "$PS3" run
+SCRIPT="$SCRIPT_REAL"; unset SPY_LOGFILE SPY_HOLD
+expect_eq "SEAL8: the lock not had refuses the close (rc 2), naming the seal" "2|yes" \
+  "$CO_RC|$(contains "$CO_OUT" "the run's seal could not be lifted")"
+expect_eq "SEAL9: …the seal still stands and the plan was not moved" "1|yes" "$(seal_count "$PS3")|$([ -f "$PS3/$PLAN_REL" ] && echo yes || echo no)"
+sh -c 'exit 0' & SEAL_DEAD=$!; wait "$SEAL_DEAD"
+PS4="$(mk_fixture seal-dead)"; advance_to "$PS4" 8; rm -f "$PS4/$EPIC_REL"
+mkdir "$PS4/.git/bionic-seal/.reap"; printf '%s\n' "$SEAL_DEAD" > "$PS4/.git/bionic-seal/.reap/pid"
+run_close "$PS4" run
+expect_eq "SEAL10: the same close under a dead holder's lock takes it over, lifts the seal and archives" "0|0|no" \
+  "$CO_RC|$(seal_count "$PS4")|$([ -f "$PS4/$PLAN_REL" ] && echo yes || echo no)"
+
+
+# THE SESSION'S BINDING RECORD GOES WITH ITS ENGAGED MARKER. A session's binding is also a record beside the seal, and
+# that record outvotes the engaged file: left standing, a closed-out session would read bound to the plan it closed. After
+# the close the record is gone and the question of which run the session is in answers as it did before the record
+# existed, unbound. The marker removed by hand beforehand is the second road act_disengage takes: its record goes all the same.
+bind_read() {  # <project> <sid> -> "<session_plan rc>|<its answer>|<seal_binding_get rc>"
+  bash -c '. "$1/run.sh" && . "$1/seal.sh" || exit 9; v=$(session_plan "$2" "$3"); a=$?; seal_binding_warm "$2"; seal_binding_get "$2" "$3" >/dev/null; printf "%s|%s|%s" "$a" "$v" "$?"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$1" "$2" 2>/dev/null
+}
+for BS_ROAD in marker nomarker; do
+  PB="$(mk_fixture "seal-bind-$BS_ROAD")"; advance_to "$PB" 8; rm -f "$PB/$EPIC_REL"; BS_SID="closeout-bind-$BS_ROAD"
+  ( in_fixture "$PB" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PB" "$BS_SID" "$PB/$PLAN_REL" )
+  [ "$BS_ROAD" = marker ] || rm -f "$PB"/.bionic/tmp/engaged-"$BS_SID".state
+  expect_eq "SEAL11-$BS_ROAD: precondition: the session is bound, its record standing" "0|$PB/$PLAN_REL|0" "$(bind_read "$PB" "$BS_SID")"
+  run_close_as "$BS_SID" "$PB" run
+  expect_eq "SEAL12-$BS_ROAD: the close exits 0 and the session's record is gone: unbound, as before the record existed" "0|1||1" "$CO_RC|$(bind_read "$PB" "$BS_SID")"
+  expect_eq "SEAL13-$BS_ROAD: and the card's last line says the binding record was dropped" "yes" \
+    "$(printf '%s\n' "$CO_OUT" | tail -1 | /usr/bin/grep -q '^disengaged: .*binding record' && echo yes || echo no)"
+done
 
 finish

@@ -4,8 +4,8 @@
 # task-engaged-session (Chris, 2026-09-03): "all guardrails imposed by bionic should only
 # apply when exercising bionic. Nothing should apply until bionic is triggered" — and the
 # trigger is the canonical-sdlc skill, nothing else. 1.4.0 shipped walls scoped by
-# `active_run <repo>` alone, so any session in a repo with an open plan was walled and told
-# to arm a Patrol it never asked for. This hook records the entry, mechanically, at the
+# `active_run <repo>` alone, so any session in a repo with an open plan was walled by a run
+# it never asked for. This hook records the entry, mechanically, at the
 # instant the skill is invoked; every other bionic hook asks `engaged_session` before it
 # asks anything else.
 #
@@ -31,9 +31,11 @@
 #
 # IT NEVER BLOCKS, AND SPEAKS ONCE. Exit is 0 on every hook path — a trigger that could refuse
 # the skill it exists to notice would be a wall in front of the front door. (The typed verb
-# `engage.sh --root <dir>`, below, exits 2 on its own misuse: no hook ever passes it.) The one thing it
-# says is said to the MODEL, on stdout as `hookSpecificOutput.additionalContext`: when the
-# count rule declined a run because another live session holds it (see THE HELD RUN below).
+# `engage.sh --root <dir>`, below, exits 2 on its own misuse: no hook ever passes it.) What it
+# says is said to the MODEL, once per invocation, as one object on stdout,
+# `hookSpecificOutput.additionalContext`, holding up to two things: why the count rule declined
+# a run another live session holds (see THE HELD RUN below), and, when the invocation's argument
+# is a handoff file, the one resume command to run, whole (see THE RESUME COMMAND below).
 # Registered twice in hooks/hooks.json.
 #
 # [WALL: tests/engage.test.sh]
@@ -147,13 +149,6 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "engage"; fi
 . "$BIONIC_LIB/binding.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"   # patrol_live_session_ids — the sweeper's liveness (T13)
-# THE SCALE PROFILE: the arm below asks whether the bound plan's scale has a Patrol.
-# NOT in `BIONIC_LIB_WANT`, and sourced only when readable, as dispatch-preflight sources owed.sh: a
-# library without it arms exactly as before.
-if ! declare -F scale_patrol >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$BIONIC_LIB/scale.sh"
-fi
 
 # ---------- ROOT, SESSION ID, MARKER PATH — the three facts, each from its one owner ----
 #
@@ -215,8 +210,8 @@ fi
 
 # ---------- THE MARKER ----------
 #
-# A symlink at the marker path is refused before it is followed — the guard idiom
-# patrol-revive.sh uses on its stamp, and it matters more here: a planted link would let a
+# A symlink at the marker path is refused before it is followed — the guard idiom every
+# writer of the state directory takes, and it matters more here: a planted link would let a
 # hostile repo have this hook clobber a file outside the tree, on the one write bionic
 # performs at the invocation the user just typed.
 [ -L "$MARKER" ] && exit 0
@@ -266,7 +261,10 @@ BOUND=0
 ENGAGE_HELD_BY=""; ENGAGE_HELD_PLAN=""
 if PLAN=$(session_plan "$REPO" "$SID" 2>/dev/null); then
   BOUND=1
-elif [ -e "$MARKER" ]; then
+elif [ -e "$MARKER" ] || session_binding "$REPO" "$SID" >/dev/null 2>&1; then
+  # A binding to none recorded beside the seal is that same answer, and it stands when the
+  # marker has been removed: removing a file in the state folder is no first engagement.
+  #
   # FIRST ENGAGEMENT ONLY (wave-23-fixit-1810 T15, critic N-1; spec D1 Δ5). A marker that
   # exists but names no plan — `plan=none`, or an older writer's empty file — is a binding
   # too: the answer this hook, or the operator, already gave. It is rewritten as `none`
@@ -353,69 +351,6 @@ fi
 # re-engagement of a bound session appends it once, then never again.
 bind_plan "$REPO" "$SID" "$PLAN" engage || [ "$BOUND" = 1 ] || bind_plan "$REPO" "$SID" none || :
 
-# ---------- ARM THE PATROL ----------
-#
-# wave-12-fixit-171 D4 (spec §Design, principle P-A: no hook requires the model to perform
-# an action before it will judge one). Until this task the Patrol stamp
-# (.bionic/tmp/patrol-<sid>.state, schema patrol-stamp/v1) was written only by a HAND step —
-# `session-poker.sh arm` — that the operator was expected to run right after engaging. The
-# chore fell on the normal path: measured 2026-09-13, the first dispatch of a fresh session
-# was refused with "no Patrol stamp exists" because that step had not happened yet. The
-# machine already has every fact `arm` needs (the session id, the project root), so the
-# machine runs it.
-#
-# ADVISORY, LIKE EVERYTHING ELSE IN THIS HOOK. Engagement itself never blocks (see the
-# header), and arming the Patrol is a courtesy on top of engagement, not a second gate — a
-# session that engaged but failed to arm is exactly the pre-1.7.1 state, not a new failure
-# mode. So a failed `arm` is reported on stderr and changes nothing else here: not the exit
-# code, not the marker or the binding already written above.
-#
-# THE STAMP ITSELF STILL REFUSES A SYMLINK — write_patrol_stamp (session-poker.sh:608)
-# already carries that guard, the same one this hook applies to its own marker above, and
-# it is not duplicated here: this call site only decides WHEN `arm` runs, not how it writes.
-#
-# RUN WITH $REPO AS THE WORKING DIRECTORY, deliberately. `session-poker.sh`'s own stamp
-# path (`patrol_stamp_file`) resolves the project root from `$PWD` of the process that asks,
-# not from an argument — the same rule `tick` and every other caller already lives under —
-# so invoking it from whatever directory happened to launch this hook could arm a stamp for
-# the wrong project. `$REPO` is the one root this hook itself just resolved and wrote the
-# marker and binding under, so arming under it is the only root that agrees with what this
-# invocation just engaged. The session id travels as `CLAUDE_CODE_SESSION_ID`, the same
-# variable `session_id()` prefers over its payload argument (L-SESSION, same rule this hook
-# applied to its own `$SID` above) — so the poker verb re-derives the identical id rather
-# than trusting a second copy of it.
-#
-# SAME LOADER-FOUND HOOK DIRECTORY AS EVERY OTHER SIBLING CALLER (dispatch-preflight.sh's
-# POKER_SCRIPT resolution): beside this hook first — the payload/hooks symlink and the bare
-# hooks/ tree both resolve here — and the installed-plugin config dir as the fallback for a
-# hook running from a location the sibling lookup does not reach.
-ENGAGE_HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-[ -n "$ENGAGE_HOOK_DIR" ] || ENGAGE_HOOK_DIR="$(dirname "$0")"
-ENGAGE_POKER="$ENGAGE_HOOK_DIR/session-poker.sh"
-[ -f "$ENGAGE_POKER" ] || ENGAGE_POKER="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
-
-# THE PATROL IS THE SCALE'S. A bound plan whose scale has no Patrol
-# (`scale_patrol`, payload/scripts/lib/scale.sh, says `no`) — the task row — arms nothing: a task-scale
-# run has no Patrol, and the dispatch wall asks the same function before it asks for a stamp. No bound
-# plan, a plan with no `scale:`, or no profile to ask: the arm runs as before.
-ENGAGE_PATROL=yes
-ENGAGE_BOUND_PLAN="$(session_plan "$REPO" "$SID" 2>/dev/null)" || ENGAGE_BOUND_PLAN=""
-if [ -n "$ENGAGE_BOUND_PLAN" ] && [ "$ENGAGE_BOUND_PLAN" != none ] && declare -F scale_patrol >/dev/null 2>&1; then
-  ENGAGE_PATROL="$(scale_patrol "$ENGAGE_BOUND_PLAN" 2>/dev/null)" || ENGAGE_PATROL=yes
-fi
-
-if [ "$ENGAGE_PATROL" = no ]; then
-  :
-elif [ -f "$ENGAGE_POKER" ]; then
-  ENGAGE_ARM_ERR=$(cd "$REPO" && CLAUDE_CODE_SESSION_ID="$SID" bash "$ENGAGE_POKER" arm 2>&1 >/dev/null)
-  ENGAGE_ARM_RC=$?
-  if [ "$ENGAGE_ARM_RC" -ne 0 ]; then
-    echo "engage: session-poker arm failed (exit $ENGAGE_ARM_RC) for session $SID: $ENGAGE_ARM_ERR" >&2
-  fi
-else
-  echo "engage: session-poker.sh not found beside this hook — Patrol stamp not armed for session $SID" >&2
-fi
-
 # ---------- TELL THE MODEL WHY IT IS UNBOUND ----------
 #
 # Only when THE HELD RUN above declined a binding, and only after the marker says so. The
@@ -425,10 +360,68 @@ fi
 # not the turn, and the reader this sentence is for is the model about to act. The second
 # line is `run_unbound_advisory`'s sentence, unchanged, so it reads as every gate's advisory
 # reads; the first says why the bind it offers is not the obvious move.
+ENGAGE_CTX=""
 if [ -n "$ENGAGE_HELD_BY" ] && [ "$(session_plan "$REPO" "$SID" 2>/dev/null || echo none)" = "none" ]; then
-  ENGAGE_EVENT=$(_jq '.hook_event_name')
   ENGAGE_CTX="bionic: this session was left unbound — the root's one live run is bound to live session $ENGAGE_HELD_BY; bind to it only if this session is joining that run.
 $(run_unbound_advisory "$ENGAGE_HELD_PLAN")"
+fi
+
+# ---------- THE RESUME COMMAND, WHOLE ----------
+#
+# The method's page names the resume command with no folder, and nothing a session is shown
+# after a /clear carries the plugin's root, so a model left to find session-poker.sh searched
+# for it and ran it through a variable. The farm-out wall cannot read a script held in a
+# variable and reads that shape as a suite (payload/scripts/lib/cmd-class.sh, reading 4 of its
+# header), so the resume's first call was refused. This hook knows its own folder; the model
+# does not. So when the invocation's argument is a handoff file, the one command is said here,
+# whole: `bash <this hooks folder as invoked, absolute>/session-poker.sh resume <the file, absolute>`,
+# each word quoted when it holds a character the shell would split or expand, so the line
+# pasted as written is one command of four words and the wall reads it as no suite.
+#
+# THE ARGUMENT, PER PATH (read off the CLI 2.1.329 bundle): the Skill tool's input is
+# `{skill, args?}`, so PreToolUse carries `tool_input.args`; UserPromptExpansion carries
+# `command_args`, the text typed after the command's name. The whole text, trimmed, is the
+# path, so a file name holding a space is read whole.
+#
+# IS A HANDOFF is the door's reading in hooks/session-start.sh, its three conditions as they
+# stand there: a regular file, not a symlink, whose first line is `bionic-handoff/v1`; a
+# relative path is read against the project root, as the door and the resume verb read it.
+#
+# ANY DOUBT SAYS NOTHING: no argument, a control character in it, a path to no file, a file
+# that fails the door's test, or no session-poker.sh beside this hook. Saying nothing leaves the
+# model where it stood before; saying a command that does not run is a refusal of its own.
+_engage_word() {  # <text> -> the text as one shell word
+  case "$1" in
+    *[!A-Za-z0-9_./:@%+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+if [ "$ROOT_MODE" -eq 0 ]; then
+  ENGAGE_ARG=""
+  case "$(_jq '.hook_event_name')" in
+    PreToolUse)          ENGAGE_ARG=$(_jq '.tool_input.args') ;;
+    UserPromptExpansion) ENGAGE_ARG=$(_jq '.command_args') ;;
+  esac
+  case "$ENGAGE_ARG" in *[[:cntrl:]]*) ENGAGE_ARG="" ;; esac
+  ENGAGE_ARG="${ENGAGE_ARG#"${ENGAGE_ARG%%[![:space:]]*}"}"
+  ENGAGE_ARG="${ENGAGE_ARG%"${ENGAGE_ARG##*[![:space:]]}"}"
+  case "$ENGAGE_ARG" in
+    '') ENGAGE_FILE="" ;;
+    /*) ENGAGE_FILE="$ENGAGE_ARG" ;;
+    *)  ENGAGE_FILE="$REPO/${ENGAGE_ARG#./}" ;;
+  esac
+  ENGAGE_POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-poker.sh" || ENGAGE_POKER=""
+  if [ -n "$ENGAGE_FILE" ] && [ -f "$ENGAGE_FILE" ] && [ ! -L "$ENGAGE_FILE" ] \
+     && [ "$(head -n 1 "$ENGAGE_FILE" 2>/dev/null)" = "bionic-handoff/v1" ] \
+     && [ -n "$ENGAGE_POKER" ] && [ -f "$ENGAGE_POKER" ]; then
+    ENGAGE_CTX="${ENGAGE_CTX:+$ENGAGE_CTX
+}bionic: resume this run with this one command, as written: bash $(_engage_word "$ENGAGE_POKER") resume $(_engage_word "$ENGAGE_FILE")"
+  fi
+fi
+
+# ONE OBJECT, whatever is said: two objects on one hook's stdout are not one answer.
+if [ -n "$ENGAGE_CTX" ]; then
+  ENGAGE_EVENT=$(_jq '.hook_event_name')
   if [ "$ROOT_MODE" -eq 1 ]; then
     # The verb has no event to answer on: its reader is whoever typed it, on stderr.
     printf '%s\n' "$ENGAGE_CTX" >&2

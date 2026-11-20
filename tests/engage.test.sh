@@ -808,4 +808,172 @@ expect_eq "engage.sh calls bind_plan" "yes" \
   "$(/usr/bin/grep -q 'bind_plan ' "$HOOK" && echo yes || echo no)"
 
 # ============================================================
+section "E10 — a handoff argument: the resume command is said whole and absolute"
+# ============================================================
+#
+# THE FAULT. The method's page names the resume command with no folder, and nothing a session
+# is shown after a /clear carries the plugin's root. A model resuming from a handoff therefore
+# searched for session-poker.sh and ran what it found through a variable, `bash "$S" resume …`,
+# which the farm-out wall reads as a suite (payload/scripts/lib/cmd-class.sh, reading 4 of its
+# header: a shell whose script is a bare variable) and refuses on the main thread. The hook
+# knows its own folder; the model does not. So when the invocation's argument is a handoff file,
+# the hook says, on the model's channel, the one command to run, whole: its own hooks folder
+# absolute, and the file absolute.
+#
+# BOTH PATHS CARRY THE ARGUMENT (read off the CLI 2.1.329 bundle): the Skill tool's input is
+# `{skill, args?}`, so PreToolUse carries `tool_input.args`; UserPromptExpansion carries
+# `command_args`, the text typed after the command's name.
+#
+# IS A HANDOFF is the door's reading in hooks/session-start.sh: a regular file, not a symlink,
+# whose first line is `bionic-handoff/v1`; a relative path is read against the project root.
+#
+# EVERY ABSENCE HERE SITS BESIDE ITS POSITIVE on the same root and through the same extractor
+# (`e10_line`), and the extractor is proved non-empty on real output first.
+E10_LEAD='bionic: resume this run with this one command, as written: '
+E10_CMDLIB="$REPO_ROOT/payload/scripts/lib/cmd-class.sh"
+
+e10_handoff() {  # <abs path> -> a handoff file, kind line first
+  mkdir -p "${1%/*}"
+  printf 'bionic-handoff/v1\nresume point: step 5\nplan: plans/wave-01.plan.md\n' > "$1"
+}
+e10_skill() {  # <sid> <cwd> <args|-> ; `-` leaves the field out, as the CLI does with none
+  if [ "$3" = "-" ]; then skill_payload "$1" "$2" "bionic:canonical-sdlc"; return; fi
+  jq -nc --arg s "$1" --arg c "$2" --arg a "$3" \
+    '{session_id:$s,prompt_id:"p-1",transcript_path:"/dev/null",cwd:$c,
+      permission_mode:"default",hook_event_name:"PreToolUse",
+      tool_name:"Skill",tool_input:{skill:"bionic:canonical-sdlc",args:$a},tool_use_id:"toolu_e10"}'
+}
+e10_typed() {  # <sid> <cwd> <args>
+  jq -nc --arg s "$1" --arg c "$2" --arg a "$3" \
+    '{session_id:$s,prompt_id:"p-1",transcript_path:"/dev/null",cwd:$c,
+      permission_mode:"default",hook_event_name:"UserPromptExpansion",
+      expansion_type:"slash_command",command_name:"bionic:canonical-sdlc",command_args:$a,
+      command_source:"plugin",prompt:("/bionic:canonical-sdlc " + $a)}'
+}
+e10_fire() {  # <hook> <sid> <json> [claude home] -> HOOK_OUT/HOOK_RC
+  HOOK_OUT=$(env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$2" BIONIC_CLAUDE_HOME="${4:-$SANDBOX/no-home}" \
+    bash "$1" <<< "$3" 2>"$SANDBOX/.err")
+  HOOK_RC=$?
+}
+e10_ctx()  { printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
+e10_line() { e10_ctx | grep -F -- "$E10_LEAD" | head -n 1; }
+e10_cmd()  { e10_line | sed "s/^.*${E10_LEAD}//"; }
+e10_argv() {  # <command> -> argc, then each word, one per line, as a shell reads the pasted line
+  ( eval "set -- $1"; printf '%s\n' "$#"; for w in "$@"; do printf '%s\n' "$w"; done )
+}
+e10_class() {  # <command> -> its class; `no command` for an empty one, so a silent hook cannot read none
+  [ -n "$1" ] || { printf "no command"; return; }
+  bash -c '. "$1" || exit 9; cmd_class "$2"' _ "$E10_CMDLIB" "$1" 2>/dev/null; }
+
+# Each fire is a FIRST engagement under its own id; set here, never in a $(…) subshell, which would
+# drop the count and hand every fire the same id.
+E10_N=0; S=""
+e10_sid() { E10_N=$((E10_N + 1)); S="$(printf "e10e10e1-0000-4000-8000-%012d" "$E10_N")"; }
+
+R16="$(make_repo e10)"
+H16REL=".bionic/docs/record/handoffs/2026-11-19-wave-01.md"
+H16="$R16/$H16REL"
+e10_handoff "$H16"
+POKER_ABS="$(cd "$BIONIC_HOOKS_DIR" && pwd -P)/session-poker.sh"
+
+# (a) THE MODEL'S PATH: a Skill call whose args name the handoff, relative to the root.
+e10_sid
+e10_fire "$HOOK" "$S" "$(e10_skill "$S" "$R16" "$H16REL")"
+expect_eq "E10a a Skill call with a handoff argument exits 0" "0" "$HOOK_RC"
+expect_nonempty "E10a …and says the resume line on the model's channel" "$(e10_line)"
+expect_eq "E10a …in an object answering the event it came on" "PreToolUse" \
+  "$(printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)"
+CMD="$(e10_cmd)"
+expect_eq "E10a …the command is four words as a shell reads it" "4" "$(e10_argv "$CMD" | sed -n 1p)"
+expect_eq "E10a …its first word is bash" "bash" "$(e10_argv "$CMD" | sed -n 2p)"
+expect_eq "E10a …its script is this hook's own session-poker.sh, absolute" "$POKER_ABS" "$(e10_argv "$CMD" | sed -n 3p)"
+if [ -f "$(e10_argv "$CMD" | sed -n 3p)" ]; then ok "E10a …and that script is a file that exists"
+else no "E10a …and that script is a file that exists" "no file at '$(e10_argv "$CMD" | sed -n 3p)'"; fi
+expect_eq "E10a …its verb is resume" "resume" "$(e10_argv "$CMD" | sed -n 4p)"
+expect_eq "E10a …and its file is the handoff, absolute" "$H16" "$(e10_argv "$CMD" | sed -n 5p)"
+expect_eq "E10a …and the wall reads the line as no suite (the refused call read suite)" "none" "$(e10_class "$CMD")"
+expect_eq "E10a …and the session is engaged as before" "$R16/.bionic/docs/plans/wave-01.plan.md" \
+  "$(plan_of "$(marker_path "$R16" "$S")")"
+
+# (b) THE TYPED PATH: the same argument as command_args, here absolute.
+e10_sid
+e10_fire "$HOOK" "$S" "$(e10_typed "$S" "$R16" "$H16")"
+expect_eq "E10b a typed invocation with a handoff argument exits 0" "0" "$HOOK_RC"
+expect_eq "E10b …in an object answering UserPromptExpansion" "UserPromptExpansion" \
+  "$(printf '%s' "$HOOK_OUT" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)"
+CMD="$(e10_cmd)"
+expect_eq "E10b …the same four words: bash, the script, resume, the file" \
+  "4|bash|$POKER_ABS|resume|$H16" "$(e10_argv "$CMD" | paste -sd'|' -)"
+expect_eq "E10b …and the wall reads it as no suite" "none" "$(e10_class "$CMD")"
+
+# (c) THE ABSENCES, on the same root, through the same extractor, on both paths: no argument,
+# `help`, a path to no file, a file with no kind line, a symlink to the real handoff. Each fire
+# is checked to have run (exit 0 and the session engaged) before its silence is read.
+printf 'notes, not a handoff\nbionic-handoff/v1\n' > "$R16/.bionic/docs/record/handoffs/notes.md"
+ln -s "$H16" "$R16/.bionic/docs/record/handoffs/link.md"
+for e10_path in skill typed; do
+  for e10_arg in - "" help ".bionic/docs/record/handoffs/gone.md" \
+                 ".bionic/docs/record/handoffs/notes.md" ".bionic/docs/record/handoffs/link.md"; do
+    [ "$e10_path" = typed ] && [ "$e10_arg" = "-" ] && continue
+    e10_sid
+    e10_fire "$HOOK" "$S" "$("e10_$e10_path" "$S" "$R16" "$e10_arg")"
+    expect_eq "E10c [$e10_path '$e10_arg'] exits 0 and engages" "0:$R16/.bionic/docs/plans/wave-01.plan.md" \
+      "$HOOK_RC:$(plan_of "$(marker_path "$R16" "$S")")"
+    expect_empty "E10c [$e10_path '$e10_arg'] …and says nothing new" "$(e10_line)"
+  done
+done
+# the pair, last, on the same root: the real file still yields the line on both paths.
+for e10_path in skill typed; do
+  e10_sid
+  e10_fire "$HOOK" "$S" "$("e10_$e10_path" "$S" "$R16" "$H16REL")"
+  expect_eq "E10c paired [$e10_path]: the real handoff on the same root still yields the command" \
+    "$H16" "$(e10_argv "$(e10_cmd)" | sed -n 5p)"
+done
+
+# (d) A ROOT AND A FILE NAME HOLDING A SPACE are printed so the pasted line is one command. The
+# plugin tree is a throwaway copy under a folder with a space (hooks/ beside scripts/lib/, the
+# shape the loader finds first), so the hook's own folder carries the space and is a link, as a
+# plugin loaded through links is: the command names the link's path, never the target's.
+E10_PLUG="$SANDBOX/plug in/bionic"
+mkdir -p "$E10_PLUG/hooks.real" "$E10_PLUG/scripts/lib"; ln -s hooks.real "$E10_PLUG/hooks"
+cp "$REPO_ROOT"/payload/scripts/lib/*.sh "$E10_PLUG/scripts/lib/"
+cp "$HOOK" "$E10_PLUG/hooks/engage.sh"
+cp "$BIONIC_HOOKS_DIR/session-poker.sh" "$E10_PLUG/hooks/session-poker.sh"
+R17="$(cd "$(mktemp -d "$SANDBOX/my proj.XXXXXX")" && pwd -P)"
+mkdir -p "$R17/.bionic/tmp"
+mk_page "$R17/.bionic/docs/plans/wave-01.plan.md" 4
+H17="$R17/.bionic/docs/record/handoffs/my handoff.md"
+e10_handoff "$H17"
+e10_sid
+e10_fire "$E10_PLUG/hooks/engage.sh" "$S" "$(e10_typed "$S" "$R17" ".bionic/docs/record/handoffs/my handoff.md")"
+CMD="$(e10_cmd)"
+expect_nonempty "E10d a root and a file with a space still yield the line" "$CMD"
+expect_eq "E10d …and the pasted line is one command of four words, each whole" \
+  "4|bash|$E10_PLUG/hooks/session-poker.sh|resume|$H17" "$(e10_argv "$CMD" | paste -sd'|' -)"
+expect_eq "E10d …and the wall reads it as no suite" "none" "$(e10_class "$CMD")"
+
+# (e) THE HELD-RUN SENTENCE AND THIS LINE AT ONE INVOCATION LEAVE AS ONE OBJECT. The root's one
+# live run is bound to another session that is live in the fixture home (its pid file names this
+# suite's own pid, alive for the whole run), so a first engagement is left unbound and told why.
+R18="$(make_repo e10e)"
+P18="$R18/.bionic/docs/plans/wave-01.plan.md"
+H18="$R18/.bionic/docs/record/handoffs/h.md"
+e10_handoff "$H18"
+HOLDER="40ld0e10-aaaa-4bbb-8ccc-dddddddddddd"
+call_bind "$R18" "$HOLDER" "$P18"
+E10_HOME="$SANDBOX/e10-home"; mkdir -p "$E10_HOME/sessions"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$HOLDER" "$R18" > "$E10_HOME/sessions/$$.json"
+e10_sid
+e10_fire "$HOOK" "$S" "$(e10_typed "$S" "$R18" "")" "$E10_HOME"
+expect_contains "E10e the held fixture says the held sentence with no argument (non-vacuity)" \
+  "was left unbound" "$(e10_ctx)"
+expect_empty "E10e …and, with no argument, no resume line" "$(e10_line)"
+e10_sid
+e10_fire "$HOOK" "$S" "$(e10_typed "$S" "$R18" "$H18")" "$E10_HOME"
+expect_eq "E10e with both to say, stdout is one line" "1" "$(printf '%s\n' "$HOOK_OUT" | grep -c .)"
+expect_eq "E10e …and that line is one JSON object" "object" "$(printf '%s' "$HOOK_OUT" | jq -r 'type' 2>/dev/null)"
+expect_contains "E10e …holding the held sentence" "was left unbound" "$(e10_ctx)"
+expect_eq "E10e …and the resume command" "$H18" "$(e10_argv "$(e10_cmd)" | sed -n 5p)"
+
+# ============================================================
 finish

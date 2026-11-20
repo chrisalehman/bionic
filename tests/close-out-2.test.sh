@@ -260,6 +260,7 @@ land_plant() {  # <project> -> a ready and a queue landing for T1, a git landing
   printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|admitted=1791281100|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
   printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
   printf 'run/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
+  seal_fixture "$1/$PLAN_REL" "$rec"
 }
 PLD="$(mk_fixture landings1)"; advance_to "$PLD" 8
 land_plant "$PLD"

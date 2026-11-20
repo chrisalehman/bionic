@@ -1516,6 +1516,7 @@ RR_MATRIX
     [ "$RR_PREVIEW" != yes ] || rr_fact preview
     rr_fact criteria "$RR_ACT" "$RR_ACW"
     for l in $RR_MISS; do rr_fact miss "$l"; done
+    for l in $RR_OWED; do rr_fact owed "${l%:*}" "${l##*:}"; done
     printf '%s\n' "$RR_CHG" | tr ',' '\n' | while IFS= read -r l; do [ -z "$l" ] || rr_fact check "$l"; done
     printf '%s\n' "$RR_ASIDE" | while IFS= read -r l; do [ -z "$l" ] || rr_fact aside "$l"; done
     for ((i = 0; i < RR_N; i++)); do
@@ -1542,7 +1543,7 @@ RR_MATRIX
     rr_fact acceptance "$RR_TACC"
     rr_fact regression "$RR_TREG"
     printf '%s\n' "$RR_REVIEWS" | while IFS= read -r l; do [ -z "$l" ] || rr_fact review "$l"; done
-    rr_fact findings "$RR_FN" "$RR_FNF" "$RR_FNA" "$RR_FNC" "$RR_FROWS"
+    rr_fact findings "$RR_FN" "$RR_FNF" "$RR_FNA" "$RR_FNC" "$RR_FROWS" "$RR_FUNL"
     printf '%s\n' "$RR_FLINES" | awk 'NF { print "finding\t" $0 }'
   }
 
@@ -1569,7 +1570,7 @@ RR_MATRIX
   }
 
   poker_verb_release_approval() {
-    local nm line key reply ac tier st au ruled person why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again
+    local nm line key reply ac tier st au ruled person why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again fo fw mk
     if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_last_line >/dev/null 2>&1 || ! _proof_reader_load; then
       die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
@@ -1612,7 +1613,7 @@ RR_MATRIX
     set -- $(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v l="$RR_LANDED_IDS" 'NF >= 10 { t++; if (index(l, " " $1 " ")) n++ } END { print t + 0, n + 0 }')
     RR_TOTAL="${1:-0}"; RR_LANDED="${2:-0}"
 
-    RR_N=0; RR_ASIDE=""
+    RR_N=0; RR_ASIDE=""; RR_FASKS=""
     RR_KIND=(); RR_KEY=(); RR_DO=(); RR_ELSE=(); RR_WHYS=(); RR_SUBJ=(); RR_DLAB=(); RR_OLAB=(); RR_DPH=(); RR_OPH=(); RR_PICK=()
 
     # WAIVERS: the run's open waive: asks (the reader's `asks`), then the ones the red check owes, each once; never the
@@ -1641,7 +1642,7 @@ RR_WAIVES
     # other row is a decision: a discharged row whose person's part is `awaits` is the user's own check, to confirm
     # (approve <AC>) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
     # step a row is owed against is the run's (the reader's `step`), the plan's `current:` only where the log has none.
-    RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
+    RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""; RR_OWED=""
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_step; RR_CUR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^n=//p')"
     if ! RR_ROWS="$(rr_rows "$PV_PLAN" "${RR_CUR:-$PV_CUR}" "$RR_HEAD")"; then
       die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded or the run's facts could not be read; nothing is written. Run again: bash ${HOOK_DIR}/session-poker.sh $RR_AGAIN"
@@ -1657,7 +1658,11 @@ RR_WAIVES
       fi
       if [ "$ruled" = 1 ] && [ "$st" = waived ]; then RR_ACW=$((RR_ACW + 1)); continue; fi
       # A ROW OWED AT A LATER STEP IS NO DECISION: the step that proves it writes it, the close for a row owed at 9.
-      case "$ruled" in owed:9) RR_ACC=$((RR_ACC + 1)); continue ;; owed:*) RR_ACL=$((RR_ACL + 1)); continue ;; esac
+      # The bottom line names each, so it never says every criterion is proved while one is pending.
+      case "$ruled" in
+        owed:9) RR_ACC=$((RR_ACC + 1)); RR_OWED="${RR_OWED:+$RR_OWED }$ac:close"; continue ;;
+        owed:*) RR_ACL=$((RR_ACL + 1)); RR_OWED="${RR_OWED:+$RR_OWED }$ac:later"; continue ;;
+      esac
       RR_MISS="${RR_MISS:+$RR_MISS }$ac"
       if [ "$person" = awaits ] && [ "$st" = discharged ]; then
         RR_ACA=$((RR_ACA + 1))
@@ -1696,7 +1701,7 @@ RR_ROWS_EOF
     # deferral carried; a move to fixed fixed once its row landed, open with that row before), and the question is
     # the reader's newest review proof citing its record. The disposition's own state stands for a finding the
     # reader holds no line of, a review's unlined flag.
-    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""
+    RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""; RR_FUNL=""
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_findings
     RR_RFIND="$(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'
       NF > 1 { print line_kv("ref") "\t" line_kv("to") "\t" line_kv("row") }')"
@@ -1736,6 +1741,15 @@ RR_ROWS_EOF
         done
         [ "$state" = fixed ] || [ -z "$dec" ] || sent="$sent (not landed yet)"
         dec=""
+      elif [ "$state" = open ] && [ -z "${to:-}" ] && ! rr_dec_of "waive:$q" >/dev/null; then
+        # A FINDING THE PERSON RULES IS A DECISION: open with no row answering it and no move of theirs, it is the ask
+        # the disposition opens, so the page numbers it, the policy's fix first. An S1 is never carried: its other
+        # choice holds it open. A waiver of its question on the page answers it, so it waits on that decision instead.
+        if [ "$sev" = S1 ]; then fo="-"; fw="hold"; else fo="finding-move $fid defer"; fw="carry"; fi
+        rr_add finding "finding:$fid" "finding-move $fid fix" "$fo" "the release approval card: fixed" "$sent (${q:-a review} #$num)" \
+          "fix now, one row" "$fw" "fix ${q:-a} finding $num" "$fw ${q:-a} finding $num"
+        ! printf '%s' "$RR_AGAINST" | /usr/bin/grep -qxF -- "finding:$fid" || RR_PICK[RR_N - 1]=other
+        grp=A; dec="$RR_N"
       elif printf '%s' "$RR_AGAINST" | /usr/bin/grep -qxF -- "finding:$fid" && ! rr_carried "$RR_DIR" "$fid"; then
         rr_add finding "finding:$fid" "-" "finding-move $fid fix" "the release approval card: fixed instead of carried" \
           "$sent (${q:-a review} #$num)" carry "fix now, one row" "carry ${q:-a} finding $num" "fix ${q:-a} finding $num"
@@ -1746,8 +1760,13 @@ RR_ROWS_EOF
         done
         if [ "$grp" = C ] && [ "$state" = open ]; then grp=A; dec="$(rr_dec_of "waive:$q")" || dec=""; fi
       fi
+      # THE CARRIED COUNT IS THE LOG'S: a carried finding the reader holds no deferral of stands on its record alone,
+      # so it is counted apart and named as the page names a finding, never by its record's path; nothing is written
+      # to the log to make the two agree.
+      if [ "$grp" = C ]; then case "${to:-}" in deferred|defer|carried) : ;; *) grp=R; RR_FUNL="${RR_FUNL:+$RR_FUNL;}${q:-a review} #$num" ;; esac; fi
       case "$grp" in F) RR_FNF=$((RR_FNF + 1)) ;; A) RR_FNA=$((RR_FNA + 1)) ;; C) RR_FNC=$((RR_FNC + 1)) ;; esac
       RR_FLINES="${RR_FLINES}${grp}	${sev}	${sent}${dec:+ (decision $dec)}"$'\n'
+      [ -z "$dec" ] || RR_FASKS="${RR_FASKS}$(finding_owed_key "$fid")"$'\n'
     done <<RR_DISP_EOF
 $RR_DISP
 RR_DISP_EOF
@@ -1810,6 +1829,21 @@ RR_DISP_EOF
          fi ;;
     esac
 
+    # EVERY ASK THAT WAITS ON THE PERSON IS ON THE PAGE (lib/owed.sh `ask_waits_on`), read after the findings' reader
+    # opened theirs. One the page has not numbered above is one no reply could answer (the changed run's accept or
+    # abandon, a pull request closed unmerged, a design decision's option, an approval no row reads), so it is an aside
+    # in its own words, and the reply leaves open nothing the page did not show. Never the regression's waiver, which
+    # no surface offers; a gate act is an aside above; the merge without a pass is the decision above or settled by it.
+    while IFS='	' read -r key _ ttl line; do
+      case "$key" in ''|gate:*|waive:regression|approve:merge-unproved) continue ;; esac
+      rr_dec_of "$key" >/dev/null && continue
+      case $'\n'"$RR_FASKS" in *$'\n'"$key"$'\n'*) continue ;; esac
+      { declare -F ask_waits_on >/dev/null 2>&1 && [ "$(ask_waits_on "$key" "$PV_PLAN" "$PV_REPO")" = user ]; } || continue
+      line="${line:-${ttl:-$key}}"; RR_ASIDE="${RR_ASIDE}${line#poker: }"$'\n'
+    done <<RR_USER_ASKS
+$(owed_list_plan "$PV_PLAN" "$PV_REPO" 2>/dev/null)
+RR_USER_ASKS
+
     # AN --against THAT NAMES NOTHING ON THE PAGE is refused before anything is written.
     while IFS= read -r key; do
       [ -n "$key" ] || continue
@@ -1849,7 +1883,8 @@ RR_AGAINST_EOF
     # THE REVIEWS: each question's newest reading, by the role the rigor deals it, covered or failing as the judge
     # reads it at the head (lib/proof.sh `facts_reviews`, the one reading the situation report's count shares): a
     # failed reading its fix landings answered reads covered, naming them, and failing stays only while it is
-    # uncovered. A plan the judge cannot deal has no coverage to read, so its lines say the recorded result.
+    # uncovered. Only a newest reading that passed draws the pass mark. A plan the judge cannot deal has no coverage
+    # to read, so its lines say the recorded result.
     RR_REVIEWS=""
     RR_COV="$(facts_reviews "$PV_PLAN" "$RR_HEAD" --landings 2>/dev/null)"
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_header rigor; RR_RIGOR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^rigor=//p')"
@@ -1868,15 +1903,19 @@ RR_AGAINST_EOF
         -) clands="" ;;
         *) clands="$(printf '%s' "$clands" | tr ',' '\n' | awk -F'@' 'NF == 2 { printf "%s%s", (n++ ? ", " : ""), ($1 == "-" ? "" : $1 " at ") substr($2, 1, 8) }')" ;;
       esac
+      # THE MARK IS lib/proof.sh `facts_review_mark`'s, the one the situation report's count reads; the words say
+      # why, a covered reading that flagged or failed its result beside the cover.
+      case "$(facts_review_mark "${cst:-}" "$r")" in pass) mk="✅" ;; fail) mk="✖️" ;; *) mk="➖" ;; esac
       case "${cst:-}:$r" in
-        failing:*) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
-        covered:*) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm${clands:+, covered at this head by $clands}"$'\n' ;;
-        uncovered:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, not covered at this head"$'\n' ;;
-        absent:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, a review still owed at this head"$'\n' ;;
-        :pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm"$'\n' ;;
-        :fail) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
-        *) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, ${r:-no result}"$'\n' ;;
+        failing:*|:fail) why=", failing" ;;
+        covered:pass) why="${clands:+, covered at this head by $clands}" ;;
+        covered:*) why=", result ${r:-none}, covered at this head${clands:+ by $clands}" ;;
+        uncovered:*) why=", not covered at this head" ;;
+        absent:*) why=", a review still owed at this head" ;;
+        :pass) why="" ;;
+        *) why=", ${r:-no result}" ;;
       esac
+      RR_REVIEWS="${RR_REVIEWS}$mk $q — $nm$why"$'\n'
     done
 
     # THE HAND-HOLDS, from the last build landing (line.sh `hand_holds_window`'s start) to this render. The render's
@@ -2009,6 +2048,15 @@ RR_AGAINST_EOF
     return 0
   }
 
+  # A DECISION APPLIED IS ITS ASK ANSWERED: whatever its verb closed, the ask the page numbered closes here, a finding's
+  # under its register key, so the reply leaves open no ask the page numbered. One held back stays open.
+  rp_close() {  # <decision key> -> always 0, prints nothing
+    local k="$1"
+    case "$k" in finding:*'#'*) k="$(finding_owed_key "${k#finding:}")" ;; esac
+    declare -F owed_close >/dev/null 2>&1 && OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$k" "release approval reply" >/dev/null 2>&1
+    return 0
+  }
+
   poker_verb_reply() {
     case "$RP_TEXT" in
       *$'\n'*|*$'\r'*) die "REFUSED — a reply is one line, and this one carries a line break; the plan is unchanged."; exit 1 ;;
@@ -2080,6 +2128,7 @@ RR_AGAINST_EOF
             && OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_answer "$RP_KEY" no "review ${RP_KEY#waive:} re-run" >/dev/null 2>&1 ;;
         esac
         printf '%s\n' "$RP_REC" >> "$RP_CARD"; say "reply — $RP_REC"
+        [ "$RP_SIDE" != default ] || rp_close "$RP_KEY"
         continue
       fi
       read -r -a RP_ARGV <<< "$RP_CMD"
@@ -2092,6 +2141,7 @@ RR_AGAINST_EOF
         exit "$RP_RC"
       fi
       printf 'applied: %s %s rc=0\n' "$RP_KEY" "${RP_ARGV[0]}" >> "$RP_CARD"
+      rp_close "$RP_KEY"
       RP_DONE=$((RP_DONE + 1))
     done <<RP_TABLE
 $RP_TABLE

@@ -16,7 +16,11 @@
 # the map reads a suite's own lines and does not follow this file, so POKER, S46_LIB and
 # S31_STOP_HOOK are assigned by each shard that needs them, before this file is sourced.
 
-TMPROOT="$(mktemp -d)"
+# shellcheck source=/dev/null
+declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
+# Under TMPDIR by name: macOS's bare `mktemp -d` ignores TMPDIR, and a run given a temp folder of its own must find
+# every world this file builds inside it, and anything a world leaves behind there too.
+TMPROOT="$(sp_t="${TMPDIR:-/tmp}"; mktemp -d "${sp_t%/}/sp.XXXXXX")"
 
 # THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
 # library through the shared loader idiom, whose candidates (2) and (3) read the CLI's
@@ -94,7 +98,9 @@ make_repo() {  # <label> -> repo path, in a session that has ENGAGED bionic
 # `arm` and `disarm` are deliberately NOT guarded: writing or removing a stamp for a
 # session that asked for one is harmless, and disarm must leave this marker in place —
 # a session that invoked the skill is bionic's for its whole life (AC-15).
-engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$SID.state"; }
+# ENGAGED AND UNBOUND, whatever was bound before: the session's binding record beside the seal
+# is dropped (tests/lib/bound-marker.sh), or it would be believed over the empty marker.
+engage()   { mkdir -p "$1/.bionic/tmp" && { ! declare -F bound_marker_unrecord >/dev/null || bound_marker_unrecord "$1" "$SID"; } && : > "$1/.bionic/tmp/engaged-$SID.state"; }
 unengage() { rm -f "$1/.bionic/tmp/engaged-$SID.state"; }
 
 roster_of() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "${2:-$SID}"; }
@@ -227,7 +233,8 @@ ack_rows() {  # <repo> <name>...
 # delivery in its log.
 delivered_plan() {  # <repo>
   local p; p="$(sp_plan_at_step "$1" 9)"
-  printf 'run/v1|ev=step|n=9|delivered=bionic 9.9.9; report: record/fixture/close-out.md|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$p")"
+  printf 'run/v1|ev=step|n=9|delivered=bionic 9.9.9; report: record/fixture/close-out.md|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$p")" || return
+  seal_fixture "$p" "$(plan_fixture_log "$p")"
 }
 
 # ---------- the session binding (wave-session-bound-run, AC-2/AC-3/AC-6/AC-8) ----------
@@ -242,7 +249,6 @@ bind_marker() {  # <repo> <plan path|none> [sid]
   bound_marker "$1" "${3:-$SID}" "$2"
 }
 
-stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
 
 # THE TICK DIGEST (wave-24 T7, REQ-4; D4). A tick over the same facts as the last one prints one
 # `unchanged` line, so a case that ticks the SAME world twice to read the second tick's full
@@ -251,20 +257,15 @@ stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
 digest_of() { printf '%s/.bionic/tmp/tick-digest-%s.state' "$1" "${2:-$SID}"; }
 forget_digest() { rm -f "$(digest_of "$1")"; }
 
-# THE ARMING RECORD — the sibling of the stamp whose mtime `arm` sets and the tick compares a
-# delivery against (R-13). Spelled out here the way stamp_of spells the stamp: one place in
-# this suite knows the layout, and a rename on the writer's side shows up as a failure rather
-# than as a fixture that quietly stops describing anything.
-armed_of() { printf '%s%s' "$(stamp_of "$@")" ".armed"; }
-
-# A DISARM FIXTURE DESCRIBES A PATROL THAT ARMED BEFORE THE RUN DELIVERED, and from 1.3.2
-# that ordering is what the tick reads — so it is fixture DATA, set by arming through the
-# real verb and dating the record back, exactly as `backdate` sets staleness and as
-# tests/cross-gate-agreement.test.sh §S.3 sets "newest". Nothing here sleeps, and nothing is
-# left to a same-second tie.
-armed_ago() {  # <repo> [seconds ago, default 3600]
-  poke "$1" arm
-  backdate "$(armed_of "$1")" "${2:-3600}"
+# THE RECORD THAT DATES A DELIVERY (`run_dated_by`, hooks/session-poker.sh): the binding beside the
+# seal, else the engaged file. A DISARM fixture describes a session bound before its run delivered,
+# so it is dated back, as `backdate` sets staleness. Nothing here sleeps.
+bound_ago() {  # <repo> [seconds ago, default 3600]
+  local f
+  for f in "$(marker_of "$1")" "$(bash -c '. "$1/run.sh" && . "$1/seal.sh" && seal_binding_warm "$2" && _seal_binding_place "$2" "$3" && printf %s "$_SB_FILE"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1" "$SID" 2>/dev/null)"; do
+    [ -f "$f" ] && backdate "$f" "${2:-3600}"
+  done
+  return 0
 }
 
 # ---------- running the poker (same watchdog shape as tests/session-sweeper.test.sh) ----------
@@ -463,7 +464,8 @@ sp_at15() {
       if (cell(r, "status") == "landed") ev("published|row=" cell(r, "id")); next }
     { print }
     END { if (eval) { print "\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
-      print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p"
+      print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p" || return
+  seal_fixture "$p" "$d/record/$n/run.log"
 }
 
 # sp_fact <plan> <line> -> a proof or waiver line in the shape lib/proof.sh's proof_line and proof_waiver_line print
@@ -476,7 +478,8 @@ sp_fact() {
       print o "|" a }' >> "$log" ;;
     'waived: '*) printf '%s\n' "$l" | sed -E 's/^waived: question=([^ ]*) head=([^ ]*) by (.*) ([0-9]{4}-[^ ]*Z) "(.*)"$/run\/v1|ev=waiver|question=\1|head=\2|by=\3|said=\5|at=\4/' >> "$log" ;;
     *) return 1 ;;
-  esac
+  esac || return
+  seal_fixture "$1" "$log"
 }
 
 # ── hoisted from Section 12: sp_plan_at_step — Sections 37–40, 50, 55 and 67 write plans with it. ──
@@ -535,6 +538,7 @@ s31_transcript() {  # <repo> <text>... -> the transcript path
   printf '%s' "$tr"
 }
 s31_stop() {  # <repo> <transcript> -> sets S31_OUT, S31_RC
+  S31_D="$1"
   S31_OUT="$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$S31_STOP_HOOK" <<EOF 2>/dev/null
 $(jq -nc --arg t "$2" --arg c "$1" --arg s "$SID" \
    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}')
@@ -542,8 +546,11 @@ EOF
 )"
   S31_RC=$?
 }
-s31_reason() { printf '%s' "$S31_OUT" | jq -r '.reason // ""' 2>/dev/null; }
-s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+# The refusal on the channel it rides (tests/lib/duty-read.sh): block, duty, or nothing for a turn that ends.
+. "${BASH_SOURCE[0]%/*}/lib/duty-read.sh"
+S31_D=""
+s31_decision() { duty_channel "$S31_OUT"; }
+s31_reason() { duty_reason "$S31_OUT" "$(duty_path "$S31_D" "$SID")"; }
 
 # ── hoisted from Section 34: s34_plan — Sections 37, 42, 49, 51 and §ROW-LABEL build the gate-admitted plan with it. ──
 s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the session is bound to it
@@ -616,7 +623,7 @@ s42_unchanged() {  # <label> <want rc> <plan>
 }
 # s42_builds_landed <plan> -> the fixture's active build row T2 landed, as T1 is, by its `published` event: a whole read
 # is registered only once no build row is pending or active.
-s42_builds_landed() { printf 'run/v1|ev=published|row=T2|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$1")"; }
+s42_builds_landed() { printf 'run/v1|ev=published|row=T2|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$1")" && seal_fixture "$1" "$(plan_fixture_log "$1")"; }
 
 # ── hoisted from Section 47 §WAIT: s47_plan, s47_lines — Section 59, §SEV, §RC-DEFER and §MOVE-PASTED write reads tables and read tick lines with them. ──
 s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, current: 4
@@ -727,6 +734,7 @@ s60_whole() {  # <head> <scope> -> a structure reading's proof line
 s60_world() {  # <label> <whole head @A|@C> <scope> -> R59W, P59W: §59's shape plus criteria under five requirements
   s59_world "$1" "$(s60_whole "$2" "$3")" "$S60_T1" "$S60_T7" "$S60_T8" "$(s59w_q T3 structure)" "$S59W_T5"
   printf '| REQ-%s | fixture | AC-%s | hermetic | `tests/a.test.sh` | the fixture is wrong |\n' 2 2.1 2 2.2 4 4.1 5 5.1 >> "$P59W"
+  seal_fixture "$P59W"
   ( cd "$R59W" && git add -f "$P59W" && git commit -qm matrix ) >/dev/null 2>&1
   S60_INIT="$(git -C "$R59W" rev-parse "$S59W_A~1" 2>/dev/null)"
   S60_REC="$R59W/.bionic/docs/record/wave-01-fixture/run.log"; mkdir -p "${S60_REC%/*}"

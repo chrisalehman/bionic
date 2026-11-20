@@ -223,8 +223,9 @@ plan_themes() {
 # the theme has an opener, `<TAB><opener>`. The state is unmeasured, reached, pending (nothing discharged yet), oncourse
 # (pending with at least one criterion discharged) or overdue (open at step 6 or later). Each matrix row is counted
 # under the theme `_plan_ac_req` maps it to. After the themes, one `mapping<TAB><line>[<TAB><ids>]` row per way a row
-# was read short of its serves:, each said once: `mapped by id: <n> rows carry no serves:` when a dotted id mapped any,
-# `read as the first: <n> rows serve several requirements` when a serves: named more than one, and
+# was read short of its Requirement cell, each said once: `mapped by id: <n> criteria name no requirement in the
+# Requirement cell, read by their dotted id` when a dotted id mapped any, `read as the first: <n> rows serve several
+# requirements` when a Requirement cell named more than one, and
 # `not mapped: <n> criteria name no requirement and no dotted id: …`, naming the Requirement cell of the criterion's
 # Eval design row as the place that maps it, its ids space-separated after it, when any row maps to
 # nothing: such a row is in no theme's count, so a theme it serves reads short and the reading says why. A task plan
@@ -261,7 +262,7 @@ _plan_theme_reads() {
         o = ""; c = 0
         for (i = 1; i <= k[t]; i++) if ((t, rq[t, i]) in op) { c++; if (c <= 2) o = o (c > 1 ? ", " : "") "REQ-" rq[t, i] }
         print ((step != "" && step + 0 >= 6) ? "overdue" : (d[t] ? "oncourse" : "pending")) "\t" nm[t] "\t" m "\t" goal_open(o, c - 2) f }
-      if (byid) print "mapping\tmapped by id: " byid " rows carry no serves:"
+      if (byid) print "mapping\tmapped by id: " byid " criteria name no requirement in the Requirement cell, read by their dotted id"
       if (many) print "mapping\tread as the first: " many " rows serve several requirements"
       if (unm) print "mapping\tnot mapped: " unm " criteria name no requirement and no dotted id: write the requirement in the Requirement cell of each row under ## Eval design\t" un
     }'

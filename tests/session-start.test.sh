@@ -241,7 +241,7 @@ eq  "0.1 the harness reads a non-zero exit as non-zero" "3" "$(rc)"
 has "0.2 …and reads the driven script's stderr" "harness-probe-stderr" "$(errtext)"
 HOOK="$BIONIC_SESSION_START_UNDER_TEST_SAVE"
 
-section "1 — a predecessor roster on a /clear: the block, and the sequence"
+section "1 — a predecessor roster on a /clear: the block, and the adopt line"
 # The whole point of the hook, driven exactly as the probe left the disk: same
 # process, new sid, the old conversation's roster still open beside the new one's.
 #
@@ -253,8 +253,8 @@ section "1 — a predecessor roster on a /clear: the block, and the sequence"
 # freshness is a coin flip against however long sourcing four libraries and
 # parsing the JSON payload actually takes on the machine running this suite. A
 # generous interval keeps the file unambiguously YOUNG so "wrote nothing" below
-# tests what this section is actually about — the report and the re-arm
-# sequence — deterministically, not by how loaded the box happens to be.
+# tests what this section is actually about — the report and the adopt
+# line — deterministically, not by how loaded the box happens to be.
 P1=$(make_env 3600s)
 roster_rows "$P1/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-ALPHA"
 roster_rows "$P1/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-BETA"
@@ -274,24 +274,8 @@ has  "1.2 the block names the predecessor roster file" "roster-$OLD_SID.state" "
 has  "1.3 …with ONE open row (three status rows for W-ALPHA are one agent)" "1 open row" "$OUT"
 has  "1.4 …under the predecessor's sid8" "${OLD_SID:0:8}" "$OUT"
 hasnt "1.5 …and THIS session's own open roster is not a predecessor" "roster-$CUR_SID.state" "$OUT"
-has  "1.6 the re-arm sequence: CronList first" "re-arm: CronList" "$OUT"
-has  "1.8 …then CronCreate" "CronCreate" "$OUT"
-# RE-AUTHORED BY wave-21 T2 (REQ-2, D2, ADR-037 decision 1). T19 (A-orch-19.3) dropped
-# `session-poker.sh arm` from this line because engage.sh arms the stamp at engagement. That
-# holds for the session that engages; it does not hold for the starts this line now serves —
-# a `compact` or `resume` of an engaged session runs no engage.sh, so its stamp is whatever the
-# last firing left, and the armed instant (R-13) predates the clock the model is about to
-# create. The line is now the FINISHED arm command the model runs as written: CronList, delete
-# every marked job, CronCreate with the prompt baked in (the poker's own `prompt` verb's output,
-# so the prompt text keeps one owner), then `arm`, all by this hook's own root.
 S1_POKER="$(cd "$(dirname "$HOOK")/.." && pwd -P)/hooks/session-poker.sh"
-S1_PROMPT="$(CLAUDE_CODE_SESSION_ID="$CUR_SID" bash "$S1_POKER" prompt 2>/dev/null)"
-has  "1.9 …then the arm hand step, by this hook's own poker" "bash $S1_POKER arm" "$OUT"
-has  "1.9c …the baked prompt's first token is THIS session's marker" \
-  "with the prompt \`bionic-patrol session=${CUR_SID:0:8} " "$OUT"
-has  "1.9e …and its tick is this hook's own poker" "bash $S1_POKER tick" "$OUT"
-eq   "1.9d exactly one re-arm line" "1" "$(printf '%s\n' "$OUT" | grep -c '^re-arm: ')"
-# The predecessor variant keeps its extra step: adopt, on its own line after the arm line.
+# The predecessor variant keeps its extra step: adopt.
 has  "1.10 …then adopt, by this hook's own poker" "adopt: bash $S1_POKER adopt" "$OUT"
 has  "1.11 the session-id triple agrees" "— agree" "$OUT"
 eq   "1.12 the hook wrote nothing under .bionic" "$S1_BEFORE" "$(snap "$P1")"
@@ -354,52 +338,22 @@ hasnt "5.4b …and an alias correctly pointing at the main root's .bionic is not
   ".worktrees/wt-three/.bionic" "$OUT"
 eq  "5.5 wrote nothing" "$S5_BEFORE" "$(snap "$P5")"
 
-section "6 — predecessor stamps: graded against ONE FIRE WINDOW, and swept per session"
-# RE-AUTHORED AT epic-23 wave-16 (REQ-8 AC-8.1/8.2, REQ-11 AC-11.1/11.2). Both halves this
-# section drives changed under it, and they changed in opposite directions:
-#
-#   THE REPORT no longer grades a stamp at `interval * 2`. That multiplier is deleted —
-#   age past a threshold cannot tell a dead cron from a busy orchestrator, because a session
-#   cron fires only while the session is IDLE. The threshold is `patrol_fire_window` (the
-#   interval plus a tenth for jitter) and, for a stamp of a LIVE session past it, the answer
-#   comes from `patrol_verdict` over that session's transcript. Every stamp here belongs to a
-#   DEAD predecessor, which is the plainest case: no process is left to fire anything, so
-#   past the window it is stale on that fact and needs no transcript.
-#
-#   THE SWEEP no longer defers the whole directory when one dead file is young. The hook
-#   passes `--window` and the verb defers PER SESSION, which is what lets this one fixture
-#   hold both answers at once.
-#
-# SO THE FIXTURE IS A 60s INTERVAL (a 66s window) with three stamps: one dead predecessor
-# ten minutes old — past the window, and old enough for the sweep; one dead predecessor five
-# seconds old — inside the window, and young enough for the verb to defer; and THIS session's
-# own, backdated, as the anti-vacuity control that staleness alone does not make a stamp
-# mine. Nothing sleeps and no assertion depends on how long the hook takes: five seconds and
-# ten minutes are both decisively on their side of 66s.
+section "6 — predecessor stamps an older build left: swept per session"
+# THE CLASS STAYS SO THE SWEEP CLEARS THEM: no hook writes a stamp now, but a predecessor's from an older build is
+# residue the sweep removes once its session is dead and its files are past the window. A 60s interval: one dead
+# predecessor ten minutes old, one five seconds old, and THIS session's own, backdated.
 P6=$(make_env 60s)
 write_stamp "$P6" "$OLD_SID";  backdate "$P6/.bionic/tmp/patrol-$OLD_SID.state" 600
 write_stamp "$P6" "$OLD2_SID"; backdate "$P6/.bionic/tmp/patrol-$OLD2_SID.state" 5
 write_stamp "$P6" "$CUR_SID";  backdate "$P6/.bionic/tmp/patrol-$CUR_SID.state" 600
 OUT=$(drive "$P6" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq  "6.1 exit 0" "0" "$(rc)"
-has "6.2 the stamps section is present" "predecessor stamps:" "$OUT"
-eq  "6.3 a dead predecessor's stamp past the fire window reads stale" "1" \
-  "$(printf '%s\n' "$OUT" | grep -c "^  ${OLD_SID:0:8} .*stale$")"
-eq  "6.4 …and one inside the window reads fresh" "1" \
-  "$(printf '%s\n' "$OUT" | grep -c "^  ${OLD2_SID:0:8} .*fresh$")"
-hasnt "6.5 THIS session's own stale stamp is not a predecessor" "  ${CUR_SID:0:8}" "$OUT"
-has "6.6 the age is reported in seconds" "s old" "$OUT"
-# THE WINDOW IS THE NUMBER THE LINE NAMES, and it is the library's, not twice the interval:
-# 60 + 60/10. A line still quoting 120s would be the deleted multiplier back in the report.
-has "6.6b …and the line names the fire window it graded against" "inside 66s" "$OUT"
 
-# THE SWEEP, PER SESSION (REQ-8). The report above is read off the disk BEFORE the sweep
-# runs, so 6.3/6.4 stand whatever it does next. Both predecessors are DEAD (no live pid for
+# THE SWEEP, PER SESSION. Both predecessors are DEAD (no live pid for
 # either in this fixture's claude-home); the ten-minute-old one is past the 60s window and
 # goes, the five-second-old one is inside it and is deferred — ALONE, which is the whole of
 # what REQ-8 changed. Before it, one young file kept the other session's residue too.
 # THIS session's own 600s-old stamp survives because it is LIVE, not because of its age —
-# the same anti-vacuity point 6.5 makes about the report, made again about the sweep.
 expect_false "6.7 the dead, 600s-old predecessor stamp is swept" \
   test -e "$P6/.bionic/tmp/patrol-$OLD_SID.state"
 expect_true "6.8 …while the OTHER dead predecessor, younger than the window, is deferred alone" \
@@ -438,10 +392,8 @@ eq    "8.1 exit 0" "0" "$(rc)"
 has   "8.2 the one-line notice names the plan path" "$PLAN8" "$OUT"
 has   "8.3 …and names the skill to invoke" "/bionic:canonical-sdlc" "$OUT"
 eq    "8.4 exactly one line of output" "1" "$(printf '%s\n' "$OUT" | grep -c .)"
-hasnt "8.5 no re-arm instruction" "re-arm" "$OUT"
 hasnt "8.6 no adopt instruction" "adopt" "$OUT"
 hasnt "8.7 no predecessor roster line" "roster-$OLD_SID.state" "$OUT"
-hasnt "8.8 no predecessor stamps section" "predecessor stamps:" "$OUT"
 eq    "8.9 the hook wrote nothing under .bionic" "$S8_BEFORE" "$(snap "$P8")"
 
 section "9 — an open run + the engagement marker: today's block, unchanged (AC-12)"
@@ -457,7 +409,6 @@ OUT=$(drive "$P9" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq    "9.1 exit 0" "0" "$(rc)"
 has   "9.2 the predecessor roster is listed, exactly as with no run open" \
   "roster-$OLD_SID.state" "$OUT"
-has   "9.3 the re-arm sequence still prints: CronList first" "re-arm: CronList" "$OUT"
 has   "9.4 …through adopt" "adopt" "$OUT"
 hasnt "9.5 the bystander notice does not also print" \
   "invoke /bionic:canonical-sdlc to engage it" "$OUT"
@@ -475,14 +426,7 @@ P11b=$(make_env 1s)
 plant_engaged "$P11b" "$CUR_SID"
 OUT=$(drive "$P11b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq "11.3 exit 0 with the marker present too" "0" "$(rc)"
-# RE-AUTHORED BY wave-21 T2 (REQ-2, AC-2.1). This row used to read "still nothing on stdout":
-# the marker changed nothing when no run was open. It changes one thing now — an ENGAGED start
-# prints the arm line whatever else is on disk, because the Patrol carries the session, not the
-# run, and the model has no other surface that names the root to arm from (ADR-037 decision 1).
-# No run, no notice, no predecessor block: the arm line is the whole output.
-eq "11.4 no run, marker present: the arm line and nothing else" "1" \
-  "$(printf '%s\n' "$OUT" | grep -c .)"
-has "11.5 …and that one line is the arm line" "re-arm: CronList" "$OUT"
+eq "11.4 …and still nothing on stdout" "" "$OUT"
 
 section "12 — two or more open runs (AC-5, S7)"
 
@@ -513,7 +457,6 @@ eq    "12a.6b both listed paths are indented two spaces" "2" \
   "$(printf '%s\n' "$OUT" | grep -cE '^  .*\.plan\.md$')"
 hasnt "12a.7 the CLOSED plan's path is absent" "$(basename "$PLAN12C")" "$OUT"
 hasnt "12a.8 no roster text — the listing is the whole block" "predecessor rosters:" "$OUT"
-hasnt "12a.9 …and no re-arm sequence either" "re-arm" "$OUT"
 eq    "12a.10 wrote nothing" "$S12_BEFORE" "$(snap "$P12")"
 
 echo ""
@@ -537,8 +480,6 @@ P12c=$(make_env 3600s)
 PLAN12cA="$(write_open_plan "$P12c" alpha)"
 PLAN12cB="$(write_open_plan "$P12c" beta)"
 roster_rows "$P12c/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-ZETA"
-# The bound run is wave-scale: this row pins the re-arm sequence for a run that has a Patrol, and a task-scale bound
-# run prints none (§14a pins that one, and the pair).
 sed 's/^scale: task$/scale: wave/' "$PLAN12cA" > "$PLAN12cA.tmp" && mv "$PLAN12cA.tmp" "$PLAN12cA"
 plant_bound "$P12c" "$CUR_SID" "$PLAN12cA"
 S12c_BEFORE=$(snap "$P12c")
@@ -546,7 +487,6 @@ OUT=$(drive "$P12c" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq    "12c.1 exit 0" "0" "$(rc)"
 has   "12c.2 the predecessor roster is listed, exactly as an engaged session sees it" \
   "roster-$OLD_SID.state" "$OUT"
-has   "12c.3 the re-arm sequence still prints" "re-arm: CronList" "$OUT"
 hasnt "12c.4 no count-style listing" "open runs exist here" "$OUT"
 hasnt "12c.5 the sibling (unbound) plan is not named" "$PLAN12cB" "$OUT"
 eq    "12c.6 wrote nothing" "$S12c_BEFORE" "$(snap "$P12c")"
@@ -570,7 +510,7 @@ has   "12d.5 the second open plan is listed relative to the docs root" \
   "  ${PLAN12dB#$P12d/.bionic/docs/}" "$OUT"
 has   "12d.6 today's engaged roster block still follows — no early exit" \
   "roster-$OLD_SID.state" "$OUT"
-has   "12d.7 …through the re-arm sequence" "re-arm: CronList" "$OUT"
+has   "12d.7 …through the adopt line" "adopt: bash " "$OUT"
 eq    "12d.8 wrote nothing" "$S12d_BEFORE" "$(snap "$P12d")"
 
 echo ""
@@ -674,41 +614,11 @@ has "14a.2 the bound line names the docs-root-relative plan and its current step
 # tells the model to read at that step. The count is still pinned exactly, not loosened to
 # "at least one" — a third line here would be predecessor state this fixture has none of,
 # which is what 14a.3 has always been guarding.
-# TWO AGAIN AT TASK SCALE: the fixture's plan is `scale: task`, whose Patrol cell (lib/scale.sh) is `no`, so a
-# bound task-scale run has nothing to re-arm and the hook prints no arm line. Pinned exactly, as before: a third
-# line would be predecessor state this fixture has none of, or the arm line the scale says nobody owes.
-eq  "14a.3 exactly two lines — the bound line and its step-file pointer; no arm line, no predecessor state" \
+eq  "14a.3 exactly two lines — the bound line and its step-file pointer; no predecessor state" \
   "2" "$(printf '%s\n' "$OUT" | grep -c .)"
-hasnt "14a.3c …and no arm line: a task-scale run has no Patrol to re-arm" "re-arm: CronList" "$OUT"
 has "14a.3b the second line points at the step file for the plan's own current step" \
   "skills/canonical-sdlc/steps/4.md" "$OUT"
 eq  "14a.4 wrote nothing" "$S14_BEFORE" "$(snap "$P14")"
-
-# THE PAIR, so the absence above is the scale's and not the fixture's: the same bound run at `scale: wave` still
-# prints the arm line as the third line.
-P14W=$(make_env 1s)
-PLAN14W="$(write_open_plan "$P14W")"
-sed 's/^scale: task$/scale: wave/' "$PLAN14W" > "$PLAN14W.tmp" && mv "$PLAN14W.tmp" "$PLAN14W"
-plant_bound "$P14W" "$CUR_SID" "$PLAN14W"
-OUT=$(drive "$P14W" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
-eq  "14a.5 the pair: a bound wave-scale run prints three lines" "3" "$(printf '%s\n' "$OUT" | grep -c .)"
-has "14a.5b …the third is the arm line, as before" "re-arm: CronList" "$OUT"
-
-# `arm` AT TASK SCALE WRITES NO STAMP AND SAYS SO IN ONE LINE. The bound task-scale project above is driven through
-# the real poker; the wave-scale project beside it is the positive on the same extractor (the stamp file), so the
-# empty readback is the scale's answer.
-P14_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
-arm14() {  # <project> -> stdout+stderr of `arm` for CUR_SID there; rc in ARM14_RC
-  ARM14_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$CUR_SID" bash "$P14_POKER" arm 2>&1 )"; ARM14_RC=$?
-}
-arm14 "$P14W"
-eq  "14a.6 the pair: arm at wave scale exits 0" "0" "$ARM14_RC"
-eq  "14a.6b …and writes the Patrol stamp" "1" "$(find "$P14W/.bionic/tmp" -name "patrol-$CUR_SID.state" | grep -c .)"
-arm14 "$P14"
-eq  "14a.7 arm at task scale exits 0" "0" "$ARM14_RC"
-eq  "14a.7b …writes no Patrol stamp" "0" "$(find "$P14/.bionic/tmp" -name "patrol-*.state" | grep -c .)"
-has "14a.7c …and says why in one line" "no Patrol" "$ARM14_OUT"
-eq  "14a.7d …that one line" "1" "$(printf '%s\n' "$ARM14_OUT" | grep -c .)"
 
 echo ""
 echo "--- 14b: the same fixture on resume and on compact: the bound line fires on every source ---"
@@ -799,5 +709,31 @@ eq    "15h.7 …nothing of it on stderr" "0" "$(errtext | grep -c 'not bound to 
 OUT=$(drive "$P15h" compact "$CUR_SID" "$CUR_SID" "$CUR_SID")
 hasnt "15h.9 …and no holder named" "holds it" "$OUT"
 has   "15h.10 …and the run on its own line" "  ${PLAN15h#$P15h/.bionic/docs/}" "$OUT"
+
+
+section "16 — predecessor watches: each record but this session's own, read by the alive rule"
+# THE CONTRACT. hooks/watch.sh keeps `watch-<sid>.state` in the project's tmp directory. The banner lists each predecessor's: watching
+# over a live process, stopped over a dead one (the watcher died without a word), or resting and why. This
+# session's own record is not a predecessor's: its watcher starts beside this hook.
+# FIXTURE FIDELITY: records in the shape hooks/watch.sh writes; a live `sleep` and a finished subshell as watchers.
+# ANTI-VACUITY: this session's record is planted too, and the listing that names the other three omits it.
+# fails-when: a predecessor's dead watcher reads as watching, a live one as stopped, or this session is listed.
+sleep 600 & W16_LIVE=$!
+W16_START="$(bash -c '. "$1/alive.sh" && alive_since "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$W16_LIVE")"
+( exit 0 ) & W16_DEAD=$!; wait "$W16_DEAD" 2>/dev/null
+W16_THIRD="33333333-4444-5555-6666-777777777777"
+P16=$(make_env 60s)
+printf 'state=watching\npid=%s\nstart=%s\n' "$W16_LIVE" "$W16_START" > "$P16/.bionic/tmp/watch-$OLD_SID.state"
+printf 'state=watching\npid=%s\nstart=%s\n' "$W16_DEAD" "$W16_START" > "$P16/.bionic/tmp/watch-$OLD2_SID.state"
+printf 'state=resting\nwhy=cleared\n' > "$P16/.bionic/tmp/watch-$W16_THIRD.state"
+printf 'state=resting\nwhy=person\n' > "$P16/.bionic/tmp/watch-$CUR_SID.state"
+OUT=$(drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq  "16.1 exit 0" "0" "$(rc)"
+has "16.2 the watches section is present" "predecessor watches:" "$OUT"
+has "16.3 a predecessor's live watcher reads watching" "  ${OLD_SID:0:8} — watch watching (pid $W16_LIVE)" "$OUT"
+has "16.4 a dead one reads stopped without a word, naming it" "  ${OLD2_SID:0:8} — watch stopped without a word (pid $W16_DEAD)" "$OUT"
+has "16.5 a rested one says why" "  ${W16_THIRD:0:8} — watch resting (cleared)" "$OUT"
+hasnt "16.6 THIS session's own record is not a predecessor's" "  ${CUR_SID:0:8} — watch" "$OUT"
+kill "$W16_LIVE" 2>/dev/null
 
 finish

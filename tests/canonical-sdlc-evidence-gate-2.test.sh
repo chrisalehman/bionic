@@ -40,6 +40,7 @@ s29_home() {  # <deploy_target> -> S29_H, a run at 15 at Step 9 whose step event
     $(for q in evidence adversarial structure; do printf 'run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:00:01Z\n' "$EG_HEAD" "$q"; done) \
     "run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:00:02Z")
   awk -v t="$1" '/^deploy_target: /{ $0 = "deploy_target: " t } { print }' "$p" > "$p.t" && mv "$p.t" "$p"
+  seal_fixture "$p"
 }
 s29_home none
 expect_block "29b Step 9 without its delivery → block naming it" "$S29_H" 'git commit -m "x"' "Step 9's delivery"
@@ -66,6 +67,7 @@ s31_home() {
     $(for q in evidence adversarial structure; do printf 'run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:01:00Z\n' "$EG_HEAD" "$q"; done) \
     "run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:02:00Z")
   awk '{ print } /^\| REQ-1 \| fixture \| AC-1\.1 /{ print "| REQ-1 | fixture | AC-2 | hermetic | `tests/b.test.sh` | the second is wrong |" }' "$P31" > "$P31.t" && mv "$P31.t" "$P31"
+  seal_fixture "$P31"
 }
 # 31a — a python3 heredoc writing the plan's absolute path, then a commit,
 # refused by the matrix arm → the refusal carries the split line.
@@ -96,6 +98,7 @@ fi
 # plan but has nothing to refuse is still allowed silently.
 s31_home; h31d="$S31_H"; p31d="$P31"
 printf 'run/v1|ev=proof|ac=AC-2|evidence=record/generic-evidence.md|at=2026-10-04T01:03:00Z\n' >> "$(plan_fixture_log "$p31d")"
+seal_fixture "$p31d"
 expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent" "$h31d" "python3 -c \"open('$p31d','a')\" && git commit -m \"x\""
 
 # ============================================================
@@ -126,6 +129,7 @@ m32_home() {  # <step> <rigor, or - for none> <eval type> <evidence review: pass
   [ "$1" != 8 ] || printf 'run/v1|ev=step|n=8|cleanup=n/a|at=2026-10-04T01:00:05Z\n' >> "$(plan_fixture_log "$P32")"
   printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:00:09Z\n' >> "$(plan_fixture_log "$P32")"
   shift 4; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$P32")"
+  seal_fixture "$P32"
 }
 m32_ap='run/v1|ev=approval|key=AC-1.1|by=Dana Fixture|said=I watched it hold|at=2026-10-04T01:00:10Z'
 m32_home 6 double hermetic none
@@ -150,6 +154,7 @@ m32_home 6 reviewed hermetic pass
 expect_block "m32-enum a rigor that names no level is refused on its rigor, ahead of the matrix" "$M32_H" 'git commit -m "x"' "rigor is not single or double"
 m32_home 6 double hermetic pass
 printf 'run/v1|ev=proof|ac=AC-1.1|evidence=TBD|at=2026-10-04T01:00:10Z\n' >> "$(plan_fixture_log "$P32")"
+seal_fixture "$P32"
 expect_block "m32-ph a criterion whose proof names a placeholder for its evidence is refused as one" "$M32_H" 'git commit -m "x"' "AC-1.1 has placeholder evidence evidence"
 m32_home 8 double human fail "$m32_ap"
 expect_block "m32-t4r a T4 row its approval confirms is refused while the auditor's REFUTED stands" "$M32_H" 'git commit -m "x"' "finding on AC-1.1 stands"
@@ -331,6 +336,7 @@ od_plan() {  # <current> <log lines> <row>... -> OD_PLAN at 15, bound to this se
     /^base-sha: / { print "base-sha: " b; print "integration-branch: main"; print "adrs: none — no decision this run"; next } { print }' "$OD_PLAN" > "$OD_PLAN.t" && mv "$OD_PLAN.t" "$OD_PLAN"
   { [ -z "$keep" ] || printf '%s\n' "$keep"; printf 'run/v1|ev=proof|ac=AC-1.1|evidence=%s/generic-evidence.md|at=2026-10-04T01:00:00Z\n' "$OD_RL"
     [ -z "$sd" ] || printf '%s\n' "$sd"; } >> "$OD_REC/run.log"
+  seal_fixture "$OD_PLAN" "$OD_REC/run.log"
   bound_marker "$OD" "$OD_SID" "$OD_PLAN" >/dev/null 2>&1 || :
 }
 od_rows() {  # <T1 status> <T2 status> <T3 and T4 status> -> the order's rows: build, regression, review, release, integrate

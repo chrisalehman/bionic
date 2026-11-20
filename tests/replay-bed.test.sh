@@ -189,7 +189,7 @@ done
 RD="$R/payload/scripts"
 
 section "COVER"
-QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready handoff sessions verdicts header row criterion cell"
+QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready pr handoff sessions verdicts header row criterion cell"
 expect_eq "the bed asks each question of the closed list, and the list has no other" "$(printf '%s\n' $QS | sort | tr '\n' ' ')" \
   "$(ask /dev/null - 2>&1 | awk 'NR > 1 { print $1 }' | sort | tr '\n' ' ')"
 for e in $WORLDS; do n=${e%%:*}; p=${e##*:}; h="$(sed -n 's/^proof\.\([0-9a-f]*\)\..*/\1/p' "$X/$n.facts" | head -1)"; r=""; c=0
@@ -249,7 +249,6 @@ expect_regex "…and a cancel the log appends takes it off the sheet" '^clock\.a
 # The tick follows it too: in the same run, a fact the log alone holds changes the tick's fill line.
 # Each tick forgets the last one's digest, which would otherwise print only that nothing changed.
 nofill() { rm -f "$FB"/tmp/tick-digest-*; ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: no FILL — '; }
-( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
 expect_regex "the tick over the logged run fills nothing, every row landed" '^poker: no FILL — width=' "$(nofill)"
 printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-09T00:00:00Z\n' >> "$FL"
 expect_contains "a cancel the log appends makes the tick's Step-3 approval pending again" "Step-3 approval pending" "$(nofill)"
@@ -289,10 +288,12 @@ expect_eq "…and not the one after it" "0" "$(printf '%s\n' "$NN" | grep -c '^T
 # The release card follows the log: an approval of the release appended to it alone ends the release's decision.
 expect_contains "the release card at 31da41f7 puts the release" "card.decision.approve:release=" "${PG:-}"
 printf 'run/v1|ev=approval|key=release|by=fixture|head=%s|said=approve|at=%s\n' "${PH:-}" "${PA:-}" >> "${PP%/plans/*}/record/$(basename "${PP:-x}" .plan.md)/run.log"
+seal_fixture "${PP:-/nonexistent}"
 G="$(render "${PD:-/nonexistent}" "${PP:-/nonexistent}")"
 expect_contains "…and with the approval appended, it still renders its carries" "card.carried." "$G"
 expect_absent "…but no longer puts the release" "card.decision.approve:release=" "$G"
 printf 'run/v1|ev=cancel|of=approval|key=release|at=%s\n' "${PA:-}" >> "${PP%/plans/*}/record/$(basename "${PP:-x}" .plan.md)/run.log"
+seal_fixture "${PP:-/nonexistent}"
 expect_contains "…and with that approval cancelled in the log, it puts the release again" "card.decision.approve:release=" \
   "$(render "${PD:-/nonexistent}" "${PP:-/nonexistent}")"
 section "OPEN"
@@ -323,20 +324,22 @@ C0="$(closecheck)"
 expect_eq "the reopened run reads at step 8, and its own log carries no debt" "step: current: 8|debt: touched 0 · burned 0" \
   "$(printf '%s\n' "$C0" | grep -m1 '^step: ')|$(printf '%s\n' "$C0" | grep -m1 '^debt: ')"
 printf 'run/v1|ev=debt|concept=follow_x|kind=duplicate|sites=lib/f.sh:1|raised-by=record/x.md|touches=3|at=\n' >> "$CR/run.log"
+seal_fixture "$CP" "$CR/run.log"
 C1="$(closecheck)"
 expect_eq "a debt the log alone holds is counted on the card's debt line" "debt: touched 3 · burned 0" "$(printf '%s\n' "$C1" | grep -m1 '^debt: ')"
 expect_contains "…and the continuation would carry it under ## Deferrals" " follow_x" "$(printf '%s\n' "$C1" | grep -m1 '^continuation: ')"
 expect_contains "the log without it carries the run's own deferrals there" "under ## Deferrals: record/" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
 expect_absent "…and not that debt" " follow_x" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
-printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; expect_contains "the run taken back to Step 7 reads there on close-out's step line" "the run is at Step 7 —" "$(closecheck | grep -m1 '^step: ')"
+printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; seal_fixture "$CP" "$CR/run.log"; expect_contains "the run taken back to Step 7 reads there on close-out's step line" "the run is at Step 7 —" "$(closecheck | grep -m1 '^step: ')"
 
 section "AGREE"
 nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }
 for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
   cp "$d.read" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"; sv="$( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>"$d.serr" )"
-  c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else f++ } END { printf "%d passed, %d failed", p, f }' "$d.out")"
-  s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
-  expect_regex "$n: the sheet prints its reviews line" '^[0-9]+ passed, [0-9]+ failed$' "$s"
+  c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else if (index($0, "✖️") == 1) f++; else if (index($0, "➖") == 1) o++ }
+    END { printf "%d passed, %d failed, %d not passed", p, f, o }' "$d.out")"
+  s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), \(\([0-9]*\) not passed, \)\{0,1\}.*/\1, \3 not passed/p' | sed 's/, \( not passed\)$/, 0\1/')"
+  expect_regex "$n: the sheet prints its reviews line" '^[0-9]+ passed, [0-9]+ failed, [0-9]+ not passed$' "$s"
   expect_eq "$n: the card's Reviews lines count as the sheet's reviews line does" "$s" "$c"
   h="$(printf '%s\n' "$sv" | nums)"; k="$(nums < "$d.out")"; a="$(ask "$p" hands | grep -c .) $(ask "$p" asks | grep -c .)"
   expect_regex "$n: the sheet prints the run's acts taken by hand and open asks" '^[0-9]+ [0-9]+$' "$h"

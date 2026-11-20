@@ -681,6 +681,35 @@ expect_eq "WA5 no note counts what it leaves out (WA1 read the notes of the same
   "$(sr_tasks_f note | /usr/bin/grep -cE ' \+[0-9]+$')"
 
 # ============================================================
+section "§PR-WAIT: with the pull request open and no landing, the sheet names it as what the run waits on and the reader's ready set is empty"
+# ============================================================
+# fails-when: the sheet of a run whose request stands says nothing of it, or the reader still offers the integrate row
+# as ready. Every row but the integrate row has landed, step 8 is current, the regression and the reviews stand, so with
+# no request the integrate row is ready and with one it is not.
+SR_REPLY_R="$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh"
+sr_world prwait "6 6 12 12"
+for sr_i in 5 6 7 8 9 10 11 12 13 14 15 16 17; do sr_state "T$sr_i" landed; done
+awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | 10 | REQ-1 | lib/t18.sh | — |"; next } { print }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=step|n=8|at=2026-10-06T21:00:00Z"
+sr_ev "ev=proof|kind=regression|head=$SR_C1|rc=0|at=2026-10-06T21:10:00Z"
+sr_ev "ev=proof|kind=review|head=$SR_C1|rc=0|result=pass|at=2026-10-06T21:11:00Z"
+sr_ready() { bash "$SR_REPLY_R" "$SR_PLAN" stop 2>&1 | sed -n 's/^ready=//p'; }
+sr_run "$SR_PLAN"
+expect_eq "PW0 control: no request is recorded, so the reader offers the integrate row and the sheet's note names no pull request" "T18|0" \
+  "$(sr_ready)|$(sr_f "$(sr_task T18)" note | /usr/bin/grep -c 'pull request')"
+sr_ev "ev=published|part=pr|url=https://example.invalid/pull/1|branch=wave/02-fx|commit=$SR_C1|base=main|by=publish|at=2026-10-06T21:30:00Z"
+sr_run "$SR_PLAN"
+expect_eq "PW1 the request open: the sheet's integrate row names it, and the merge as the person's" \
+  "waits on your merge of the pull request https://example.invalid/pull/1" "$(sr_f "$(sr_task T18)" note)"
+expect_eq "PW2 …the reader's ready set is empty (PW0 read it through the same question)" "" "$(sr_ready)"
+expect_eq "PW3 …and the row has not landed: the sheet counts it open, pending" "pending" "$(sr_f "$(sr_task T18)" state)"
+sr_ask_ev "key=pr-closed:wave:02-fx|sent=-|title=the pull request was closed unmerged|at=2026-10-06T21:40:00Z"
+sr_run "$SR_PLAN"
+expect_eq "PW4 the host closed it unmerged (its ask open): the sheet no longer says the run waits on that request (PW1 named it before)" "0" \
+  "$(sr_f "$(sr_task T18)" note | /usr/bin/grep -c 'pull request')"
+
+# ============================================================
 section "§KINDS: an unruled matrix row (row:) and an unread ruling (ruling:) open on the register are asks on the sheet"
 # ============================================================
 # fails-when: either is open and missing from the sheet.
@@ -859,6 +888,33 @@ sr_run "$SR_PLAN"
 expect_eq "RV1 five results of reviews, a line for each one standing, and the count by question and scope at its latest: 2 passed, 1 failed" \
   "5|a1.md a2.md e1.md s1.md s2.md|2 passed, 1 failed, 0 running" \
   "$(sr_lines review | /usr/bin/grep -c .)|$(sr_lines review | sed 's/.*record=record\/wave-02-fx\///' | sort | tr '\n' ' ' | sed 's/ $//')|$(sr_m reviews)"
+
+# A page the judge deals (single rigor, task scale, a base commit) with its three readings at the head, C, each record in
+# the readers' grammar. The judged count marks a question as the release card does: a newest reading that flagged,
+# its range covered, is neither passed nor failed and is said as its own count; so is a question a later code commit
+# leaves uncovered. A sheet holding no such question prints as it did.
+sr_judged() {  # <the adversarial reading's result> [<its finding line>] -> the judged world, SR_JC its head
+  local b r q; SR_SCALE=task sr_world "judged-$1" "6 6 12 12"; printf '.bionic\n' > "$SR_REPO/.gitignore"; mkdir -p "$SR_REPO/lib"
+  printf 'one\n' > "$SR_REPO/lib/x.sh"; git -C "$SR_REPO" add -A; git -C "$SR_REPO" -c user.name=f -c user.email=f@example.invalid commit -qm base
+  git -C "$SR_REPO" checkout -qb wave/02-fx; b="$(git -C "$SR_REPO" rev-parse HEAD)"; SR_JC="$(sr_jcommit two)"
+  awk -v b="$b" 'NR > 1 && /^---$/ && !d { print "rigor: single"; print "base-sha: " b; d = 1 } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  for r in evidence:pass structure:pass "adversarial:$1"; do q="${r%%:*}"
+    { printf 'question: %s\nresult: %s\nscope: piece\nreviewed: %s..%s\n' "$q" "${r#*:}" "${b:0:10}" "${SR_JC:0:10}"
+      if [ "$q" = adversarial ] && [ -n "${2:-}" ]; then printf 'findings: 1\n%s\n' "$2"; else printf 'findings: 0\n'; fi; } > "$SR_DIR/$q.md"
+    sr_ev "ev=proof|kind=review|head=$SR_JC|evidence=record/wave-02-fx/$q.md|question=$q|reader=c-$q|result=${r#*:}|scope=piece|at=2026-10-06T19:00:00Z"
+  done
+}
+sr_jcommit() { printf '%s\n' "$1" > "$SR_REPO/lib/x.sh"; git -C "$SR_REPO" -c user.name=f -c user.email=f@example.invalid commit -qam "$1"; git -C "$SR_REPO" rev-parse HEAD; }
+sr_junit() { sr_d reviews | sed -n 's/.* · unit: \(.*\) · source: .*/\1/p'; }
+sr_judged pass; sr_run "$SR_PLAN"
+expect_eq "RV2 a judged page whose three readings passed at the head: the judge's count, as it printed before" \
+  "as the judge reads it|3 passed, 0 failed, 0 running|count passed, failed, running" \
+  "$(sr_d reviews | /usr/bin/grep -o 'as the judge reads it')|$(sr_m reviews)|$(sr_junit)"
+sr_judged flag 'finding: 1 S3 off lib/x.sh:1 a name could be plainer'; sr_run "$SR_PLAN"
+expect_eq "RV3 …the adversarial reading flagged, its range covered: neither passed nor failed, its own count, named in the unit" \
+  "2 passed, 0 failed, 1 not passed, 0 running|count passed, failed, not passed, running" "$(sr_m reviews)|$(sr_junit)"
+sr_jcommit three >/dev/null; sr_run "$SR_PLAN"
+expect_eq "RV4 …a code commit past the readings leaves every question uncovered: none passed" "0 passed, 0 failed, 3 not passed, 0 running" "$(sr_m reviews)"
 
 # Correctness names the suites run, each by its last verdict on the line, then the whole run. A suite named by its
 # path is the suite its bare name is; the whole run's own verdicts are no suite's run here.
@@ -1099,7 +1155,7 @@ sr_tick_world() {
   sr_world "$1" "$2"
   : > "$SR_REPO/.bionic/tmp/engaged-$SID.state"
   ( cd "$SR_REPO" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1 )
-  sr_poke bind "$SR_PLAN" >/dev/null 2>&1; sr_poke arm >/dev/null 2>&1
+  sr_poke bind "$SR_PLAN" >/dev/null 2>&1
 }
 sr_tick() { sr_poke tick > "$TMPROOT/tick.out" 2> "$TMPROOT/tick.err"; RC=$?; OUT="$(cat "$TMPROOT/tick.out")"; }
 # The tick's worlds are unapproved plans (an approved one FILLs, and S1 pins QUIET), so the close is not forecast.
@@ -1119,6 +1175,32 @@ expect_eq "S3 an ask opened: the next tick's sitrep line moves with the Patrol's
   "$(printf '%s\n' "$SR_T2" | /usr/bin/grep '^poker: sitrep ')|$([ "$OUT" != "$SR_L1" ] && echo yes)"
 SR_AT=$((SR_NOW + 120)) sr_tick
 expect_contains "S4 an unchanged tick (nothing decided moved) still takes the unchanged path" "poker: unchanged since " "$OUT"
+
+# ============================================================
+section "§REST: the watcher's rest and the status line's waits-on-you agree: it rests only while the line says every open ask is on you"
+# ============================================================
+# The tick's world above, its plan unapproved, so nothing is ready and no agent is out: the asks alone decide the rest.
+# The pass is the shipped `tick --watch`; its rest code is read from lib/patrol.sh, its one home.
+SR_REST="$(bash -c '. "$1/patrol.sh" >/dev/null 2>&1 && printf %s "${WATCH_RC_REST:-}"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib")"
+sr_pass() { sr_poke tick --watch > "$TMPROOT/pass.out" 2> "$TMPROOT/pass.err"; RC=$?; }
+sr_owed_of() { printf '%s\n' "$1" | /usr/bin/grep -oE 'owed: [0-9]+ on you · [0-9]+ on events'; }
+expect_nonempty "RS0 precondition: the library names the rest code" "$SR_REST"
+SR_APPROVED=none sr_tick_world rest "6 6 12 12"
+sr_pass; SR_R0="$RC"
+sr_run --line "$SR_PLAN"
+expect_eq "RS1 no ask open: the line owes nothing on you, and the pass does not rest" "owed: 0 on you · 0 on events|no" \
+  "$(sr_owed_of "$OUT")|$([ "$SR_R0" = "$SR_REST" ] && echo yes || echo no)"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
+SR_AT=$((SR_NOW + 60)) sr_pass; SR_R1="$RC"
+SR_AT=$((SR_NOW + 60)) sr_run --line "$SR_PLAN"
+expect_eq "RS2 one ask open on the person: the line says one on you and none on events, and the pass rests" \
+  "owed: 1 on you · 0 on events|$SR_REST" "$(sr_owed_of "$OUT")|$SR_R1"
+sr_ask_ev "key=waive:Q1|sent=-|title=waiver: Q1|at=2026-10-06T20:01:00Z"
+sr_ask_ev "key=waive:Q1|answer=no|event=-|at=2026-10-06T20:02:00Z"
+SR_AT=$((SR_NOW + 120)) sr_pass; SR_R2="$RC"
+SR_AT=$((SR_NOW + 120)) sr_run --line "$SR_PLAN"
+expect_eq "RS3 a waiver answered no waits on its review's run: the line counts it on events, and the pass does not rest" \
+  "owed: 1 on you · 1 on events|no" "$(sr_owed_of "$OUT")|$([ "$SR_R2" = "$SR_REST" ] && echo yes || echo no)"
 
 # ============================================================
 section "§SCOPE: the asks are read from the named plan's register, never the session running the verb, never a session acting for no run"
@@ -1245,6 +1327,14 @@ sed 's/^| REQ-1 | x | AC-1\.1 |/| — | x | AC-101 |/' "$SR_PLAN" > "$SR_PLAN.t"
 sr_run "$SR_PLAN"; SR_UNM="$(printf '%s\n' "$OUT" | /usr/bin/grep '^not mapped: ')"
 expect_contains "RG1-4 a criterion naming no requirement: the sheet's line names the Requirement cell of its Eval design row" "Requirement cell" "$SR_UNM"
 expect_absent "RG1-4b …and no serves: line, which no page at 15 holds" "serves:" "$SR_UNM"
+# fails-when: a criterion mapped by its dotted id draws "rows carry no serves:", or any text naming a serves cell.
+sr_world rg1-byid "6 6 12 12"; sr_themes 4 $SR_MIXED
+sed 's/^| REQ-1 | x | AC-1\.1 |/| — | x | AC-1.1 |/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"; SR_BYID="$(printf '%s\n' "$OUT" | /usr/bin/grep '^mapped by id: ')"
+expect_eq "RG1-5 a page at 15 with a blank Requirement cell and a dotted id: the sheet's line says it is mapped by its id" \
+  "15|mapped by id: 1 criteria" "$(sed -n 's/^canonical_sdlc_version: //p' "$SR_PLAN" | head -1)|$(printf '%s' "$SR_BYID" | /usr/bin/grep -o 'mapped by id: 1 criteria')"
+expect_contains "RG1-5c …the line names the Requirement cell" "Requirement cell" "$SR_BYID"
+expect_absent "RG1-5d …and no text of the sheet names a serves cell (RG1-5 read the sheet)" "serves" "$OUT"
 
 # ============================================================
 section "§REQ-GOALS-2: a goals: line's measured goals follow the theme goals"
@@ -1537,6 +1627,33 @@ sr_recap
 expect_eq "RC3 the decision ruled: no open: and no ask: line names it while the tick's approvals still read open, and the recap lists it settled" \
   "0|0|2|settled: D21 · \"1\" · Chris Lehman 2026-10-06 · the gate the judge holds" \
   "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^ask: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^ask: approval: ')|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^settled: D21')"
+
+section "§RESUME-LINES: a resume says each step to the terminal as the step starts, before the step's own lines reach the recap"
+# The terminal is appended to the recap's own path, so the terminal's lines and the recap's land in one file in the order
+# they were written; the recap the verb keeps is read from a run with the terminal apart. fails-when: a step's line
+# comes after its first line, a step goes unsaid, the lines reach the recap, or the lines arrive out of order.
+sr_recap
+RL_TERM="$(/usr/bin/grep -c '^poker: resume — step: ' "$TMPROOT/rs.out")"
+RL_REC="$(printf '%s\n' "$RECAP" | /usr/bin/grep -c 'resume — step: ')"
+RL_F="$SR_DIR/resume-recap.md"; : > "$RL_F"; sr_poke resume "$SR_HF" >> "$RL_F" 2>/dev/null
+rl_at() { awk -v p="$1" 'index($0, p) == 1 { print NR; exit }' "$RL_F"; }  # <prefix> -> the number of the first line that starts with it
+RL_PREV=0; RL_GOT=""; RL_WANT=""; RL_N=0
+while IFS=$'\t' read -r RL_NAME RL_PFX; do  # <step> <the first line the step writes to the recap>
+  RL_OWN="$(rl_at "$RL_PFX")"; RL_SAID="$(rl_at "poker: resume — step: $RL_NAME")"
+  RL_N=$((RL_N + 1)); RL_WANT="$RL_WANT $RL_NAME:said-before"
+  if [ -n "$RL_OWN" ] && [ -n "$RL_SAID" ] && [ "$RL_SAID" -lt "$RL_OWN" ] && [ "$RL_SAID" -gt "$RL_PREV" ]; then RL_GOT="$RL_GOT $RL_NAME:said-before"
+  else RL_GOT="$RL_GOT $RL_NAME:${RL_SAID:-unsaid}/${RL_OWN:-no-lines}"; fi
+  [ -z "$RL_SAID" ] || RL_PREV="$RL_SAID"
+done <<EOT
+bind	poker: bound
+adopt	poker-adopt/v1|
+task list	task-list: 0:
+recap	settled:
+step file	step-file:
+tick	poker: sitrep
+EOT
+expect_eq "RL1 each step's line is on the terminal before its first line in the recap and after the step before it" "$RL_WANT" "$RL_GOT"
+expect_eq "RL2 …the terminal got one line a step and the recap the verb keeps got none" "$RL_N|0" "$RL_TERM|$RL_REC"
 
 section "§FOLD: a fold that fails is no fact: the sheet prints none and exits 2, the line and the recap say the status could not be read, and nothing is held"
 SR_ST="$TMPROOT/stand"; mkdir -p "$SR_ST/payload/scripts"; cp -R "$BIONIC_HOOKS_DIR" "$SR_ST/hooks"; cp -R "${SR_OWED_LIB%/*}" "$SR_ST/payload/scripts/lib"; echo 'reader_facts() { return 128; }' >> "$SR_ST/payload/scripts/lib/reader.sh"
