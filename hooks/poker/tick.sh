@@ -1018,14 +1018,12 @@ tick_watch_facts() {  # <file>
       units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF { print $1 "|" $10 }'
       printf 'ready=%s\n' "$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
     }
-    # THE TASK LIST IS REBUILT AT PLAN APPROVAL (wave-27 T13; D20; steps/3.md). No hook reads a
-    # task list, so this line is all the rule has (advice: no wall reads it since wave-31 T32): it is also owed when the
-    # plan's `current:` was 3 at the last digest and is 4 now, or its row count has grown, and
-    # it is owed on a QUIET tick too (a plan at approval has nothing open yet).
-    # WHICH MOVE IT WAS (wave-27 T37; review pass 8 F2) is TICK_RECONCILE, `step4` or `grew`: the
-    # RECONCILE line says it and names the rebuild, and the digest keeps it as `reconcile=` (read by
-    # no wall since wave-31 T32; D6: the line is advice). A move into Step 4 is named first when
-    # the table also grew: the rebuild it asks for covers the new rows.
+    # THE TASK LIST IS BUILT AT PLAN APPROVAL (steps/3.md) AND ONLY APPENDED TO AFTER. This line is
+    # advice, no wall reads it: it is owed when the plan's `current:` was 3 at the last digest and is
+    # 4 now, or its row count has grown, and on a QUIET tick too (a plan at approval has nothing open
+    # yet). WHICH MOVE IT WAS is TICK_RECONCILE, `step4` or `grew`: the RECONCILE line says it, and the
+    # digest keeps it as `reconcile=`. A move into Step 4 is named first when the table also grew: the
+    # entries it asks for cover the new rows.
     TICK_RECONCILE=""
     tick_plan_moved() {  # -> 0 when the digest's last reading of the plan is behind this one
       local pc pr
@@ -1036,6 +1034,17 @@ tick_watch_facts() {  # <file>
       case "$pr" in ''|*[!0-9]*) return 1 ;; esac
       [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ] || return 1
       TICK_RECONCILE=grew
+    }
+    # THE LIST ONLY APPENDS: a row added after the last tick owes its own entry at the end, and the rows past
+    # the count the digest holds are the rows added, since task-add writes at the end of the table. The tick
+    # reads the plan and its digest and never the platform's list.
+    tick_grown_entries() {
+      local n id step task e="" k=0
+      n=$(( TICK_PLAN_ROWS - $(tick_digest_field "$TICK_DIGEST_FILE" plan_rows) ))
+      while IFS=$'\t' read -r id step _ task _; do
+        e="${e:+$e; }$step/$id: $(clean_whole "$(plan_task_title "$task")")"; k=$((k + 1))
+      done <<< "$(units_rows "$SCHED_PLAN" 2>/dev/null | tail -n "$n")"
+      say "RECONCILE — the ## Tasks table grew since the last tick: add the task-list $([ "$k" -gt 1 ] && echo entries || echo entry) $e at the end of the list"
     }
     tick_conclude() {  # <decision before the gate>
       local cur="" prev=""
@@ -1116,8 +1125,8 @@ tick_watch_facts() {  # <file>
       if tick_plan_moved; then
         TICK_DUTY=owed
         case "$TICK_RECONCILE" in
-          step4) say "RECONCILE — the plan moved from approval into Step 4 since the last tick: TaskList, and rebuild the task list in execution order (delete every pending entry and recreate them)" ;;
-          *)     say "RECONCILE — the ## Tasks table grew since the last tick: TaskList, and rebuild the task list in execution order (delete the pending entries after the new row and recreate them)" ;;
+          step4) say "RECONCILE — the plan moved from approval into Step 4 since the last tick: TaskList, and add an entry for each row the list lacks" ;;
+          *)     tick_grown_entries ;;
         esac
       elif [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; then
         TICK_DUTY=owed
@@ -2012,6 +2021,13 @@ EOF
                 say "held ${SD_NAME} since ${SD_HELD%% *} — ${SD_HELD_REST% fp=*}"
                 continue
               fi
+              # A WRITER IS DONE WHEN ITS ROW HAS LANDED. Its record is the first thing it writes, so MET alone
+              # finds it mid-work, before `ready`; such a row is named nothing and ordered nothing. A read-only
+              # role has no landing, and its record is its whole work.
+              if ! role_is_readonly "$(line_field "$SD_ROW" subagent_type)" \
+                && ! roster_landed "$ROSTER_FILE" "$SD_NAME" >/dev/null 2>&1; then
+                continue
+              fi
               say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written), or keep it up with: bash ${POKER_WORD} hold ${SD_NAME} ${HOLD_REASON_SLOT}"
               SD_ORDER_NAMES="${SD_ORDER_NAMES}${SD_ORDER_NAMES:+ }${SD_NAME}"
               ;;
@@ -2161,13 +2177,66 @@ EOF
     TICK_OCCUPIED="$(printf '%s' "$TICK_OCC_NAMES" | budget_open_writers "$ROSTER_FILE")"
     case "$TICK_OCCUPIED" in ''|*[!0-9]*) TICK_OCCUPIED=0 ;; esac
 
+    # regression_declined <list> <cause, one> <cause, many> <starts when, one> <starts when, many> -> REG_DECLINE, the
+    # words of the line after `regression: not started — `: `<cause>: <list>; starts when <what>`, the singular
+    # wording for a list of one and the plural for several. One site for the wording, so each reason reads the one way.
+    regression_declined() {
+      case "$1" in
+        *,*) REG_DECLINE="$3: $1; starts when $5" ;;
+        *) REG_DECLINE="$2: $1; starts when $4" ;;
+      esac
+    }
+
+    # tick_regression_waiters <plan> -> each open row that waits on the regression, one id per line: the row's waits (its
+    # kind's default and its deps, the plan's one reader of them) name `proof:regression` or the regression row itself.
+    # A row that waits on the regression cannot land before it runs, so its writer is no reason to hold the run back.
+    tick_regression_waiters() {
+      local plan="$1" reg
+      declare -F plan_read_waits >/dev/null 2>&1 || return 0
+      reg="$(units_order "$plan" 2>/dev/null)"
+      { units_rows "$plan" 2>/dev/null | awk -F'\t' 'tolower($10) == "pending" || tolower($10) == "active" { print "O\t" $1 }'
+        plan_read_waits "$plan" 2>/dev/null | awk -F'\t' '$2 == "kind" { print "W\t" $1 "\t" $4 }'
+      } | awk -F'\t' -v reg="$reg" '
+        $1 == "O" { open[$2] = 1; next }
+        $1 == "W" && ($2 in open) {
+          n = split($3, t, ",")
+          for (k = 1; k <= n; k++) { x = t[k]; gsub(/^ +| +$/, "", x)
+            if (x == "proof:regression" || (reg != "" && x == reg)) { print $2; break } } }'
+    }
+
+    # tick_regression_writers <plan> -> TICK_REG_BLOCK (the open writers whose row does not wait on the regression, ", "
+    # joined, empty when none) and TICK_REG_BLOCKS (their count). A read-only role holds no writer slot. FAIL CLOSED: an
+    # occupied slot no name here accounts for is a writer, so a count the names do not explain still holds the run back.
+    tick_regression_writers() {
+      local plan="$1" waiters wn ids r hit waiting=0
+      TICK_REG_BLOCK=""; TICK_REG_BLOCKS=0
+      case "${TICK_OCCUPIED:-0}" in 0) return 0 ;; esac
+      waiters="$(tick_regression_waiters "$plan")"
+      while IFS= read -r wn; do
+        [ -n "$wn" ] || continue
+        [ "$(printf '%s\n' "$wn" | budget_open_writers "$ROSTER_FILE")" = 1 ] || continue
+        ids="$(fill_launched_rows "$ROSTER_FILE" "$SESSION_ID" "$wn")"
+        hit=""
+        for r in $waiters; do if fill_row_launched "$r" "$ids"; then hit=1; break; fi; done
+        if [ -n "$hit" ]; then waiting=$((waiting + 1))
+        else TICK_REG_BLOCK="${TICK_REG_BLOCK:+$TICK_REG_BLOCK, }$wn"; TICK_REG_BLOCKS=$((TICK_REG_BLOCKS + 1)); fi
+      done <<EOF
+$TICK_OCC_NAMES
+EOF
+      if [ "$TICK_REG_BLOCKS" -eq 0 ] && [ "$waiting" -lt "$TICK_OCCUPIED" ]; then
+        TICK_REG_BLOCK="$TICK_OCCUPIED unnamed"; TICK_REG_BLOCKS="$TICK_OCCUPIED"
+      fi
+    }
+
     # ─────────────────────────────────────── the whole run, started by the tick
     #
     # THE TICK STARTS THE WHOLE RUN ITSELF. A head no whole run has run at is not proved green, and the
     # machine is the one that runs it: neither the tick nor the orchestrator is a hand-hold (the run
     # line says which with `starter=`). It starts when the plan is past approval and owes a regression,
-    # no row is ready, no writer row is open and no row the regression waits on still writes, and the
-    # working branch's head is not the last regression proof's (no proof counts as another head). A fix
+    # no row is ready, no writer row is open (one whose row waits on the regression is no reason: it cannot land before the
+    # run) and no row the regression waits on still writes, and the working branch's head is not the last regression
+    # proof's (no proof counts as another head). EVERY OTHER REASON FOR NOT STARTING, at a head that owes a run, IS ONE
+    # LINE, `regression: not started — <cause>; starts when <what>`, so a tick that declines is never silent. A fix
     # row that lands past a proof is this same case at the next tick: its landing moved the head, so it
     # has no branch of its own. Nothing starts at a head that already has a whole-run log, nor beside a
     # whole run still running in the checkout (`whole_run_at_head`), nor from a dirty checkout, which
@@ -2186,14 +2255,11 @@ EOF
     # hand-typed run's does). The command ends with the run's code when the run wrote a log, 75 when the
     # gate never admitted it, and 69 when it ran nothing: a stamp of 75 or 69 is no run of the head.
     tick_regression_start() {
-      local plan="${SCHED_PLAN:-}" head ph wb co docs rel h8 name row poker cmd out log
+      local plan="${SCHED_PLAN:-}" head ph wb co docs rel h8 name row poker cmd out log r rdy hold
       [ -n "$plan" ] && [ -f "$plan" ] && [ "${POKER_RUN_OPEN:-}" != unreadable ] || return 0
       case "${SCHED_STEP:-}" in ''|*[!0-9]*) return 0 ;; esac
       [ "$SCHED_STEP" -ge 4 ] || return 0
       [ "$(plan_regression "$plan" 2>/dev/null)" != no ] || return 0
-      case "${SCHED_READY_ALL:-}" in *[!\ ]*) return 0 ;; esac
-      case "${TICK_OCCUPIED:-0}" in 0) : ;; *) return 0 ;; esac
-      [ -z "$(units_floor_holds "$plan" "" 2>/dev/null)" ] || return 0
       if ! declare -F proof_branch_head >/dev/null 2>&1; then
         [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
       fi
@@ -2202,28 +2268,65 @@ EOF
       case "$head" in [0-9a-f]*) : ;; *) return 0 ;; esac
       ph="$(proof_last "$plan" regression 2>/dev/null)"
       if [ -n "$ph" ]; then case "$head" in "$ph"*) return 0 ;; esac; fi
+      h8="${head:0:8}"; name="regression@$h8"
+      # A DECLINE IS SAID, ONCE A RUN IS OWED. Past this line a whole run is owed at the head, so each reason for not
+      # starting one is a line (`regression_declined`) naming the cause and what lets it start; a head the last full
+      # pass still proves is no head to run again and says nothing.
+      REG_DECLINE=""
+      rdy=""; for r in ${SCHED_READY_ALL:-}; do rdy="${rdy:+$rdy, }$r"; done
+      if [ -n "$rdy" ]; then
+        regression_declined "$rdy" "a row is ready" "rows are ready" "no row is ready" "no row is ready"
+      else
+        tick_regression_writers "$plan"
+        if [ -n "$TICK_REG_BLOCK" ]; then
+          regression_declined "$TICK_REG_BLOCK" "a writer is open" "writers are open" "it closes" "they close"
+        else
+          hold="$(units_floor_holds "$plan" "" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s", (n++ ? ", " : ""), $1 }')"
+          [ -z "$hold" ] || regression_declined "$hold" "a row the regression waits on has not landed" \
+            "rows the regression waits on have not landed" "it lands" "they land"
+        fi
+      fi
       # A head the last full pass still proves (nothing since moved code) is no head to run again: the printer is the one reader.
       case "$(proof_whole_text "$plan" "$REPO_REAL" "$head" 2>/dev/null)" in "green at "*) return 0 ;; esac
+      [ -z "$REG_DECLINE" ] || { say "regression: not started — $REG_DECLINE"; return 0; }
       wb="$(plan_working_branch "$plan" 2>/dev/null)"
       co="$(proof_checkout "$REPO_REAL" "$wb")" || return 0
-      [ -z "$(_wt_piece_dirt "$co" 2>/dev/null)" ] || return 0
+      if [ -n "$(_wt_piece_dirt "$co" 2>/dev/null)" ]; then
+        say "regression: not started — the working checkout has uncommitted changes; starts when it is committed or cleaned"
+        return 0
+      fi
       docs="$(docs_root "$REPO_REAL" 2>/dev/null)"; [ -n "$docs" ] || return 0
       rel="record/$(proof_plan_slug "$plan")/regression-run-$head.log"
       # A whole run at this head that ended left its log; one still running, the tick's own or the orchestrator's,
       # has written none yet, and its open whole request at the gate is what says so.
-      ! whole_run_at_head "$docs" "$(proof_plan_slug "$plan")" "$head" "$co" || return 0
-      h8="${head:0:8}"; name="regression@$h8"
+      if whole_run_at_head "$docs" "$(proof_plan_slug "$plan")" "$head" "$co"; then
+        if [ -n "${WRA_LOG:-}" ]; then
+          say "regression: not started — a whole run at $h8 left its log ($WRA_LOG); starts when the head moves past it"
+        else
+          say "regression: not started — a whole run at $h8 is running at the gate; starts when it ends"
+        fi
+        return 0
+      fi
       if run_load_row "$(run_row_of "$ROSTER_FILE" "$name")" "$ROSTER_FILE"; then
         run_read
         case "$RUN_STATE" in
           RUNNING) return 0 ;;
           FINISHED)
-            [ "$RUN_RC" = 75 ] || return 0
+            if [ "$RUN_RC" != 75 ]; then
+              say "regression: not started — $name ran at this head and ended ${RUN_RC:+with exit $RUN_RC }without a proof; starts when the head moves past it"
+              return 0
+            fi
             say "regression-run waiting — the gate has no room for a whole run" ;;
         esac
       fi
-      [ ! -L "$ROSTER_FILE" ] && tmp_dir_ok "${ROSTER_FILE%/*}" || return 0
-      [ -f "$ROSTER_FILE" ] || roster_header > "$ROSTER_FILE" 2>/dev/null || return 0
+      if [ -L "$ROSTER_FILE" ] || ! tmp_dir_ok "${ROSTER_FILE%/*}"; then
+        say "regression: not started — the roster file is a symlink or sits in an unsafe directory; starts when it is a plain file in a safe one"
+        return 0
+      fi
+      if [ ! -f "$ROSTER_FILE" ] && ! roster_header > "$ROSTER_FILE" 2>/dev/null; then
+        say "regression: not started — the roster file cannot be written; starts when it can"
+        return 0
+      fi
       row="$(roster_row status=run session="$SESSION_ID" name="$name" agent_id= launched_at="$(iso_now)" \
         subagent_type=bionic:test-runner model= deliverable= source= duration= progress= claims= cadence= absent= \
         waiver="a whole run the tick started, not an agent: its log and its proof are its record" \

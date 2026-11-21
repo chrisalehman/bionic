@@ -701,12 +701,15 @@ EOF
     # THE LANDING'S MARK DECIDES (wave-28 T6; D7). A row the line published carries
     # `landed=<40-hex> landed_at=<ISO-UTC>` on its roster line (lib/roster.sh `roster_landed`): it
     # closes `landed` whatever its deliverable says, and its tree goes once the row is closed (below).
-    [ -z "$_mark" ] || _reason=landed
+    [ -z "$_mark" ] || { _reason=landed; _still_live=0; }
     # THE FRESH PANEL, through the one shared read above (`read_panel` / `_is_live`, the same
-    # predicate standdown uses). C4 holds for every state: no fresh answer, or the name still
-    # on it, is a refusal that names the verdict. A verb that cannot see does not ack, and an
-    # agent that is still working has not been stopped.
-    read_panel
+    # predicate standdown uses). C4 holds for every state but a landed one: no fresh answer, or
+    # the name still on it, is a refusal that names the verdict. A verb that cannot see does not
+    # ack, and an agent that is still working has not been stopped. A row carrying the mark has
+    # finished its work by the landing's own fact, and the landing closes its row itself, so no
+    # panel is read for it: this verb then only closes what the landing could not.
+    _live_ok=1; _live=""
+    [ -n "$_mark" ] || read_panel
     if [ "$_live_ok" -ne 1 ]; then
       if [ "$_still_live" -eq 1 ]; then
         die "REFUSED — $_target's contract is STILL-LIVE; retry after the cadence elapses, or when a fresh panel no longer lists it."
