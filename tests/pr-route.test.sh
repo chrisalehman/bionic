@@ -25,7 +25,10 @@
 #             fetch once the request is closed unmerged and the person's ask is open.
 #   §MERGE    the pass that sees the merge closes the run: the integrate row lands at the merge, the run reads delivered,
 #             and a close that holds wakes once.
-#   §WALL     publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
+#   §MERGE-LOOK a pass over an unchanged run with the request open runs no tick and asks the host alone, and the pass
+#             after the merge still reads the run as merged; a change to what the tick reads, a writer out, or a
+#             request closed unmerged runs the tick.
+#   §WALL    publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
 #   §STRAY    the whole run a world's tick started detached is ended before the worlds go: none is alive at the end.
 #
 # FIXTURE FIDELITY. Each case is a copy of one door fixture (tests/lib/door.sh): a real repository on its working branch
