@@ -2128,6 +2128,8 @@ release-check.test.sh §REL-1.24.0 — prose pin
 release-check.test.sh §REL-1.25.0 — prose pin
 release-check.test.sh §REL-1.26.0 — prose pin
 release-check.test.sh §REL-1.27.0 — cut in 3b633c154: the omission it shared with the fixture section is held by the fixture sections, which go red under it
+release-check.test.sh §RATIO — cut in a9eb6e4d: the cap counts characters, so its line-count rows were rewritten as §JOIN, §DELETE, §OVER and §LINE, and §OVER holds the exceed arm
+release-check.test.sh §RATIO-BASE — cut in a9eb6e4d: the base's admit and its refusal were rewritten into §DELETE and §OVER, which hold the limit's base and the head at or under the base's
 render.test.sh §Section 2 — duplicate
 render.test.sh §Section 10 — vacuous
 render.test.sh §Section 11 — prose pin

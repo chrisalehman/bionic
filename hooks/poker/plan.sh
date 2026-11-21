@@ -2259,18 +2259,18 @@ RP_TABLE
   # later landing can have written.
   poker_verb_check_from() {
     local head jc who rc
-    plan_verb_value_ok "$CF_WORDS" || { die "REFUSED — the words are one field of the run's log, and they carry a line break, a tab or a '|'; nothing was written."; exit 1; }
+    plan_verb_value_ok "$CF_WORDS" || { die "REFUSED — the words are one field of the run's log, and they carry a line break, a tab or a '|'; nothing was written. run again: session-poker.sh check-from '<their words, on one line, with no |>'"; exit 1; }
     plan_verb_open check-from
     declare -F proof_approval_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1; }
     declare -F user_said >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/said.sh" ] && . "$BIONIC_LIB/said.sh"; }
     if ! declare -F proof_approval_event >/dev/null 2>&1 || ! declare -F user_said >/dev/null 2>&1; then
-      die "REFUSED — lib/proof.sh or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written."
+      die "REFUSED — lib/proof.sh or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written. needs: the person — the plugin's lib/ restored; then run again: session-poker.sh check-from '<their words>'"
       exit 2
     fi
     head="$(proof_branch_head "$PV_PLAN" "$PV_REPO" 2>/dev/null)" || head=""
     jc="$head"; [ -z "$CF_AT" ] || jc="$(git -C "$PV_REPO" rev-parse --verify -q "${CF_AT}^{commit}" 2>/dev/null)" || jc=""
     if [ -z "$head" ] || [ -z "$jc" ] || ! git -C "$PV_REPO" merge-base --is-ancestor "$jc" "$head" 2>/dev/null; then
-      die "REFUSED — ${CF_AT:-the working head} is no commit the working head ${head:-<none: the plan names no working-branch head>} holds, and the judge is a commit that stands on the working branch; nothing was written."
+      die "REFUSED — ${CF_AT:-the working head} is no commit the working head ${head:-<none: the plan names no working-branch head>} holds, and the judge is a commit that stands on the working branch; nothing was written. run again: session-poker.sh check-from '<their words>' <a commit the working head holds>"
       exit 1
     fi
     who="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
