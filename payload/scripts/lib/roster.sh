@@ -1054,7 +1054,8 @@ ruling_fold() {  # <roster> [<writer>]
         index($0, "roster-state/") == 1 { p = _roster_kv($0, "plan"); if (p != "" && p != "none") print p }' "$f"
       printf '%s\n' "$_RULING_PLAN"; } | awk 'NF && !seen[$0]++' | while IFS= read -r p; do
       declare -F reader_facts >/dev/null 2>&1 || . "$_RULING_LIB_DIR/reader.sh" >/dev/null 2>&1 || break
-      reader_facts "$p" 2>/dev/null | /usr/bin/grep '^run/v1|ev=ruling|'
+      facts="$(reader_facts "$p" 2>/dev/null)" || continue
+      printf '%s\n' "$facts" | /usr/bin/grep '^run/v1|ev=ruling|'
     done
   } | awk -F'|' -v want="${2:-}" -v us="$RULING_US" '
     function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
