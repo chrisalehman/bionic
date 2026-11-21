@@ -71,6 +71,8 @@
 #   §LINT                tests/lib/lint.sh, the landing's run of §EXIT's, §BP's and §HEADER's programs over the files a
 #                        row changed, names each hit there by file and line, and a lowered ceiling at its own line.
 #   §SETUP               a shared setup that loads a helper on a line with no stop is refused by file and line.
+#   §STOP                a maker that fails stops the suite that asked, its processes and nothing beside it, with one
+#                        line; a setup or a tests/lib file that calls maker_stop with no load of it is refused by line.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
@@ -1845,5 +1847,67 @@ expect_eq "SETUP-3 the landing's run, told the bad setup, names its four loads a
   "$(lint_at "$LT" tests/bad.prelude.sh)"
 expect_eq "…told the stopped setup alone, none, and it exits 0" "|0" \
   "$(printf '%s\n' tests/good.prelude.sh | bash "$TESTS_DIR/lib/lint.sh" "$LT" 2>&1; echo "|$?")"
+
+# ============================================================
+section "STOP — a maker that fails stops the suite that asked, and a file that stops through maker_stop loads it"
+# ============================================================
+# A suite takes a maker's path as `R="$(make_repo x)"`, in a command substitution, so a maker's own exit ends only
+# that child: tests/lib/maker-stop.sh ends the shell that loaded it, and every process under that shell, from
+# wherever the maker runs. Each take below runs in a child bash that loads the real file, the way a row that tests a
+# refusal must; the child is then the suite that stops. The maker is handed a folder it cannot make, and the line
+# after the take would write a mark.
+# fails-when: maker_stop only exits its own process, or signals a process group, or leaves its notice twice, and
+# the take's next line runs; or a file calls maker_stop with no load of maker-stop.sh, and the sweep passes.
+ST="$TMP/stop"; mkdir -p "$ST/ro"; chmod 500 "$ST/ro"
+st_child() {  # <maker body> <take shape> -> rc|stderr lines|marks, of a child bash that takes through the shape
+  rm -f "$ST/went-on" "$ST/cleaned"
+  { printf '%s\n' ". \"$TESTS_DIR/lib/maker-stop.sh\" || exit 9" "trap ': > \"$ST/cleaned\"' EXIT" \
+      "mk() { mkdir -p \"\$1\" 2>/dev/null && git -C \"\$1\" init -q 2>/dev/null || $1; printf '%s' \"\$1\"; }"
+    printf '%s\n' "$2" ": > \"$ST/went-on\""; } > "$ST/child.sh"
+  /bin/bash "$ST/child.sh" 2>"$ST/child.err"; printf '%s|%s|%s%s' "$?" "$(awk 'END { print NR }' "$ST/child.err")" \
+    "$([ -e "$ST/cleaned" ] && echo cleaned)" "$([ -e "$ST/went-on" ] && echo ' went-on')"
+}
+ST_STOP='maker_stop mk "no repository of its own at $1"'
+expect_true "tests/lib/maker-stop.sh parses under /bin/bash -n" /bin/bash -n "$TESTS_DIR/lib/maker-stop.sh"
+expect_eq "mutant: a maker that only returns 1 hands the take an empty path, and the next line runs" "0|0|cleaned went-on" \
+  "$(st_child 'return 1' "R=\"\$(mk \"$ST/ro/r\")\"; [ -z \"\$R\" ] || exit 7")"
+expect_eq "STOP-1 a take in the suite's own shell: exit 1, one line, the EXIT trap run, no next line" "1|1|cleaned" \
+  "$(st_child "$ST_STOP" "R=\"\$(mk \"$ST/ro/r\")\"")"
+expect_eq "…the one line names the maker and says the suite stops" "mk: no repository of its own at $ST/ro/r; the suite stops" \
+  "$(cat "$ST/child.err")"
+expect_eq "…a take inside ( … ): the subshell's next line and the suite's do not run" "1|1|cleaned" \
+  "$(st_child "$ST_STOP" "( R=\"\$(mk \"$ST/ro/r\")\"; : > \"$ST/went-on\" )")"
+expect_eq "…a take two command substitutions deep" "1|1|cleaned" \
+  "$(st_child "$ST_STOP" "f() { local x; x=\"\$(mk \"$ST/ro/r\")\"; printf '%s' \"\$x\"; }; R=\"\$(f)\"")"
+expect_eq "…a take beside a background row: the row is ended too, and leaves no notice" "1|1|cleaned" \
+  "$(st_child "$ST_STOP" "( sleep 2; : > \"$ST/went-on\" ) & R=\"\$(mk \"$ST/ro/r\")\"")"
+sleep 3
+expect_eq "…and the background row never ran its line" "no" "$([ -e "$ST/went-on" ] && echo yes || echo no)"
+# The stop reaches the loading shell and what runs under it, by process id: a process beside the child, started
+# from this suite, is alive after the child stopped.
+sleep 30 & ST_SIB=$!
+expect_eq "STOP-2 a process beside the stopped child, under this suite, is not reached by the stop" "1|1|cleaned|alive" \
+  "$(st_child "$ST_STOP" "R=\"\$(mk \"$ST/ro/r\")\"")|$(kill -0 "$ST_SIB" 2>/dev/null && echo alive || echo gone)"
+kill "$ST_SIB" 2>/dev/null; wait "$ST_SIB" 2>/dev/null
+chmod 700 "$ST/ro"
+# The lint: a file that calls maker_stop loads it itself, since without the function the call answers 127 and the
+# maker goes on to write through the path it refused.
+printf '%s\n' '#!/bin/bash' 'mk() {' '  # maker_stop in a comment is no call' \
+  '  git -C "$1" init -q || maker_stop mk "no repository at $1"' '}' > "$ST/bad.prelude.sh"
+printf '%s\n' '#!/bin/bash' '[ -r "$H/lib/maker-stop.sh" ] && . "$H/lib/maker-stop.sh" || { echo "x: cannot load" >&2; exit 1; }' \
+  'mk() { git -C "$1" init -q || maker_stop mk "no repository at $1"; }' > "$ST/good.prelude.sh"
+printf '%s\n' '#!/bin/bash' "cat > \"\$p/s.sh\" <<'EOF'" 'maker_stop mk "fixture text"' 'EOF' > "$ST/text.prelude.sh"
+for f in "$ST"/*.prelude.sh; do expect_true "the planted ${f##*/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+expect_eq "STOP-3 a call of maker_stop in a file with no load of it is refused at the call's line" "$ST/bad.prelude.sh:4" \
+  "$(stop_refusals "$ST/bad.prelude.sh" | cut -f1)"
+expect_eq "control: the file that loads it, and a heredoc body that names it, are refused for nothing" "" \
+  "$(stop_refusals "$ST/good.prelude.sh" "$ST/text.prelude.sh")"
+ST_REAL="$(for f in "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh; do /usr/bin/grep -l 'maker_stop [a-z"]' "$f"; done | wc -l | tr -d ' ')"
+expect_true "the real sweep has callers to read: ${ST_REAL} files of tests/ call maker_stop" [ "${ST_REAL:-0}" -gt 1 ]
+expect_eq "STOP-4 every real setup and library that calls maker_stop loads it" "" \
+  "$(stop_refusals "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh)"
+cp "$ST/bad.prelude.sh" "$LT/tests/stopbad.prelude.sh" && mkdir -p "$LT/tests/lib" && cp "$ST/bad.prelude.sh" "$LT/tests/lib/stopbad.sh"
+expect_eq "STOP-5 the landing's run, told a setup and a library that call it unloaded, names each as a STOP hit" \
+  "STOP tests/lib/stopbad.sh:4|STOP tests/stopbad.prelude.sh:4" "$(lint_at "$LT" tests/stopbad.prelude.sh tests/lib/stopbad.sh | tr '|' '\n' | LC_ALL=C sort | paste -sd'|' -)"
 
 finish

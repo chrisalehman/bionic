@@ -56,6 +56,8 @@ for CG_HELPER in bound-marker plan-fixture live-answer roster-row swept-marker d
   [ -r "$CG_HERE/lib/$CG_HELPER.sh" ] && . "$CG_HERE/lib/$CG_HELPER.sh" \
     || { echo "cross-gate-agreement.prelude.sh: cannot load $CG_HERE/lib/$CG_HELPER.sh" >&2; exit 1; }
 done
+[ -r "$CG_HERE/lib/maker-stop.sh" ] && . "$CG_HERE/lib/maker-stop.sh" \
+  || { echo "cross-gate-agreement.prelude.sh: cannot load $CG_HERE/lib/maker-stop.sh" >&2; exit 1; }
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
@@ -485,7 +487,7 @@ new_repo() {  # <name> -> path
   # Nothing is written until git agrees the repository is the one just made: a path that is no directory, or one
   # inside another repository, would carry these markers to whatever repository answers for it.
   [ -n "$1" ] && [ -d "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$r" && pwd -P)" ] \
-    || { echo "new_repo: no repository of its own at '$r'" >&2; return 1; }
+    || maker_stop new_repo "no repository of its own at '$r'"
   arm_patrol "$r" "$SID_A" "$SID_B" "$SID_LG"
   engage_sids "$r" "$SID_A" "$SID_B" "$SID_LG"
   printf '%s' "$r"

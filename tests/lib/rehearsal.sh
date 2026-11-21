@@ -97,6 +97,9 @@ if ! type -t roster_row_fixture >/dev/null 2>&1; then
 fi
 # shellcheck source=/dev/null
 type -t live_answer_body >/dev/null 2>&1 || . "${BIONIC_SCRIPTS_DIR}/tests/lib/live-answer.sh" || return 1 2>/dev/null || exit 1
+# A maker here that cannot make its fixture stops the suite that asked for it (tests/lib/maker-stop.sh).
+[ -r "${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" ] && . "${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" \
+  || { echo "rehearsal.sh: cannot load ${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" >&2; return 1 2>/dev/null || exit 1; }
 
 # The kinds of hand write, each what a person, an agent or the harness writes in a real run (above).
 RH_HAND_KINDS="prose record code typed launch plan"
@@ -396,11 +399,12 @@ rh_remote() {
   # `git -C ""` acts where the caller stands: the project must be the top of its own repository and <dir> a bare one
   # of its own before a ref or a remote is written to either.
   [ -n "$1" ] && [ -d "$1" ] && [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$1" && pwd -P)" ] \
-    || { echo "rh_remote: '$1' is no repository of its own" >&2; return 1; }
+    || maker_stop rh_remote "'$1' is no repository of its own"
   [ -n "$2" ] && git init --quiet --bare "$2" \
     && [ "$(git -C "$2" rev-parse --absolute-git-dir 2>/dev/null)" = "$(cd "$2" && pwd -P)" ] \
     && git -C "$2" symbolic-ref HEAD "refs/heads/$b" \
-    && git -C "$2" fetch --quiet "$1" "refs/heads/$b:refs/heads/$b" && git -C "$1" remote add origin "$2"
+    && git -C "$2" fetch --quiet "$1" "refs/heads/$b:refs/heads/$b" && git -C "$1" remote add origin "$2" \
+    || maker_stop rh_remote "no bare remote of its own at '$2'"
 }
 
 # rh_host <dir> [pull] -> the stand-in for the host's command line tool at <dir>/bin/gh, and RH_GHPATH: that

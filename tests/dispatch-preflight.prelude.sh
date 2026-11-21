@@ -22,6 +22,8 @@ DP_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=/dev/null
 declare -F seal_fixture >/dev/null 2>&1 || { [ -r "$DP_HERE/lib/seal-fixture.sh" ] && . "$DP_HERE/lib/seal-fixture.sh"; } \
   || { echo "dispatch-preflight.prelude.sh: cannot load $DP_HERE/lib/seal-fixture.sh" >&2; exit 1; }
+[ -r "$DP_HERE/lib/maker-stop.sh" ] && . "$DP_HERE/lib/maker-stop.sh" \
+  || { echo "dispatch-preflight.prelude.sh: cannot load $DP_HERE/lib/maker-stop.sh" >&2; exit 1; }
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 # The rendered dispatch.md, whose fenced scaffold the suites read: the page the dispatch library's
@@ -482,7 +484,7 @@ make_repo() {
   # Nothing is written until git agrees the repository is the one just made: a path that is no directory, or one
   # inside another repository, would carry this identity and this commit to whatever repository answers for it.
   [ -n "$name" ] && [ -d "$repo" ] && [ "$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$repo" && pwd -P)" ] \
-    || { echo "make_repo: no repository of its own at '$repo'" >&2; return 1; }
+    || maker_stop make_repo "no repository of its own at '$repo'"
   if [ -z "$seeded" ]; then
     git -C "$repo" config user.email t@example.com
     git -C "$repo" config user.name "T"
@@ -528,8 +530,8 @@ make_repo() {
       bound_marker "$repo" "$_psid" "$_pplan"
     done
   fi
-  # A repository with no commit is not the fixture asked for: answer nothing, and fail (T57).
-  git -C "$repo" rev-parse -q --verify HEAD >/dev/null 2>&1 || return 1
+  # A repository with no commit is not the fixture asked for: answer nothing, and stop.
+  git -C "$repo" rev-parse -q --verify HEAD >/dev/null 2>&1 || maker_stop make_repo "no commit in '$repo'"
   printf '%s' "$repo"
 }
 
@@ -540,7 +542,8 @@ make_repo() {
 #   - the take: the guard is on the VALUE. A DEBUG trap notes each `<var>=$(make_repo …)` and,
 #     before the next command at that subshell level ($BASH_SUBSHELL: the suite runs under
 #     /bin/bash 3.2, which has no BASHPID), reads <var>: empty, whatever make_repo exited
-#     with (a dying subshell, make_repo's own check above, or nothing printed at all), it points
+#     with (a subshell that died or could not fork, or nothing printed at all; a make_repo whose own
+#     check above fails stops the suite through maker_stop before the take returns), it points
 #     <var> at a path under "$SANDBOX/.lost/" before any word is expanded, so no path is ever
 #     built from an empty value and every write the fixture goes on to make lands in the sandbox;
 #   - the drive: run_gate refuses to run the wall on a payload whose cwd is under .lost, empty

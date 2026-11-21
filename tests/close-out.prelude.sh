@@ -38,6 +38,8 @@ CO_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=/dev/null
 declare -F seal_fixture >/dev/null 2>&1 || { [ -r "$CO_HERE/lib/seal-fixture.sh" ] && . "$CO_HERE/lib/seal-fixture.sh"; } \
   || { echo "close-out.prelude.sh: cannot load $CO_HERE/lib/seal-fixture.sh" >&2; exit 1; }
+[ -r "$CO_HERE/lib/maker-stop.sh" ] && . "$CO_HERE/lib/maker-stop.sh" \
+  || { echo "close-out.prelude.sh: cannot load $CO_HERE/lib/maker-stop.sh" >&2; exit 1; }
 SCRIPT="$REPO_ROOT/payload/scripts/close-out.sh"
 RUN_LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
@@ -104,11 +106,11 @@ in_fixture() {
 
 # fixture_own — 0 when the directory a subshell entered by in_fixture stands in is the top of a repository of its
 # own. `git init` that failed leaves the directory inside whatever repository holds the sandbox, if one does, and
-# every write after it would land there: a fixture writes nothing until git names this directory as its top.
+# every write after it would land there: a fixture writes nothing until git names this directory as its top, and
+# the maker that called it stops the suite.
 fixture_own() {
   [ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ] && return 0
-  echo "${0##*/}: no repository of its own at $(pwd -P)" >&2
-  return 1
+  maker_stop "${FUNCNAME[1]:-fixture_own}" "no repository of its own at $(pwd -P)"
 }
 
 # fixture_git <dir> <git args...> — `git -C` with the same guard. `git -C ""` runs in the
@@ -269,7 +271,7 @@ mk_fixture() {
     git branch wt/01-x
     git checkout -q main
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
-  ) || return 1
+  ) || maker_stop mk_fixture "the fixture at $p was not made"
   co_page15 "$p"
   seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   plant_facts "$p"
@@ -464,7 +466,7 @@ PLAN_CENSUS
     printf 'seed\n' > file.txt
     git add -A >/dev/null 2>&1
     git commit -q -m "seed" >/dev/null 2>&1
-  ) || return 1
+  ) || maker_stop mk_census_fixture "the fixture at $p was not made"
   co_page15 "$p"
   seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"

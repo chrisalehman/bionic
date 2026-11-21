@@ -25,6 +25,8 @@ declare -F seal_fixture >/dev/null 2>&1 || { [ -r "$SP_HERE/lib/seal-fixture.sh"
 # The refusal on the channel it rides (tests/lib/duty-read.sh): block, duty, or nothing for a turn that ends.
 [ -r "$SP_HERE/lib/duty-read.sh" ] && . "$SP_HERE/lib/duty-read.sh" \
   || { echo "session-poker.prelude.sh: cannot load $SP_HERE/lib/duty-read.sh" >&2; exit 1; }
+[ -r "$SP_HERE/lib/maker-stop.sh" ] && . "$SP_HERE/lib/maker-stop.sh" \
+  || { echo "session-poker.prelude.sh: cannot load $SP_HERE/lib/maker-stop.sh" >&2; exit 1; }
 # Under TMPDIR by name: macOS's bare `mktemp -d` ignores TMPDIR, and a run given a temp folder of its own must find
 # every world this file builds inside it, and anything a world leaves behind there too.
 TMPROOT="$(sp_t="${TMPDIR:-/tmp}"; mktemp -d "${sp_t%/}/sp.XXXXXX")" && [ -n "$TMPROOT" ] && [ -d "$TMPROOT" ] \
@@ -94,7 +96,7 @@ make_repo() {  # <label> -> repo path, in a session that has ENGAGED bionic
   # No path is answered until git agrees the repository is the one just made: a caller writes its identity and its
   # commits through it, and a directory inside another repository would hand them to that one.
   [ -d "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$r" && pwd -P)" ] \
-    || { echo "make_repo: no repository of its own at '$r'" >&2; return 1; }
+    || maker_stop make_repo "no repository of its own at '$r'"
   engage "$r"
   printf '%s' "$r"
 }
