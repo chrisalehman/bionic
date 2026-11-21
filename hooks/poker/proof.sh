@@ -1265,10 +1265,10 @@ FM_FINDING
       FM_STAND="$(printf '%s\n' "$_PROOF_FINDINGS" | awk -v id="$FM_ID" "$(proof_bind_awk)"'proof_bound($0) == id { t = proof_fkv($0, "to") } END { print t }')"
       case "$FM_STAND" in
         ''|deferred|defer) : ;;
-        *) die "REFUSED — $(clean "$FM_ID") stands moved to $FM_STAND, and a Known-limits sentence is a carried finding's; nothing is written."; exit 1 ;;
+        *) die "REFUSED — $(clean "$FM_ID") stands moved to $FM_STAND, and a Known-limits sentence is a carried finding's; nothing is written. A move to fix or to a row is no carry: state the sentence of a deferred finding, or move this one again with finding-move."; exit 1 ;;
       esac
       proof_finding_event "$PV_PLAN" "ref=$FM_ID" ${FM_STAND:+"to=$FM_STAND"} "stated=$(deferral_escape "$FM_SENT")" "by=$FM_WHO" \
-        || { die "REFUSED — the sentence of $(clean "$FM_ID") could not be written to the run's log of $PV_PLAN; nothing is written."; exit 2; }
+        || { die "REFUSED — the sentence of $(clean "$FM_ID") could not be written to the run's log of $PV_PLAN; nothing is written. Run again: bash ${HOOK_DIR}/session-poker.sh finding-move with the same sentence"; exit 2; }
       say "finding-move — $(clean "$FM_ID") states its Known-limits sentence, by $(clean "$FM_WHO"); it stands where it stood${FM_STAND:+ ($FM_STAND)}, and the release card draws it."
       exit 0
     fi

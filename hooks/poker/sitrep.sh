@@ -2249,7 +2249,7 @@ sitrep_tick_line() {
     case "$title" in ''|*$'\n'*) die "REFUSED — the title is one line saying what is decided; nothing is written."; exit 1 ;; esac
     ids=" $(units_rows "$plan" 2>/dev/null | cut -f1 | tr '\n' ' ') "
     for h in $holds; do
-      case "$ids" in *" $h "*) ;; *) die "REFUSED — the plan has no row '$(clean "$h")' for $d to hold; nothing is written."; exit 1 ;; esac
+      case "$ids" in *" $h "*) ;; *) die "REFUSED — the plan has no row '$(clean "$h")' for $d to hold; nothing is written. Name a row of the plan's ## Tasks table: bash ${HOOK_DIR}/session-poker.sh decisions put $d '<title>' <row>"; exit 1 ;; esac
     done
     wait="$(decision_wait "$plan" "$d" "$REPO_REAL" "$holds")"
     decisions_append "$plan" "d=$d" verb=put by=orchestrator "title=$title" ${wait:+"wait=$wait"} ${holds:+"holds=$holds"} || exit 1

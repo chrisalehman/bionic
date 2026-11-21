@@ -13,6 +13,7 @@
 #   §T47  a refusal never loses its own line to a long value.
 #   §DUTY  an agent's refusal goes out as one fixed line, its whole reason kept for the duty verb.
 #   §NEEDS  a refusal that needs a person is an event on the bound plan's landing record.
+#   §ROW-VERBS  each refusal of start, rule, amend and the landing's returns ends on a line run: with a command.
 #
 # THE SHAPES ARE ASSERTED LITERALLY, NOT READ BACK OUT OF THE TABLE. §2's exit2 rows say
 # what the stream IS — a verdict line, then the detail behind it — as a literal
