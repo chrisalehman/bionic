@@ -321,6 +321,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh check-from '<their words>' [<commit>]   the person's word that the commit, the working head unless named, judges every landing and release check after it: one approval of key judge in the run's log, naming the words and who typed them"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh publish   the bound run's pull request, on the release approval at the working head and nothing else: the working branch pushed to origin and the request opened against the integration branch through gh, recorded as a published event of part pr; at a head already published it does nothing, at a new head it pushes and keeps the request; a failed push or request exits 4 with the cause and opens an ask for the user"
+  die "  bash ${HOOK_DIR}/session-poker.sh pr-facts   the bound run's pull request facts, printed from the reader and never typed: ## Testing, ## Review, ## Known limits and ## Decision records, the four sections publish puts after the orchestrator's ## Summary, ## What changed and ## Upgrade notes from record/<wave>/pr-summary.md (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task|walk> <evidence>   record a proof in the run's log, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the regression's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
@@ -605,6 +606,9 @@ case "$VERB" in
   publish)
     [ $# -eq 0 ] || usage "publish takes no argument: it publishes the bound run's working branch against its integration branch."
     ;;
+  pr-facts)
+    [ $# -eq 0 ] || usage "pr-facts takes no argument: it prints the bound run's facts."
+    ;;
   # THE ENTRY ROW'S RENDER OF THE KNOWN LIMITS: the row id alone; the head is the working branch's.
   known-limits-part)
     [ $# -eq 1 ] && [ -n "$1" ] || usage "known-limits-part takes one argument: the doc or integrate row's id."
@@ -764,11 +768,13 @@ $1"; shift ;;
   # OR THREE (wave-36 T8; D9): the finding, `fixed`, and the row that fixed it, `T<n>`; words or a why
   # after it are the usage error. Whether the plan's table carries the row is the verb's own refusal (1).
   # `carried` takes the same three: the finding stays open and closes when the named row lands. A move to defer
-  # takes a fifth, the deferral's one changelog sentence, a field of the move's event.
+  # takes a fifth, the deferral's one changelog sentence, a field of the move's event. `stated` takes the sentence alone:
+  # the orchestrator's, written before the release card, so it takes no words and moves nothing.
   finding-move)
-    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why, and for defer optionally its changelog sentence; or <record>#<n>, fixed, and the row that fixed it; or <record>#<n>, carried, and the row whose landing closes it."
+    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why, and for defer optionally its changelog sentence; or <record>#<n>, fixed, and the row that fixed it; or <record>#<n>, carried, and the row whose landing closes it; or <record>#<n>, stated, and its Known-limits sentence."
     FM_ROW=""; FM_SENT_RAW=""
     case "${2:-}" in
+      stated) [ $# -eq 3 ] && [ -n "${3//[[:space:]]/}" ] || usage "$FM_USAGE"; FM_SENT_RAW="$3"; set -- "$1" "$2" ;;
       defer|fix)
         { [ $# -eq 4 ] || { [ $# -eq 5 ] && [ "$2" = defer ] && [ -n "${5//[[:space:]]/}" ]; }; } \
           && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$FM_USAGE"
@@ -2469,6 +2475,7 @@ case "$VERB" in
   task-add) poker_verb_task_add "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   publish) poker_verb_publish "$@" ;;
+  pr-facts) poker_verb_pr_facts "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;
   handoff) poker_verb_handoff "$@" ;;
   brief) poker_verb_brief "$@" ;;

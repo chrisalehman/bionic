@@ -1717,6 +1717,15 @@ _units_sched_awk() {
       lwhy = "the judge (facts_state) reads " s " at " substr(livehead, 1, 12) "; only an uncovered question is read again"
       return 0
     }
+    # revcover(j) -> 1 when row j is a review with a reading for each question it carries (a bare one, any review
+    # proof) that the judge owes nothing past. The readings are asked as live_judge asks them (needread).
+    function revcover(j,   k) {
+      if (knd[j] != "review") return 0
+      if (nq[j]) { for (k = 1; k <= nq[j]; k++) if (!(rq[j, k] in prvq)) return 0 }
+      else if (!("review" in prvh)) return 0
+      if (readst == "") { needread = 1; return 0 }
+      return (rdparse() && !live_owes(j))
+    }
     # live_past(i) -> 1 when pending row i reads live:head past a reading, with a head handed in: the judge decides it.
     function live_past(i,   k) {
       if (!rlive[i] || rbadq[i] || livehead == "") return 0
@@ -1812,8 +1821,10 @@ _units_sched_awk() {
       }
       # A ROW ID waits until that row lands or is dropped, whatever other state it is in, itself
       # included: a row that reads its own id waits for ever, and the validator names the cycle.
+      # A REVIEW ROW NEVER LANDS: a proof returns it to pending, so a dep on it is met by its cover. It is met when
+      # every question it carries has a reading (registered) and the judge owes it none (revcover).
       if (t in at) {
-        for (c = 1; c <= ncw; c++) if (st[cw[c]] != satisfied && st[cw[c]] != "dropped") wj[++nw] = cw[c]
+        for (c = 1; c <= ncw; c++) if (st[cw[c]] != satisfied && st[cw[c]] != "dropped" && !revcover(cw[c])) wj[++nw] = cw[c]
         return (nw == 0)
       }
       # head, record, merge AND A PATH wait on each open row the read names (a row reading the settled
@@ -1988,7 +1999,7 @@ _units_sched_awk() {
       if ((mode == "ready" || mode == "held" || mode == "waiting") && readst == "") {
         for (i = 1; i <= n; i++) {
           if (st[i] != "pending" || rowheld(i) != 0 || knd[i] == "integrate") continue
-          for (k = 1; k <= ntk[i]; k++) if (tk[i, k] == "proof:review") { judge(i, tk[i, k]); if (needread) exit 4 }
+          for (k = 1; k <= ntk[i]; k++) if (tk[i, k] == "proof:review" || (tk[i, k] in at)) { judge(i, tk[i, k]); if (needread) exit 4 }
         }
       }
       for (i = 1; i <= n; i++) {
