@@ -31,6 +31,10 @@
 #             after the merge still reads the run as merged; a change to what the tick reads, a writer out, or a
 #             request closed unmerged runs the tick; over a fresh state folder, a file the tick writes in its own
 #             first pass moves nothing, so the first quiet pass keeps its look.
+#   §TAG      the close of a merged, approved run leaves the release's tag on the remote at the merge commit and the
+#             run delivered; with no approval in the log, no release named, or the merge not seen, no tag is made; a tag
+#             that stands elsewhere is left and said and is never moved; a push the remote refuses holds the close with
+#             the person's ask, leaves no tag made, and the close made again once the push can be delivers.
 #   §WALL    publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
 #   §STRAY    the whole run a world's tick started detached is ended before the worlds go: none is alive at the end.
 #
@@ -744,6 +748,105 @@ prr_look_pass lookfresh 3
 # The red is planted by hand, so the run's seal holds the close; the merge is read all the same, and the wake says so.
 expect_eq "LK-9 …and the pass after the merge reads the run as merged: it wakes, naming the merge" "$PRR_WAKE|yes" \
   "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - close-out held' && echo yes)"
+
+# ============================================================
+section "§TAG: the close tags the merge once the release is approved, and never moves a tag (AC-21.1, AC-21.2)"
+# ============================================================
+# fails-when: the close of a merged, approved run leaves the remote with no tag, or one at a commit other than the
+# merge's; makes a tag with no release approval in the log, no release named, or the merge not seen; moves a tag that
+# stands elsewhere, here or on the remote, or says nothing of it; a refused push leaves a tag made, the run closed, or no
+# ask open; or the close made again after the push can be made does not tag and deliver.
+# FIXTURE FIDELITY: §MERGE's world, the stand-in host merging into the bare remote, the tag the one `v` plus the
+# release the plan's header names; the refused push a pre-receive hook on the bare remote, as a host's protected tags.
+TG_TAG="v${DOOR_VERSION}"
+prr_tag_there() { git -C "$B" rev-parse --verify -q "refs/tags/$TG_TAG^{commit}" 2>/dev/null; }
+prr_tag_here() { git -C "$R" rev-parse --verify -q "refs/tags/$TG_TAG^{commit}" 2>/dev/null; }
+prr_tag() {  # <commit> [--check] -> DOOR_OUT, DOOR_RC: line_tag_merge's line and answer over the case
+  door_run "$R" env PATH="$RH_GHPATH" bash -c '. "$1/line.sh" && line_tag_merge "$2" "$3" "$4" ${5:-}' _ "$PRR_LIB" "$P" "$R" "$1" "${2:-}"
+}
+prr_tag_refuse() {  # -> the bare remote refuses every tag pushed to it
+  printf '#!/bin/sh\nwhile read o n ref; do case "$ref" in refs/tags/*) echo "tags are protected" >&2; exit 1;; esac; done\n' > "$B/hooks/pre-receive" \
+    && chmod +x "$B/hooks/pre-receive"
+}
+
+prr_case8 taglib
+TG_A="$(prr_main)"; TG_B="$(prr_head)"
+prr_tag "$TG_A"
+expect_eq "TG-1 AC-21.2 no release approval in the log: no tag is made, here or on the remote, and the answer is none" "none|1||" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_approve "$TG_B"
+cp "$P" "$P.keep"; sed '/^release:/d' "$P.keep" > "$P"
+prr_tag "$TG_A"
+expect_eq "TG-2 AC-21.2 approved, the plan naming no release: no tag is made" "none|1||" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+mv "$P.keep" "$P"
+prr_tag "$TG_A" --check
+expect_eq "TG-3 --check: the tag would be made at the commit, and none is" "would|0||" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_tag "$TG_A"
+expect_eq "TG-4 AC-21.1 approved, the release named: the tag is made at the commit and pushed" "tagged|0|$TG_A|$TG_A" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_tag "$TG_A"
+expect_eq "TG-5 the call made again: the tag stands at the commit, and nothing is made" "stands|0|$TG_A|$TG_A" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_tag "$TG_B"
+expect_eq "TG-6 AC-21.2 a commit other than the tag's: the tag is left and said, and stands where it was, here and there" "left|1|$TG_A|$TG_A|yes" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)|$(printf '%s' "$DOOR_OUT" | /usr/bin/grep -q "$TG_TAG stands here at ${TG_A:0:12}" && echo yes)"
+
+prr_case8 tagelse
+prr_approve "$(prr_head)"; TG_A="$(prr_main)"
+git -C "$R" push --quiet origin "$(prr_head):refs/tags/$TG_TAG"
+prr_tag "$TG_A"
+expect_eq "TG-7 AC-21.2 a tag of the name stands on the remote at another commit: left and said, none made here, the remote's where it was" \
+  "left|1||$(prr_head)|yes" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)|$(printf '%s' "$DOOR_OUT" | /usr/bin/grep -q "stands on origin at $(prr_head | cut -c1-12)" && echo yes)"
+
+prr_case8 tagfail
+prr_approve "$(prr_head)"; TG_A="$(prr_main)"; prr_tag_refuse
+prr_tag "$TG_A"
+expect_eq "TG-8 a push the remote refuses: the answer is failed, naming the push, and no tag stands here or there" "failed|2|yes||" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(printf '%s' "$DOOR_OUT" | /usr/bin/grep -q 'push of .* failed: .*tags are protected' && echo yes)|$(prr_tag_here)|$(prr_tag_there)"
+
+# The close, driven by the pass that sees the merge.
+prr_watch_world tag
+prr_pass
+expect_eq "TG-9 AC-21.2 the request open, the merge not seen: the pass is quiet and no tag is made, here or there" "$PRR_QUIET||" \
+  "$PASS_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_close run
+expect_eq "TG-9b …close-out's run typed by hand holds the same way, and makes no tag" "2||" "$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_gh pr merge 1 --squash; TG_TIP="$(prr_bare_main)"
+prr_pass
+expect_eq "TG-10 AC-21.1 merged and approved: the pass closes the run, and the remote holds the release's tag at the merge commit" \
+  "$PRR_WAKE|n=9 state=delivered|$TG_TIP" "$PASS_RC|$(prr_log_step)|$(prr_tag_there)"
+expect_eq "TG-10b …the tag is also made in the project, and the account says it was pushed" "$TG_TIP|yes" \
+  "$(prr_tag_here)|$(prr_close_out | /usr/bin/grep -q "^tag: $TG_TAG at the merge commit ${TG_TIP:0:12}, pushed to origin" && echo yes)"
+
+prr_watch_world tagdrive
+git -C "$R" push --quiet origin "$(prr_head):refs/tags/$TG_TAG"; TG_OLD="$(prr_head)"
+prr_gh pr merge 1 --squash
+prr_pass
+TG_TIP="$(prr_bare_main)"
+# The close's own fetch follows a tag that points into what it downloads, so the project may hold the remote's tag too;
+# what must hold is that neither stands at the merge commit.
+expect_eq "TG-11 AC-21.2 a tag of the name stands elsewhere on the remote: the run is closed, the tag left where it was and none made at the merge" \
+  "n=9 state=delivered|$TG_OLD|yes" \
+  "$(prr_log_step)|$(prr_tag_there)|$([ "$(prr_tag_here)" != "$TG_TIP" ] && echo yes)"
+expect_eq "TG-11b …and the account says it was left" "yes" \
+  "$(prr_close_out | /usr/bin/grep -qE "^tag: $TG_TAG stands (here|on origin) at ${TG_OLD:0:12}.*left as it is" && echo yes)"
+
+prr_watch_world tagpush
+prr_tag_refuse
+prr_gh pr merge 1 --squash; TG_TIP="$(prr_bare_main)"
+prr_pass
+expect_eq "TG-12 a push the remote refuses: the pass wakes saying close-out held, nothing landed, the run still at step 8, no tag made" \
+  "$PRR_WAKE|yes|0|n=8 state=open||" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - close-out held (exit [0-9]*): ' && echo yes)|$(prr_landed)|$(prr_log_step)|$(prr_tag_here)|$(prr_tag_there)"
+expect_eq "TG-12b …the person's ask is open, naming the push" "yes" \
+  "$(prr_ask hold:merge | /usr/bin/grep -q 'push of .* failed' && echo yes)"
+rm -f "$B/hooks/pre-receive"
+prr_pass
+expect_eq "TG-13 the push can be made: the next pass closes the run and the remote holds the tag at the merge commit" \
+  "n=9 state=delivered|$TG_TIP" "$(prr_log_step)|$(prr_tag_there)"
 
 # ============================================================
 section "§WALL: publish is the orchestrator's verb"

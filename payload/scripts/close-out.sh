@@ -534,6 +534,26 @@ act_merge() {
   _co_held "$(co_merge_holds)" "${verdict#WOULD REFUSE — } — the tail runs once the merge is seen"
 }
 
+# co_tag_merge <run|check> -> TAG_LINE, the tag's key: the release tagged at the merge commit and pushed, as lib/line.sh
+# `line_tag_merge` decides it. The release approval in the log authorises the tag and its push, and the tag is made once
+# the merge is seen, before any row lands. A tag left as it stands, or none made for want of a release or an approval,
+# is said and does not hold the close; a tag that cannot be made or pushed holds it with the person's ask, and nothing
+# is left made, so the close runs again once the push can be.
+TAG_LINE=""; TAG_RC=0
+co_tag_merge() {
+  local out rc flag=""
+  [ "${1:-run}" != check ] || flag=--check
+  [ -n "$CO_MERGE_COMMIT" ] || { TAG_LINE="none — no merge was read, so there is no commit to tag"; return 0; }
+  if ! co_line_load || ! declare -F line_tag_merge >/dev/null 2>&1; then
+    TAG_LINE="none — $CO_LIB/line.sh, the tag's writer, cannot be loaded"; return 0
+  fi
+  out="$(line_tag_merge "$PLAN" "$ROOT" "$CO_MERGE_COMMIT" $flag)"; rc=$?
+  TAG_LINE="$(printf '%s' "$out" | cut -f3-)"
+  TAG_RC="$rc"
+  [ "$rc" -ne 2 ] || [ -n "$flag" ] || _co_held "the release tag was not pushed" "$TAG_LINE — nothing was moved"
+  return 0
+}
+
 # ─── Act 1b: the rows the merge lands (wave-36 T14; D13, AC-7.7; C70) ─────────
 #
 # THE PLAN CLOSE-OUT DELIVERS READS THE ROWS ITS MERGE LANDED AS LANDED. wave-35 closed with its integrate and close
@@ -2247,6 +2267,11 @@ do_check() {
   fi
   case "$verdict" in "WOULD REFUSE"*) co_would "merge: $verdict" "$(co_merge_holds)" ;; *) say "merge: $verdict" ;; esac
   is="$(git -C "$ROOT" rev-parse --short "$CO_MERGE_COMMIT" 2>/dev/null)"
+  if [ "$PARKED" = yes ]; then say "tag: none — parked, no merge is tagged"
+  else
+    co_tag_merge check
+    if [ "$TAG_RC" -eq 2 ]; then co_would "tag: WOULD REFUSE — $TAG_LINE" "the release tag cannot be made"; else say "tag: $TAG_LINE"; fi
+  fi
   CO_LANDS="$(co_lands_rows)"
   if [ "$PARKED" = yes ]; then
     say "rows-landed: none — parked, no merge lands a row"
@@ -2425,6 +2450,7 @@ do_run() {
     WT_LINE="$(co_parked_wt_line)"; say "worktree-removed: $WT_LINE"
   else
     act_merge;      say "merge: $MERGE_LINE"
+    co_tag_merge run; say "tag: $TAG_LINE"
     act_lands "$CO_LANDS"; say "rows-landed: $LANDS_LINE"
     act_worktrees;  say "worktree-removed: $WT_LINE"
   fi

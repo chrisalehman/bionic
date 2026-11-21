@@ -277,6 +277,67 @@ line_merge_seen() {
   printf 'unmerged\t-\t%s\tthe pull request %s is %s\n' "$name" "$url" "$(printf '%s' "${st:-of no state}" | tr '[:upper:]' '[:lower:]')"
   return 1
 }
+# THE TAG AT THE MERGE. The release the plan names is tagged at the commit the merge was read at, and the tag is
+# pushed, once the run's log holds the person's release approval; the approval authorises the tag and its push. Both
+# are read here and nowhere else, so the close and its check agree. A tag is never moved: one that stands at another
+# commit, here or on origin, is left as it is and said, and the push is never forced. A push that fails removes the
+# tag this call made, so nothing stands half done.
+#
+#   line_tag_merge <plan> <root> <commit> [--check]
+#     prints one line, three tab-separated fields: <verdict> <tag or -> <words>, and returns
+#       0  tagged   the tag was made at the commit and pushed to origin (or only made, a project with no origin)
+#       0  stands   the tag is already at the commit, and nothing was made
+#       0  would    --check alone: the tag would be made and pushed; nothing was
+#       1  none     no tag is made: the plan names no release, the run holds no release approval, or no commit was read
+#       1  left     a tag of that name stands at another commit, here or on origin
+#       2  failed   the tags of origin cannot be read, or the tag or its push failed; nothing was left made
+line_tag_merge() {
+  local plan="${1:-}" root="${2:-}" c="${3:-}" mode="${4:-}" rel tag ah here="" there="" out err made=no s
+  _line_load_run && _line_load_proof \
+    || { printf 'none\t-\tthe plan readers (lib/run.sh, lib/proof.sh) cannot be loaded\n'; return 1; }
+  rel="$(plan_frontmatter_get "$plan" release 2>/dev/null)"
+  [ -n "$rel" ] || { printf 'none\t-\tno tag: the plan names no release:\n'; return 1; }
+  tag="v${rel#v}"
+  git check-ref-format "refs/tags/$tag" 2>/dev/null \
+    || { printf 'none\t-\tno tag: the release %s is not a name a tag can have\n' "$rel"; return 1; }
+  ah="$(proof_approved_head "$plan" release 2>/dev/null)" || ah=""
+  [ -n "$ah" ] || { printf 'none\t%s\tno tag: the run'"'"'s log holds no release approval\n' "$tag"; return 1; }
+  c="$(git -C "$root" rev-parse --verify -q "${c:-none}^{commit}" 2>/dev/null)" \
+    || { printf 'none\t%s\tno tag: no merge commit was read\n' "$tag"; return 1; }
+  s="${c:0:12}"
+  here="$(git -C "$root" rev-parse --verify -q "refs/tags/$tag^{commit}" 2>/dev/null)" || here=""
+  if git -C "$root" remote get-url origin >/dev/null 2>&1; then
+    out="$(GIT_TERMINAL_PROMPT=0 git -C "$root" ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}" 2>&1)" \
+      || { printf 'failed\t%s\tthe tags of origin cannot be read: %s\n' "$tag" "$(printf '%s' "$out" | tr '\t\n' '  ')"; return 2; }
+    there="$(printf '%s\n' "$out" | awk '$2 ~ /\^\{\}$/ { p = $1 } $2 !~ /\^\{\}$/ { t = $1 } END { print (p != "" ? p : t) }')"
+  fi
+  if [ -n "$here" ] && [ "$here" != "$c" ]; then
+    printf 'left\t%s\t%s stands here at %s, not at the merge commit %s; left as it is, nothing moved\n' "$tag" "$tag" "${here:0:12}" "$s"; return 1
+  fi
+  if [ -n "$there" ] && [ "$there" != "$c" ]; then
+    printf 'left\t%s\t%s stands on origin at %s, not at the merge commit %s; left as it is, nothing moved\n' "$tag" "$tag" "${there:0:12}" "$s"; return 1
+  fi
+  if [ "$there" = "$c" ] || { [ "$here" = "$c" ] && ! git -C "$root" remote get-url origin >/dev/null 2>&1; }; then
+    printf 'stands\t%s\t%s already stands at the merge commit %s; nothing was made\n' "$tag" "$tag" "$s"; return 0
+  fi
+  if [ "$mode" = --check ]; then
+    printf 'would\t%s\trun would tag %s at the merge commit %s and push it\n' "$tag" "$tag" "$s"; return 0
+  fi
+  if [ -z "$here" ]; then
+    err="$(git -C "$root" tag "$tag" "$c" 2>&1)" \
+      || { printf 'failed\t%s\t%s could not be made at %s: %s\n' "$tag" "$tag" "$s" "$(printf '%s' "$err" | tr '\t\n' '  ')"; return 2; }
+    made=yes
+  fi
+  if ! git -C "$root" remote get-url origin >/dev/null 2>&1; then
+    printf 'tagged\t%s\t%s at the merge commit %s; no remote named origin, so nothing was pushed\n' "$tag" "$tag" "$s"; return 0
+  fi
+  err="$(GIT_TERMINAL_PROMPT=0 git -C "$root" push --quiet origin "refs/tags/$tag:refs/tags/$tag" 2>&1)" || {
+    [ "$made" = yes ] && git -C "$root" tag -d "$tag" >/dev/null 2>&1
+    printf 'failed\t%s\tthe push of %s to origin failed: %s; no tag was left made\n' "$tag" "$tag" "$(printf '%s' "$err" | tr '\t\n' '  ')"; return 2
+  }
+  printf 'tagged\t%s\t%s at the merge commit %s, pushed to origin\n' "$tag" "$tag" "$s"
+  return 0
+}
 # line_merge_ask_key <working branch> -> the register's key of a request closed unmerged: each character outside
 # [A-Za-z0-9._-] written `:`, as the publish verb writes its own `pr:` key
 line_merge_ask_key() { printf 'pr-closed:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }
