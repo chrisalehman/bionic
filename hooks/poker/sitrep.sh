@@ -2272,9 +2272,12 @@ sitrep_tick_line() {
   # release approval card (whose reply runs `approve`), it is this one function, so a decision ruled anywhere has its
   # round and its closed ask. It writes the ruled round (`decisions_append`), the title the newest put's and none when
   # the decision was never put; then it settles the register against the rounds, which closes `decide:D<n>`. A double
-  # quote in the reply is written as a single one. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
-  # this run, a reply under three words only in a prompt typed after the orchestrator's own put of this decision (the mark
-  # `decisions put D<n> `, its newest round: a digit typed for another decision is not this one's). Found, the user's
+  # quote in the reply is written as a single one. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh
+  # `user_said` in the prompts the user typed in this run, a reply under three words only in a prompt typed after the
+  # instant its window opens: the log's stamp on the newest put of this decision, so a digit typed for another decision
+  # is not this one's. When no other decision stood open at that put, the window opens at the register's line before
+  # it instead, for a put recorded beside its ruling records a reply already typed, and nothing else was asked that the
+  # reply could answer. A decision never put opens its window at the ruling itself. Found, the user's
   # words: who is the project's git user name. Not found, or found too short to be a quote,
   # the words are the orchestrator's relaying a decision it was ordered to make: who is `orchestrator`, the way a ruling
   # written by hand has always read, so the record never says a person decided what they did not. Unable to look (no jq,
@@ -2284,7 +2287,7 @@ sitrep_tick_line() {
   # words no usable git user name); 3 refused, nothing written, the decision's last round already closed by a ruling or a
   # withdrawal.
   decisions_rule() {  # <plan> <root> <D<n>> <reply>
-    local plan="$1" root="$2" d="$3" reply="$4" led who title st sq said raw
+    local plan="$1" root="$2" d="$3" reply="$4" led who title st sq said raw after
     case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
     if [ -z "$d" ]; then
       die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
@@ -2306,7 +2309,13 @@ sitrep_tick_line() {
       die "REFUSED — who said the reply is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
       return 1
     fi
-    user_said "$raw" "$plan" "decisions put $d "; said=$?
+    after="$(_sitrep_ledger_facts "$led" | awk -F'|' -v d="$d" '
+      { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); f[substr($i, 1, e - 1)] = substr($i, e + 1) } }
+      f["ev"] != "decision" { next }
+      f["d"] == d && f["verb"] == "put" { for (k in st) if (k != d && st[k] == "put") prev = ""; m = (prev == "") ? f["at"] : prev }
+      { st[f["d"]] = f["verb"]; prev = f["at"] }
+      END { print m }')"
+    user_said "$raw" "$plan" "${after:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; said=$?
     case "$said" in
       0)
         who="$(git -C "$root" config user.name 2>/dev/null)"
