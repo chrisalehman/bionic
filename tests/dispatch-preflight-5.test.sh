@@ -472,35 +472,39 @@ section "§DEBT-ONCE — an admitted launch asks the debt verb once for every co
 # `debt: <concept> <kind> touches <n> — burn it in this row or say why not`, and each item's touches go up by one
 # through the debt's one writer, `session-poker.sh debt touched`, a process that reads the run whole. So the wall
 # starts it once, naming every concept the brief touches, however many.
-# FIXTURES: make_repo's approved, bound plan with row T23; nine debts of nine concepts written to its run's log by the
-# verb's own `debt add` over a record of nine debt: lines sited at notes/c<i>.md:1; a brief binding T23 whose Files:
-# name the nine notes, admitted with Lands-on: none by the fixture's `prose: notes/`. SYNTHESIZED.
+# FIXTURES: make_repo's approved, bound plan with two build rows; nine debts of nine concepts written to its run's log
+# by the verb's own `debt add` over a record of nine debt: lines sited at notes/c<i>.md:1; a brief binding the first
+# row whose Files: name the nine notes, and for the second launch the same brief binding the second row, admitted with
+# Lands-on: none by the fixture's `prose: notes/`. SYNTHESIZED.
 # THE COUNT: BASH_ENV names a prelude every bash the drive starts reads. In a `session-poker.sh debt touched` process
-# alone (known by its command line: bash 3.2 gives the prelude no $0 or arguments of the script) it writes one `call` line and traces into the same file with the function in PS4, so each entry to lib/proof.sh
-# `_proof_facts` there (the run's facts, read whole) is one read.
+# alone (known by its command line: bash 3.2 gives the prelude no $0 or arguments of the script) it writes one `call`
+# line and exports BIONIC_COUNT as the same file, so the verb and every process it starts count their own reads. A read
+# of the run is a `log reader_events` line: lib/reader.sh `reader_events` is the one place the run's log is read, and
+# it counts itself there, whichever path asked, a held command's fold or none. A fold's second pass, over the events it
+# already holds, goes through a stand-in that counts nothing.
 # fails-when: nine concepts start the verb more than once, or it reads the run more than once; the advisory loses an
-# item or its count.
+# item or its count; a second launch is advised at the counts from before the first.
 DO_N=9
 DO_PRE="$SANDBOX/do-prelude.sh"
 cat > "$DO_PRE" <<'DO_PRELUDE'
 case "$(ps -o args= -p $$ 2>/dev/null)" in
-  *"/session-poker.sh debt touched "*) printf 'call\n' >> "$DO_TRACE"; exec 2>>"$DO_TRACE"; PS4='+|DO|${FUNCNAME[0]:-}| '; set -x ;;
+  *"/session-poker.sh debt touched "*) printf 'call\n' >> "$DO_TRACE"; BIONIC_COUNT="$DO_TRACE"; export BIONIC_COUNT ;;
 esac
 DO_PRELUDE
 do_repo() {  # <repo tag> -> REPO, its run holding DO_N untouched debts of DO_N concepts
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  pf_tasks "$REPO" '| T23 | 4 | build | the notes | — | 30 | REQ-1 | a.sh | — |'
+  pf_tasks "$REPO" '| T23 | 4 | build | the notes | — | 30 | REQ-1 | a.sh | — |' '| T24 | 4 | build | the notes again | — | 30 | REQ-1 | a.sh | — |'
   printf 'prose: notes/\n' > "$REPO/.bionic/config.yaml"
   seq 1 "$DO_N" | awk '{ print "debt: duplicate c" $1 " notes/c" $1 ".md:1" }' > "$REPO/.bionic/docs/record/wave-01-test/do-debts.md"
   (cd "$REPO" && bash "$BIONIC_HOOKS_DIR/session-poker.sh" debt add record/wave-01-test/do-debts.md "$(pf_plan_path "$REPO")" >/dev/null 2>&1)
 }
-do_gate() {  # [<extra jq filter>] -> GATE_*, DO_CALLS, DO_READS, DO_SAID (the advisory's debt lines)
+do_gate() {  # [<extra jq filter>] [<role>], the brief binding the row DO_ROW names (the first) as w99-<row> -> GATE_*, DO_CALLS, DO_READS, DO_SAID (the advisory's debt lines)
   DO_TRACE="$SANDBOX/do-trace.$RANDOM"; : > "$DO_TRACE"
-  GATE_ENV="BASH_ENV=$DO_PRE DO_TRACE=$DO_TRACE" run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 \
+  GATE_ENV="BASH_ENV=$DO_PRE DO_TRACE=$DO_TRACE" run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" "${DO_ROW:-T23}" "w99-${DO_ROW:-T23}" \
     "$(printf '%s\nFiles: %s\nLands-on: none the notes are prose' "$BRIEF_FULL" "$(seq 1 "$DO_N" | awk '{ printf "%snotes/c%s.md", (NR > 1 ? ", " : ""), $1 }')")")" \
-    w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${2:-implementor}" | jq -c "${1:-.}")"
+    "w99-${DO_ROW:-T23}" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${2:-implementor}" | jq -c "${1:-.}")"
   DO_CALLS="$(/usr/bin/grep -c '^call$' "$DO_TRACE")"
-  DO_READS="$(/usr/bin/grep -c -F '|DO|_proof_facts| local plan=' "$DO_TRACE")"
+  DO_READS="$(/usr/bin/grep -c -x 'log reader_events' "$DO_TRACE")"
   DO_SAID="$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null | /usr/bin/grep '^debt: ')"
 }
 do_touches() {  # -> each debt as <concept>=<touches>, in the run's order
@@ -508,7 +512,8 @@ do_touches() {  # -> each debt as <concept>=<touches>, in the run's order
     | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^touches=/) printf "%s%s=%s", (NR > 1 ? " " : ""), $1, substr($i, 9) }'
 }
 do_want() { seq 1 "$DO_N" | awk -v t="$1" '{ printf "%sc%s=%s", (NR > 1 ? " " : ""), $1, t }'; }
-DO_LINES="$(seq 1 "$DO_N" | awk '{ print "debt: c" $1 " duplicate touches 1 — burn it in this row or say why not" }')"
+do_lines() { seq 1 "$DO_N" | awk -v t="$1" '{ print "debt: c" $1 " duplicate touches " t " — burn it in this row or say why not" }'; }
+DO_LINES="$(do_lines 1)"
 
 do_repo rdo1
 expect_eq "DO.0 precondition: the run holds nine debts of nine concepts, none touched" "$(do_want 0)" "$(do_touches)"
@@ -520,6 +525,13 @@ expect_eq "DO.3 …which reads the run once" "1" "$DO_READS"
 expect_eq "DO.4 …each item touched once" "$(do_want 1)" "$(do_touches)"
 expect_eq "DO.5 …and the advisory carries one line per item, at its new count, in its words" \
   "$DO_LINES" "$DO_SAID"
+# A second row whose Files name the same nine, launched while the first is in flight: the first launch's touches moved
+# every count, so an answer taken from before it is told apart.
+DO_ROW=T24 do_gate
+expect_eq "DO.6 a second launch over the same nine, row T24's, is advised at the counts the first one left, each one up" \
+  "$(do_lines 2)" "$DO_SAID"
+expect_eq "DO.6b …the run holds each touched twice, in one call that reads the run once" \
+  "$(do_want 2)|1|1" "$(do_touches)|$DO_CALLS|$DO_READS"
 
 section "§DEBT-ADMITTED — a touch is written only for a launch the wall admits"
 # ============================================================================
