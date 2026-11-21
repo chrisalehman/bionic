@@ -398,6 +398,14 @@ poker_brief_pinned() {
     END { for (i = 1; i <= m; i++) print order[i] "  # (pinned by " by[order[i]] ")" }'
 }
 
+# poker_brief_grants <facts> <row> <files|suites> -> what the rulings of <row> granted of that kind, `, `-joined, each
+# once; one the row's cells already name is left in, since the contract reader reads a line as a set.
+poker_brief_grants() {
+  printf '%s\n' "$1" | awk -F'|' -v r="$2" -v k="$3" "$_LINE_FIELDS_AWK"'
+    line_kv("ev") == "ruling" && line_kv("row") == r && line_kv("recorded") != "" {
+      n = split(line_kv(k), g, ","); for (i = 1; i <= n; i++) if (g[i] != "" && !seen[g[i]]++) o = o (o == "" ? "" : ", ") g[i] }
+    END { if (o != "") print o }'
+}
 # poker_reader_kind <kind> -> 0 for a reader row's kind (verify, test, review): its artifact is a record it writes.
 poker_reader_kind() { case "$1" in verify|test|review) return 0 ;; esac; return 1; }
 # ---- END the brief rendered from its row ----
@@ -738,8 +746,9 @@ EOF
       die "REFUSED — could not write to $ROSTER_FILE."
       exit 2
     }
-    # The roster row is the walls' contract; the hand event is the act, in the run's log.
-    poker_hand amend "$AMEND_REASON" "name=$AMEND_NAME" 2>/dev/null || :
+    # The roster row is the walls' contract; the hand event is the act, in the run's log. A grant a ruling makes has
+    # the ruling's own event for its act (AMEND_RULED), so it writes none: one call, one event.
+    [ -n "${AMEND_RULED:-}" ] || poker_hand amend "$AMEND_REASON" "name=$AMEND_NAME" 2>/dev/null || :
     # THE SUCCESS LINE CHECKS ITSELF (wave-22 T1; REQ-1 AC-1.6, D3). It used to print
     # unconditionally, and the wall it promised went on reading the pre-amend row (wave-22
     # seed). Now the verb asks `roster_row_for_id` — the budget wall's own pick, one function
@@ -1253,6 +1262,15 @@ EOF
       [ -n "$BRF_LANDS" ] || BRF_LANDS="none the row's Files name no suite"
     fi
     [ -n "$BRF_SUITES" ] || BRF_SUITES="${BRF_SUITE_SLOT:-none}"
+
+    # WHAT A RULING GRANTED THE ROW rides every later brief of it, so a successor is born holding its predecessor's
+    # grants; Lands-on stays the row's, as a grant widens a running set and not the landing's.
+    poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" poker_fold_all
+    BRF_GF="$(poker_brief_grants "$BRF_ANS" "$BRF_ID" files)"; BRF_GS="$(poker_brief_grants "$BRF_ANS" "$BRF_ID" suites)"
+    if [ -n "$BRF_GF" ]; then poker_brief_none "$BRF_FILES_LINE" && BRF_FILES_LINE="$BRF_GF" || BRF_FILES_LINE="$BRF_FILES_LINE, $BRF_GF"; fi
+    if [ -n "$BRF_GS" ]; then
+      case "$BRF_SUITES" in none|"$BRF_SUITE_SLOT") BRF_SUITES="$BRF_GS" ;; *) BRF_SUITES="$BRF_SUITES, $BRF_GS" ;; esac
+    fi
 
     # THE PINS OF THE SUITES: each suite in Suites declares the files it pins in its own header, and they follow the
     # row's Files on lines of their own, each marked with the suite that pins it (a suite with no header adds nothing).
