@@ -1050,11 +1050,11 @@ sitrep_suites() {
     END { for (st in last) { n++; if (last[st] == "green") g++; else rd++ }; printf "%d\t%d\t%d\n", n, g, rd }'
 }
 
-# sitrep_test_ratio <plan> <root> -> `<tests> <code> <head>`: the two counts of shell lines the plan's newest release
-# check printed, and the head it ran at; nothing when no check has run or its log holds no count. The check prints its
-# count into the log it writes (`test-ratio: <tests>/<code>` on a pass, `release-check: test-ratio <tests>/<code> — …` on
-# a refusal), so the release card quotes the check and never counts a tree again, and a project whose declared check
-# prints no such line shows none. The evidence is a path under the docs root and never leaves it.
+# sitrep_test_ratio <plan> <root> -> `<head> <reading>`: the head the plan's newest release check ran at and the reading
+# it printed, `<tests>/<code> chars · limit <n> · room <n>`; nothing when no check has run or its log holds no count.
+# The check prints the line on a pass and after `release-check: ` on a refusal, whose tail is not the reading; a log
+# from before the cap counted characters holds `<tests>/<code>` alone, the reading read then. So the release card
+# quotes the check and never counts a tree again. The evidence is a path under the docs root and never leaves it.
 sitrep_test_ratio() {
   local line ev h log r
   line="$(proof_last_line "$1" check 2>/dev/null)"
@@ -1064,9 +1064,9 @@ sitrep_test_ratio() {
   case "$ev" in ''|/*|*..*) return 0 ;; esac
   log="$(docs_root "$2")/$ev"
   [ -f "$log" ] && [ ! -L "$log" ] || return 0
-  r="$(awk 'match($0, /^(release-check: )?test-ratio:? [0-9]+\/[0-9]+/) {
-    s = substr($0, RSTART, RLENGTH); sub(/^(release-check: )?test-ratio:? /, "", s); split(s, a, "/"); print a[1] " " a[2]; exit }' "$log" 2>/dev/null)"
-  [ -z "$r" ] || printf '%s %s\n' "$r" "$h"
+  r="$(awk 'match($0, /^(release-check: )?test-ratio:? [0-9]+\/[0-9]+( chars [^ ]+ limit [0-9]+ [^ ]+ room -?[0-9]+)?/) {
+    s = substr($0, RSTART, RLENGTH); sub(/^(release-check: )?test-ratio:? /, "", s); print s; exit }' "$log" 2>/dev/null)"
+  [ -z "$r" ] || printf '%s %s\n' "${h:--}" "$r"
 }
 
 # sitrep_forecast_end <plan> <units_rows output> -> `<epoch><TAB><words>`: the Step-3 approval (`approved-by:`) plus the
