@@ -132,4 +132,63 @@ expect_true "17a: the skill directory holds SKILL.md" test -f "${REPO}/skills/de
 expect_empty "17b: …and nothing that is not markdown (no script, hook or store runs per decision)" \
   "$(find "${REPO}/skills/decision" -type f ! -name '*.md')"
 
+# The asking rule lives in one page. sect <file> <heading> prints the body of a "## <heading>" section.
+sect() { awk -v h="## $2" '$0 == h { f = 1; next } f && /^## / { exit } f { print }' "$1"; }
+
+# whose_ok — the rule's section names the seven acts it gives the person; shorts_ok — the short form is the default.
+whose_ok() {
+  local t; t="$(sect "$1" 'Whose call it is')"
+  local w; for w in 'push' 'tag' 'merge' 'rewrite of history' 'git identity' 'home config' 'waiver'; do
+    printf '%s' "$t" | grep -qi "$w" || return 1
+  done
+}
+short_ok() {
+  local t; t="$(sect "$1" 'The short form')"
+  printf '%s' "$t" | grep -qi 'default' && printf '%s' "$t" | grep -qi 'long form' && printf '%s' "$t" | grep -qi 'hard to undo'
+}
+act_ok() { sect "$1" 'The short form' | grep -qi 'no decision number'; }
+one_ok() { grep -qi 'one question per message' "$1" && grep -qi 'never as an option' "$1"; }
+noshare_ok() { ! grep -qi 'share a turn' "$1"; }
+# points_ok — a page points to the decision skill and states no asking test of its own.
+points_ok() {
+  grep -q 'the `decision` skill' "$1" && ! grep -qiE 'strategic|tactical|share a turn|stop and surface|judgment call|reversible call' "$1"
+}
+
+section "§ONE-RULE — the rule stands in the decision skill; three pages point to it (AC-25.1, AC-25.2)"
+expect_nonempty "R0: the rule's section is read from the real skill" "$(sect "$SKILL" 'Whose call it is')"
+expect_true "R1: the skill names all seven acts" whose_ok "$SKILL"
+for w in 'push' 'tag' 'merge' 'rewrite of history' 'git identity' 'home config' 'waiver'; do
+  sed -E "/^## Whose call it is/,/^## /s/$w/ZZZ/Ig" "$SKILL" > "$TMP/no-$w.md"
+  expect_true "R2: the copy without '$w' carries the plant" grep -q ZZZ "$TMP/no-$w.md"
+  expect_false "R2: …and fails the seven-acts pin" whose_ok "$TMP/no-$w.md"
+done
+for pg in skills/canonical-sdlc/SKILL.md skills/canonical-sdlc/steps/2.md skills/canonical-sdlc/dispatch.md; do
+  expect_true "R3: $pg points to the decision skill and holds no test of its own" points_ok "${REPO}/$pg"
+  { cat "${REPO}/$pg"; echo 'A strategic choice gets a question.'; } > "$TMP/own.md"
+  expect_false "R3: …a copy that states its own test fails" points_ok "$TMP/own.md"
+  sed 's/the `decision` skill/another page/' "${REPO}/$pg" > "$TMP/nopoint.md"
+  expect_false "R3: …a copy with no pointer fails" points_ok "$TMP/nopoint.md"
+done
+
+section "§SHORT — the short form is the default; an act is one line; one question a message (AC-26.1, AC-26.2, AC-26.3)"
+expect_nonempty "S0: the short form's section is read from the real skill" "$(sect "$SKILL" 'The short form')"
+expect_true "S1: the short form is the default and the long form is kept for a call hard to undo" short_ok "$SKILL"
+sed 's/^## The short form/## The form/' "$SKILL" > "$TMP/no-short.md"
+expect_true "S1: the no-short-form copy carries the plant" grep -q '^## The form$' "$TMP/no-short.md"
+expect_false "S1: …and fails the short-form pin" short_ok "$TMP/no-short.md"
+expect_true "S2: an act only the person can take is one line with no decision number" act_ok "$SKILL"
+sed 's/no decision number/a decision number/' "$SKILL" > "$TMP/act-numbered.md"
+expect_false "S2: a copy that numbers the act fails" act_ok "$TMP/act-numbered.md"
+expect_true "S3: the skill says one question a message and that no option reopens a ruling" one_ok "$SKILL"
+sed 's/one question per message/several questions a message/I' "$SKILL" > "$TMP/several.md"
+expect_false "S3: a copy that allows several questions fails" one_ok "$TMP/several.md"
+for pg in "$SKILL" "${REPO}/skills/canonical-sdlc/SKILL.md" "${REPO}/skills/canonical-sdlc/steps/2.md"; do
+  expect_true "S3: $(basename "$pg") holds no rule that decisions share a turn" noshare_ok "$pg"
+  { cat "$pg"; echo 'Small decisions may share a turn.'; } > "$TMP/share.md"
+  expect_false "S3: …a copy of it that lets them share a turn fails" noshare_ok "$TMP/share.md"
+  expect_true "S3: $(basename "$pg") says one question goes in a message" grep -qi 'one question' "$pg"
+  sed 's/one question/several questions/I' "$pg" > "$TMP/several-pg.md"
+  expect_false "S3: …a copy saying several questions fails" grep -qi 'one question' "$TMP/several-pg.md"
+done
+
 finish

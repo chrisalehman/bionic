@@ -87,13 +87,13 @@ Three operator commands carry the fact-discharged paths: `bash <plugin-root>/hoo
 
 **Diagnostic friction** (direction clear, code misbehaves) → load `map-instrument-narrow` in a fresh subagent carrying its Rigor Mandate verbatim, and write no fix code until NARROW names a root cause with data. "I'll try one thing first" mutates the state you were about to instrument. Recurse on layered causes, depth ≤4.
 
-**Decision friction** (the direction itself is in question) → stop and surface it. The framing rules live in the global config, not here.
+**Decision friction** (the direction itself is in question) → the `decision` skill says whose call it is: make your own and say so in one line, and put the person's as it directs.
 
 **Model outage.** On a model-tier outage, hold. Never downgrade a confirmed `model_plan` without the user. Back off with lengthening waits and re-derive what is actually blocked.
 
-**Three-fail rule.** Three failures to produce valid evidence for one step: if diagnostic, run a full MAP-INSTRUMENT-NARROW pass (the counter resets on a completed pass, not on more speculative fixes); if decision-related, stop and surface. A `standard` task that fails twice re-dispatches once as `senior-implementor` — that is the third try, not a fourth.
+**Three-fail rule.** Three failures to produce valid evidence for one step: if diagnostic, run a full MAP-INSTRUMENT-NARROW pass (the counter resets on a completed pass, not on more speculative fixes); if decision-related, the `decision` skill says whose call it is. A `standard` task that fails twice re-dispatches once as `senior-implementor` — that is the third try, not a fourth.
 
-**Stop and wake** for: an ambiguous spec needing a judgment call, new external-API auth, anything affecting billing, destructive migrations, secrets or production infrastructure, and anything the user's own config marks as requiring approval. Append a `## Wake Note` and do not proceed past it.
+**Stop and wake** for: an ambiguous spec that only the person can settle, new external-API auth, anything affecting billing, destructive migrations, secrets or production infrastructure, and anything the user's own config marks as requiring approval. Append a `## Wake Note` and do not proceed past it.
 <!-- ORCHESTRATOR-DISPATCH-END -->
 
 **No store in a suite.** The runner hands every suite an environment with no gate store: `tests/run.sh` strips `BIONIC_GATE_DIR` from each worker's suite process, and a runner exports none itself. A suite that needs a store makes its own fixture.

@@ -782,6 +782,14 @@ expect_eq "LOAD1e the stood-down row is pending again" "pending" "$(bash -c '. "
 expect_eq "LOAD1f …and the older writer's row is still active" "active" "$(bash -c '. "$1/units.sh" && units_rows "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$LOAD_P" | awk -F'\t' '$1 == "T13" { print $10 }')"
 expect_eq "LOAD1g the admitted run is not ended by the stand-down" "open" \
   "$(grep -q '^ended=' "$LOAD_GATE/requests/1" 2>/dev/null && echo ended || { grep -q '^admitted=' "$LOAD_GATE/requests/1" && echo open; })"
+# THE WAKE SAYS THE CAUSE. The watch composes its line from this tick's print: the load and the writer, and an act
+# the row accepts. hold answers a met stand-down only, and refuses this live row, so the wake never offers it.
+printf '%s\n' "$LOAD_T" > "$LOAD_D/load.print"
+LOAD_W="$(bash -c '. "$1/patrol.sh" >/dev/null 2>&1 && watch_wake_line "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$LOAD_D/load.print")"
+expect_contains "LOAD1h the wake names the load and the writer" "LOAD wl-T14 - load 14.0 over 6.36" "$LOAD_W"
+expect_absent "LOAD1i …and does not offer the hold verb" "hold" "$LOAD_W"
+LOAD_H="$( cd "$LOAD_D" && CLAUDE_CODE_SESSION_ID="$SID" bash "$S7_POKER" hold wl-T14 'kept up' 2>&1 )"; LOAD_HRC=$?
+expect_eq "LOAD1j …which refuses the stood-down row (exit 1)" "1|REFUSED" "$LOAD_HRC|$(printf '%s' "$LOAD_H" | grep -o 'REFUSED' | head -1)"
 ( cd "$LOAD_D" && CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_HOOKS_DIR/session-sweeper.sh" ack wl-T14 --by human --reason abandoned >/dev/null 2>&1 )
 LOAD_T2="$(BIONIC_GATE_DIR="$LOAD_GATE" gap_tick "$LOAD_D" 1)"
 expect_contains "LOAD2 once the room opens the next tick offers the stood-down row" " T14" "$(printf '%s\n' "$LOAD_T2" | grep '^poker: FILL ')"

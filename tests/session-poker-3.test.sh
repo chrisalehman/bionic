@@ -1001,4 +1001,26 @@ expect_absent "LR-4b …and closes the finding's item of the review the log alon
 POKE_BOUND="$LR_BOUND_WAS"
 
 # ============================================================
+section "§WHO: a short reply is the person's when they typed it after the decision was put, however the put was spelled"
+# ============================================================
+# fails-when: a reply typed after puts made in a loop is the orchestrator's, or one typed just before a put nothing else
+# stood open at; or one typed while another decision stood open is the person's. FIXTURE FIDELITY: each act is the real
+# verb at a fixed log instant; the transcript holds the CLI's typed-prompt and Bash-call shapes (transcript-move), stamped.
+RWHO="$(make_repo who)"; s34_plan "$RWHO" 4 >/dev/null; git -C "$RWHO" config user.name "Dana Fixture"; said_as typed "$RWHO"
+WHO_TX="$SAID_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$RWHO")/$SID.jsonl"
+who_tx() {  # <typed|put> <minute> <text> -> the person's prompt, or the orchestrator's Bash call, at 10:<minute>:00
+  jq -c --arg t "$3" --arg at "2026-11-20T10:$2:00.000Z" '.timestamp = $at | if .type == "user" then .message.content = $t
+    else .message.content[0].input.command = $t end' "$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move/$1.jsonl" >> "$WHO_TX"; }
+who_act() { LOG_AT="2026-11-20T10:$1Z" CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RWHO" decisions "${@:2}"; }   # <mm:ss> <verb args…>
+who_tx put 00 'for d in D1 D2 D3; do decisions put "$d" "the decision $d"; done'; for d in D1 D2 D3; do who_act 00:00 put "$d" "the decision $d"; done
+who_tx typed 02 $'D1: 1\nD2: 3\nD3: 1'; for r in 'D1: 1' 'D2: 3' 'D3: 1'; do who_act 02:10 rule "${r%%:*}" "$r"; done
+who_tx typed 10 approved; who_tx put 11 "decisions put D4 'the fourth'; decisions rule D4 'approved'"; who_act 11:00 put D4 'the fourth'; who_act 11:01 rule D4 approved
+who_act 20:00 put D5 'the fifth'; who_tx typed 21 1; who_tx put 22 "decisions put D6 'the sixth'; decisions rule D6 '1'"; who_act 22:00 put D6 'the sixth'; who_act 22:01 rule D6 1
+poke "$RWHO" decisions; WHO_BY="$(printf '%s\n' "$OUT" | awk -F' · ' '/^D[0-9]/ { w = $3; sub(/ [0-9-]+$/, "", w); printf "%s=%s ", $1, w }')"
+expect_eq "WHO-1 AC-27.2 three replies typed in one prompt, after puts made in a loop, are each the person's" \
+  "D1=Dana Fixture D2=Dana Fixture D3=Dana Fixture " "$(printf '%s' "$WHO_BY" | sed 's/ D4=.*/ /')"
+expect_contains "WHO-2 …as is a reply typed before its put, when nothing else stood open (WHO-1 read the same register)" "D4=Dana Fixture " "$WHO_BY"
+expect_contains "WHO-3 …and one typed while another decision stood open, before this one's put, is the orchestrator's" "D6=orchestrator " "$WHO_BY"
+
+# ============================================================
 finish

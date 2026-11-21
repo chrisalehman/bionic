@@ -349,4 +349,46 @@ expect_eq "TASK-9 the typed reply renews the approval at the fix's head (exit 0)
 git -C "$RFC" reset -q --hard "$FC_R"
 fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
 
+# ============================================================
+section "§SENTENCE: a carry holds its sentence: stated before the card, drawn on it, carried by the reply's move, refused at the card when missing"
+# ============================================================
+# FIXTURE FIDELITY: two S3 findings the registration deferred (lib/proof.sh's deferral line) and one open S2, the
+# person's to rule, its carry a decision; each sentence stated by the verb, the release entry rendered by its verb.
+# fails-when: the card renders over a carry with no sentence, or puts its approval first; the reply carries a decision
+# with no sentence or drops it from the move; or the Known limits refuse after the one reply, a move left to run by hand.
+FC_SA=record/wave-x/structure.md#1; FC_SB=record/wave-x/structure-whole.md#1; FC_SC=record/wave-x/adversarial-whole.md#1
+fc_record structure structure piece 'finding: 1 S3 on lib/x.sh:1 a name could be clearer'
+fc_record structure-whole structure whole 'finding: 1 S3 on lib/x.sh:1 a word could be plainer'
+fc_record adversarial-whole adversarial whole $'finding: 1 S2 on lib/x.sh:1 a path could break\nshown: 1 cat lib/x.sh'
+fc_plan "$FC_GOOD
+$(for f in "$FC_SA" "$FC_SB"; do printf 'run/v1|ev=finding|ref=%s|severity=S3|reach=on|to=deferred|title=t|at=2026-10-12T12:10:00Z\n' "$f"; done)"
+fc_said() { poke "$RFC" finding-move "$1" stated "The sentence of ${1##*/}."; printf '%s' "$RC"; }
+fc_snum() { fc_table | /usr/bin/grep -F "|key=finding:$FC_SC|" | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p'; }
+fc_page
+expect_eq "SENT-1 a carry with no sentence: the card refuses (exit 1), naming the finding and the verb that states it" "1|yes|yes" \
+  "$FC_RC|$(fc_has "$FC_ERR" "REFUSED — $FC_SA is carried with no Known-limits sentence")|$(fc_has "$FC_ERR" "run: bash $BIONIC_HOOKS_DIR/session-poker.sh finding-move $FC_SA stated")"
+expect_eq "SENT-1b …before the approval: no page is recorded and the release approval is not opened" "|" "$(fc_pages)|$(fc_owed | /usr/bin/grep -x approve:release)"
+FC_SN="$(fc_said "$FC_SA")$(fc_said "$FC_SB")"
+fc_page; FC_SNN="$(fc_snum)"; FC_SNR="${FC_SNN:-0} carry, rest default"; fc_typed "$FC_SNR"
+expect_eq "SENT-2 each deferral states its sentence (exit 0), standing deferred still; the card renders (exit 0), records its page and opens the approval" \
+  "00|2|0|release-approval-$FC_H8.md|approve:release" "$FC_SN|$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" findings | /usr/bin/grep -c 'to=deferred')|$FC_RC|$(fc_pages)|$(fc_owed | /usr/bin/grep -x approve:release)"
+expect_eq "SENT-2b …drawing each carried finding's sentence under Findings" "yes|yes" \
+  "$(fc_has "$(fc_under Findings | fc_flat)" "The sentence of structure.md#1")|$(fc_has "$(fc_under Findings | fc_flat)" "The sentence of structure-whole.md#1")"
+poke "$RFC" reply "$FC_SNR"
+expect_eq "SENT-3 the reply that carries the open S2, which states none, refuses (exit 1) naming it, and writes no approval" "1|yes|" \
+  "$RC|$(fc_has "$OUT" "the reply carries $FC_SC (decision $FC_SNN), which states no Known-limits sentence")|$(fc_appr release)"
+FC_SN="$(fc_said "$FC_SC")"; fc_page
+expect_eq "SENT-4 stated, the decision draws the sentence its carry takes, and its replay line holds it" "0|yes|yes" \
+  "$FC_SN|$(fc_has "$(fc_under Decisions | fc_flat)" "carried, it reads: The sentence of adversarial-whole.md#1.")|$(fc_has "$(fc_table)" "|key=finding:$FC_SC|default=finding-move $FC_SC fix|other=finding-move $FC_SC defer|pick=default|choices=fix/carry|why=the release approval card: fixed|stated=The sentence of adversarial-whole.md#1.")"
+poke "$RFC" reply "$FC_SNR"
+expect_eq "SENT-5 the one reply replays (exit 0): the approval written, the carry's move stating its sentence" "0|1|1" \
+  "$RC|$(fc_appr release | grep -c .)|$(/usr/bin/grep -c "^run/v1|ev=finding|ref=$FC_SC|to=defer|.*|words=$FC_SNR|.*|stated=The sentence of adversarial-whole.md#1.|" "$FC_REC/run.log")"
+s57_commit "$RFC" CHANGELOG.md '## 1.0.0 — the fixture release' >/dev/null
+poke "$RFC" known-limits-part T3
+expect_eq "SENT-6 with no move after the reply, the Known limits render (exit 0), the three sentences in the order deferred" "0|- The sentence of structure.md#1.|- The sentence of structure-whole.md#1.|- The sentence of adversarial-whole.md#1." \
+  "$RC|$(git -C "$RFC" show HEAD:CHANGELOG.md | /usr/bin/grep '^- The sentence' | paste -sd'|' -)"
+git -C "$RFC" reset -q --hard "$FC_R"
+fc_record structure structure piece; fc_record structure-whole structure whole; fc_record adversarial-whole adversarial whole
+fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
+
 finish
