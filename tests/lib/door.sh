@@ -45,7 +45,8 @@
 #
 # WHAT THE FIXTURE HOLDS, at its accepted head, committed: hooks/ and payload/scripts/ copied whole from the tree
 # under test, with the payload/hooks link; tests/run.sh and tests/lib/ whole, so the check and the name scan are
-# the copies a relative `bash tests/lib/release-check.sh` opens there; CHANGELOG.md as the tree under test's HEAD
+# the copies a relative `bash tests/lib/release-check.sh` opens there; tests/RUBRIC.md, which the landing's copy of
+# tests/lib/lint.sh reads to judge a changed suite's header, and without which it refuses to judge; CHANGELOG.md as the tree under test's HEAD
 # commits it, the real file of more than a pipe's buffer, never a filler; payload/.claude-plugin/plugin.json.
 # Ignored and so never landed: .bionic/config.yaml declaring `release-check: bash tests/lib/release-check.sh
 # <list>`, the list a file beside <dir>, outside every checkout, and the check's files as bionic declares its own,
@@ -120,6 +121,7 @@ _door_world() (
   mkdir -p "$root/payload/.claude-plugin" "$root/tests"
   cp -R "$src/hooks" "$root/hooks" && cp -R "$src/payload/scripts" "$root/payload/scripts" \
     && cp -R "$src/tests/lib" "$root/tests/lib" && cp "$src/tests/run.sh" "$root/tests/run.sh" \
+    && cp "$src/tests/RUBRIC.md" "$root/tests/RUBRIC.md" \
     && cp "$src/payload/.claude-plugin/plugin.json" "$root/payload/.claude-plugin/plugin.json" \
     && ln -s ../hooks "$root/payload/hooks" || exit 1
   git -C "$src" show HEAD:CHANGELOG.md > "$root/CHANGELOG.md" || exit 1
