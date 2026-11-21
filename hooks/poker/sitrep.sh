@@ -1056,9 +1056,9 @@ sitrep_card_puts() {
   local dir f
   dir="$(docs_root "$2")/record/$(proof_plan_slug "$1")"
   set --
-  for f in "$dir"/release-approval-*.md "$dir/${RR_OLD_VERB:-review-results}"-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && set -- "$@" "$f"; done
+  for f in "$dir"/release-approval-*.md "$dir/$RR_OLD_VERB"-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && set -- "$@" "$f"; done
   [ $# -gt 0 ] || return 0
-  awk -v old="${RR_OLD_VERB:-review-results}/v1|" '
+  awk -v old="$RR_OLD_VERB/v1|" '
     FNR == 1 { at = "" }
     index($0, "release-approval/v1|plan=") == 1 || index($0, old "plan=") == 1 { at = $0; sub(/^.*\|at=/, "", at); sub(/\|.*$/, "", at) }
     (index($0, "release-approval/v1|dec=") == 1 || index($0, old "dec=") == 1) && at != "" {

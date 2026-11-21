@@ -1518,7 +1518,8 @@ BRF_EOF
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
   #   Reviews       evidence, adversarial, structure: each question's newest reading, by the role that holds it
   #   Findings      a count, then one sentence each, the severity code first: fixed / awaiting your decision / carried
-  #   Decisions     numbered, the recommendation first and the default second, then the reply line
+  #   Decisions     numbered heaviest first (`rr_order`), the recommendation first and the default second, then the
+  #                 reply line
   #
   # WHAT IS A DECISION. Every approval an open row reads that is not yet given; every question waiver the person
   # owes; every matrix row neither proved nor waived (only the user waives a criterion, or confirms a T4 row's own
@@ -1630,6 +1631,46 @@ RR_MATRIX
     local i
     for ((i = 0; i < RR_N; i++)); do [ "${RR_KEY[$i]}" != "$1" ] || { printf '%s' "$((i + 1))"; return 0; }; done
     return 1
+  }
+
+  # THE ORDER OF THE DECISIONS IS THE WEIGHT OF THE CALL, the hardest to undo first: a call is the person's when
+  # it is hard to undo, changes what the release contains, leaves this machine or spends money. Heaviest to lightest: the
+  # merge without a whole run at this head, the release, the merge, any other approval, a finding the person rules, a
+  # review's waiver, a criterion. A kind keeps the order it was gathered in. The rows stay together at the end, which
+  # `card.sh release` relies on to say them as one phrase.
+  rr_weight() {  # <kind> <key> -> the call's weight, 0 the heaviest
+    case "$1:$2" in
+      unproved:*) printf 0 ;;
+      approve:approve:release) printf 1 ;;
+      approve:approve:merge) printf 2 ;;
+      approve:*) printf 3 ;;
+      finding:*) printf 4 ;;
+      waive:*) printf 5 ;;
+      row:*) printf 6 ;;
+      *) printf 7 ;;
+    esac
+  }
+
+  rr_order() {  # -> the decisions gathered so far, put heaviest first; the numbers a finding's line names follow them
+    local w i a n=0 map=""
+    local -a ord=() tmp=()
+    for w in 0 1 2 3 4 5 6 7; do
+      for ((i = 0; i < RR_N; i++)); do
+        [ "$(rr_weight "${RR_KIND[$i]}" "${RR_KEY[$i]}")" = "$w" ] || continue
+        ord[n]="$i"; n=$((n + 1))
+      done
+    done
+    [ "$n" -eq "$RR_N" ] || return 0
+    for a in KIND KEY DO ELSE WHYS SUBJ DLAB OLAB DPH OPH PICK STATED; do
+      eval 'for ((i = 0; i < RR_N; i++)); do tmp[i]="${RR_'"$a"'[${ord[i]}]:-}"; done
+            for ((i = 0; i < RR_N; i++)); do RR_'"$a"'[i]="${tmp[i]}"; done'
+    done
+    for ((i = 0; i < RR_N; i++)); do map="$map $((ord[i] + 1)):$((i + 1))"; done
+    # A finding's line names its decision by the number it was gathered at, which is now another one.
+    [ -z "$RR_FLINES" ] || RR_FLINES="$(printf '%s' "$RR_FLINES" | awk -F'\t' -v m="$map" '
+      BEGIN { n = split(m, a, " "); for (i = 1; i <= n; i++) { split(a[i], p, ":"); to[p[1]] = p[2] } }
+      match($0, / \(decision [0-9]+\)$/) { d = substr($0, RSTART + 11, RLENGTH - 12); $0 = substr($0, 1, RSTART - 1) " (decision " to[d] ")" }
+      { print }')"$'\n'
   }
 
   rr_word() {  # <label> -> the one word a reply names that choice by: its first, in lower case
@@ -1977,6 +2018,7 @@ RR_DISP_EOF
            esac
          fi ;;
     esac
+    rr_order
 
     # EVERY ASK THAT WAITS ON THE PERSON IS ON THE PAGE (lib/owed.sh `ask_waits_on`), read after the findings' reader
     # opened theirs. One the page has not numbered above is one no reply could answer (the changed run's accept or
