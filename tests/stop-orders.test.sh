@@ -1002,6 +1002,29 @@ expect_eq "(bk1b) …its row reads pending and is offered, by exactly one cancel
 run_orders_cfg "$RB" stopped w-log
 expect_status "(bk3) once its row is back, a closed name is refused as ever (exit 2)" 2 "$ST"
 
+# ============================================================
+section "§LANDED: stopped on a landed row needs no panel reading (AC-15.2)"
+# ============================================================
+# The landing's mark is the landing's own fact, so no panel is read to close its row; a row without it still reads one.
+# FIXTURE FIDELITY: the mark by the roster's one marker (`so_mark`); a metadata root of its own holds no transcript, so
+# no panel reading exists (the shared root's planted ones answer for this session's id). The section is the suite's last.
+# fails-when: it refuses for want of a panel reading.
+R8CFG="$SANDBOX/landed-cfg"; mkdir -p "$R8CFG/projects"
+RL="$(make_repo stopped-landed)"
+so_roster_row "$RL" w-landed ".bionic/docs/record/never-l.md" "" "w-landed@session-6c85684c"
+so_mark "$RL" w-landed 0123456789abcdef0123456789abcdef01234567
+so_roster_row "$RL" w-unmarked ".bionic/docs/record/never-u.md" "" "w-unmarked@session-6c85684c"
+run_orders_cfg "$RL" stopped w-unmarked
+expect_eq "(ld0) an unmarked row with no panel reading is refused for want of one (exit 2)" "2 yes" \
+  "$ST $(printf '%s' "$OUT$ERR" | grep -qF 'no fresh panel reading' && echo yes)"
+run_orders_cfg "$RL" stopped w-landed
+expect_status "(ld1) a landed row with no panel reading closes (exit 0)" 0 "$ST"
+expect_contains "(ld1) …acked by the sweeper, reason landed" "|name=w-landed|by=human|reason=landed" \
+  "$(cat "$RL/.bionic/tmp/sweeper-$SID.state" 2>/dev/null)"
+run_orders_cfg "$RL" stopped w-landed
+expect_eq "(ld2) once closed, as the landing closes it, stopped still answers (exit 0), with no second ack" "0 1" \
+  "$ST $(grep -c '|event=ack|.*|name=w-landed|' "$RL/.bionic/tmp/sweeper-$SID.state")"
+
 
 # ============================================================
 finish

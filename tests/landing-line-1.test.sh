@@ -476,7 +476,7 @@ K3B="$(ll_field "$(ll_ev "$RM3b" published)" commit)"
 expect_nonempty "(r6g2-pre) the adopted row's landing was published" "$K3B"
 expect_contains "(r6g2) the adopted-only row's landing is marked on its roster row (the mark reads the row the wall reads)" "|landed=${K3B}|" \
   "$(grep '|name=wx-T1|' "$(ll_roster "$RM3b")" | tail -1)"
-expect_contains "(r6g2) …and the owed line is printed, naming the agent" "owed: complete task T1, then stop wx-T1" "$LL_OUT"
+expect_contains "(r6g2) …and the owed line is printed, naming the agent" "owed: stop wx-T1" "$LL_OUT"
 # THE MARK GOES TO THE WRITER `ready` HELD THE LANDING TO (wave-35 T7; burns debt row-writer-lookup). The
 # launch line is wx-T1; the agent's latest row carries the same id under another name, wx-T1b, so
 # `line_row_writer` answers wx-T1b. `_line_roster_mark` asks it too, and marks wx-T1b's row, never the
@@ -577,6 +577,27 @@ expect_eq "(r6k) the suite-name parser: names, paths, run.sh, none" \
 expect_eq "(r6k2) …a path keeps its directories, one spelling per file; no .., no absolute path, no empty or . directory" \
   "tests/a.test.sh|./a.test.sh|d/x.test.sh,x.test.sh|FAIL|FAIL|FAIL|FAIL|FAIL" \
   "$(_line_suites './tests/a, tests/a.test.sh')|$(_line_suites ./a)|$(_line_suites 'd/x x')|$(_line_suites ../a.test.sh || echo FAIL)|$(_line_suites /d/a.test.sh || echo FAIL)|$(_line_suites d//a.test.sh || echo FAIL)|$(_line_suites d/./a.test.sh || echo FAIL)|$(_line_suites d/run.sh || echo FAIL)"
+
+section "§CLOSES: the landing closes its row: the roster row acked, the tree gone, the record's assumptions in the run's once, the stop alone owed (AC-15.1, AC-15.3)"
+# fails-when: a command is owed to close the row or remove the tree; the assumptions are absent, or there twice.
+RCL="$(ll_rworld)"; DCL="$RCL/.bionic/docs/record/wave-x"
+printf '# T1\n\n## Assumptions\n\n- A-T1.1 — one.\n- A-T1.2 — two,\n  carried on.\n\n## Reuse\n\n- not one.\n' > "$DCL/T1.md"
+printf '# assumptions\n\n- (T0): older.\n' > "$DCL/assumptions.md"
+ll_verb "$RCL" T1
+KCL="$(ll_field "$(ll_ev "$RCL" published)" commit)"
+expect_eq "(cl0) T1 lands (exit 0)" "0" "$LL_RC"
+expect_nonempty "(cl0) …and its landing was published" "$KCL"
+expect_eq "(cl1) the owed line, last, names the stop and nothing else" "landed T1 $KCL — owed: stop wx-T1" "$(printf '%s\n' "$LL_OUT" | tail -1)"
+expect_contains "(cl2) the roster row is closed: acked on the sweeper's ledger, reason landed" "|name=wx-T1|by=patrol|reason=landed" \
+  "$(cat "$RCL/.bionic/tmp/sweeper-$WORLD_SID.state" 2>/dev/null)"
+expect_false "(cl3) the tree is gone" test -e "$RCL/.worktrees/T1"
+expect_eq "(cl3) …and its branch stays" "$(git -C "$RCL" rev-parse "$KCL^2")" "$(git -C "$RCL" rev-parse --verify -q wt/T1)"
+cl_items() { grep -c '^- (T1): A-T1\.' "$DCL/assumptions.md"; }
+expect_eq "(cl4) the record's two assumptions stand in the run's, a carried line joined, the older line kept" \
+  "2|- (T1): A-T1.2 — two, carried on.|- (T0): older." \
+  "$(cl_items)|$(grep -F 'A-T1.2' "$DCL/assumptions.md")|$(grep -F '(T0)' "$DCL/assumptions.md")"
+_line_close_assumptions "$(ll_log "$RCL")" T1 >/dev/null
+expect_eq "(cl5) …and a second close appends none: each stands once" "2" "$(cl_items)"
 
 # ---------------------------------------------------------------------------
 section "§GATE: the line runs the suites the brief names, asks the gate before each start, and holds no width of its own"
