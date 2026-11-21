@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
-# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §REGISTRY, §APPROVED-BY, §PARTS.
+# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §REGISTRY, §APPROVED-BY, §PARTS, §START.
 #
 # THE SUITE IS SHARDS. Its design, hermetic posture and clock discipline are
 # in tests/session-poker.test.sh's header; the sandbox and shared fixture builders are tests/session-poker.prelude.sh.
@@ -656,10 +656,10 @@ section "§OWED: task-add ends on one line naming the task-list entry the turn n
 # of a refusal.
 ta_add "$RCP" T9 7 doc 'Make the entry. The entry is owed the same turn.' bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "OWED-1 task-add of a row exits 0 and ends on one line naming the task-list entry by its title" \
-  "0|poker: task-add — owed: create the task-list entry 7/T9: Make the entry, and recreate the entries after it to keep the order." "$RC|$(printf '%s\n' "$OUT" | tail -1)"
+  "0|poker: task-add — owed: create the task-list entry 7/T9: Make the entry at the end of the list." "$RC|$(printf '%s\n' "$OUT" | tail -1)"
 expect_eq "OWED-1b …the line is said once" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed: create the task-list entry')"
 expect_eq "OWED-2 a born row (CAP-3d's T8) ends on the same line, its title without the tag" \
-  "poker: task-add — owed: create the task-list entry 7/T8: ${CP_T30}, and recreate the entries after it to keep the order." "$CP_BORN_LAST"
+  "poker: task-add — owed: create the task-list entry 7/T8: ${CP_T30} at the end of the list." "$CP_BORN_LAST"
 ta_add "$RCP" T11 7 doc "${CP_T31}. Over the cap." bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "OWED-3 a refused task-add says nothing is owed" "1|0" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed:')"
 POKE_BOUND="$CP_BOUND_WAS"
@@ -868,5 +868,42 @@ expect_eq "PA-9 run from a checkout on main, reviews-part commits on the working
   "0|$PA_T3|$PA_M|$PA_T4" "$RC|$(git -C "$RPA" log -1 --format='%P' "$PA_T4" 2>/dev/null)|$(pa_tip main)|$(git -C "$RPA" rev-parse HEAD)"
 expect_contains "PA-9b …and its part line names the working branch and the checkout holding it" \
   "|ev=published|part=reviews|commit=$PA_T4|branch=wave/01-fixture|tree=$RPA|by=T4|at=" "$(pa_ev reviews)"
+
+# ============================================================
+section "§START: start <id> records the birth, renders the brief and makes the tree of a row the plan holds, then owes one task-list entry, at the end (REQ-14 AC-14.1, REQ-18 AC-18.1)"
+# ============================================================
+# The row's words are a person's and are in the plan first; start does every act after them: task-add's birth, the
+# brief's render and spawn-worktree.sh create --for the row's name, at the working head on wt/<wave n>-<id>. A second
+# start, under a re-dispatch's name, finds the birth and the tree standing and marks the kept tree for the new name.
+# FIXTURE FIDELITY: plan_fixture's page at Step 4 on a real repository on its working branch; the row is the
+# orchestrator's edit (ta_put), sealed again as the write hook seals it; every act is the real verb's.
+# fails-when: after start the log lacks the row's birth, or its brief or its tree is missing; the owed line names more
+# than one entry, or asks for the entries after it to be made again.
+SR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=120
+RSR="$(make_repo start)"; git -C "$RSR" config user.email t@example.com; git -C "$RSR" config user.name "Dana Fixture"
+( cd "$RSR" && printf '.bionic\n' > .gitignore && git add .gitignore && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
+PSR="$(plan_fixture "$RSR/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave \
+  "| T1 | 4 | build | The first build. It lands. | — | — | — | 30 | REQ-1 | lib/a.sh | — | — | pending |")"
+ta_put "$PSR" '| T7 | 4 | build | Start the row. One verb starts it. · complexity: complex | — | 30 | REQ-1 | lib/s.sh, tests/s.test.sh | — |'
+SR_LOG="$(plan_fixture_log "$PSR")"; seal_fixture "$PSR" "$SR_LOG"; bind_marker "$RSR" "$PSR"
+SR_TREE="$RSR/.worktrees/01-T7"; SR_BRIEFS="$RSR/.bionic/docs/record/wave-01-fixture/briefs"
+sr_owed() { printf '%s\n' "$OUT" | /usr/bin/grep -c "$1"; }
+poke "$RSR" start T7
+expect_eq "START-1 start of a row the plan holds exits 0" "0" "$RC"
+expect_eq "START-1b AC-14.1 …the run's log holds the row's birth, once" "1" "$(/usr/bin/grep -c '|ev=born|row=T7|' "$SR_LOG")"
+expect_true "START-1c AC-14.1 …its brief is rendered under its name" test -s "$SR_BRIEFS/T7.md"
+expect_eq "START-1d AC-14.1 …and its tree is made at the working head, on its branch" \
+  "wt/01-T7 $(git -C "$RSR" rev-parse wave/01-fixture)" "$(git -C "$SR_TREE" rev-parse --abbrev-ref HEAD 2>&1) $(git -C "$SR_TREE" rev-parse HEAD 2>&1)"
+expect_eq "START-2 AC-18.1 its last line owes one task-list entry, added at the end of the list" \
+  "poker: start — owed: add the task-list entry 4/T7: Start the row at the end of the list, and mark it in progress." "$(printf '%s\n' "$OUT" | tail -1)"
+expect_eq "START-2b …said once, and no entry after it is to be made again" "1|0" "$(sr_owed 'owed:')|$(sr_owed recreate)"
+poke "$RSR" start T7 T7-r2
+expect_eq "START-3 a second start under a re-dispatch's name exits 0, and the birth stands once" \
+  "0|1" "$RC|$(/usr/bin/grep -c '|ev=born|row=T7|' "$SR_LOG")"
+expect_eq "START-3b …the brief is rendered for the new name, and the kept tree is marked for it" "1|T7-r2" \
+  "$(test -s "$SR_BRIEFS/T7-r2.md" && echo 1)|$(bash -c '. "$1/worktree.sh" >/dev/null 2>&1; worktree_marker "$2"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$SR_TREE")"
+expect_eq "START-3c …and it owes no new entry: the one it has goes in progress" \
+  "poker: start — owed: mark the task-list entry 4/T7: Start the row in progress." "$(printf '%s\n' "$OUT" | tail -1)"
+POKE_BOUND="$SR_BOUND_WAS"
 
 finish
