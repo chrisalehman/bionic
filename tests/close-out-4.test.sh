@@ -556,6 +556,7 @@ section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, 
 #   agent minutes after the final reply: <n> · target 0     roster launches of this plan after the merge approval
 #   widest landing ready→landed: <row> <m> min · target < 15   landing-report --rows, the largest minutes=; 15 is LINE_LANDING_BAR (wave-39 T9)
 #   human-wait minutes: <n> · no target (the user's)        those rounds, each opened= to its at=
+#   asks put to you: <n> · <m> min                          the asks put after the approval, overlaps counted once
 # then the sitrep sheet's pace, correctness and waste at close, `pace: …`, `correctness: …` and `waste: …`. A number the
 # record cannot compute is `unverified`.
 # `landing-report --scorecard <plan>` prints the same lines; close-out reads them before the tmp wipe (the roster).
@@ -596,11 +597,11 @@ sc_plant "$PSC"
 # one instant and a run slowed by load cannot tick the percentage between them.
 SC_NOW=1791295200   # 2026-10-06T14:00:00Z, after every instant sc_plant writes
 SC_VERB="$(BIONIC_NOW_EPOCH="$SC_NOW" BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSC" --scorecard)"
-expect_eq "SC-0b …then the sitrep sheet's pace, correctness and waste, and nothing more" "pace|correctness|waste|7" \
-  "$(printf '%s\n' "$SC_VERB" | sed -n 5p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 6p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 7p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | /usr/bin/grep -c . | tr -d ' ')"
+expect_eq "SC-0b …then the asks put to you, the sitrep sheet's pace, correctness and waste, and nothing more" "asks put to you|pace|correctness|waste|8" \
+  "$(printf '%s\n' "$SC_VERB" | sed -n 5p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 6p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 7p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | sed -n 8p | cut -d: -f1)|$(printf '%s\n' "$SC_VERB" | /usr/bin/grep -c . | tr -d ' ')"
 BIONIC_NOW_EPOCH="$SC_NOW" BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSC" run
 expect_nonempty "SC-1b precondition: the extractor finds lines under the heading" "$(sc_section "$PSC/$CONT_REL")"
-expect_eq "SC-2 D26 the section is the verb's seven lines, read before the wipe (the roster's launch counted)" \
+expect_eq "SC-2 D26 the section is the verb's eight lines, read before the wipe (the roster's launch counted)" \
   "$SC_VERB" "$(sc_section "$PSC/$CONT_REL")"
 expect_eq "SC-4 …the heading sits before the Resume instruction" "yes" \
   "$(awk '/^## Scorecard$/ { a = NR } /^## Resume instruction/ { b = NR } END { print (a && b > a) ? "yes" : "no" }' "$PSC/$CONT_REL")"
