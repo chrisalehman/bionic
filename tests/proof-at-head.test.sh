@@ -312,7 +312,9 @@ pf_close() { local p; p="$(mk_fixture "fold-$1")"; advance_to "$p" 8; debt_plant
 expect_eq "FOLD-2 a fold that fails as close-out writes the continuation writes none and refuses, exit 2; whole, the debt carried" "2|0|1~0|1|0" "$(pf_close c act_continuation)~$(pf_close w none)"
 pah_world fold "" 0; ( in_fixture "$PAH_P" || exit 1; bound_marker "$PAH_P" pah-fold "$PAH_PLAN" ); fixture_git "$PAH_P" config user.name fixture
 PF_POKE() { TMPDIR="$(pf_tmp "p$RANDOM")" PAH_POKER="$PF_ST/hooks/session-poker.sh" PAH_IN="$1" pah_poke "$PAH_P" pah-fold "${@:2}"; pfu "$PAH_RC" "$PAH_OUT" "$PF_PAT"; }  # <function the fold fails in> <verb…> -> exit|lines of PF_PAT|could-not-read lines
-PF_PAT='whole suite: '; expect_eq "FOLD-3 the release card over a fold that fails is not drawn, exit 2; whole, drawn" "2|0|1~0|1|0" "$(PF_POKE poker_verb_release_approval release-approval --preview "$PAH_PLAN")~$(PF_POKE none release-approval --preview "$PAH_PLAN")"
+# The poker folds a bound run once, before its verb runs (session-poker.sh `poker_hold_prime`), and the card reads that
+# held fold: a failure planted inside the verb's own function is never reached, so the card's fold fails wherever it runs.
+PF_PAT='whole suite: '; expect_eq "FOLD-3 the release card over a fold that fails is not drawn, exit 2; whole, drawn" "2|0|1~0|1|0" "$(PF_POKE reader_facts release-approval --preview "$PAH_PLAN")~$(PF_POKE none release-approval --preview "$PAH_PLAN")"
 PF_PAT='^hand-holds: total='; expect_eq "FOLD-4 the hand-holds count over a fold that fails says it could not be read; whole, its total" "0|0|1~0|1|0" "$(PF_POKE reader_facts landing-report --hand-holds "$PAH_PLAN")~$(PF_POKE none landing-report --hand-holds "$PAH_PLAN")"
 # The person typed the waiver's words in this session: its transcript under a config of this check's own, at the fixture's
 # project name, and its load record there, the two witnesses the waive verb holds a waiver's words to (lib/said.sh).
