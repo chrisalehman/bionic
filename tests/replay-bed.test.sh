@@ -183,8 +183,8 @@ for x in "$X"/release-approval-*.facts; do
   [ "$n" != release-approval-fcbb975f ] || expect_eq "$n: AC-7.3, its cells set by hand and waived after the instant, reads pending" "state=pending" "$(ask "$p" cell AC-7.3)"
   [ "$n" != release-approval-31da41f7 ] || { PG="$G"; PD="$d"; PP="$p"; PH="$h"; PA="$at"; }
 done
-expect_eq "the two cards whose runs left a carry unstated at the instant were rendered after its stand-in, the other two with none" "2" \
-  "$(cat "$WORLD_ROOT"/pages/*/.bio*/docs/record/*/run.log | grep -c '|stated=A stand-in for the sentence this run stated after its card\.|')"
+expect_eq "the one card whose run left a carry unstated at the instant, f87acbfc's, was rendered after its stand-in, the other three with none" "1|1" \
+  "$(cat "$WORLD_ROOT"/pages/*/.bio*/docs/record/*/run.log | grep -c '|stated=A stand-in for the sentence')|$(cat "$WORLD_ROOT"/pages/*-f87acbfc/.bio*/docs/record/*/run.log | grep -c '|stated=A stand-in for the sentence')"
 
 section "CATCH"
 for m in 'replace:s/if \(\(id in live\) && fact\[id\] == body\) next/if (id in live) next/' \
