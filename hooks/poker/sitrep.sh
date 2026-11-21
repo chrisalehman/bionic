@@ -275,7 +275,7 @@ _sitrep_log_in() {  # <record directory> -> the run's log in it, as the reader n
   reader_log_in "$1"
 }
 _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledger's run, one decision fact per round
-  local led="$1" log lib
+  local led="$1" log lib plan
   if ! declare -F reader_q_ledger >/dev/null 2>&1; then
     lib="$(_sitrep_lib)" || return 0
     # shellcheck source=/dev/null
@@ -283,24 +283,50 @@ _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledge
   fi
   log="$(_sitrep_log_in "${1%/*}")"
   [ -f "$log" ] && [ ! -L "$log" ] || return 0
+  # THE LEDGER IS READ FROM THE FOLD ALREADY TAKEN when its run is one whose log is this ledger's: the fold this shell
+  # holds (`_sitrep_hold`, read as every question of the sheet reads it, across reads that write no event), else the
+  # poker's bound run (`poker_hold_prime`), asked of lib/proof.sh `_proof_facts`, whose key is the log's cksum, so a
+  # round written since is folded in. Either is the log's fold with nothing pending laid over it, as the log read
+  # below is, and the log is not folded again for the ledger alone.
+  if [ -n "${_SITREP_FACTS_PLAN:-}" ] && [ -f "$_SITREP_FACTS_PLAN" ] && [ "$(reader_log "$_SITREP_FACTS_PLAN" 2>/dev/null)" = "$log" ]; then
+    ( f="${_SITREP_FACTS:+$_SITREP_FACTS$'\n'}"; reader_facts() { printf '%s' "$f"; }; reader_q_ledger "$_SITREP_FACTS_PLAN" ); return
+  fi
+  plan="${POKER_HELD_RUN:-}"
+  if [ -n "$plan" ] && [ -f "$plan" ] && declare -F _proof_facts >/dev/null 2>&1 && [ "$(reader_log "$plan" 2>/dev/null)" = "$log" ] \
+     && _proof_facts "$plan" >/dev/null 2>&1; then
+    ( f="$_PROOF_FACTS"; reader_facts() { printf '%s' "$f"; }; reader_q_ledger "$plan" ); return
+  fi
   ( reader_events() { cat "$log"; }; reader_q_ledger "$led" )
 }
 decisions_list() {  # <ledger> [puts|times] -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
-  # A round in the log holds the appender's UTC instant; it is read on the local clock a ledger heading names.
-  _sitrep_ledger_facts "$1" | while IFS= read -r l; do
-      case "$l" in *'|at='[0-9][0-9][0-9][0-9]-*Z) e="$(iso_epoch "${l##*|at=}")"
-        [ -z "$e" ] || l="${l%|at=*}|at=$(date -r "$e" '+%Y-%m-%d %-I:%M %p %Z' 2>/dev/null || date -d "@$e" '+%Y-%m-%d %-I:%M %p %Z')" ;; esac
+  # A round in the log holds the appender's UTC instant; it is read on the local clock a ledger heading names. Every
+  # instant is read in one awk, ahead of the rounds, and each is put on the local clock by the command's held zone
+  # (`sitrep_date`), so no process is started a round. With `times`, each round's line ends with its instant's epoch,
+  # to the minute, as its heading's clock names it, or empty.
+  _sitrep_ledger_facts "$1" | _sitrep_epochs | while IFS=$'\t' read -r e l; do
+      if [ "$e" != - ]; then
+        _sitrep_local "$e" '%Y-%m-%d %-I:%M %p %Z' || _SITREP_LOCAL="$(date -r "$e" '+%Y-%m-%d %-I:%M %p %Z' 2>/dev/null || date -d "@$e" '+%Y-%m-%d %-I:%M %p %Z')"
+        l="${l%|at=*}|at=$_SITREP_LOCAL"$'\t'"$((e - e % 60))"
+      fi
       printf '%s\n' "$l"; done | awk -F'|' -v mode="${2:-}" '
+    { ep = ""; if ((k = index($0, "\t")) > 0) { ep = substr($0, k + 1); $0 = substr($0, 1, k - 1) } }
     { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); f[substr($i, 1, e - 1)] = substr($i, e + 1) } }
     f["ev"] != "decision" { next }
     { v = f["verb"]; at = f["at"]; t = f["title"]; if (t == "") t = "(untitled)"
       date = ""; clock = ""; ap = ""
       if (match(at, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) { date = substr(at, RSTART, RLENGTH); rest = substr(at, RSTART + RLENGTH)
         if (match(rest, /^ [0-9][0-9]?:[0-9][0-9] [AP]M/)) { split(substr(rest, 2, RLENGTH - 1), w, " "); clock = w[1]; ap = w[2] } } }
-    mode == "times" { print f["d"] "\t" v "\t" date "\t" clock "\t" ap "\t" f["wait"] "\t" t; next }
+    mode == "times" { print f["d"] "\t" v "\t" date "\t" clock "\t" ap "\t" f["wait"] "\t" t "\t" (clock == "" ? "" : ep); next }
     v == "put" && mode != "puts" { next }
     { x = v; if ("said" in f) x = (v == "ruled") ? "\"" f["said"] "\"" : v " \"" f["said"] "\""
       print f["d"] " · " x " · " f["by"] " " date " · " t }'
+}
+# _sitrep_epochs -> each line of stdin, a fact, as `<epoch><TAB><line>`, the epoch its last `at=` instant's when the line
+# ends in one (lib/time.sh `iso2epoch`, the one reader of an instant), else `-`: one awk for every round.
+_sitrep_epochs() {
+  awk "$_PATROL_ISO_AWK"'{ e = -1; s = $0; i = 0
+    if (s ~ /\|at=[0-9][0-9][0-9][0-9]-/ && s ~ /Z$/) { while ((j = index(substr(s, i + 1), "|at=")) > 0) i += j; e = iso2epoch(substr(s, i + 4)) }
+    print ((e < 0) ? "-" : e) "\t" $0 }'
 }
 # ROUNDS. A put opens a round of its decision and the next ruling of the same number closes it; a second put before
 # the ruling is a second round; a ruling with no put open is a round of its own, as every ruling of a ledger written
@@ -805,12 +831,6 @@ sitrep_delivered_at() {
     END { if ((gone || n == "9") && e != "" && e >= 0) print e }'
 }
 
-# sitrep_local_epoch <YYYY-MM-DD> <h:mm> <AM|PM> -> the epoch of that clock on this machine's zone, BSD date then GNU;
-# nothing when neither reads it. The design ledger writes its puts and rulings on the local clock.
-sitrep_local_epoch() {
-  date -j -f '%Y-%m-%d %I:%M:%S %p' "$1 $2:00 $3" +%s 2>/dev/null || date -d "$1 $2 $3" +%s 2>/dev/null
-}
-
 # sitrep_added <plan> -> `<id><TAB><epoch>` per row the run's born facts say joined the plan, at that fact's instant
 # (task-add, or a split). A row with no born fact was in the plan from its writing.
 sitrep_added() {
@@ -909,16 +929,10 @@ sitrep_work() {
 # `decisions_list`'s records on the local clock; a ruling that names no clock is `-`. A put naming no clock starts no
 # span; a later put of the same decision does not move the start.
 sitrep_ledger_times() {
-  local d pd pc pa rd rc ra k e
   decisions_list "$1" times | awk -F'\t' '
-    $2 == "put" { if (!($1 in put) && $4 != "") { put[$1] = $3 "\t" $4 "\t" $5; ord[++m] = $1 }; next }
-    ($1 in put) && !($1 in rul) { rul[$1] = ($4 == "") ? "-" : $3 "\t" $4 "\t" $5 }
-    END { for (i = 1; i <= m; i++) print ord[i] "\t" put[ord[i]] "\t" ((ord[i] in rul) ? rul[ord[i]] : "") }' \
-  | while IFS='	' read -r d pd pc pa rd rc ra; do
-      k="$(sitrep_local_epoch "$pd" "$pc" "$pa")"; [ -n "$k" ] || continue
-      e="-"; [ -z "$rc" ] || e="$(sitrep_local_epoch "$rd" "$rc" "$ra")"
-      printf '%s\t%s\t%s\n' "$d" "$k" "${e:--}"
-    done
+    $2 == "put" { if (!($1 in put) && $4 != "" && $8 != "") { put[$1] = $8; ord[++m] = $1 }; next }
+    ($1 in put) && !($1 in rul) { rul[$1] = ($4 == "" || $8 == "") ? "-" : $8 }
+    END { for (i = 1; i <= m; i++) print ord[i] "\t" put[ord[i]] "\t" ((ord[i] in rul) ? rul[ord[i]] : "-") }'
 }
 
 # sitrep_record_spans <plan> -> `<key><TAB><start ISO><TAB><end ISO or empty>` per ask the run's facts time, for the

@@ -2054,11 +2054,14 @@ SR_FM="$TMPROOT/fast-mut"; mkdir -p "$SR_FM/payload"
 cp -R "$BIONIC_HOOKS_DIR" "$SR_FM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_FM/payload/scripts"
 sed 's|^sitrep_gather() {$|sitrep_gather() { [ -z "${SR_GATHER_MARK:-}" ] \|\| echo gather >> "$SR_GATHER_MARK";|' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$SR_FM/hooks/poker/sitrep.sh"
 printf '#!/bin/bash\ncat "$2" > "$SR_CARD_KEPT"\necho drawn\n' > "$SR_FM/payload/scripts/card.sh"
-# and the kept fold counts its entries, so a sheet that reads its findings by folding again is seen
+# and the kept fold counts its entries, so a sheet that reads its findings by folding again is seen: an entry is an ask
+# of _proof_facts that the fold this shell already holds under the same key does not answer
 SR_FA_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/proof.sh"
-sed 's|^_proof_facts() {|_proof_facts() { [ -z "${SR_FOLD_MARK:-}" ] \|\| echo fold >> "$SR_FOLD_MARK";|' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
-expect_eq "FA4 precondition: the counting plants took effect (each shipped file and its plant differ)" "yes|yes" \
-  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$SR_FM/hooks/poker/sitrep.sh" || echo yes)|$(cmp -s "$SR_FA_LIB" "$SR_FM/payload/scripts/lib/proof.sh" || echo yes)"
+sed '/^  if \[ "\$_PROOF_FACTS_KEY" = "\$key" \] && .*then _proof_facts_out; return; fi$/a\
+  [ -z "${SR_FOLD_MARK:-}" ] || echo fold >> "$SR_FOLD_MARK"
+' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
+expect_eq "FA4 precondition: the counting plants took effect (each shipped file and its plant differ, the fold's by one line)" "yes|1" \
+  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$SR_FM/hooks/poker/sitrep.sh" || echo yes)|$(diff "$SR_FA_LIB" "$SR_FM/payload/scripts/lib/proof.sh" | /usr/bin/grep -c '^> .*SR_FOLD_MARK')"
 SR_FA_MARK="$TMPROOT/fast-gathers"; SR_FA_KEPT="$TMPROOT/fast-kept"; : > "$SR_FA_MARK"
 export SR_GATHER_MARK="$SR_FA_MARK" SR_CARD_KEPT="$SR_FA_KEPT" SR_FOLD_MARK="$TMPROOT/fast-folds"
 SR_AT="$SR_FAST_AT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep "$SR_PLAN" > "$TMPROOT/fast-sheet2.out" 2>/dev/null

@@ -502,6 +502,54 @@ done
 expect_eq "CARD-6 the findings' debt verb, asked in the card, reads the held fold no more than a card with no debt line" \
   "$(sc_count n card held)" "$(sc_count f card held)"
 [ -z "${SPEED_COUNTS_PRINTS:-}" ] || { mkdir -p "$SPEED_COUNTS_PRINTS"; sc_print f card on > "$SPEED_COUNTS_PRINTS/f.card.txt"; }
+section "§READ-ONCE: the tick, resume and the watcher's pass each fold the log once, read the table once and pass the statuses once"
+# fails-when: a reader of the tick or of resume folds the run's log for itself (the sheet's ledger reader, a recap read),
+# or a process the command starts (the judge the card asks, the tick resume runs) reads the plan's table or passes every
+# row's status again, though the plan and the facts it reads are the ones the command already read.
+for SC_SIZE in n 2n; do
+  for SC_C in tick resume watch; do
+    expect_eq "RO-1 ($SC_SIZE) $SC_C: one fold of the log, one read of the table, one status pass" "1 1 1" \
+      "$(sc_count "$SC_SIZE" "$SC_C" fold) $(sc_count "$SC_SIZE" "$SC_C" table) $(sc_count "$SC_SIZE" "$SC_C" status)"
+  done
+done
+
+# THE DATES ARE FORMATTED WITHOUT A PROCESS EACH. The sheet's times (a landing's clock on each task's line, an ask's, a
+# decision's) are local clock readings. Each command below runs from a copy of a size's snapshot whose PATH carries a
+# stand-in `date` that logs each start and execs the real one; a copy may first be handed decisions, each put by the
+# verb. The tick and resume are counted at n and 2n rows with two decisions put, and at n with six.
+# sd_run <size> <puts> <command> -> $SC_OUT/<size>.dates<puts>.<command>.{dates,out,rc}: the date processes it started
+sd_run() {
+  local size="$1" puts="$2" cmd="$3" f="$SC_OUT/$1.dates$2.$3" i a
+  rm -rf "$TMPROOT/$size/live" && cp -Rp "$TMPROOT/$size/snap" "$TMPROOT/$size/live" || return 1
+  SC_W="$TMPROOT/$size/live"; SC_ROOT="$SC_W/proj"; SC_PLAN="$SC_ROOT/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
+  i=1; while [ "$i" -le "$puts" ]; do sc_env "$POKER" decisions put "D$i" "decision $i" >/dev/null 2>&1; i=$((i + 1)); done
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/date.log"\nexec /bin/date "$@"\n' "$SC_W" > "$SC_W/bin/date"; chmod +x "$SC_W/bin/date"
+  : > "$SC_W/date.log"
+  set --; while IFS= read -r a; do set -- "$@" "$a"; done < <(sc_args "$cmd")
+  sc_env "$POKER" "$@" > "$f.out" 2>&1; printf '%s\n' "$?" > "$f.rc"
+  awk 'END { print NR }' "$SC_W/date.log" > "$f.dates"
+  cp "$SC_ROOT/.bionic/docs/record/wave-02-fx/resume-recap.md" "$f.recap" 2>/dev/null || :
+  # the rounds the copy's log holds, the positive that the puts were made
+  awk '/^run\/v1\|ev=decision\|/ { n++ } END { print n + 0 }' "$SC_ROOT/.bionic/docs/record/wave-02-fx/run.log" > "$f.rounds"
+}
+for SC_C in tick resume; do
+  sd_run n 2 "$SC_C"; sd_run 2n 2 "$SC_C"; sd_run n 6 "$SC_C"
+done
+sd_get() { cat "$SC_OUT/$1.dates$2.$3.$4" 2>/dev/null || echo -; }   # <size> <puts> <command> <dates|rc|rounds>
+for SC_C in tick resume; do
+  expect_eq "DATE-0 $SC_C: each copy was handed its decisions, read back as rounds (2, 2, 6), and the command ran (exit 0)" \
+    "2 2 6 0 0 0" "$(sd_get n 2 "$SC_C" rounds) $(sd_get 2n 2 "$SC_C" rounds) $(sd_get n 6 "$SC_C" rounds) $(sd_get n 2 "$SC_C" rc) $(sd_get 2n 2 "$SC_C" rc) $(sd_get n 6 "$SC_C" rc)"
+  expect_eq "DATE-1 $SC_C starts as many date processes at 2n rows as at n ($(sd_get n 2 "$SC_C" dates) at n)" \
+    "$(sd_get n 2 "$SC_C" dates)" "$(sd_get 2n 2 "$SC_C" dates)"
+  expect_eq "DATE-2 $SC_C starts as many date processes with six decisions put as with two" \
+    "$(sd_get n 2 "$SC_C" dates)" "$(sd_get n 6 "$SC_C" dates)"
+done
+# A record compares these prints, and resume's recap, across two runs of the suite (SPEED_COUNTS_PRINTS, above).
+[ -z "${SPEED_COUNTS_PRINTS:-}" ] || cp "$SC_OUT"/*.dates[26].* "$SPEED_COUNTS_PRINTS/" 2>/dev/null
+# The stand-in is proved on the same copy: a date started as the commands start one is logged.
+expect_eq "DATE-3 the stand-in date logs a start made through the commands' PATH (the counter proved)" "1" \
+  "$(: > "$SC_W/date.log"; printf 'date +%%s >/dev/null\n' > "$SC_W/date-probe.sh"; sc_env "$SC_W/date-probe.sh" >/dev/null 2>&1
+     awk 'END { print NR }' "$SC_W/date.log")"
 
 section "§PRINT: counting changes no print"
 # fails-when: a counter writes to the command's stdout or stderr, or moves its exit, so the print with BIONIC_COUNT
