@@ -828,9 +828,9 @@ expect_eq "PA-0 precondition: the plan's working branch is wave/01-fixture, the 
 
 poke "$PA_WT" known-limits-part T3
 PA_T1="$(pa_tip wt/01-T3)"
-expect_eq "PA-1 known-limits-part run from the row's tree commits on the tree's branch: exit 0, the line's author, on the tree's head, the message as before" \
-  "0|bionic line|$PA_H|line: the $PA_V entry's Known limits, rendered from the plan's deferrals" \
-  "$RC|$(git -C "$RPA" log -1 --format='%an|%P|%s' "$PA_T1" 2>/dev/null)"
+expect_eq "PA-1 known-limits-part run from the row's tree commits on the tree's branch: exit 0, the checkout's own author, on the tree's head, the message as before" \
+  "0|Dana Fixture <t@example.com>|$PA_H|line: the $PA_V entry's Known limits, rendered from the plan's deferrals" \
+  "$RC|$(git -C "$RPA" log -1 --format='%an <%ae>|%P|%s' "$PA_T1" 2>/dev/null)"
 [ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
 expect_eq "PA-1b …rendered into the tree: its HEAD is the commit, its CHANGELOG.md holds the sentence and is clean" \
   "$PA_T1|1|" "$(git -C "$PA_WT" rev-parse HEAD)|$(pa_has "$PA_WT" "- $PA_S1")|$(git -C "$PA_WT" status --porcelain -- CHANGELOG.md)"
@@ -841,9 +841,9 @@ expect_contains "PA-3 the part line names the commit, the tree's branch and the 
 
 poke "$PA_WT" reviews-part T4
 PA_T2="$(pa_tip wt/01-T3)"
-expect_eq "PA-4 reviews-part run from the row's tree commits on the tree's branch: exit 0, the line's author, on the tree's head, the message as before" \
-  "0|bionic line|$PA_T1|line: the $PA_V entry's reviews, rendered from the plan before the pull request" \
-  "$RC|$(git -C "$RPA" log -1 --format='%an|%P|%s' "$PA_T2" 2>/dev/null)"
+expect_eq "PA-4 reviews-part run from the row's tree commits on the tree's branch: exit 0, the checkout's own author, on the tree's head, the message as before" \
+  "0|Dana Fixture <t@example.com>|$PA_T1|line: the $PA_V entry's reviews, rendered from the plan before the pull request" \
+  "$RC|$(git -C "$RPA" log -1 --format='%an <%ae>|%P|%s' "$PA_T2" 2>/dev/null)"
 [ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
 expect_eq "PA-4b …rendered into the tree: its HEAD is the commit and its CHANGELOG.md holds the part" \
   "$PA_T2|1" "$(git -C "$PA_WT" rev-parse HEAD)|$(pa_has "$PA_WT" '### The reviews')"
@@ -854,7 +854,7 @@ expect_contains "PA-6 the part line names the commit, the tree's branch and the 
 poke "$RPA" known-limits-part T3
 PA_T3="$(pa_tip wave/01-fixture)"
 expect_eq "PA-7 run from the checkout holding the working branch, known-limits-part moves that branch: exit 0, a commit on its old head" \
-  "0|bionic line|$PA_H" "$RC|$(git -C "$RPA" log -1 --format='%an|%P' "$PA_T3" 2>/dev/null)"
+  "0|Dana Fixture <t@example.com>|$PA_H" "$RC|$(git -C "$RPA" log -1 --format='%an <%ae>|%P' "$PA_T3" 2>/dev/null)"
 expect_eq "PA-7b …by a fast-forward of that checkout, which holds the sentence; the row's branch is untouched" \
   "$PA_T3|1|$PA_T2" "$(git -C "$RPA" rev-parse HEAD)|$(pa_has "$RPA" "- $PA_S1")|$(pa_tip wt/01-T3)"
 expect_contains "PA-8 …and its part line names the working branch and its checkout" \

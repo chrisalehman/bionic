@@ -677,14 +677,14 @@ _line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
 # once a release row of the plan has published, every later landing would leave the check red until someone typed
 # the numbers again by hand. So the line renders them as part of that landing: `release-note --at <candidate> --on
 # <instant>` for the plan, the entry's block in the candidate's CHANGELOG.md replaced by what it prints, committed on
-# the candidate under the line's own author. The commit is made in the object store alone, before the release check
-# and the fast-forward, which then judge and publish it: a render that fails refuses the landing with nothing moved.
+# the candidate under the checkout's own author, as a commit typed by hand there would be. The commit is made in the
+# object store alone, before the release check and the fast-forward, which then judge and publish it: a render that
+# fails refuses the landing with nothing moved.
 # The instant is one second before the render, since the record's lines carry whole seconds and the report keeps a
 # line written at the instant: every line the block folds is then written before it is rendered, so the release
 # check rendering it again for the same head and instant gets the same block. No published release row (the release
 # row itself carries its own numbers), no `release:` in the plan, or an entry with no numbers block: nothing is made.
 # Sets LINE_NUMBERS (the commit, or empty) and, on a refusal, LINE_NUMBERS_SAID (the renderer's words).
-LINE_NUMBERS_AUTHOR="bionic line"; LINE_NUMBERS_EMAIL="line@bionic.invalid"
 # _line_release_landed <plan> <record> -> the first release row, in table order, the record holds a landing of: read
 # through lib/units.sh `units_record_landings`, the reading the reader rule's publish order asks, so the two agree on
 # whether the release has landed; nothing when none has.
@@ -751,8 +751,7 @@ _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothi
   && GIT_INDEX_FILE="$tmp/index" git -C "$root" read-tree "$cand" >/dev/null 2>&1 \
   && GIT_INDEX_FILE="$tmp/index" git -C "$root" update-index --cacheinfo "${mode:-100644},${blob},CHANGELOG.md" >/dev/null 2>&1 \
   && tree="$(GIT_INDEX_FILE="$tmp/index" git -C "$root" write-tree 2>&1)" \
-  && c="$(GIT_AUTHOR_NAME="$LINE_NUMBERS_AUTHOR" GIT_AUTHOR_EMAIL="$LINE_NUMBERS_EMAIL" \
-         git -C "$root" commit-tree "$tree" -p "$cand" -m "line: release numbers ${row}" 2>&1)" \
+  && c="$(git -C "$root" commit-tree "$tree" -p "$cand" -m "line: release numbers ${row}" 2>&1)" \
   || { LINE_NUMBERS_SAID="the numbers commit on ${cand} cannot be made: ${c:-${tree:-${blob:-git refused}}}"; rm -rf "$tmp"; return 1; }
   rm -rf "$tmp"
   LINE_NUMBERS="$c"
@@ -853,8 +852,9 @@ line_reviews_checkout() {
     printf 'CHANGELOG.md is changed in %s, the checkout holding %s: commit or restore it' "$co" "$2"
   fi
 }
-# line_reviews_commit <root> <parent> <file> <author> <email> <message> -> LINE_RV_COMMIT, the commit of <file> as
-# CHANGELOG.md on <parent>, made in the object store alone (nothing moves); rc 1 with LINE_RV_SAID saying why
+# line_reviews_commit <root> <parent> <file> <message> -> LINE_RV_COMMIT, the commit of <file> as CHANGELOG.md on
+# <parent>, made in the object store alone (nothing moves) under the checkout's own author, which <message> says the tool
+# made; rc 1 with LINE_RV_SAID saying why
 LINE_RV_COMMIT=""
 line_reviews_commit() {
   local root="$1" tip="$2" f="$3" tmp mode blob tree c
@@ -865,7 +865,7 @@ line_reviews_commit() {
      && GIT_INDEX_FILE="$tmp/index" git -C "$root" read-tree "$tip" >/dev/null 2>&1 \
      && GIT_INDEX_FILE="$tmp/index" git -C "$root" update-index --cacheinfo "${mode:-100644},${blob},CHANGELOG.md" >/dev/null 2>&1 \
      && tree="$(GIT_INDEX_FILE="$tmp/index" git -C "$root" write-tree 2>&1)" \
-     && c="$(GIT_AUTHOR_NAME="$4" GIT_AUTHOR_EMAIL="$5" git -C "$root" commit-tree "$tree" -p "$tip" -m "$6" 2>&1)"; then
+     && c="$(git -C "$root" commit-tree "$tree" -p "$tip" -m "$4" 2>&1)"; then
     rm -rf "$tmp"; LINE_RV_COMMIT="$c"; return 0
   fi
   rm -rf "$tmp"

@@ -188,7 +188,7 @@ expect_eq "ORDER-5 precondition: the integration branch holds the working branch
 run_close "$PMO" run
 OM_TIP="$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
 expect_eq "ORDER-6 close-out published a part: the working branch moved past the tip the person merged" "yes" \
-  "$([ -n "$OM_TIP" ] && [ "$OM_TIP" != "$OM_H" ] && fixture_git "$PMO" log -1 --format=%an "$OM_TIP" | /usr/bin/grep -qx 'bionic close-out' && echo yes || echo no)"
+  "$([ -n "$OM_TIP" ] && [ "$OM_TIP" != "$OM_H" ] && fixture_git "$PMO" log -1 --format='%an <%ae>' "$OM_TIP" | /usr/bin/grep -qxF 'fixture <fixture@example.invalid>' && echo yes || echo no)"
 OM_ACT="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^merge: ')"
 expect_eq "ORDER-7 …so the readback, read on that branch, held: the run did not close, and its merge act never ran" "yes|0" \
   "$([ "$CO_RC" -ne 0 ] && echo yes)|$OM_ACT"

@@ -552,8 +552,8 @@ expect_contains "(rr3) the block at the working head names the published candida
 door_run "$DR" bash "$DOOR_POKER" release-note --at "$DR_C3" --on "${DR_ON:-none}" "$DR/$DOOR_PLAN_REL"
 expect_eq "(rr3b) …and equals what release-note renders for that head and instant" "$DOOR_OUT" "$DR_NEW"
 expect_ne "(rr3c) …which is not the block the release carried" "$DR_OLD" "$DR_NEW"
-expect_eq "(rr4) the commit that wrote it is the line one: its author and its message" \
-  "bionic line <line@bionic.invalid>|line: release numbers T3" "$(git -C "$DR" log -1 --format='%an <%ae>|%s' "$DR_H3")"
+expect_eq "(rr4) the commit that wrote it is the line one: its author is the checkout's own, and its message says the line made it" \
+  "door <door@example.invalid>|line: release numbers T3" "$(git -C "$DR" log -1 --format='%an <%ae>|%s' "$DR_H3")"
 expect_eq "(rr4b) …and it changes CHANGELOG.md alone" "CHANGELOG.md" \
   "$(git -C "$DR" diff-tree --no-commit-id --name-only -r "$DR_H3")"
 expect_eq "(rr4c) of the commits the landing brought, the line one is the only one to touch CHANGELOG.md" \
