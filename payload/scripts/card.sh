@@ -3746,6 +3746,9 @@ case "$1" in
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable plan at '$2'"
     _card_early_load || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }
     _card_early_ctx "$2" || { printf 'card.sh: %s: %s\n' "$1" "$CF_ERR" >&2; exit 1; }
+    # THE RUN'S FACTS ARE READ ONCE, IN THIS SHELL, before any subshell asks: inside the command's hold the held fold
+    # is read here and inherited, so no subshell below reads it again; outside one this shell folds once for them all.
+    if declare -F _proof_facts >/dev/null 2>&1; then _proof_facts "$CF_PLAN" >/dev/null 2>&1 || :; fi
     if ! _card_early; then printf 'CARD-EARLY — %s\n' "$CARD_EARLY_WHY" >&2; exit 1; fi
     printf '%s' "$CF_SETTLE" | awk 'NF && !seen[$0]++ { print "settles: " $0 }'
     exit 0 ;;

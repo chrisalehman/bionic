@@ -1343,6 +1343,20 @@ FM_FINDING
     DSP_BORN="$(units_born_findings "$PV_PLAN" 2>/dev/null)" || DSP_BORN=""
     DSP_READS="$(review_readings "$PV_PLAN")" \
       || { die "REFUSED — the run's facts could not be read, so no finding is read or opened. Run again: bash ${HOOK_DIR}/session-poker.sh release-approval"; return 2; }
+    # EVERY FINDING'S EVENTS READ IN ONE PASS, and the rows born of each in one more: `<id> TAB <newest move> TAB <the row a
+    # move to fixed names> TAB <1 when the run deferred it> TAB <its newest stated sentence, unescaped>` and `<id> TAB
+    # <rows>`, so a finding is answered from the two by its id with no process started. Each field is what the one-finding
+    # reads give (the move's newest word and row, proof_finding_stated's sentence and exit, the born rows comma-joined).
+    DSP_FMOVES="$(printf '%s\n' "$DSP_FEV" | awk "$(proof_bind_awk)"'
+  function unesc(s,   o, i, c) { o = ""; for (i = 1; i <= length(s); i++) { c = substr(s, i, 1); if (c == "\\" && i < length(s)) { i++; c = substr(s, i, 1) } o = o c }; return o }
+  { b = proof_bound($0); if (b == "") next
+    if (!(b in seen)) { seen[b] = 1; ord[++n] = b }
+    m = proof_move_of($0); if (m != "") { to[b] = m; r[b] = proof_move_row($0) }
+    if (proof_defers($0)) d[b] = 1
+    v = proof_fkv($0, "stated"); if (v != "") st[b] = v }
+  END { for (i = 1; i <= n; i++) { b = ord[i]; print b "\t" to[b] "\t" r[b] "\t" ((b in d) ? 1 : 0) "\t" unesc(st[b]) } }')"
+    DSP_BROWS="$(printf '%s\n' "$DSP_BORN" | awk -F'\t' '$3 != "" { if ($3 in v) v[$3] = v[$3] "," $1; else { v[$3] = $1; ord[++n] = $3 } }
+  END { for (i = 1; i <= n; i++) print ord[i] "\t" v[ord[i]] }')"
     while IFS='	' read -r DSP_EV DSP_Q DSP_H; do
       [ -n "$DSP_EV" ] || continue
       if ! DSP_GOT="$(proof_findings "$DSP_DOCS/$DSP_EV" 2>&1)"; then
@@ -1355,16 +1369,20 @@ FM_FINDING
         [ -n "$DSP_N" ] || continue
         [ "$DSP_N" != debt ] || { DSP_DEBT=1; continue; }
         DSP_FID="$DSP_EV#$DSP_N"
-        # The finding's newest whole move and the row a move to fixed names, from the events read once above.
-        IFS='	' read -r DSP_MOVED DSP_MV <<DSP_MOVE
-$(printf '%s\n' "$DSP_FEV" | awk -v id="$DSP_FID" "$(proof_bind_awk)"'
-  proof_bound($0) == id { m = proof_move_of($0); if (m != "") { to = m; r = proof_move_row($0) } }
-  END { print to "\t" r }')
-DSP_MOVE
+        # The finding's newest whole move, the row a move to fixed names and its stated sentence, from the one pass above.
+        DSP_MOVED=""; DSP_MV=""; DSP_DEF=0; DSP_ST=""; DSP_ROWS=""
+        case $'\n'"$DSP_FMOVES" in
+          *$'\n'"$DSP_FID"$'\t'*)
+            DSP_RX=$'\n'"$DSP_FMOVES"; DSP_RX="${DSP_RX#*$'\n'"$DSP_FID"$'\t'}"; DSP_RX="${DSP_RX%%$'\n'*}"
+            DSP_MOVED="${DSP_RX%%$'\t'*}"; DSP_RX="${DSP_RX#*$'\t'}"; DSP_MV="${DSP_RX%%$'\t'*}"; DSP_RX="${DSP_RX#*$'\t'}"
+            DSP_DEF="${DSP_RX%%$'\t'*}"; DSP_ST="${DSP_RX#*$'\t'}" ;;
+        esac
+        case $'\n'"$DSP_BROWS" in
+          *$'\n'"$DSP_FID"$'\t'*) DSP_RX=$'\n'"$DSP_BROWS"; DSP_RX="${DSP_RX#*$'\n'"$DSP_FID"$'\t'}"; DSP_ROWS="${DSP_RX%%$'\n'*}" ;;
+        esac
         _proof_rating_apply "$DSP_MOVED" "$DSP_S" "$DSP_R"
         set -- $_PROOF_RATING
         DSP_P="${3:-}"
-        DSP_ROWS="$(printf '%s\n' "$DSP_BORN" | awk -F'\t' -v id="$DSP_FID" '$3 == id { printf "%s%s", (k++ ? "," : ""), $1 }')"
         if [ "$DSP_MOVED" = fixed ]; then
           case ",$DSP_ROWS," in *",$DSP_MV,"*) : ;; *) DSP_ROWS="${DSP_ROWS:+$DSP_ROWS,}$DSP_MV" ;; esac
         fi
@@ -1389,7 +1407,7 @@ DSP_MOVE
                 [ -n "$DSP_MOVED" ] \
                   || proof_owed open "$(carry_owed_key "$DSP_FID")" "Carried $DSP_S finding" \
                        "$(clean "$DSP_FID") $DSP_S $DSP_R: $(clean "$DSP_T") — carried, not fixed; the release approval card rules it"
-                DSP_STATED="$(proof_finding_stated "$PV_PLAN" "$DSP_FID" 2>/dev/null)" || DSP_STATED="" ;;
+                [ "$DSP_DEF" != 1 ] || DSP_STATED="$DSP_ST" ;;
               *) DSP_STATE=accepted ;;
             esac ;;
         esac
@@ -1401,8 +1419,12 @@ DSP_MOVE
       done <<DSP_FINDINGS
 $DSP_GOT
 DSP_FINDINGS
+      # A RECORD'S DEBT LINES ARE ADDED BY THE DEBT VERB ITSELF, run in a subshell of this one with the operands the
+      # command line would hand it, so the ledger is written as `debt add <record> <plan>` writes it, over the facts this
+      # command already holds, and no poker process is started for it.
       if [ "$DSP_DEBT" = 1 ]; then
-        ( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" debt add "$DSP_EV" "$PV_PLAN" 2>&1 ) || :
+        ( cd "$PV_REPO" || exit 2
+          DEBT_SUB=add DEBT_A="$DSP_EV" DEBT_B="" DEBT_C="" DEBT_PLAN_ARG="$PV_PLAN" poker_verb_debt ) 2>&1 || :
       fi
     done <<DSP_READINGS
 $DSP_READS

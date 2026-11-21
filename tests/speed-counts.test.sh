@@ -15,6 +15,7 @@
 #   status  lib/reader.sh reader_q_status   one row's status asked
 #           lib/reader.sh reader_q_statuses every row's status, in one pass
 #   facts   lib/proof.sh facts_state        the run's facts answered at a head
+#   held    lib/proof.sh _proof_facts       the command's held fold read by a shell that did not hold it yet
 #   gate    lib/walls.sh dispatch           one pass of the evidence gate's judging arms: one step's checks
 #   pass    lib/walls.sh wall_evidence_gate one pass of the evidence gate, its reads and every step it judges
 #           lib/walls.sh wall_gate_judge_steps  one pass for several steps, each step's checks run in it
@@ -50,7 +51,7 @@
 #
 # ANTI-VACUITY (.claude/rules/test-harness.md, "Anti-vacuity"). The count extractor is proved on real output first:
 # §REPORTS reads every kind as non-zero somewhere before any later row reads a ceiling through `sc_count`, and every
-# command's lines are read whole against the fifteen known shapes. §PRINT compares only prints it has shown are not
+# command's lines are read whole against the sixteen known shapes. §PRINT compares only prints it has shown are not
 # empty. RED: with the counter lines taken out of the libraries, §REPORTS is red and §FIXTURE and §PRINT stay
 # green.
 #
@@ -84,7 +85,7 @@ SC_NOW=1791324000     # 2026-10-06T22:00:00Z
 SC_AT=2026-10-06T12:00:00Z
 SC_N=5
 SC_CMDS="card check tick resume watch"
-SC_KINDS="log fold overlay parse table status facts gate pass matrix owing"
+SC_KINDS="log fold overlay parse table status facts held gate pass matrix owing"
 SC_OUT="$TMPROOT/out"; mkdir -p "$SC_OUT"
 
 # ---------- the run ----------
@@ -118,6 +119,8 @@ integration-branch: main|" -e "s/^base-sha: .*/base-sha: $base/" "$p" > "$p.t" &
   # Every proof the dealing owes passes at the working head: its evidence is committed there, its event written after.
   for q in evidence adversarial structure; do : > "$rec/$q-piece.md"; : > "$rec/$q-whole.md"; done
   printf 'whole\n' > "$rec/reg.log"; printf 'ok\n' > "$rec/check.log"
+  # A section that needs more in the record writes it here, before the commit the proofs are planted at.
+  [ -z "${SC_WORLD_RECORDS:-}" ] || "$SC_WORLD_RECORDS" "$rec" || return 1
   git -C "$r" add -A && git -C "$r" commit -q -m fixture || return 1
   h="$(git -C "$r" rev-parse HEAD)"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
@@ -247,7 +250,7 @@ for SC_SIZE in n 2n; do
   done
   for SC_C in $SC_CMDS; do
     expect_regex "REP-2 ($SC_SIZE) $SC_C counts its reads, each line a known kind and its function" \
-      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load)( |$))+$' \
+      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|held _proof_facts|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load)( |$))+$' \
       "$(sort "$SC_OUT/$SC_SIZE.$SC_C.on.count" 2>/dev/null | uniq -c | awk '{ $1 = $1; print }' | paste -sd' ' -)"
   done
 done
@@ -452,6 +455,53 @@ for SC_K in $SC_KINDS; do
   expect_eq "WO-6 the third pass counts the same $SC_K at n rows and 2n" "$(sc_seq_count n 3 "$SC_K")" "$(sc_seq_count 2n 3 "$SC_K")"
 done
 
+section "§CARD: the release approval card draws from one load of its rows, one pass of its findings, and the held facts"
+# fails-when: the card's rows load the criteria again or ask a criterion's owing step and openness one at a time; or
+# its findings start a process of the tool for a record's debt lines; or a shell of the card reads the held fold
+# where the shell it was started from already held it. Then a read the card's one pass holds is made again.
+# The world `f` is the run of n rows whose adversarial reading holds two findings and a debt line: the findings'
+# reader reads it, and the debt verb is asked for it. Its card is run twice from the snapshot: once as it is, so the
+# debt verb writes the debt, and once with the debt already in the ledger, as a card drawn again finds it, counted.
+sc_card_records() {  # <record dir> -> the adversarial whole reading's findings, two notes and a debt line
+  printf '%s\n' 'reviewed: main..wave/02-fx' 'findings: 2' \
+    'finding: 1 S3 off - the card reads its rows twice' 'finding: 2 S4 off - the card names a row once' \
+    'debt: duplicate card-rows-read lib/t1.sh:1' > "$1/adversarial-whole.md"
+}
+SC_WORLD_RECORDS=sc_card_records; export SC_WORLD_RECORDS
+if sc_world f "$SC_N" > "$TMPROOT/f.world.out" 2>&1; then SC_CF=built; else SC_CF=""; cat "$TMPROOT/f.world.out"; fi
+unset SC_WORLD_RECORDS
+expect_eq "CARD-0 the run with findings is built" built "$SC_CF"
+# The first card from the snapshot: the debt verb writes the record's debt into the ledger.
+sc_run f card off
+SC_CDEBT="$(sc_env "$POKER" debt list "$SC_PLAN" 2>&1)"
+expect_contains "CARD-1 the card's findings asked the debt verb, which wrote the record's debt to the ledger" \
+  "card-rows-read duplicate" "$SC_CDEBT"
+expect_contains "CARD-1 the card's findings were read: the page counts the reading's two" "Findings — 2" \
+  "$(cat "$SC_OUT/f.card.off.out" 2>/dev/null)"
+# The counted card: the debt is in the ledger before it starts, so the verb writes nothing and the log is the one held.
+rm -rf "$TMPROOT/f/live" && cp -Rp "$TMPROOT/f/snap" "$TMPROOT/f/live"
+SC_W="$TMPROOT/f/live"; SC_ROOT="$SC_W/proj"; SC_PLAN="$SC_ROOT/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
+sc_env "$POKER" debt add record/wave-02-fx/adversarial-whole.md "$SC_PLAN" > "$TMPROOT/f.debt.out" 2>&1
+rm -rf "$TMPROOT/f/snap" && cp -Rp "$TMPROOT/f/live" "$TMPROOT/f/snap"
+sc_run f card on
+expect_eq "CARD-2 the counted card draws the same page as the first" "$(cat "$SC_OUT/f.card.off.out")" "$(cat "$SC_OUT/f.card.on.out")"
+for SC_SIZE in n 2n f; do
+  SC_M="$(sc_count "$SC_SIZE" card matrix)"; SC_O="$(sc_count "$SC_SIZE" card owing)"; SC_H="$(sc_count "$SC_SIZE" card held)"
+  # The judge the card asks loads the criteria and reads their owing once for each of its two gated steps; the rows
+  # load them once more and read every owing step and openness in one pass, so three of each in all.
+  expect_eq "CARD-3 ($SC_SIZE) the card loads the criteria three times at most, the judge's two and its rows' one ($SC_M)" 1 \
+    "$([ "$SC_M" -ge 1 ] && [ "$SC_M" -le 3 ] && echo 1 || echo 0)"
+  expect_eq "CARD-4 ($SC_SIZE) the card reads the owing steps three times at most, one pass each ($SC_O)" 1 \
+    "$([ "$SC_O" -ge 1 ] && [ "$SC_O" -le 3 ] && echo 1 || echo 0)"
+  # Two pokers each read it twice (the bound run's place, then the shell that primes), card.sh early once.
+  expect_eq "CARD-5 ($SC_SIZE) the card's processes read the held fold four times at most ($SC_H)" 1 \
+    "$([ "$SC_H" -ge 1 ] && [ "$SC_H" -le 4 ] && echo 1 || echo 0)"
+done
+# A record's debt line starts no process: the card over the run with findings reads the held fold as often as over
+# the run with none.
+expect_eq "CARD-6 the findings' debt verb, asked in the card, reads the held fold no more than a card with no debt line" \
+  "$(sc_count n card held)" "$(sc_count f card held)"
+[ -z "${SPEED_COUNTS_PRINTS:-}" ] || { mkdir -p "$SPEED_COUNTS_PRINTS"; sc_print f card on > "$SPEED_COUNTS_PRINTS/f.card.txt"; }
 section "§READ-ONCE: the tick, resume and the watcher's pass each fold the log once, read the table once and pass the statuses once"
 # fails-when: a reader of the tick or of resume folds the run's log for itself (the sheet's ledger reader, a recap read),
 # or a process the command starts (the judge the card asks, the tick resume runs) reads the plan's table or passes every
