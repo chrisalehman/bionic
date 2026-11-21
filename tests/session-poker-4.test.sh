@@ -1392,10 +1392,10 @@ expect_eq "ST-7d …with its proof at the new head" "1" "$(s46_proved "$PST" | /
 ST_H3="$(s57_commit "$ST_WT" lib/c.sh H3)"; printf 'regression-command: bash tests/run.sh\n' > "$RST/.bionic/config.yaml"
 : > "$ST_CTL/hold"; st_beside "${ST_H3:0:8}" ST-8; rm -f "$ST_CTL/hold" "$RST/.bionic/config.yaml"
 
-# A DECLINED START SAYS WHY (AC-10.1, AC-10.2). The head below owes a whole run and each reason the tick has for not
+# A DECLINED START SAYS WHY. The head below owes a whole run and each reason the tick has for not
 # starting it is one line, `regression: not started — <cause>; starts when <what>`. The reasons are met one at a time
 # in the order the tick weighs them, each at a head past the last proof; a writer whose row waits on the regression is
-# no reason (AC-10.2), while another writer beside it still is.
+# no reason, while another writer beside it still is.
 # fails-when: the decline line dropped on the writer-open branch; a writer whose row waits on the regression counted as
 # a reason, or every open writer taken for one that waits on it; a reason that prints nothing.
 st_decl() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: regression: not started — '; }
