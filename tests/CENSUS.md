@@ -1042,6 +1042,7 @@ preflight-probe.test.sh | §S10 | keep | hooks/preflight-probe.sh:171 the --read
 ## principles-item.test.sh
 
 principles-item.test.sh | §the shipped text and the extractor | duplicate | payload/context/working-principles.md deleted or emptied, so setup has no block to write | principles-item.test.sh §SET
+principles-item.test.sh | §OWN | keep | agents-src/templates/context/working-principles.md.tmpl: a word of the ownership paragraph changed, the paragraph moved from after the first principle, or another line of the template reworded, so the placement rows or the earlier-template cksum go red (OWN rows) | none (searched 'Own the code' in tests/)
 principles-item.test.sh | §SET | keep | payload/scripts/lib/env.sh: the working-principles write appends a second block when one is already there, so a second run adds a start marker (SET idempotence rows) | none (searched 'working-principles' in tests/)
 principles-item.test.sh | §DOCTOR | keep | payload/scripts/lib/markers.sh: an edited block read as present, so doctor's edited and present rows are the same (DOCTOR edited rows) | none (searched 'state=edited' in tests/)
 principles-item.test.sh | §REMOVE | keep | payload/scripts/remove.sh: the block's trailing blank line not stripped with it, so CLAUDE.md does not come back to its pre-setup bytes (REMOVE pre-setup rows); also RM_PRINCIPLES_START drifting from env.sh's | none (searched 'RM_PRINCIPLES_START' in tests/)
@@ -1570,7 +1571,7 @@ setup.test.sh | §PROXY — $SH: anywhere else, nothing added | keep | payload/s
 setup.test.sh | §PROXY — cheap: a shell start runs nothing, a call runs git once | keep | payload/scripts/lib/env.sh: the root resolved when the rc file is sourced instead of at call time, so a shell start runs git (P11) | none (searched 'GITLOG' and 'runs git' in tests/)
 setup.test.sh | §PROXY — the consent says what the line now does | keep | payload/scripts/lib/env.sh: the consent page no longer prints the function body it will write, so the then-set line is absent (P19); also a page line past 100 columns (P18) | none (searched 'claude-proxy' consent rows in tests/)
 setup.test.sh | §PROXY — the line setup wrote before this one is stale, and setup rewrites it | keep | payload/scripts/lib/detect.sh detect_rc_claude_proxy: the 1.18.0 block read as present=yes instead of stale (P12) | none (searched 'present=stale' in tests/)
-setup.test.sh | §PRINCIPLES | keep | payload/context/working-principles.md: the comment rule's line deleted, so the written span and the consent screen lack "never names a wave" (R3, R4); principles-item.test.sh compares the span to whatever the shipped file holds | none (searched 'never names a wave' in tests/)
+setup.test.sh | §PRINCIPLES | keep | payload/context/working-principles.md: the comment rule's line deleted, so the written span and the consent screen lack "never names a wave" (R3, R4); also payload/scripts/lib/env.sh: the block written with a byte changed, or a byte outside the markers rewritten, so the installed span differs from the rendered one (PB1 to PB4); principles-item.test.sh compares the span to whatever the shipped file holds | none (searched 'never names a wave' and 'bionic:principles:start' in tests/)
 
 ## shell-lint.test.sh
 
