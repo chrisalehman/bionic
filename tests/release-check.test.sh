@@ -53,6 +53,9 @@
 #   §JUDGE          the person's word moves the judge: `check-from` refuses words no prompt holds and a commit the
 #                   working head does not hold; on their words a later landing that rewrites the check is run by the
 #                   judge's copy, and its line names the judge, the words and who typed them.
+#   §RELEASE        two landings through the runner, the first deleting code, the next adding a test line onto it:
+#                   both are admitted, for the runner exports the release (BIONIC_CHECK_RELEASE) and the check counts
+#                   its code as well as the landing's base.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -808,5 +811,32 @@ JG_OUT="$(jg_land)"
 expect_contains "(jg4) a later landing that rewrites the check is run by the judge's copy, not its own" "judge-copy" "$JG_OUT"
 expect_contains "(jg5) …and its line names the judge, the word and whose it was" \
   "(the judge ${JG_J:0:12}, set by Dana Fixture's word \"$JG_W\")" "$JG_OUT"
+
+section "§RELEASE — two landings through the runner: code deleted during a release takes no room from the landing after"
+
+# A landing's BIONIC_CHECK_BASE is the target's head before it, so after a landing that deletes code the base is the
+# smaller code; the runner's BIONIC_CHECK_RELEASE, the plan's base-sha here, keeps the release's code in the limit. The
+# check is declared by its path in this suite's tree, outside the fixture, so the runner runs this copy whatever the
+# judge holds; which copy judges is §JUDGE's. One character of room at the release: 49 test characters against 40.
+RL="$TMP/release"; fx_ratio "$RL" 49 40; RL_B="$(git -C "$RL" rev-parse HEAD)"
+mkdir -p "$RL/.bionic/docs/plans" && printf '.bionic/\n' >> "$RL/.git/info/exclude"
+printf 'release-check: bash %s %s\n' "$CHECK" "$LIST" > "$RL/.bionic/config.yaml"
+RL_PLAN="$RL/.bionic/docs/plans/x.plan.md"
+printf -- '---\nbase-sha: %s\nintegration-branch: main\n---\n# plan\n' "$RL_B" > "$RL_PLAN"
+git -C "$RL" worktree add -q -b rl-piece "$TMP/rl-piece" "$RL_B"
+fx_lines 20 > "$TMP/rl-piece/code.sh"; fx_commit "$TMP/rl-piece" "half the code deleted"; RL_P1="$(git -C "$RL" rev-parse rl-piece)"
+printf ':\n' >> "$TMP/rl-piece/tests/big.test.sh"; fx_commit "$TMP/rl-piece" "one test line"; RL_P2="$(git -C "$RL" rev-parse rl-piece)"
+rl_land() { ( cd "$RL" && . "$FC_LIB/worktree.sh" && _wt_release_check "$RL" "$RL_PLAN" "$1" "$2" "$TMP/rl-piece" rl-piece main 2>&1 ); }
+RL_OUT="$(rl_land "$RL_B" "$RL_P1")"; RC=$?
+expect_status "(rl1) the landing that only deletes code is admitted" 0 "$RC"
+RL_OUT="$(rl_land "$RL_P1" "$RL_P2")"; RC=$?
+expect_status "(rl2) the next landing, onto the deletion, which adds one test line, is admitted too" 0 "$RC"
+[ "$RC" = 0 ] || printf '      the landing said: %s\n' "$RL_OUT" | head -3
+OUT="$(cd "$RL" && env BIONIC_CHECK_HEAD="$RL_P2" BIONIC_CHECK_BASE="$RL_P1" BIONIC_CHECK_RELEASE="$RL_B" bash "$CHECK" "$LIST" 2>&1)"
+expect_eq "(rl3) the check as the runner calls it there counts the release's 40 characters of code" \
+  "test-ratio: 50/20 chars · limit 50 · room 0" "$(ratio_line)"
+OUT="$(cd "$RL" && env -u BIONIC_CHECK_RELEASE BIONIC_CHECK_HEAD="$RL_P2" BIONIC_CHECK_BASE="$RL_P1" bash "$CHECK" "$LIST" 2>&1)"
+expect_contains "(rl4) CONTROL with no release named, the same range is refused on the base's 20 characters" \
+  "release-check: test-ratio: 50/20 chars · limit 25" "$OUT"
 
 finish

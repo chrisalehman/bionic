@@ -645,15 +645,15 @@ ll_stamp() {  # <root> <row> <rc> — a clean stamp at the row's head naming a.t
 }
 RQ="$(ll_rworld)"; HQ="$(ll_head "$RQ")"
 ll_redsuite "$RQ" T1 a; ll_stamp "$RQ" T1 0
-expect_false "(q1-pre) the planted stamp is green proof to 1.12.0's reader" \
-  _wt_stale_proof "$RQ/.worktrees/T1" "$(git -C "$RQ/.worktrees/T1" rev-parse HEAD)"
+expect_true "(q1-pre) the planted stamp stands green at the row's head" \
+  grep -q "^stamp/v1|head=$(git -C "$RQ/.worktrees/T1" rev-parse HEAD)|dirty=0|rc=0|" "$(git -C "$RQ/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-stamps"
 ll_verb "$RQ" T1
 expect_eq "(q1) a green stamp beside a red candidate: red (exit 1)" "1" "$LL_RC"
 expect_match "(q1) …printing RED" "RED T1 a.test.sh *" "$LL_OUT"
 expect_eq "(q1) …and nothing is published" "$HQ" "$(ll_head "$RQ")"
 RQ2="$(ll_rworld)"; ll_stamp "$RQ2" T1 1
-expect_true "(q2-pre) the planted stamp is red to 1.12.0's reader" \
-  _wt_stale_proof "$RQ2/.worktrees/T1" "$(git -C "$RQ2/.worktrees/T1" rev-parse HEAD)"
+expect_true "(q2-pre) the planted stamp stands red at the row's head" \
+  grep -q "^stamp/v1|head=$(git -C "$RQ2/.worktrees/T1" rev-parse HEAD)|dirty=0|rc=1|" "$(git -C "$RQ2/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-stamps"
 ll_verb "$RQ2" T1
 expect_eq "(q2) a red stamp beside a green candidate: published (exit 0)" "0" "$LL_RC"
 
