@@ -132,7 +132,9 @@ reader_events() {  # <plan> -> the run's lines, in the order they were written; 
 }
 
 reader_facts() {  # <plan> -> one line per standing fact, in the order the facts were last set
-  [ -z "${BIONIC_COUNT:-}" ] || printf 'fold reader_facts\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  # Lines handed in on `-` are an overlay, pending lines laid over facts already folded, and are counted apart from a
+  # fold of the run's log.
+  [ -z "${BIONIC_COUNT:-}" ] || { if [ "${1:-}" = - ]; then printf 'overlay reader_facts\n'; else printf 'fold reader_facts\n'; fi; } 2>/dev/null >>"$BIONIC_COUNT" || :
   reader_events "$1" | awk -F'|' -v ids="$READER_IDENTITY" '
     BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) { e = index(a[i], "="); idk[substr(a[i], 1, e - 1)] = substr(a[i], e + 1) } }
     $1 != "run/v1" { next }
@@ -194,7 +196,15 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
     # question runs under pipefail, its caller's setting put back after, and the failure is its exit in-process too.
     shopt -qo pipefail || pf=off
     set -o pipefail
-    if [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null; else "$fn" "$plan" "$@"; fi; rc=$?
+    # INSIDE A HELD COMMAND (lib/proof.sh `_proof_held_dir`) the question reads the command's one fold of the log, the
+    # same facts a fold here would make, and no pending line laid over them: no second fold is made for it.
+    if declare -F _proof_held_dir >/dev/null 2>&1 && _proof_held_dir && _proof_facts "$plan" >/dev/null 2>&1 \
+       && [ -n "$_PROOF_FACTS_LOG" ] && [ "${_PROOF_FACTS_KEY%% *}" = "$plan" ]; then
+      ( reader_facts() { printf '%s' "$_PROOF_FACTS"; }
+        if [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null; else "$fn" "$plan" "$@"; fi )
+    elif [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null
+    else "$fn" "$plan" "$@"; fi
+    rc=$?
     [ "$pf" = on ] || set +o pipefail
     return "$rc"
   done

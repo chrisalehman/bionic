@@ -9,6 +9,7 @@
 #
 #   log     lib/reader.sh reader_events     a whole read of the run's log
 #   fold    lib/reader.sh reader_facts      a fold of the log into facts
+#   overlay lib/reader.sh reader_facts -    pending lines laid over facts already folded (a judgment's pending step)
 #   parse   lib/plan-read.sh _plan_read_lines  a parse of the plan
 #   table   lib/units.sh _units_read        a read of the plan's Tasks table (a memo's answer is no read)
 #   status  lib/reader.sh reader_q_status   one row's status asked
@@ -43,7 +44,7 @@
 #
 # ANTI-VACUITY (.claude/rules/test-harness.md, "Anti-vacuity"). The count extractor is proved on real output first:
 # §REPORTS reads every kind as non-zero somewhere before any later row reads a ceiling through `sc_count`, and every
-# command's lines are read whole against the eight known shapes. §PRINT compares only prints it has shown are not
+# command's lines are read whole against the nine known shapes. §PRINT compares only prints it has shown are not
 # empty. RED: with the counter lines taken out of the libraries, §REPORTS is red and §FIXTURE and §PRINT stay
 # green.
 #
@@ -77,7 +78,7 @@ SC_NOW=1791324000     # 2026-10-06T22:00:00Z
 SC_AT=2026-10-06T12:00:00Z
 SC_N=5
 SC_CMDS="card check tick resume watch"
-SC_KINDS="log fold parse table status facts gate"
+SC_KINDS="log fold overlay parse table status facts gate"
 SC_OUT="$TMPROOT/out"; mkdir -p "$SC_OUT"
 
 # ---------- the run ----------
@@ -240,8 +241,38 @@ for SC_SIZE in n 2n; do
   done
   for SC_C in $SC_CMDS; do
     expect_regex "REP-2 ($SC_SIZE) $SC_C counts its reads, each line a known kind and its function" \
-      '^([0-9]+ (log reader_events|fold reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|gate dispatch)( |$))+$' \
+      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|gate dispatch)( |$))+$' \
       "$(sort "$SC_OUT/$SC_SIZE.$SC_C.on.count" 2>/dev/null | uniq -c | awk '{ $1 = $1; print }' | paste -sd' ' -)"
+  done
+done
+
+section "§ONCE: one fold of the run's log a command, one answer of its facts at a head"
+# fails-when: a reader in any of the commands folds the run's log for itself, or a subshell or a process the command
+# starts is not served the command's one fold, or the facts at the head are judged a second time in one command; or
+# a judgment's pending step is laid over the fold more than once a gate pass.
+for SC_SIZE in n 2n; do
+  for SC_C in card check; do
+    expect_eq "ONCE-1 ($SC_SIZE) $SC_C folds the run's log once" 1 "$(sc_count "$SC_SIZE" "$SC_C" fold)"
+  done
+  for SC_C in card tick resume watch; do
+    expect_eq "ONCE-2 ($SC_SIZE) $SC_C answers the facts at its head once" 1 "$(sc_count "$SC_SIZE" "$SC_C" facts)"
+  done
+  expect_eq "ONCE-3 ($SC_SIZE) check judges at its step and asks no facts at a head" 0 "$(sc_count "$SC_SIZE" check facts)"
+  expect_eq "ONCE-4 ($SC_SIZE) check lays its pending step over the fold once, in its one gate pass" "1 1" \
+    "$(sc_count "$SC_SIZE" check overlay) $(sc_count "$SC_SIZE" check gate)"
+  for SC_C in $SC_CMDS; do
+    SC_O="$(sc_count "$SC_SIZE" "$SC_C" overlay)"; SC_G="$(sc_count "$SC_SIZE" "$SC_C" gate)"
+    expect_eq "ONCE-5 ($SC_SIZE) $SC_C lays a pending step over the fold no more than once a gate pass ($SC_O for $SC_G)" 1 \
+      "$([ "$SC_O" -le "$SC_G" ] && echo 1 || echo 0)"
+  done
+done
+
+section "§SCALE: the reads of the log and the facts do not grow with the rows"
+# fails-when: a whole read of the log, a fold, an overlay or a facts answer is made once a row, so a run of 2n rows
+# counts more of it than a run of n.
+for SC_C in $SC_CMDS; do
+  for SC_K in log fold overlay facts; do
+    expect_eq "SCALE-1 $SC_C counts the same $SC_K at n rows and 2n" "$(sc_count n "$SC_C" "$SC_K")" "$(sc_count 2n "$SC_C" "$SC_K")"
   done
 done
 
