@@ -945,7 +945,7 @@ ruling_clean() {  # <text> -> the text as a ruling carries it
 # Appends a ruling for <writer> and prints its id; 1 and nothing written when the text is empty
 # once cleaned, the writer is no name, or the roster cannot be written. Whether the writer's row is
 # live is the caller's question (`session-poker.sh rule` asks `roster_open_names`).
-ruling_record() {  # <roster> <writer> <text> -> the id
+ruling_record() {  # <roster> <writer> <text> [<key=value>...: what it grants] -> the id
   local f="${1:-}" w="${2:-}" t now id r flag
   t="$(ruling_clean "${3-}")"
   [ -n "$t" ] || return 1
@@ -953,7 +953,7 @@ ruling_record() {  # <roster> <writer> <text> -> the id
   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 1
   now="$(date +%s)"
   id="r${now}-$$"
-  _ruling_put "$f" "$w" "id=$id" "recorded=$now" "text=$t" || return 1
+  _ruling_put "$f" "$w" "id=$id" "recorded=$now" "${@:4}" "text=$t" || return 1
   for r in "${f%/*}"/roster-*.state; do
     [ "$r" = "$f" ] || /usr/bin/grep '^roster-state/' "$r" 2>/dev/null | /usr/bin/grep -qF "|name=${w}|" || continue
     flag="$(ruling_pending_flag "$r")" && : >> "$flag" 2>/dev/null

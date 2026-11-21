@@ -1093,5 +1093,14 @@ ll_verb "$SL" T1
 expect_eq "(sl3) AC-11.2 once both rows differ from their text at dispatch, the row lands" "0|" "$LL_RC|$(sl_stale)"
 expect_contains "(sl3) …LANDED" "LANDED T1 " "$LL_OUT"
 
+section "§GONE: a row that deletes a suite in its set lands with no command between, and the landing says the suite left the set (AC-24.3)"
+# fails-when: the row lands only once a command takes the suite out of its set, or lands saying nothing of it.
+GN="$(ll_world)"; ll_launch "$GN" T1 a,c; ( cd "$GN" && world_cost a.test.sh 5 && world_suite c green >/dev/null )
+git -C "$GN" add tests/c.test.sh && git -C "$GN" commit -qm "suite c" && git -C "$GN/.worktrees/T1" merge -q --no-edit wave/x
+git -C "$GN/.worktrees/T1" rm -q tests/c.test.sh && git -C "$GN/.worktrees/T1" commit -qm "T1: c removed"; ll_verb "$GN" T1
+expect_eq "(gn1) AC-24.3 the row lands on its first ready, a,c in its set and c deleted" "0" "$LL_RC"
+expect_contains "(gn1) …LANDED" "LANDED T1 " "$LL_OUT"
+expect_eq "(gn2) AC-24.3 the landing says c left the set, and a did not" "GONE T1 c.test.sh" "$(printf '%s\n' "$LL_OUT" | /usr/bin/grep '^GONE ' | cut -d' ' -f1-3)"
+
 # ---------------------------------------------------------------------------
 finish
