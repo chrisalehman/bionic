@@ -25,6 +25,7 @@
 #                 verb writes a ledger file.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
+#                 tests/lib/lint.sh, told the planted hook changed, names the same sites by line.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none. The tree event is folded in the reader alone: a second fold planted in a
 #                 script is found beside it, and the checkout holds the reader's one.
@@ -256,6 +257,14 @@ expect_eq "the dispatch library says a fact under a key for each of the wall's 4
 expect_eq "every piece of those facts is found in the library's own text" "$(printf '%s\n' "$DPIECES" | grep -c .)" "$(pieces_in "$L/dispatch.sh" | grep -c .)"
 expect_eq "no fact of the dispatch library is found in the wall's file" "" "$(pieces_in "$S/hooks/dispatch-preflight.sh")"
 expect_eq "the stop hook's file, which answers the stop of an agent, lists no refusal" "0" "$(own stop | grep -c .)"
+# The landing runs tests/lib/lint.sh over the files a row changed: told the planted hook alone changed, its REFUSALS
+# names every site the whole check lists there, by line; told only an unregistered file changed, it names none.
+LINT_LIB="${BIONIC_SCRIPTS_DIR}/tests/lib/lint.sh"
+lint_refusal_lines() { printf '%s\n' "$1" | bash "$LINT_LIB" "$S" 2>&1 | awk '$1 == "REFUSALS" { sub(/^hooks\/engage\.sh:/, "", $2); print $2, $3 }'; }
+expect_eq "lint.sh's REFUSALS over the changed hook names the ten planted sites" 10 "$(lint_refusal_lines hooks/engage.sh | grep -c .)"
+expect_eq "…each one a site the check lists in it, by line" \
+  "$(own engage "$AFTER" | tr '\n' ' ')" "$(lint_refusal_lines hooks/engage.sh | tr '\n' ' ')"
+expect_eq "…and over a changed file that is no registered hook it names none" "" "$(lint_refusal_lines payload/scripts/lib/planted-folds.sh)"
 # The stop guard's words are its facts and its details, each line cut at its facts and trimmed.
 DPIECES="$(bash -c '. "$1/refuse.sh" && . "$1/stop.sh" || exit 1
   for k in $(stop_guard_keys); do stop_guard_say "$k" @ @ @ @ @ @ && printf "%s\n%s\n" "$SG_FACT" "$SG_DETAIL"; done' _ "$L" \

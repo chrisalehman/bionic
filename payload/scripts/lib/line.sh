@@ -1319,14 +1319,14 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
           line_returned_event "$plan" "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
           _wt_refuse "conflict branch=${branch} onto=${onto} files=${c:-<unreadable>} — the row does not merge onto what is ahead of it; merge ${onto} into the tree, land again"; rc=2; break
         fi
-        # The comment lint the queue runs (`_line_carry` 3b), over the same range: a comment the row adds that cites
-        # the run returns the row with a LINT line per hit, and nothing publishes.
-        lo="$(_line_comment_lint "$root" "$base" "$c")"; lc=$?
+        # The lints the queue runs (`_line_carry` 3b), over the same range: a line the row adds that a lint refuses
+        # returns the row with a LINT line per hit, and nothing publishes.
+        lo="$(_line_lint_all "$root" "$lt" "$base" "$c")"; lc=$?
         case $lc in
           0) ;;
           1) line_returned_event "$plan" "row=${row}" why=lint "detail=$(printf '%s\n' "$lo" | head -1)" >/dev/null
              printf '%s\n' "$lo" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
-             _wt_refuse "lint branch=${branch} — a comment the row adds cites the run; say the reason without it, land again"; rc=2; break ;;
+             _wt_refuse "lint branch=${branch} — a line the row adds is refused by a lint, each named on a LINT line above; fix it there, land again"; rc=2; break ;;
           *) _wt_refuse "lint-unreadable row=${row} — ${lo:-the lint printed nothing}"; rc=2; break ;;
         esac
         _line_stale_say "$plan" "$row" "$root" "$base" "$c"; lc=$?
@@ -1911,10 +1911,11 @@ EOF
         *) _wt_refuse "anchors-unreadable row=${row} — ${c:-the check printed nothing}"; return 2 ;;
       esac
     fi
-    # 3b. THE COMMENT LINT, once per candidate and before any suite: a comment the row adds that cites the run
-    # returns the row to its writer, one LINT line per hit.
+    # 3b. THE LINTS, once per candidate and before any suite: the comment lint and the project's static checks over
+    # what the row changed. A line the row adds that one refuses returns the row to its writer, one LINT line per hit.
     if [ "$linted" != "$cand" ]; then
-      c="$(_line_comment_lint "$root" "$cbase" "$cand")"; rc=$?
+      [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
+      c="$(_line_lint_all "$root" "$_LINE_LT" "$cbase" "$cand")"; rc=$?
       case $rc in
         0) linted="$cand" ;;
         1) line_returned_event "$plan" "row=${row}" why=lint "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
@@ -2096,7 +2097,8 @@ function line_shapes(t,   b, e, f, s, n, i, a) {
   if (t ~ (b "D[0-9]+" e)) s = s ",decision"
   return substr(s, 2)
 }'
-# The added lines of a `git diff -U0` that carry a shape anywhere on them and are not moved: `<file> TAB <line>`.
+# The added lines of a `git diff -U0` that carry a shape anywhere on them and are not moved: `<file> TAB <line>`;
+# with -v all=1, every added line that is not moved.
 _LINE_ADDS_AWK='
 function line_trim(t) { sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); return t }
 /^diff --git / { hdr = 1; f = ""; next }
@@ -2110,7 +2112,7 @@ END {
   for (i = 1; i <= na; i++) {
     t = line_trim(AT[i])
     if (R[t] > 0) { R[t]--; continue }
-    if (line_shapes(AT[i]) != "") print AF[i] "\t" AL[i]
+    if (all || line_shapes(AT[i]) != "") print AF[i] "\t" AL[i]
   }
 }'
 # The comment on each wanted line of one file: `<line> TAB <comment>`. want= the line numbers, py=1 for python.
@@ -2207,6 +2209,51 @@ _line_comment_lint() {  # <root> <base> <candidate> -> `<file>:<line> <shapes>` 
   hits="$(printf '%s' "$hits" | awk 'NF')"
   [ -n "$hits" ] || return 0
   printf '%s\n' "$hits"
+  return 1
+}
+
+# EVERY LINT A LANDING RUNS over the range <base>..<candidate>, before any suite: the comment lint, then the project's
+# static checks. One hit a line, each check's own shape; 0 none · 1 hits · 2 a check unreadable, with its reason.
+_line_lint_all() {  # <root> <tree> <base> <candidate>
+  local a b ra rb
+  a="$(_line_comment_lint "$1" "$3" "$4")"; ra=$?
+  [ "$ra" -le 1 ] || { printf '%s\n' "$a"; return 2; }
+  b="$(_line_lints "$1" "$2" "$3" "$4")"; rb=$?
+  [ "$rb" -le 1 ] || { printf '%s\n' "$b"; return 2; }
+  [ "$ra$rb" != 00 ] || return 0
+  printf '%s\n' "$a" "$b" | awk 'NF'
+  return 1
+}
+
+# THE PROJECT'S STATIC CHECKS. A candidate that holds tests/lib/lint.sh is judged by that copy, run in <tree> pointed
+# at the candidate over every file the range changed, whatever the row's landing set names: a lint red is the row's to
+# fix at its own landing, not the next row's. A hit is the row's when it is on a line the range added (a moved line is
+# not added) or names no line, which the lint prints only of a file the range changed; a hit on an older line stands
+# from before and returns nothing. A candidate without the file has no static check to run. The lint's contract is its
+# file's header: `<CHECK> <file>[:<line>] <what>` per hit; rc 0 none, 1 hits, 2 a check that cannot run.
+_line_lints() {  # <root> <tree> <base> <candidate> -> the row's hits; 0 none · 1 hits · 2 unreadable, with the reason
+  local root="$1" t="$2" base="$3" cand="$4" paths diff out err rc
+  git -C "$root" cat-file -e "${cand}:tests/lib/lint.sh" 2>/dev/null || return 0
+  landing_tree_point "$t" "$cand" || { printf 'landing-tree-unpointable tree=%s base=%s\n' "$t" "$cand"; return 2; }
+  paths="$(git -C "$root" -c core.quotePath=false diff --name-only --no-renames "$base" "$cand" 2>&1)" \
+    || { printf 'diff-unreadable base=%s candidate=%s — %s\n' "$base" "$cand" "$(printf '%s\n' "$paths" | head -1)"; return 2; }
+  [ -n "$paths" ] || return 0
+  err="$(mktemp "${TMPDIR:-/tmp}/line-lint.XXXXXX")" || { printf 'no temporary file for the lint\n'; return 2; }
+  out="$(printf '%s\n' "$paths" | bash "$t/tests/lib/lint.sh" "$t" 2>"$err")"; rc=$?
+  case $rc in
+    0) rm -f "$err"; return 0 ;;
+    1) rm -f "$err" ;;
+    *) printf 'tests/lib/lint.sh exited %s — %s\n' "$rc" "$(head -1 "$err")"; rm -f "$err"; return 2 ;;
+  esac
+  diff="$(git -C "$root" -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --no-renames \
+    --src-prefix=a/ --dst-prefix=b/ "$base" "$cand" 2>&1)" \
+    || { printf 'diff-unreadable base=%s candidate=%s — %s\n' "$base" "$cand" "$(printf '%s\n' "$diff" | head -1)"; return 2; }
+  out="$(printf '%s\n' "$diff" | LC_ALL=C awk -v all=1 "$_LINE_SHAPES_AWK$_LINE_ADDS_AWK" \
+    | LINE_LINT_HITS="$out" LC_ALL=C awk -F'\t' 'BEGIN { n = split(ENVIRON["LINE_LINT_HITS"], H, "\n") } { A[$1 ":" $2] = 1 }
+      END { for (i = 1; i <= n; i++) { split(H[i], w, " "); if (H[i] == "") continue
+              if (w[2] !~ /:[0-9]+$/ || (w[2] in A)) print H[i] } }')"
+  [ -n "$out" ] || return 0
+  printf '%s\n' "$out"
   return 1
 }
 

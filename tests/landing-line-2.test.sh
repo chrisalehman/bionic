@@ -840,7 +840,7 @@ expect_eq "(o2) both land, T2 then T1" "0 0 T2 T1" \
   "$(cat "$WORLD_ROOT/o2-T2.out.rc" 2>/dev/null) $(cat "$WORLD_ROOT/o2-T1.out.rc" 2>/dev/null) $(ll_ev "$RO2" published | sed 's/.*|row=\([^|]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 
 # ---------------------------------------------------------------------------
-section "§LINT: a comment that cites the run is refused at its line; a tracked docs path, a test's fixture row ids and a .bionic/tmp path are accepted"
+section "§LINT: a comment that cites the run is refused at its line; a tracked docs path, a test's fixture row ids and a .bionic/tmp path are accepted; the project's static checks return a row at its own landing for a line it wrote"
 #
 # The landing line reads the comments a candidate adds to a shell file under payload/ or tests/ and refuses one that
 # names a wave or a record path, printing the file, the line and the shapes. A tracked docs path, a fixture's row ids
@@ -862,6 +862,36 @@ printf '%s\n' '# see docs/adrs/adr-001.md' '# scratch goes under .bionic/tmp/scr
 git -C "$LN_REPO" add -A && git -C "$LN_REPO" commit -qm tracked
 LN_OUT="$(_line_comment_lint "$LN_REPO" "$LN_CITED" "$(git -C "$LN_REPO" rev-parse HEAD)")"; LN_RC=$?
 expect_eq "(ln2) AC-16.2 a tracked docs path and a .bionic/tmp path in a script, and a test's T12 waits on T2, are accepted: rc 0, nothing named" "0|" "$LN_RC|$LN_OUT"
+# The project's static checks run at every landing over the files the row changed, from the candidate's own
+# tests/lib/lint.sh, whatever its landing set names, and a hit is the row's only on a line the row wrote. The base
+# holds hooks/old.sh, a refusal with no exit already over its ceiling. T1 adds a refusal with no exit; T2 adds one
+# that names its exit and a line to hooks/old.sh. Both land on a.test.sh alone, which runs no lint.
+# fails-when: the landing runs no lint, so T1 lands; or it judges the whole file, so T2 is returned for old.sh's line.
+LR="$(ll_world)"; mkdir -p "$LR/tests/lib" "$LR/hooks" "$LR/.worktrees/T1/hooks"
+cp "$REPO/tests/lib/lint.sh" "$LR/tests/lib/lint.sh"
+printf '%s\n' '#!/bin/bash' 'die "REFUSED — an old refusal"' > "$LR/hooks/old.sh"
+git -C "$LR" add tests/lib/lint.sh hooks/old.sh && git -C "$LR" commit -qm "world: the project's lint, and a standing red"
+printf '%s\n' '#!/bin/bash' 'die "REFUSED — nothing to run"' > "$LR/.worktrees/T1/hooks/x.sh"
+git -C "$LR/.worktrees/T1" add hooks/x.sh && git -C "$LR/.worktrees/T1" commit -qm "T1: a bare refusal"
+git -C "$LR/.worktrees/T2" merge -q wave/x
+printf '%s\n' '#!/bin/bash' 'die "REFUSED — y; needs: Dana — the reason"' > "$LR/.worktrees/T2/hooks/y.sh"
+printf '%s\n' 'echo more' >> "$LR/.worktrees/T2/hooks/old.sh"
+git -C "$LR/.worktrees/T2" add hooks && git -C "$LR/.worktrees/T2" commit -qm "T2: a refusal with its exit, a line beside a standing red"
+expect_eq "(ln3) the world's base is red on hooks/old.sh, the hit the lint names at its line" "1|EXIT hooks/old.sh:2" \
+  "$(printf '%s\n' hooks/old.sh | bash "$LR/tests/lib/lint.sh" "$LR" > "$WORLD_ROOT/ln3.base" 2>&1; echo $?)|$(cut -d' ' -f1-2 "$WORLD_ROOT/ln3.base")"
+ll_launch "$LR" T1 a.test.sh; ll_launch "$LR" T2 a.test.sh
+ll_verb "$LR" T1
+expect_eq "(ln3) AC-22.1 a row that adds a refusal with no exit is returned at its own landing though its landing set names no lint: rc 1, a LINT line naming the check, the file and the line" \
+  "1|LINT T1 EXIT hooks/x.sh:2" "$LL_RC|$(printf '%s\n' "$LL_OUT" | /usr/bin/grep '^LINT ' | cut -d' ' -f1-4)"
+expect_eq "(ln3) …the landing record returns the row for its lint and publishes nothing of it" "lint|0" \
+  "$(ll_field "$(ll_ev "$LR" returned | /usr/bin/grep '|row=T1|' | tail -1)" why)|$(ll_ev "$LR" published | /usr/bin/grep -c '|row=T1|')"
+ll_verb "$LR" T2
+expect_eq "(ln4) control: a refusal that names its exit, and a line beside a standing red, land with no LINT line" "0|0" \
+  "$LL_RC|$(printf '%s\n' "$LL_OUT" | /usr/bin/grep -c '^LINT ')"
+LN_H="$(ll_head "$LR")"
+LL_OUT="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$LR/.worktrees/T1" --by-hand --reason 'lint' 2>&1 )"; LL_RC=$?
+expect_eq "(ln5) the same row landed by hand is refused with the same LINT line, and the branch does not move" \
+  "2|LINT T1 EXIT hooks/x.sh:2|$LN_H" "$LL_RC|$(printf '%s\n' "$LL_OUT" | /usr/bin/grep '^LINT ' | cut -d' ' -f1-4)|$(ll_head "$LR")"
 
 # ============================================================================ the landing's settlement
 #
