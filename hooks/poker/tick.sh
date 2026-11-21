@@ -2875,30 +2875,57 @@ EOF
   # A CAUSE TOLD IS NOT TOLD AGAIN: BIONIC_WATCH_TOLD, when the watcher names it, is the file of causes its record has
   # told, which the line leaves out and the pass rewrites with the causes this print holds (lib/patrol.sh
   # `watch_wake_line`). By hand, with no file, every cause in a full print is named.
+  #
+  # A PASS OVER AN OPEN REQUEST ASKS ONE QUESTION when the watcher names BIONIC_WATCH_LOOK (`watch_look_still`): over a
+  # run that waits on its request alone and has not moved since the pass that ran the tick, the tick is not run again
+  # and the host is asked alone.
   poker_verb_watch_pass() {
-    local out err facts rc line iv_rc rest=no pr=no pr_root pr_plan
-    out="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
-      && err="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
-      && facts="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" || {
-      die "REFUSED — no scratch file for the tick's print; the pass did not run. Once the temporary directory takes a file, run again: bash $HOOK_DIR/session-poker.sh tick --watch"
-      exit "$WATCH_RC_REFUSED"
-    }
-    BIONIC_WATCH_FACTS="$facts" bash "$HOOK_DIR/${0##*/}" tick > "$out" 2> "$err"
-    rc=$?
-    cat "$err" >&2
-    case "$rc" in
-      0|1) ;;
-      *) rm -f "$out" "$err" "$facts"
-         die "REFUSED — the tick refused (exit $rc); this pass decided nothing. Its refusal is printed above; mend what it names, then run again: bash $HOOK_DIR/session-poker.sh tick --watch"
-         exit "$WATCH_RC_REFUSED" ;;
-    esac
-    line="$(watch_wake_line "$out" "${BIONIC_WATCH_TOLD:-}")"
-    [ -n "$line" ] || line="$(watch_person_wake "$out" "$facts")"
-    /usr/bin/grep -q '^watch-facts/v[0-9]*|rest=yes' "$facts" 2>/dev/null && rest=yes
-    if /usr/bin/grep -q '^watch-facts/v[0-9]*|.*|pr=open' "$facts" 2>/dev/null; then
-      pr=open; pr_root="$(sed -n 's/^pr-root=//p' "$facts" | head -1)"; pr_plan="$(sed -n 's/^pr-plan=//p' "$facts" | head -1)"
+    local out err facts rc line="" iv_rc rest=no pr=no pr_root pr_plan look="" root stamp="" tok=""
+    [ -n "${BIONIC_WATCH_LOOK:-}" ] && [ -f "$BIONIC_WATCH_LOOK" ] && [ ! -L "$BIONIC_WATCH_LOOK" ] && look="$BIONIC_WATCH_LOOK"
+    root="$(tick_state_root)" || root=""
+    if [ -n "$look" ] && watch_look_still "$look" "$root"; then
+      pr=open; pr_root="$WL_PR_ROOT"; pr_plan="$WL_PR_PLAN"
+    else
+      out="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
+        && err="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" \
+        && facts="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" || {
+        die "REFUSED — no scratch file for the tick's print; the pass did not run. Once the temporary directory takes a file, run again: bash $HOOK_DIR/session-poker.sh tick --watch"
+        exit "$WATCH_RC_REFUSED"
+      }
+      # The look is emptied before the tick, so a pass that ends any way but kept leaves none; the stamp is made before
+      # the token is taken, and both before the tick reads anything, so a change made while it runs is a change seen.
+      if [ -n "$look" ] && [ -n "$root" ]; then
+        : > "$look" 2>/dev/null
+        stamp="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pass.XXXXXX" 2>/dev/null)" && tok="$(watch_look_token "$root")" || { [ -z "$stamp" ] || rm -f "$stamp"; stamp=""; }
+      fi
+      BIONIC_WATCH_FACTS="$facts" bash "$HOOK_DIR/${0##*/}" tick > "$out" 2> "$err"
+      rc=$?
+      cat "$err" >&2
+      case "$rc" in
+        0|1) ;;
+        *) rm -f "$out" "$err" "$facts" ${stamp:+"$stamp"}
+           die "REFUSED — the tick refused (exit $rc); this pass decided nothing. Its refusal is printed above; mend what it names, then run again: bash $HOOK_DIR/session-poker.sh tick --watch"
+           exit "$WATCH_RC_REFUSED" ;;
+      esac
+      line="$(watch_wake_line "$out" "${BIONIC_WATCH_TOLD:-}")"
+      [ -n "$line" ] || line="$(watch_person_wake "$out" "$facts")"
+      /usr/bin/grep -q '^watch-facts/v[0-9]*|rest=yes' "$facts" 2>/dev/null && rest=yes
+      if /usr/bin/grep -q '^watch-facts/v[0-9]*|.*|pr=open' "$facts" 2>/dev/null; then
+        pr=open; pr_root="$(sed -n 's/^pr-root=//p' "$facts" | head -1)"; pr_plan="$(sed -n 's/^pr-plan=//p' "$facts" | head -1)"
+      fi
+      # KEPT ONLY over a tick that woke nothing and left the run waiting on its request alone (the band QUIET, no row out,
+      # nothing ready, no run detached: `tick_waits_only_on_person`), whose own writes moved nothing it reads. A row out
+      # is what the tick's clock reads (a writer quiet past its cadence, past its duration, gone), so no look is kept
+      # while one is.
+      if [ -n "$stamp" ]; then
+        if [ -z "$line" ] && [ "$pr" = open ] && /usr/bin/grep -q '^watch-facts/v[0-9]*|rest=no|why=pull-request|' "$facts" 2>/dev/null \
+           && [ "$(watch_look_token "$root")" = "$tok" ] && ! watch_look_docs_moved "$pr_plan" "$stamp"; then
+          watch_look_keep "$look" "$stamp" "$tok" "$root" "$pr_root" "$pr_plan"
+        fi
+        rm -f "$stamp"
+      fi
+      rm -f "$out" "$err" "$facts"
     fi
-    rm -f "$out" "$err" "$facts"
     if [ -n "${BIONIC_WATCH_PR:-}" ] && [ ! -L "$BIONIC_WATCH_PR" ]; then
       if [ "$pr" = open ]; then printf 'open\n' > "$BIONIC_WATCH_PR"; else : > "$BIONIC_WATCH_PR"; fi
     fi 2>/dev/null
@@ -2914,6 +2941,67 @@ EOF
     fi
     [ "$rest" = no ] || exit "$WATCH_RC_REST"
     exit "$WATCH_RC_QUIET"
+  }
+
+  # ---------------------------------------------------------------- the look a pass keeps over an open request
+  #
+  # WHILE THE RUN WAITS ON ITS REQUEST ALONE, ITS TICK CHANGES ONLY WHEN SOMETHING IT READS DOES, and a print that did
+  # not change wakes nothing (lib/patrol.sh `watch_wake_line`). So the pass that ran the tick over such a run keeps a
+  # look in the file BIONIC_WATCH_LOOK names (hooks/watch.sh makes it for the watcher's life): a token of what the
+  # project holds, and the file's own mtime, set to the instant before the tick began. A later pass whose token is the
+  # same and under whose docs root nothing is newer runs no tick; anything else runs it. The merge is in neither, as the
+  # host merging moves nothing here until the fetch, which `watch_merge_look` makes on every pass; the fetch that moves
+  # the integration branch moves the token, so the pass after it runs the tick.
+  #
+  # WHAT THE TOKEN COVERS, A SUPERSET OF WHAT THE TICK READS: the project's git (the head, every ref, the status and the
+  # tracked diff), each file of its state directory two deep but the tick's and the watcher's own (the digest, the
+  # running record, the watch record, the close's account), and its config, each by name, size and mtime to the
+  # nanosecond where the platform has it. The docs root is read by mtime alone, as it is the one tree too large to list
+  # on every pass; its folders count, so a file removed or moved in is newer too. Doubt runs the tick: a look that
+  # cannot be read, a root that moved, a plan gone or a docs root not found keeps nothing.
+  _watch_look_stat() {  # <find arguments> -> `<name>|<size>|<mtime>` of each file found
+    if stat -c %n / >/dev/null 2>&1; then find "$@" -exec stat -c '%n|%s|%y' {} + 2>/dev/null
+    else find "$@" -exec stat -f '%N|%z|%Fm' {} + 2>/dev/null; fi
+  }
+  watch_look_token() {  # <root> -> one token, `<cksum>-<bytes>`; rc 1 with no root
+    local root="${1:-}"
+    [ -d "$root" ] || return 1
+    {
+      git -C "$root" rev-parse HEAD 2>&1
+      git -C "$root" for-each-ref 2>&1
+      git -C "$root" status --porcelain 2>&1
+      git -C "$root" diff --no-ext-diff --no-color HEAD 2>&1
+      [ ! -d "$root/.bionic/tmp" ] || _watch_look_stat "$root/.bionic/tmp" -maxdepth 2 -type f \
+        ! -name 'tick-digest-*' ! -name 'tick-run-*' ! -name 'watch-*' ! -name 'close-*'
+      _watch_look_stat "$root/.bionic" -maxdepth 1 -type f -name config.yaml
+    } | LC_ALL=C sort | cksum | awk '{ print $1 "-" $2 }'
+  }
+  # watch_look_docs_moved <plan> <reference file> -> rc 0 when anything under the plan's docs root
+  # (<docs>/plans/<epic>/<wave>.plan.md) is newer than the reference, or no such root is found. The plan's own folder
+  # is left out as a folder, not its files: the judge's dry copy is made and removed beside the plan on every tick.
+  watch_look_docs_moved() {
+    local docs="${1:-}"
+    docs="${docs%/*}"; docs="${docs%/*}"
+    [ "${docs##*/}" = plans ] || return 0
+    docs="${docs%/*}"
+    [ -d "$docs" ] && [ -f "${2:-}" ] || return 0
+    [ -n "$(find -H "$docs" -newer "$2" -print 2>/dev/null | /usr/bin/grep -vxF -m1 -- "${1%/*}")" ]
+  }
+  watch_look_keep() {  # <look> <stamp> <token> <root> <pr root> <pr plan> -> the look written, its mtime the stamp's
+    { printf 'watch-look/v1\ntoken=%s\nroot=%s\npr-root=%s\npr-plan=%s\n' "$3" "$4" "$5" "$6" > "$1" \
+      && touch -r "$2" "$1"; } 2>/dev/null || : > "$1" 2>/dev/null
+  }
+  # watch_look_still <look> <root> -> rc 0 when the look was kept at this root and nothing it covers has moved since,
+  # with WL_PR_ROOT and WL_PR_PLAN set from it
+  watch_look_still() {
+    local f="${1:-}" tok r
+    WL_PR_ROOT=""; WL_PR_PLAN=""
+    [ -s "$f" ] && [ ! -L "$f" ] && [ -n "${2:-}" ] || return 1
+    [ "$(head -1 "$f" 2>/dev/null)" = watch-look/v1 ] || return 1
+    tok="$(sed -n 's/^token=//p' "$f" | head -1)"; r="$(sed -n 's/^root=//p' "$f" | head -1)"
+    WL_PR_ROOT="$(sed -n 's/^pr-root=//p' "$f" | head -1)"; WL_PR_PLAN="$(sed -n 's/^pr-plan=//p' "$f" | head -1)"
+    [ -n "$tok" ] && [ "$r" = "$2" ] && [ -d "$WL_PR_ROOT" ] && [ -f "$WL_PR_PLAN" ] || return 1
+    [ "$(watch_look_token "$r")" = "$tok" ] && ! watch_look_docs_moved "$WL_PR_PLAN" "$f"
   }
 
   # watch_merge_look <root> <plan> -> the wake line once the merge of the run's open pull request can be reached, or

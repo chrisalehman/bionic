@@ -469,6 +469,20 @@ wh_start "$RHQ" Stop; wh_wait
 expect_eq "HQ4 the same world with a request denied: the watcher wakes" "$WP_WAKE" "$WH_RC"
 expect_regex "HQ4.a …with the gate's line on stderr" '^bionic watch: GATE ' "$WH_ERR"
 
+section "§HOOK-LOOK: the watcher keeps one file for what its passes read, for as long as it runs"
+# fails-when: the watcher names no file for its passes' look, so each pass over an open request runs the whole tick; or
+# the file outlives the watcher, so a killed watcher leaves a file in the temporary folder for every day of the watch.
+# wl_files -> the look files in the watcher's own temporary folder
+wl_files() { find "$TMPROOT/wl-tmp" -maxdepth 1 -name 'bionic-watch-look.*' 2>/dev/null | wc -l | tr -d ' '; }
+mkdir -p "$TMPROOT/wl-tmp"
+plant_answer "$WP_TR" fresh "busy:running"
+RHL="$(wp_quiet_world wh-look)"; wh_fast "$RHL"
+wh_start "$RHL" Stop TMPDIR="$TMPROOT/wl-tmp"
+wh_passes "$RHL" 2
+expect_eq "HK1 the watcher is running, two passes made, and it holds one look file" "2|1" "$WH_SEEN|$(wl_files)"
+wh_kill
+expect_eq "HK2 …the watcher ended, and the file went with it" "0" "$(wl_files)"
+
 section "§HOOK-REST: a run that waits only on the person ends the watcher silently, its record saying why (AC-10.1, the suite's half)"
 wp_person_world wh-person
 RHP="$WP_R"; wh_fast "$RHP"
