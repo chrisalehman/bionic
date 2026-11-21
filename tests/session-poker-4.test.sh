@@ -1391,6 +1391,53 @@ expect_eq "ST-7d …with its proof at the new head" "1" "$(s46_proved "$PST" | /
 # The same beside a configured command: regression-command: names the stub, and the verb books its run as for none.
 ST_H3="$(s57_commit "$ST_WT" lib/c.sh H3)"; printf 'regression-command: bash tests/run.sh\n' > "$RST/.bionic/config.yaml"
 : > "$ST_CTL/hold"; st_beside "${ST_H3:0:8}" ST-8; rm -f "$ST_CTL/hold" "$RST/.bionic/config.yaml"
+
+# A DECLINED START SAYS WHY. The head below owes a whole run and each reason the tick has for not
+# starting it is one line, `regression: not started — <cause>; starts when <what>`. The reasons are met one at a time
+# in the order the tick weighs them, each at a head past the last proof; a writer whose row waits on the regression is
+# no reason, while another writer beside it still is.
+# fails-when: the decline line dropped on the writer-open branch; a writer whose row waits on the regression counted as
+# a reason, or every open writer taken for one that waits on it; a reason that prints nothing.
+st_decl() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: regression: not started — '; }
+st_row() {  # <row line> -> the line added to the plan's Tasks table, after the T5 row
+  awk -v r="$1" '{ print } /^\| T5 \| 5 \| verify/ { print r }' "$PST" > "$PST.tmp" && mv "$PST.tmp" "$PST"
+}
+st_dispatched() { printf 'run/v1|ev=dispatch|row=%s|name=%s|at=2026-10-04T00:3%s:00Z\n' "$1" "$2" "$3" >> "$(plan_fixture_log "$PST")" && seal_fixture "$PST" "$(plan_fixture_log "$PST")"; }
+st_landed() { printf 'run/v1|ev=published|row=%s|at=2026-10-04T00:3%s:00Z\n' "$1" "$2" >> "$(plan_fixture_log "$PST")" && seal_fixture "$PST" "$(plan_fixture_log "$PST")"; }
+: > "$ST_CTL/hold"
+forget_digest "$RST"; poke "$RST" tick
+expect_eq "ST-9 AC-10.1 a whole run at the head left its log and no proof: the tick says so and starts none" \
+  "poker: regression: not started — a whole run at ${ST_H3:0:8} left its log (record/wave-01-fixture/regression-run-$ST_H3.log); starts when the head moves past it|" "$(st_decl)|$(st_started)"
+ST_H4="$(s57_commit "$ST_WT" lib/d.sh H4)"
+st_row '| T7 | 4 | build | a ready build | — | 30 | REQ-1 | e.sh | — |'
+forget_digest "$RST"; poke "$RST" tick
+expect_eq "ST-10 AC-10.1 a row ready at the head past the proof: the tick says which, and starts none" \
+  "poker: regression: not started — a row is ready: T7; starts when no row is ready|" "$(st_decl)|$(st_started)"
+st_landed T7 1
+st_row '| T8 | 4 | build | a build under way | — | 30 | REQ-1 | f.sh | — |'
+st_row '| T9 | 4 | verify | a check that waits on the whole run | proof:regression | 30 | REQ-1 | — | — |'
+st_dispatched T8 w-T8 3; st_dispatched T9 w-T9 4
+add_row "$RST" name=w-T8 agent_id=a-w-T8 subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$RST/record/T8.md" duration=60m
+add_row "$RST" name=w-T9 agent_id=a-w-T9 subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$RST/record/T9.md" duration=60m
+forget_digest "$RST"; poke "$RST" tick
+expect_eq "ST-11 AC-10.1 AC-10.2 two writers open, T9's row waits on the regression and T8's does not: the line names T8's writer alone" \
+  "poker: regression: not started — a writer is open: w-T8; starts when it closes|" "$(st_decl)|$(st_started)"
+ack_rows "$RST" w-T8
+forget_digest "$RST"; poke "$RST" tick
+expect_eq "ST-12 AC-10.1 T8 closed its writer and has not landed, the regression waits on it: the line names the row" \
+  "poker: regression: not started — a row the regression waits on has not landed: T8; starts when it lands|" "$(st_decl)|$(st_started)"
+st_landed T8 5
+printf 'dirt\n' >> "$ST_WT/lib/a.sh"
+forget_digest "$RST"; poke "$RST" tick
+expect_eq "ST-13 AC-10.1 a checkout with uncommitted changes: the line names it" \
+  "poker: regression: not started — the working checkout has uncommitted changes; starts when it is committed or cleaned|" "$(st_decl)|$(st_started)"
+git -C "$ST_WT" checkout -q -- lib/a.sh
+forget_digest "$RST"; poke "$RST" tick
+expect_eq "ST-14 AC-10.2 the one open writer is T9's, whose row waits on the regression: the tick starts it, and says no decline" \
+  "regression-run started regression@${ST_H4:0:8} (log $(st_log "${ST_H4:0:8}"))|" "$(st_started | sed 's/^poker: //')|$(st_decl)"
+[ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
+rm -f "$ST_CTL/hold"
+expect_true "ST-14b …and its run ends" st_until 60 st_ended "$(st_log "${ST_H4:0:8}")"
 POKE_BOUND="$ST_BOUND_WAS"
 
 

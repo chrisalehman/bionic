@@ -1056,6 +1056,13 @@ for v in 's/: evidence |/: evidense |/' 's/: evidence |/: |/' 's/: evidence |/: 
 expect_eq "DEPS-5 at 15 the validator holds the questions tag to the verb's rule: a word outside the set, an empty tag, a question twice, a tag on a row no review" \
   "|0 T6: task declares questions: evidense, $DQ_TAIL T6: task declares questions: (empty), $DQ_TAIL T6: task declares questions: evidence,evidence, $DQ_TAIL T3: task declares questions: structure; only a review row is dealt questions" "$DQ_OUT"
 
+CV="$SANDBOX/cover/plans/cv.plan.md"; mkdir -p "${CV%/*}" "$SANDBOX/cover/record/cv"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | b | — | 30m | R | src/a.sh | — |\n| T2 | 6 | review | r | T1 | 30m | R | r/T2.md | — |\n| T3 | 7 | doc | d | T2 | 30m | R | CHANGELOG.md | — |\n' > "$CV"
+printf 'run/v1|ev=%s|at=2026-10-20T00:00:0%sZ\n' 'step|n=7' 1 'approval|key=step3|by=me|said=approved' 2 'published|row=T1' 3 > "$SANDBOX/cover/record/cv/run.log"
+cv() { ( export UNITS_READINGS_STATE="$1"; call units_waiting "$CV" 7 | awk -F'\t' '$1 == "T3" && $2 == "T2"' | wc -l | tr -d ' ' ); }
+CV_A="$(cv covered)"; printf 'run/v1|ev=proof|kind=review|head=%s|question=adversarial|result=pass|scope=piece|at=2026-10-20T00:00:05Z\n' "$(printf 'a%.0s' {1..40})" >> "$SANDBOX/cover/record/cv/run.log"
+expect_eq "COVER-1 a dep on a review row is met by cover: unregistered it waits though the judge reads covered; registered it waits while a question is uncovered and no longer once covered" \
+  "1|1|0" "$CV_A|$(cv 'review adversarial critic piece uncovered')|$(cv covered)"
 section "§HELD — inside a held command the table's answer and the status pass are kept for the command, keyed by what they read"
 # fails-when: a read inside a held command is not served the command's one read (the count grows), or a plan edited or a
 # fact of a row set during the command is served the answer kept before it (a stale read), or anything is kept outside a

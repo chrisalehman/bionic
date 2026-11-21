@@ -550,4 +550,31 @@ expect_eq "DA.3 a read-only role launched from inside an agent: admitted with no
 expect_eq "DA.3b …its items touched once, in one call" "$(do_want 1)|1" "$(do_touches)|$DO_CALLS"
 expect_eq "DA.3c …and advised at their new counts" "$DO_LINES" "$DO_SAID"
 
+section "§START — the call start prints is admitted by the wall as printed, and names the role, the tree, the branch and the brief (REQ-14 AC-14.2)"
+# ============================================================================
+# FIXTURE: pf_repo's bound, approved run at Step 4 on its working branch, which its header names; one complex build
+# row, the orchestrator's edit, sealed again. The call is the JSON start prints, put whole as an Agent payload's
+# tool_input; the control takes the brief's line out of the same call.
+# fails-when: the wall refuses the printed call, or it lacks the role, the tree, the branch or the brief.
+ST_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+REPO=$(pf_repo rst1); write_attestation "$REPO" "$SID_A"; ST_P="$(pf_plan_path "$REPO")"; ST_R="$(cd "$REPO" && pwd -P)"
+awk 'NR == 2 { print "working-branch: wave/99-test" } { print }' "$ST_P" > "$ST_P.t" && mv "$ST_P.t" "$ST_P"
+pf_tasks "$REPO" '| T7 | 4 | build | Start the row. One verb starts it. · complexity: complex | — | 30 | REQ-1 | lib/s.sh, tests/a.test.sh, .bionic/docs/record/wave-01-test/T7.md | record/wave-01-test/T7.md |'
+seal_fixture "$ST_P" "$REPO/.bionic/docs/record/wave-01-test/run.log"
+ST_OUT="$(cd "$REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ST_POKER" start T7 2>&1)"
+ST_CALL="$(printf '%s\n' "$ST_OUT" | sed -n 's/^poker: start — dispatch: //p')"
+st_gate() {  # <tool_input json>
+  run_gate "$(jq -n --arg s "$SID_A" --arg c "$REPO" --arg t "$S5_LIVE_TRANSCRIPT" --argjson i "$1" \
+    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent", tool_input:$i, tool_use_id:"toolu_start"}')"
+}
+expect_eq "ST.1 start prints the call, a JSON object (its output whole when not)" "object" "$(jq -r type <<< "$ST_CALL" 2>/dev/null || printf '%s' "$ST_OUT")"
+expect_eq "ST.2 AC-14.2 the call names the role, and the brief on its prompt's first line" \
+  "bionic:senior-implementor|.bionic/docs/record/wave-01-test/briefs/T7.md" "$(jq -r '.subagent_type + "|" + (.prompt | split("\n")[0])' <<< "$ST_CALL")"
+expect_contains "ST.2b …the tree and the branch" "$ST_R/.worktrees/01-T7, branch wt/01-T7" "$(jq -r .prompt <<< "$ST_CALL")"
+st_gate "$(jq '.prompt |= (split("\n")[1:] | join("\n"))' <<< "$ST_CALL")"
+expect_eq "ST.3 control: the same call without its brief's line is refused" "deny" "$GATE_VERDICT"
+expect_contains "ST.3b …as naming no brief file of its row" "the prompt names no brief file of row T7" "$GATE_REASON"
+st_gate "$ST_CALL"
+expect_eq "ST.4 AC-14.2 the wall admits the call as printed" "allow" "$GATE_VERDICT${GATE_REASON:+ — $GATE_REASON}"
+
 finish

@@ -214,6 +214,7 @@ proof_waiver_line() {
 #   finding  ref=<record>#<n> to=<defer|fix> by=<who> words=<words> session=<sid> why=<why> [severity= reach= title=]
 #            [stated=<the changelog sentence>]                                            a person's move
 #   finding  ref=<record>#<n> to=<fixed|carried> row=<T> by=<who> [landing=<commit>]       a move to a row
+#   finding  ref=<record>#<n> [to=<deferred|defer>] stated=<the sentence> by=<who>          a sentence, moving nothing
 #
 # words, why and stated hold `\` and `"` escaped, as the plan's quoted fields held them. RUN_LOG is set for the one
 # call and never exported, so the caller's shell keeps its own. Exit 0 appended; 2 when the plan has no
@@ -772,16 +773,17 @@ proof_finding_rating() {
 }
 
 # proof_finding_stated <plan> <record>#<n> -> the finding's one changelog sentence, unescaped, nothing when none is given;
-# exit 1 when the run never deferred it, 2 when the fold fails. Every event of the finding is read, not its standing
-# fact alone: that is its newest word, and a move written after the deferral replaces it without the sentence. The
-# newest sentence given is the one.
+# exit 1 when the run never deferred it (the sentence a carry would take is printed all the same), 2 when the fold
+# fails. Every event of the finding is read, not its standing fact alone: that is its newest word, and a move written
+# after the deferral replaces it without the sentence. The newest sentence given is the one.
 proof_finding_stated() {
-  local ev l
+  local ev l rc
   _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
   l="$(printf '%s\n' "$ev" | awk -v id="$2" "$(proof_bind_awk)"'
     proof_bound($0) == id { if (proof_defers($0)) d = 1; v = proof_fkv($0, "stated"); if (v != "") st = v }
-    END { if (!d) exit 1; print st }')" || return 1
+    END { print st; exit !d }')"; rc=$?
   [ -z "$l" ] || printf '%s\n' "$l" | sed -e 's/\\\(.\)/\1/g'
+  return "$rc"
 }
 
 # proof_finding_deferrals <plan> <record path> <proof_findings lines> -> one deferral event in the plan's run log for
@@ -1654,7 +1656,9 @@ proof_awk() {
 #
 #     proof_fkv(line, key)    the value of a field of a finding event, else ""
 #     proof_bound(line)       the `<record>#<n>` a finding event is keyed to, else ""
-#     proof_binds(line, rec)  1 when the event is keyed to a finding of the record <rec>
+#     proof_binding(line)     1 when the event is keyed to a finding and says where it goes (`to=`): a Known-limits
+#                             sentence alone rates nothing, so it binds no pass
+#     proof_binds(line, rec)  1 when the event is binding and keyed to a finding of the record <rec>
 #     proof_defers(line)      1 when the event is a deferral: the registration's, or a move to defer that carries the
 #                             finding's rating
 #     proof_move_of(line)     `defer` or `fix` when the event is a whole move (who, when, the words and why, as
@@ -1669,7 +1673,8 @@ proof_bind_awk() {
       return ""
     }
     function proof_bound(s) { return (index(s, "run/v1|ev=finding|") == 1) ? proof_fkv(s, "ref") : "" }
-    function proof_binds(s, rec) { return index(proof_bound(s), rec "#") == 1 }
+    function proof_binding(s) { return proof_bound(s) != "" && proof_fkv(s, "to") != "" }
+    function proof_binds(s, rec) { return proof_binding(s) && index(proof_bound(s), rec "#") == 1 }
     function proof_defers(s,   t) {
       t = proof_fkv(s, "to")
       return proof_bound(s) != "" && (t == "deferred" || (t == "defer" && proof_fkv(s, "severity") != ""))
@@ -2227,7 +2232,7 @@ proof_readings_derived() {
 $(printf '%s\n\034\n%s\n' "$ev" "$pl" | PROOF_HAS_FIXED="${fixed:+1}" awk "$(proof_awk)$(proof_bind_awk)"'
     $0 == "\034" { proofs = 1; next }
     !proofs {
-      if (proof_bound($0) == "") next
+      if (!proof_binding($0)) next
       nbind++; id = proof_bound($0); ids[id] = 1
       m = proof_move_of($0); if (m != "") mv[id] = m
       next
