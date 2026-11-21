@@ -30,6 +30,11 @@
 # and watched for its merge, wakes the model once (the turn's end starts a fresh watcher), and with neither it rests at
 # its limit. The pass says whether it watched the request in the file BIONIC_WATCH_PR names.
 #
+# A PASS OVER AN OPEN REQUEST ASKS ONE QUESTION. The file BIONIC_WATCH_LOOK names, made here for the watcher's life and
+# removed with it, is where a pass keeps its look at a run that waits on its request alone, so the next runs the tick
+# again only when what it reads has changed; the host is asked on every pass (hooks/poker/tick.sh `watch_look_still`).
+# A new watcher starts with an empty file, so its first pass runs the tick.
+#
 # AT MOST ONE A SESSION: the record is the lock (lib/patrol.sh `watch_claim`). A second watcher, from a second turn
 # end, finds the first alive and ends at once and silently.
 #
@@ -97,7 +102,8 @@ W_CLI="$(alive_holder "$W_SID" 2>/dev/null)" || W_CLI=""
 W_SLEEP=""
 W_PR="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-pr.XXXXXX" 2>/dev/null)" || W_PR=""
 W_TOLD="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-told.XXXXXX" 2>/dev/null)" || W_TOLD=""
-trap 'rm -f ${W_PR:+"$W_PR"} ${W_TOLD:+"$W_TOLD"}' EXIT
+W_LOOK="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-look.XXXXXX" 2>/dev/null)" || W_LOOK=""
+trap 'rm -f ${W_PR:+"$W_PR"} ${W_TOLD:+"$W_TOLD"} ${W_LOOK:+"$W_LOOK"}' EXIT
 trap '[ -z "$W_SLEEP" ] || kill "$W_SLEEP" 2>/dev/null; exit 143' TERM INT HUP
 
 w_rest() { watch_rest "$W_ROOT" "$W_SID" "$$" "$1" >/dev/null 2>&1; exit 0; }
@@ -134,7 +140,7 @@ while :; do
   fi
 
   [ -z "$W_TOLD" ] || watch_causes "$W_ROOT" "$W_SID" > "$W_TOLD" 2>/dev/null
-  W_LINE="$(BIONIC_WATCH_PR="$W_PR" BIONIC_WATCH_TOLD="$W_TOLD" bash "$W_POKER" tick --watch 2>/dev/null)"
+  W_LINE="$(BIONIC_WATCH_PR="$W_PR" BIONIC_WATCH_TOLD="$W_TOLD" BIONIC_WATCH_LOOK="$W_LOOK" bash "$W_POKER" tick --watch 2>/dev/null)"
   W_RC=$?
   [ -z "$W_TOLD" ] || watch_woke "$W_ROOT" "$W_SID" "$$" "$W_TOLD" >/dev/null 2>&1
   case "$W_RC" in

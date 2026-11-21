@@ -415,6 +415,43 @@ fi
   for SC_SIZE in n 2n; do for SC_C in $SC_CMDS; do sc_print "$SC_SIZE" "$SC_C" on > "$SPEED_COUNTS_PRINTS/$SC_SIZE.$SC_C.txt"; done; done
   cp "$SC_OUT"/*.judge-* "$SPEED_COUNTS_PRINTS/" 2>/dev/null; }
 
+section "§WATCH-ONE: with the request open and nothing the tick reads changed, the watcher's pass asks the host one question"
+# fails-when: a pass over an unchanged run, the request open, runs the tick again (a gate pass, a fold of the log, a
+# status pass, a read of the table or a facts answer is counted); makes no fetch; prints; or counts more at 2n rows than
+# at n. The first passes run the tick and settle the file the watcher keeps its look in (BIONIC_WATCH_LOOK): a fetch that
+# moves origin/main, which the tick reads, makes the next pass run it once more, so the third is the one sure to be unchanged.
+# sc_watch_seq <size> -> three passes in one world, one look file, each with its own counts and prints:
+# $SC_OUT/<size>.watchseq.<i>.{count,out,err,rc}, and .fetched for the third (its FETCH_HEAD made new by that pass)
+sc_watch_seq() {
+  local size="$1" i f
+  rm -rf "$TMPROOT/$size/live" && cp -Rp "$TMPROOT/$size/snap" "$TMPROOT/$size/live" || return 1
+  SC_W="$TMPROOT/$size/live"; SC_ROOT="$SC_W/proj"; SC_PLAN="$SC_ROOT/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
+  : > "$SC_W/look"
+  for i in 1 2 3; do
+    f="$SC_OUT/$size.watchseq.$i"; : > "$f.count"; rm -f "$SC_ROOT/.git/FETCH_HEAD"
+    BIONIC_COUNT="$f.count" BIONIC_WATCH_LOOK="$SC_W/look" sc_env "$POKER" tick --watch > "$f.out" 2> "$f.err"
+    printf '%s\n' "$?" > "$f.rc"
+    [ -f "$SC_ROOT/.git/FETCH_HEAD" ] && echo yes > "$f.fetched" || echo no > "$f.fetched"
+  done
+}
+sc_seq_count() { awk -v k="$3" '$1 == k { n++ } END { print n + 0 }' "$SC_OUT/$1.watchseq.$2.count" 2>/dev/null || echo 0; }   # <size> <i> <kind>
+for SC_SIZE in n 2n; do
+  sc_watch_seq "$SC_SIZE"
+  expect_eq "WO-1 ($SC_SIZE) the first pass runs the tick, so the extractor reads real counts (gate>0, facts>0)" "yes" \
+    "$([ "$(sc_seq_count "$SC_SIZE" 1 gate)" -gt 0 ] && [ "$(sc_seq_count "$SC_SIZE" 1 facts)" -gt 0 ] && echo yes)"
+  expect_eq "WO-2 ($SC_SIZE) the three passes are quiet" "0 0 0" \
+    "$(for SC_I in 1 2 3; do cat "$SC_OUT/$SC_SIZE.watchseq.$SC_I.rc"; done | paste -sd' ' -)"
+  expect_eq "WO-3 ($SC_SIZE) the third pass runs no tick: no gate pass, no status pass, no facts answer, no read of the table, no parse" \
+    "0 0 0 0 0" "$(for SC_K in gate status facts table parse; do sc_seq_count "$SC_SIZE" 3 "$SC_K"; done | paste -sd' ' -)"
+  expect_eq "WO-4 ($SC_SIZE) …and reads the log no more than the one question needs: at most one fold" "1" \
+    "$([ "$(sc_seq_count "$SC_SIZE" 3 fold)" -le 1 ] && echo 1 || echo 0)"
+  expect_eq "WO-5 ($SC_SIZE) …it asked the host: the integration branch was fetched, and nothing was printed" "yes||" \
+    "$(cat "$SC_OUT/$SC_SIZE.watchseq.3.fetched")|$(cat "$SC_OUT/$SC_SIZE.watchseq.3.out")|$(cat "$SC_OUT/$SC_SIZE.watchseq.3.err")"
+done
+for SC_K in $SC_KINDS; do
+  expect_eq "WO-6 the third pass counts the same $SC_K at n rows and 2n" "$(sc_seq_count n 3 "$SC_K")" "$(sc_seq_count 2n 3 "$SC_K")"
+done
+
 section "§PRINT: counting changes no print"
 # fails-when: a counter writes to the command's stdout or stderr, or moves its exit, so the print with BIONIC_COUNT
 # set differs from the print without it, from the same snapshot.
