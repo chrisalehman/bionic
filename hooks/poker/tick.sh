@@ -3110,20 +3110,25 @@ EOF
   # watch_merge_look <root> <plan> -> the wake line once the merge of the run's open pull request can be reached, or
   # nothing. The merge's one reader is asked with its fetch (lib/line.sh `line_merge_seen --fetch`), which also keeps the
   # person's ask on a request closed unmerged; anything but merged is no act: an open request, a closed one (its ask is
-  # open now, and the next pass rests on it), and a read that failed, which the next pass reads again. Merged, the run is
-  # closed by close-out's own `run`, which reads the merge again and lands the integrate row at it, and close-out's
+  # open now, and the next pass rests on it), and a read that failed, which the next pass reads again. Merged, and with no
+  # row of the run out (`watch_rows_out`), the run is closed by close-out's own `run`, which reads the merge again and
+  # lands the integrate row at it, and close-out's
   # account is kept at .bionic/tmp/close-<session, first 8>.out for the woken turn, whose acts it names.
   # A CLOSE THAT HOLDS IS TOLD ONCE: the account's first line is the hold's key (the merge, the exit, the refusal's last
   # line), and a pass that meets the same hold again stays quiet, so a hold nobody has mended starts no turn after each
   # turn's end.
   watch_merge_look() {
-    local root="${1:-}" plan="${2:-}" seen co tmp acct rel key sid
+    local root="${1:-}" plan="${2:-}" seen co tmp acct rel key sid out
     [ -d "$root" ] && [ -f "$plan" ] || return 0
     declare -F line_merge_seen >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
     declare -F line_merge_seen >/dev/null 2>&1 || return 0
     seen="$(line_merge_seen "$plan" "$root" --fetch 2>/dev/null)" || return 0
     sid="$(printf '%s' "${CLAUDE_CODE_SESSION_ID:-}" | LC_ALL=C tr -cd 'A-Za-z0-9_-' | cut -c1-8)"
     rel=".bionic/tmp/close-${sid:-session}.out"; acct="$root/$rel"
+    if out="$(watch_rows_out "$plan" "$seen" "$acct")"; then
+      [ -z "$out" ] || printf '%s\n' "$out"
+      return 0
+    fi
     tmp="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-close.XXXXXX" 2>/dev/null)" || return 0
     ( cd "$root" && bash "$BIONIC_LIB/../close-out.sh" "$plan" run ) > "$tmp" 2>&1 < /dev/null
     co=$?
@@ -3139,6 +3144,40 @@ EOF
       printf 'bionic watch: MERGED - close-out held (exit %s): mend what %s names\n' "$co" "$rel"
     fi
   }
+
+  # watch_rows_out <plan> <merge seen> <account> -> rc 0 while a row of the run has a live writer (lib/patrol.sh
+  # `patrol_rows_out`), printing the wake line the first time these rows are out over this merge and nothing after; rc 1
+  # when nobody is out, and the close may run.
+  # A MERGE SEEN WITH A WRITER OUT CLOSES NOTHING. The close lands every open integrate and close row, wipes the state
+  # directory and writes the continuation, so run under a live writer it lands a row mid-work and removes what that
+  # writer still reads. The pass says once which rows are out, keyed like a hold in the account (the merge and the ids),
+  # and runs the close on the first pass that finds nobody out. Rows that cannot be read are out: doubt never closes.
+  watch_rows_out() {
+    local plan="$1" seen="$2" acct="$3" held rc ids="" key word room more=0
+    declare -F patrol_rows_out >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/patrol.sh" ] && . "$BIONIC_LIB/patrol.sh"; } >/dev/null 2>&1
+    if declare -F patrol_rows_out >/dev/null 2>&1; then held="$(patrol_rows_out "$plan" 2>/dev/null)"; rc=$?; else held=""; rc=2; fi
+    if [ "$rc" -ne 0 ]; then ids=unread; held="the rows or their rosters cannot be read"
+    else ids="$(printf '%s\n' "$held" | awk -F'\t' '$1 != "" { printf "%s%s", (n++ ? " " : ""), $1 }')"; fi
+    [ -n "$ids" ] || return 1
+    key="watch-close/v1|commit=$(printf '%s' "$seen" | cut -f2)|out=${ids}"
+    [ "$(head -1 "$acct" 2>/dev/null)" != "$key" ] || return 0
+    if [ -d "${acct%/*}" ] && [ ! -L "${acct%/*}" ] && [ ! -L "$acct" ]; then
+      { printf '%s\n' "$key"
+        printf 'rows out: %s — the close waits until each writer is acked or gone\n' "$ids"
+        printf '%s\n' "$held" | awk -F'\t' 'NF >= 3 { printf "  %s: %s open on roster %s\n", $1, $2, substr($3, 1, 8) } NF < 3 && $0 != "" { print "  " $0 }'
+      } > "$acct" 2>/dev/null
+    fi
+    # The line holds as many ids as its ceiling leaves room for, and counts the rest.
+    room=$(( ${WATCH_LINE_MAX:-120} - ${#WATCH_OUT_HEAD} - ${#WATCH_OUT_TAIL} - 9 ))
+    set -- $ids; ids=""
+    for word in "$@"; do
+      if [ "$more" -eq 0 ] && [ $(( ${#ids} + ${#word} + 1 )) -le "$room" ]; then ids="${ids:+$ids }$word"; else more=$((more + 1)); fi
+    done
+    [ "$more" -eq 0 ] || ids="$ids +$more more"
+    printf '%s%s%s\n' "$WATCH_OUT_HEAD" "$ids" "$WATCH_OUT_TAIL"
+  }
+  WATCH_OUT_HEAD="bionic watch: MERGED - rows out: "
+  WATCH_OUT_TAIL="; the close waits until each writer is gone"
 
   # watch_person_wake <tick print> <watch facts> -> the wake line for a state the person alone can end and nobody has
   # told them of, on the print that first holds it; nothing on an unchanged print, which was told before.
