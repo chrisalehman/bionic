@@ -124,6 +124,7 @@ reader_log_stamp() (  # <log> -> its `cksum` less its stop events; 2 when it can
 # A RUN IS ITS LOG: no other file of its record, and no line of its plan, holds a fact of it, so a plan with no log has
 # no event. A plan that is no file is refused as a plan the walk admits none of.
 reader_events() {  # <plan> -> the run's lines, in the order they were written; 2 when it is no plan
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'log reader_events\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   local log
   [ -f "${1:-}" ] || return 2
   log="$(reader_log "$1")" || return 2
@@ -131,6 +132,7 @@ reader_events() {  # <plan> -> the run's lines, in the order they were written; 
 }
 
 reader_facts() {  # <plan> -> one line per standing fact, in the order the facts were last set
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'fold reader_facts\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   reader_events "$1" | awk -F'|' -v ids="$READER_IDENTITY" '
     BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) { e = index(a[i], "="); idk[substr(a[i], 1, e - 1)] = substr(a[i], e + 1) } }
     $1 != "run/v1" { next }
@@ -463,6 +465,7 @@ reader_q_hands() {  # <plan> -> each act taken by hand: a hand event, or a landi
 
 reader_question status value reader_q_status
 reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch contract, its tree and its landing commit
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'status reader_q_status\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   # state is the latest of dispatched, candidate, ready, returned, stalled and landed; pending when the
   # log holds none. A row the plan's Tasks table lacks has no status, so a wrong id never reads as pending.
   # The state is the one row fold's (`_READER_ROW_AWK`). A dropped row is dropped whatever else stands of it.

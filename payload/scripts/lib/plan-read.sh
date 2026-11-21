@@ -68,7 +68,10 @@ plan_read_header() {  # <plan> [key [all]] -> `key=value` lines in the header's 
 
 # _plan_read_lines <file> -> its lines, a carriage return ending a line wherever it stands. A file saved
 # with CR alone is one awk record, which no later pass can split again, so this pass comes first.
-_plan_read_lines() { awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"; }
+_plan_read_lines() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'parse _plan_read_lines\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
+}
 
 # The walk the table readers share, over `_plan_read_lines`: `cells` splits a row and returns how many
 # cells it holds, the header line's names fill head[1..nh], `name(i)` prints column i's and `line()` a

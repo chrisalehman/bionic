@@ -150,6 +150,7 @@ _units_plan_read() {
 }
 _units_plan_read
 _units_read() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'table _units_read\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   [ -n "${1:-}" ] && [ -f "$1" ] && declare -F plan_read_table >/dev/null 2>&1 || return 1
   plan_read_table "$1" Tasks id 2>/dev/null | awk -F'\t' '
     BEGIN {

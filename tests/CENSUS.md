@@ -1708,6 +1708,12 @@ spawn-worktree.test.sh | §TREE-RECORD | keep | payload/scripts/lib/worktree.sh:
 spawn-worktree.test.sh | §TREE | keep | payload/scripts/lib/worktree.sh worktree_tree_event and worktree_tree_row: create --for writing no tree event, or two, or one missing a field (tv1, tv2, tv5), writing the plan (tv3), appending for a name no row claims or saying no row (tv4), or making a tree for a claimed row with no brief (tv6, tv7); spawn-worktree.sh remove writing no tree event with an empty path, so the reader still answers T2's tree (tv9, tv10); lib/worktree.sh _wt_tree_remove writing none, so the stop's removal leaves T1's tree in the reader (tv11) | none (searched 'ev=tree' and 'brief-unrendered' in tests/)
 spawn-worktree.test.sh | §REFUSALS | keep | payload/scripts/spawn-worktree.sh create: the integrate-row refusal dropped, so a tree, its branch and its tree event are made for the integrate row's brief (rf1, rf2) | none (searched 'integrate-row' in tests/)
 
+## speed-counts.test.sh
+
+speed-counts.test.sh | §FIXTURE | keep | the fixture itself: the plan's triple left at single rigor or multi_agent off, so the ledger arm never runs and the check's status count reads 0 (FX-2 stays, REP-1 status goes red); its base-sha left a non-commit, so the card stops before its judge (FX-4); the request's published fact dropped, so the watcher's pass never fetches (FX-5) | none (searched 'BIONIC_COUNT' and 'FETCH_HEAD' in tests/)
+speed-counts.test.sh | §REPORTS | keep | payload/scripts/lib/reader.sh, plan-read.sh, units.sh, proof.sh and walls.sh: any of the seven counter lines (reader_events, reader_facts, _plan_read_lines, _units_read, reader_q_status, facts_state, dispatch) dropped, so that kind is counted by none of the five commands (REP-1), or a line written in another shape (REP-2) | none (searched 'BIONIC_COUNT' in tests/)
+speed-counts.test.sh | §PRINT | keep | any counter line that writes to the command's stdout or stderr instead of the counts' file, or that fails the function it opens, so a command's print with BIONIC_COUNT set differs from its print without (PR-2) | none (searched 'BIONIC_COUNT' in tests/)
+
 ## stop-check.test.sh
 
 stop-check.test.sh | §Section 1 | keep | payload/hooks/stop-check.sh: a typed agent id resolved to the roster's last row of that name, so the first twin's machine line records the second twin's id (target=$AIDA row) | none (searched 'twin' and 'target=' in tests/; cross-gate-agreement-1.test.sh §C resolves names only)

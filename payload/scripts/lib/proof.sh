@@ -2828,6 +2828,7 @@ proof_debts_open() {
 # IT READS GIT, so a verb, the tick and close-out call it, never a wall: a wall is handed its answer
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'facts facts_state\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot="" pfx chains fact kind q role scope st rc=0
   local x pt pr ph pe wt wr we wh cb ws fixed="" born="" chk="" walked="|"
   [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }
