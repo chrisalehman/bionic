@@ -189,7 +189,7 @@ done
 RD="$R/payload/scripts"
 
 section "COVER"
-QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready pr handoff sessions verdicts header row criterion cell"
+QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready pr judge handoff sessions verdicts header row criterion cell"
 expect_eq "the bed asks each question of the closed list, and the list has no other" "$(printf '%s\n' $QS | sort | tr '\n' ' ')" \
   "$(ask /dev/null - 2>&1 | awk 'NR > 1 { print $1 }' | sort | tr '\n' ' ')"
 for e in $WORLDS; do n=${e%%:*}; p=${e##*:}; h="$(sed -n 's/^proof\.\([0-9a-f]*\)\..*/\1/p' "$X/$n.facts" | head -1)"; r=""; c=0
@@ -210,7 +210,7 @@ for t in $TYPES; do
   grep -q "^run/v1|ev=$t|" "$A" && [ "$(grep -c "^run/v1|ev=$t|" "$A")" = "$(grep "^run/v1|ev=$t|" "$A" | grep -c '|fixture=hand-written|')" ] && only="$only $t"
 done
 expect_empty "every event type has a fixture line" "$none"
-expect_eq "the types no closed run holds a line of are the hand-written ones" " stalled admitted void decision debt abandon cancel" "$only"
+expect_eq "the types no closed run holds a line of are the hand-written ones" " stalled admitted void decision debt abandon cancel ruling" "$only"
 expect_eq "every hand-written line is marked, and one is a dispatch" "$(grep -c . "$X/hand-written.log") 1" \
   "$(grep -c '[| ]fixture=hand-written[| ]' "$X/hand-written.log") $(grep -c '^run/v1|ev=dispatch|' "$X/hand-written.log")"
 
