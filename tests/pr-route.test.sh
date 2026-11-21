@@ -25,7 +25,10 @@
 #             fetch once the request is closed unmerged and the person's ask is open.
 #   §MERGE    the pass that sees the merge closes the run: the integrate row lands at the merge, the run reads delivered,
 #             and a close that holds wakes once.
-#   §WALL     publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
+#   §MERGE-LOOK a pass over an unchanged run with the request open runs no tick and asks the host alone, and the pass
+#             after the merge still reads the run as merged; a change to what the tick reads, a writer out, or a
+#             request closed unmerged runs the tick.
+#   §WALL    publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
 #   §STRAY    the whole run a world's tick started detached is ended before the worlds go: none is alive at the end.
 #
 # FIXTURE FIDELITY. Each case is a copy of one door fixture (tests/lib/door.sh): a real repository on its working branch
@@ -599,6 +602,79 @@ expect_eq "MG-6b …nothing landed, the run still at step 8, close-out's refusal
   "$(prr_landed)|$(prr_log_step)|$(prr_close_out | /usr/bin/grep -q 'close-out refused' && echo yes)"
 prr_pass
 expect_eq "MG-7 …the next pass over the same hold is quiet: the hold was told once" "$PRR_QUIET|" "$PASS_RC|$PASS_OUT"
+
+# ============================================================
+section "§MERGE-LOOK: a pass over an unchanged run with the request open asks the host alone, and the merge is still read (AC-5.2)"
+# ============================================================
+# fails-when: the pass after the host merges the request reads the run as open; the pass over an unchanged run runs the
+# tick again (the gate's judging passes are counted: none); a pass over an unchanged run makes no fetch, so the merge
+# is not reached; an input the tick reads moves and the pass does not run the tick (a denied request is not told); or
+# the request closed unmerged is not told to the person, and the pass after it does not rest; or, with a writer out on
+# the roster, a pass over an unchanged run runs no tick, so what the tick's clock reads of the row is never read.
+# The watcher names the file its passes keep what they read in (BIONIC_WATCH_LOOK); the first passes settle it, as the
+# fetch of the first moves origin/main, which the tick reads.
+prr_look_pass() {  # <world file stem> <n> -> PASS_OUT PASS_RC, and the pass's counts in <stem>.count.<n>
+  : > "$WORLD_ROOT/$1.count.$2"
+  prr_pass BIONIC_WATCH_LOOK="$WORLD_ROOT/$1.look" BIONIC_COUNT="$WORLD_ROOT/$1.count.$2"
+}
+prr_look_n() { awk -v k="$3" '$1 == k { n++ } END { print n + 0 }' "$WORLD_ROOT/$1.count.$2"; }   # <stem> <n> <kind>
+prr_look_warm() {  # <stem> -> two passes over the world, the look file made first, each quiet
+  : > "$WORLD_ROOT/$1.look"
+  prr_look_pass "$1" 1; LK_R1="$PASS_RC"; prr_look_pass "$1" 2; LK_R2="$PASS_RC"
+}
+prr_watch_world lookmerge
+prr_look_warm lookmerge
+expect_eq "LK-0 precondition: two passes over the open request are quiet, and the tick judged in each (gate counted)" \
+  "$PRR_QUIET $PRR_QUIET|yes" "$LK_R1 $LK_R2|$([ "$(prr_look_n lookmerge 1 gate)" -gt 0 ] && [ "$(prr_look_n lookmerge 2 gate)" -gt 0 ] && echo yes)"
+LK_FETCH="$(prr_origin)"
+rm -f "$R/.git/FETCH_HEAD"
+prr_look_pass lookmerge 3
+expect_eq "LK-1 the third pass over the unchanged run is quiet and prints nothing" "$PRR_QUIET|" "$PASS_RC|$PASS_OUT"
+expect_eq "LK-1b …runs no tick: nothing judged, no status pass, no facts answer" "0 0 0" \
+  "$(prr_look_n lookmerge 3 gate) $(prr_look_n lookmerge 3 status) $(prr_look_n lookmerge 3 facts)"
+expect_eq "LK-1c …and still asks the host: the integration branch fetched, origin/main where it was" "yes|$LK_FETCH" \
+  "$([ -f "$R/.git/FETCH_HEAD" ] && echo yes)|$(prr_origin)"
+prr_gh pr merge 1 --squash; LK_TIP="$(prr_bare_main)"
+prr_look_pass lookmerge 4
+expect_eq "LK-2 merged on the host: the very next pass wakes, naming the delivered run" "$PRR_WAKE|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: DELIVERED - ' && echo yes)"
+expect_contains "LK-2b …the log holds the integrate row's landing as merged, at the host's merge commit" \
+  "|ev=published|row=T3|commit=$LK_TIP|kind=close|by=close-out|why=merged|" "$(cat "$L")"
+expect_eq "LK-2c …and the run reads delivered" "n=9 state=delivered" "$(prr_log_step)"
+
+# AN INPUT THE TICK READS MOVES: the pass runs the tick, and a wake it owes is told.
+prr_watch_world lookgate
+prr_look_warm lookgate
+prr_look_pass lookgate 3
+expect_eq "LK-3 precondition: the third pass over the unchanged run judges nothing" "$PRR_QUIET|0" "$PASS_RC|$(prr_look_n lookgate 3 gate)"
+printf 'gate/v1|at=2026-10-11T00:00:00Z|session=%s|asker=w99-T9|category=leaves-the-machine|head=git push origin wave/99-p\n' \
+  "$WORLD_SID" >> "$R/.bionic/tmp/gate-$WORLD_SID.state"
+prr_look_pass lookgate 4
+expect_eq "LK-4 a request denied since the last pass: the pass runs the tick, and wakes with the gate's line" "$PRR_WAKE|yes|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: GATE ' && echo yes)|$([ "$(prr_look_n lookgate 4 gate)" -gt 0 ] && echo yes)"
+
+# A REQUEST CLOSED UNMERGED: the pass that reads it tells the person, and the pass after it rests with no fetch.
+prr_watch_world lookclosed
+prr_look_warm lookclosed
+prr_gh pr close "$PRR_URL1"
+prr_look_pass lookclosed 3
+expect_eq "LK-5 the request closed on the host: the pass over the unchanged run is quiet, and opens the person's ask" "$PRR_QUIET||yes" \
+  "$PASS_RC|$PASS_OUT|$([ -n "$(prr_ask pr-closed:wave:01-x)" ] && echo yes)"
+LK_SEEN="$(prr_origin)"
+prr_side lookclosed
+prr_look_pass lookclosed 4
+expect_eq "LK-6 …the next pass rests, the run waiting only on the person, and makes no fetch" "$PRR_REST|$LK_SEEN" "$PASS_RC|$(prr_origin)"
+
+# A WRITER OUT: the tick reads its row against the clock (quiet past its cadence, past its duration, gone), which no file
+# moving says, so with a row on the roster every pass runs the tick, the request open and nothing else moving.
+prr_watch_world lookrow
+LK_AT="$(t=$(( $(date +%s) - 60 )); date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ)"
+roster_row_fixture session="$WORLD_SID" name=busy agent_id=abusy-1111111111111111 launched_at="$LK_AT" duration="4 hours" \
+  deliverable="$R/never-written.md" >> "$R/.bionic/tmp/roster-$WORLD_SID.state"
+prr_look_warm lookrow
+prr_look_pass lookrow 3
+expect_eq "LK-7 a writer out on the roster: three quiet passes over the unchanged run, and the third still judges (its tick ran)" \
+  "$PRR_QUIET $PRR_QUIET $PRR_QUIET|yes" "$LK_R1 $LK_R2 $PASS_RC|$([ "$(prr_look_n lookrow 3 gate)" -gt 0 ] && echo yes)"
 
 # ============================================================
 section "§WALL: publish is the orchestrator's verb"
