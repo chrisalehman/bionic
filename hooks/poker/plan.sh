@@ -434,18 +434,18 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
   local aid="$1" prior="$2" tr sub old_sa="" old_runs="" decl add sa new_runs r row pick
   case "$aid" in
     ''|*[!A-Za-z0-9._@-]*)
-      die "REFUSED — no row is named $(clean "$aid"), and it is not an agent id; nothing was written."
+      die_run "REFUSED — no row is named $(clean "$aid"), and it is not an agent id; nothing was written." "bash ${HOOK_DIR}/session-poker.sh adopt"
       return 1 ;;
   esac
   if [ -z "$prior" ]; then
     tr="$(session_transcript "$SESSION_ID")" || tr=""
     if [ -z "$tr" ]; then
-      die "REFUSED — no row is named or carries the agent id $aid, and this session's transcript cannot be found to check it is one of its agents; nothing was written."
+      die_run "REFUSED — no row is named or carries the agent id $aid, and this session's transcript cannot be found to check it is one of its agents; nothing was written." "bash ${HOOK_DIR}/session-poker.sh adopt"
       return 1
     fi
     sub="${tr%.jsonl}/subagents/agent-${aid}.jsonl"
     if [ ! -f "$sub" ] || [ -L "$sub" ]; then
-      die "REFUSED — no row is named or carries the agent id $aid, and no agent $aid ran in this session (no transcript at $sub); nothing was written."
+      die_run "REFUSED — no row is named or carries the agent id $aid, and no agent $aid ran in this session (no transcript at $sub); nothing was written." "bash ${HOOK_DIR}/session-poker.sh adopt"
       return 1
     fi
   fi
@@ -562,6 +562,7 @@ pv_header_cells() {
   # refuses (1). A subagent cannot reach this verb at all: the Bash wall refuses `amend`,
   # `extend` and `task-add` in any payload carrying an `agent_id` (payload/scripts/lib/walls.sh).
   poker_verb_amend() {
+    RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh amend $(clean "$AMEND_NAME") --files+ <path> --reason '<why>'"
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
@@ -580,7 +581,7 @@ pv_header_cells() {
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
-      die "REFUSED — no row named $AMEND_NAME: this session has no roster at $ROSTER_FILE."
+      die_run "REFUSED — no row named $AMEND_NAME: this session has no roster at $ROSTER_FILE." "bash ${HOOK_DIR}/session-poker.sh adopt"
       exit 1
     fi
     # Any `roster-state/` row, as `identity_args` reads (wave-22 T13; critic-3598752 I4).
@@ -623,7 +624,7 @@ pv_header_cells() {
     fi
     # ---- END amend by agent id ----
     if [ -z "$AM_ROW" ]; then
-      die "REFUSED — no row named $AMEND_NAME on this session's roster ($ROSTER_FILE)."
+      die_run "REFUSED — no row named $AMEND_NAME on this session's roster ($ROSTER_FILE)." "bash ${HOOK_DIR}/session-poker.sh adopt"
       exit 1
     fi
     AM_OPEN="$(roster_open_names "$ROSTER_FILE" "$REPO_REAL/.bionic/tmp/sweeper-${SESSION_ID}.state" "$SESSION_ID")"
@@ -632,7 +633,7 @@ pv_header_cells() {
     if ! grep -qxF -- "$AMEND_NAME" <<< "$AM_OPEN"; then
       AM_CROW="$(line_field "$AM_ROW" row)"
       plan_verb_id_ok "$AM_CROW" || AM_CROW="<row>"
-      die "REFUSED — $AMEND_NAME is closed: it was acked after its latest launch, or holds no live row. A closed contract is not amended; its row's Files are the plan's cell: edit the Files cell of $AM_CROW in the plan. Nothing was written."
+      die_run "REFUSED — $AMEND_NAME is closed: it was acked after its latest launch, or holds no live row. A closed contract is not amended; its row's Files are the plan's cell: edit the Files cell of $AM_CROW in the plan. Nothing was written." "bash ${HOOK_DIR}/session-poker.sh brief $AM_CROW"
       exit 1
     fi
     if ! poker_brief_load; then
@@ -677,7 +678,7 @@ pv_header_cells() {
       for AM_N in $AM_NARROW; do
         case " $AM_OLD_SA " in
           *" $AM_N "*|*" ${AM_N##*/} "*) : ;;
-          *) die "REFUSED — $AMEND_NAME's row does not hold the suite $(clean "$AM_N"), so naming it would widen the set, and --suites= only narrows; add it with --suites+ $(clean "$AM_N"). Nothing was written."
+          *) die_run "REFUSED — $AMEND_NAME's row does not hold the suite $(clean "$AM_N"), so naming it would widen the set, and --suites= only narrows; add it with --suites+. Nothing was written." "bash ${HOOK_DIR}/session-poker.sh amend $AMEND_NAME --suites+ $(clean "$AM_N") --reason '<why>'"
              exit 1 ;;
         esac
       done
@@ -1391,10 +1392,10 @@ BRF_EOF
   # still a linked worktree is marked for the new name, as a re-dispatch keeps its tree. Each act runs in a subshell,
   # because each verb ends by exiting. A row whose Files write no tracked path takes no tree.
   poker_verb_start() {
+    ST_AGAIN="bash ${HOOK_DIR}/session-poker.sh start $(clean "$ST_ID")${ST_NAME:+ $(clean "$ST_NAME")}"; RUN_DEFAULT="$ST_AGAIN"
     plan_verb_open start
-    ST_AGAIN="bash ${HOOK_DIR}/session-poker.sh start $(clean "$ST_ID")${ST_NAME:+ $(clean "$ST_NAME")}"
     if ! plan_verb_id_ok "$ST_ID" || ! ST_ROW="$(plan_read_row "$PV_PLAN" Tasks id "$ST_ID" 2>/dev/null)"; then
-      die "REFUSED — $PV_PLAN holds no row $(clean "$ST_ID") in its ## Tasks table: write the row, then run: $ST_AGAIN. Nothing was done."
+      die "REFUSED — $PV_PLAN holds no row $(clean "$ST_ID") in its ## Tasks table: write the row, then start again. Nothing was done."
       exit 1
     fi
     st_cell() { printf '%s\n' "$ST_ROW" | sed -n "s/^$1=//p" | head -1; }
@@ -1408,13 +1409,13 @@ BRF_EOF
       case "${BASH_REMATCH[2]}" in complex) ST_ROLE=senior-implementor ;; standard) ST_ROLE=implementor ;; esac
     fi
     if [ -z "$ST_ROLE" ]; then
-      die "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. Name it: $ST_AGAIN --role bionic:<role>"
+      die_run "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. Name one, bionic:implementor for a standard row or bionic:senior-implementor for a complex one." "$ST_AGAIN --role bionic:implementor"
       exit 1
     fi
     case "$ST_ROLE" in *:*) : ;; *) ST_ROLE="bionic:$ST_ROLE" ;; esac
     [ -n "$ST_NAME" ] || ST_NAME="$(fill_name "$PV_REPO/.bionic/tmp/roster-$(session_id).state" "$ST_ID")"
     if ! plan_verb_id_ok "$ST_NAME" || ! fill_row_launched "$ST_ID" "$ST_NAME"; then
-      die "REFUSED — '$(clean "$ST_NAME")' is not a name of row $ST_ID: the dispatch wall binds a name to the row it ends with (the id, or <prefix>-$ST_ID, with -r<n> for a re-dispatch). Nothing was done. Run: bash ${HOOK_DIR}/session-poker.sh start $ST_ID <prefix>-$ST_ID"
+      die_run "REFUSED — '$(clean "$ST_NAME")' is not a name of row $ST_ID: the dispatch wall binds a name to the row it ends with (the id, or <prefix>-$ST_ID, with -r<n> for a re-dispatch). Nothing was done." "bash ${HOOK_DIR}/session-poker.sh start $ST_ID" 
       exit 1
     fi
 
@@ -1428,7 +1429,7 @@ BRF_EOF
       say "start — $ST_ID is born already: its birth stands in the run's log."
     fi
     ( BRF_ID="$ST_ID" BRF_NAME="$ST_NAME"; poker_verb_brief ) \
-      || { ST_RC=$?; die "start — $ST_ID stopped at its brief; its birth stands, and no tree or call was made. When the brief renders, run: $ST_AGAIN"; exit "$ST_RC"; }
+      || { ST_RC=$?; die "start — $ST_ID stopped at its brief; its birth stands, and no tree or call was made. Once the brief renders, start again."; exit "$ST_RC"; }
 
     ST_SW="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
     ST_TREE=""; ST_BRANCH=""; ST_BASE=""
@@ -1443,7 +1444,7 @@ BRF_EOF
         ST_WB="$(plan_working_branch "$PV_PLAN")"
         ST_BASE="$(git -C "$PV_REPO" rev-parse --verify -q "refs/heads/${ST_WB:-?}^{commit}" 2>/dev/null)" || ST_BASE=""
         if [ -z "$ST_BASE" ]; then
-          die "REFUSED — the plan's working branch (${ST_WB:-none named}) has no head in $PV_REPO, so the tree has no base; the brief stands. Name the branch in the plan's working-branch:, then run: $ST_AGAIN"
+          die "REFUSED — the plan's working branch (${ST_WB:-none named}) has no head in $PV_REPO, so the tree has no base; the brief stands. Name the branch in the plan's working-branch:, then start again."
           exit 1
         fi
         ST_N="$(proof_plan_slug "$PV_PLAN")"; case "$ST_N" in wave-[0-9]*) ST_N="${ST_N#wave-}"; ST_N="${ST_N%%-*}" ;; esac
@@ -1453,7 +1454,7 @@ BRF_EOF
       fi
       case "$ST_OK" in
         'spawn-worktree: OK '*) : ;;
-        *) die "REFUSED — spawn-worktree.sh made no tree for $ST_NAME: $(clean "$(printf '%s' "$ST_OK" | tail -n 1)"). Its birth and its brief stand. When the cause is gone, run: $ST_AGAIN"; exit 1 ;;
+        *) die "REFUSED — spawn-worktree.sh made no tree for $ST_NAME: $(clean "$(printf '%s' "$ST_OK" | tail -n 1)"). Its birth and its brief stand. When the cause is gone, start again."; exit 1 ;;
       esac
     fi
 
@@ -1468,7 +1469,7 @@ BRF_EOF
     if ! ST_CALL="$(jq -cn --arg n "$ST_NAME" --arg r "$ST_ROLE" --arg d "$ST_ID: $ST_TITLE" \
          --arg p "$ST_BRIEF"$'\n'"Read the brief first, whole: it is your contract."$'\n'"Project root $PV_REPO. $ST_WHERE" \
          '{name: $n, subagent_type: $r, description: $d, prompt: $p, run_in_background: true}' 2>/dev/null)"; then
-      die "REFUSED — the call cannot be printed (no jq on PATH); the birth, the brief and the tree stand. Install jq, then run: $ST_AGAIN"
+      die "REFUSED — the call cannot be printed (no jq on PATH); the birth, the brief and the tree stand. Install jq, then start again."
       exit 2
     fi
     say "start — dispatch: $ST_CALL"

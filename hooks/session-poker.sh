@@ -270,6 +270,13 @@ ADOPT_TAIL_CAP=2000
 
 say()  { printf 'poker: %s\n' "$1"; }
 die()  { printf 'poker: %s\n' "$1" >&2; }
+# THE LAST LINE OF A REFUSAL OF START, RULE AND AMEND IS `run: <command>`: the one a person pastes. A refusal that knows
+# a better command than the verb's own form says it with die_run; the exit trap adds the form to any other non-zero exit.
+RUN_SAID=""; RUN_DEFAULT=""
+run_line() { RUN_SAID=1; printf 'run: %s\n' "$1" >&2; }
+die_run() { die "$1"; run_line "$2"; }  # <the refusal> <the command to type>
+run_last() { [ "$1" -eq 0 ] || [ -n "$RUN_SAID" ] || [ -z "$RUN_DEFAULT" ] || run_line "$RUN_DEFAULT"; }  # <exit status>
+trap 'run_last $?' EXIT
 
 # ONE EXIT CODE FOR EVERY ARGUMENT ERROR IN THIS FILE, AND IT IS 2. `bind` briefly had a 3
 # of its own (wave-session-bound-run S6, on the reading that a missing operand is the same
@@ -353,6 +360,11 @@ usage() {  # [message]
 # THE VERB'S OLD SPELLING IS REFUSED (wave-39 T18; REQ-13 AC-13.1, D2): the line after VERB is read, before both case blocks,
 # lib/alias.sh names the new one.
 VERB="$1"; shift
+case "$VERB" in
+  start) RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh start <id>" ;;
+  rule) RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>'" ;;
+  amend) RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh amend <name> --files+ <path> --reason '<why>'" ;;
+esac
 if declare -F alias_gone >/dev/null 2>&1 && alias_gone verb "$VERB"; then die "REFUSED — $ALIAS_GONE_SAID. Nothing was run."; exit 1; fi
 # THE CARD'S OLD NAME. The card the autonomous half waits on was called by another name before it was the release approval
 # card, and the person's decision it asks for is the release's. The old verb still runs, as the new one, and says so once
@@ -2248,7 +2260,7 @@ plan_verb_open() {
   PV_NEW="${PV_PLAN}.${verb}.$$"
   PV_SID="planverb-$$"
   PV_MARK="$(engaged_marker_path "$PV_REPO" "$PV_SID")" || PV_MARK=""
-  trap 'rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"}' EXIT
+  trap 'run_last $?; rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"}' EXIT
 }
 
 # plan_verb_dry <verb> <what changed> <step> -> the dry commit through the real gate, asked about the plan itself
