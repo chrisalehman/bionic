@@ -2162,11 +2162,7 @@ sitrep_tick_line() {
     fi
     LR_PLAN=""
     if [ -n "$LR_ARG" ]; then
-      case "$LR_ARG" in
-        /*) LR_PLAN="$LR_ARG" ;;
-        *)  LR_PLAN="$REPO_REAL/$LR_ARG"
-            [ -f "$LR_PLAN" ] || LR_PLAN="$(docs_root "$REPO_REAL")/$LR_ARG" ;;
-      esac
+      LR_PLAN="$(docs_path "$REPO_REAL" "$LR_ARG")"
       if [ ! -f "$LR_PLAN" ] || [ -L "$LR_PLAN" ]; then
         die "REFUSED — no plan file at $LR_ARG; name the plan whose landings to report."
         exit 2
@@ -2411,11 +2407,7 @@ sitrep_tick_line() {
       exit 2
     fi
     RS_DOCS="$(docs_root "$REPO_REAL")"
-    case "$RS_ARG" in
-      /*) RS_FILE="$RS_ARG" ;;
-      *)  RS_FILE="$REPO_REAL/${RS_ARG#./}"
-          [ -f "$RS_FILE" ] || { [ -f "$RS_DOCS/$RS_ARG" ] && RS_FILE="$RS_DOCS/$RS_ARG"; } ;;
-    esac
+    RS_FILE="$(docs_path "$REPO_REAL" "$RS_ARG")"
     RS_SHOWN="$(printf '%s' "${RS_ARG:0:160}" | tr -d '[:cntrl:]')"
     if [ ! -f "$RS_FILE" ] || [ -L "$RS_FILE" ]; then
       die "REFUSED — no handoff file at '$RS_SHOWN'; write one with: bash ${HOOK_DIR}/session-poker.sh handoff, and resume from the path its last line names. Nothing was bound."
@@ -2648,11 +2640,7 @@ sitrep_tick_line() {
     fi
     SR_PLAN=""
     if [ -n "$SR_ARG" ]; then
-      case "$SR_ARG" in
-        /*) SR_PLAN="$SR_ARG" ;;
-        *)  SR_PLAN="$REPO_REAL/$SR_ARG"
-            [ -f "$SR_PLAN" ] || SR_PLAN="$(docs_root "$REPO_REAL")/$SR_ARG" ;;
-      esac
+      SR_PLAN="$(docs_path "$REPO_REAL" "$SR_ARG")"
       if [ ! -f "$SR_PLAN" ] || [ -L "$SR_PLAN" ]; then
         die "REFUSED — no plan file at $SR_ARG; name the plan whose situation to report."
         exit 2

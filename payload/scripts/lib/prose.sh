@@ -74,6 +74,7 @@ _prose_home() {
 # An entry ending in `/` is a directory prefix; any other matches its exact path, and one holding a glob character is
 # also a pattern (the built-in `.bionic/*`, whose `*` spans directories as a case pattern does). Pure parameter
 # expansion, so a walk pays no fork per path.
+# <path> is spelled from the project root; a caller holding the docs-root spelling asks lib/root.sh `docs_path` first.
 prose_path() {
   local p="$1" rest="${2:-}" e
   [ -n "$p" ] || return 1

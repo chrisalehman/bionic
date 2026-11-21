@@ -1785,13 +1785,9 @@ adopt_plan_key() {  # <plan path> -> a comparable spelling of it
   printf '%s' "$out"
 }
 
-# A roster path is absolute or project-relative, exactly as the row's writer left it.
+# A roster path is absolute, project-relative or docs-root-relative, as the row's writer left it.
 adopt_abs() {  # <path> <repo root>
-  case "$1" in
-    /*) printf '%s' "$1" ;;
-    '') : ;;
-    *)  printf '%s/%s' "$2" "$1" ;;
-  esac
+  [ -z "$1" ] || printf '%s' "$(docs_path "$2" "$1")"
 }
 
 #

@@ -32,6 +32,8 @@
 #   §LOGPATH      the run log's path is joined in the reader alone: a planted second join is found by its line.
 #   §GITHOME      a second resolution of the common git directory planted in a hook is found by its file; the checkout holds
 #                 none beside the root library's `git_common_dir`.
+#   §DOCSPATH     adopt and the review proof read a record spelled from the project root or the docs root through lib/root.sh
+#                 `docs_path`; a join of the docs root to an operand planted in a script is found by its file.
 #   §LOADER      the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
 #                 tree; a copy planted in a hook file is listed and counted.
 #   §REPORT       with the plants the check exits 1, refusing each finding of the four kinds once; a loader copy
@@ -361,5 +363,39 @@ expect_regex "a record's born events are not zero" "^[1-9][0-9]*$" "$BORN"
 expect_eq "reading 7 is the born events the reader lists for the run" "$BORN" "$(count "$R46" r7_born_events)"
 expect_ne "reading 7 moves with the record passed" "$(count "$R46" r7_born_events)" "$(count "$R49" r7_born_events)"
 expect_status "a record that is not a directory exits 2" 2 "$(at "$BIONIC_SCRIPTS_DIR" $OLD "$S/none" >/dev/null; echo $?)"
+
+section "DOCSPATH"
+# A path spelled from the project root or the docs root is read by lib/root.sh `docs_path`, and by adopt and the review proof through it.
+. "$(dirname "$0")/lib/bound-marker.sh"; . "$(dirname "$0")/lib/roster-row.sh"; . "$(dirname "$0")/lib/plan-fixture.sh"
+POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+. "$(dirname "$0")/session-poker.prelude.sh"; trap 'cleanup; rm -rf "$S"' EXIT
+R="$(make_repo dp)"; D="$R/.bionic/docs"; W="$D/record/wave-01-fixture"; mkdir -p "$W"; : > "$W/a.md"
+dp() { bash -c '. "$1/root.sh"; docs_path "$2" "$3"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$R" "$1"; }
+for sp in .bionic/docs/record/wave-01-fixture/a.md record/wave-01-fixture/a.md; do
+  expect_eq "docs_path reads $sp as the file" "$W/a.md" "$(dp "$sp")"
+done
+expect_eq "a record not yet written, spelled from the docs root, is under it" "$W/y.md" "$(dp record/wave-01-fixture/y.md)"
+joins() { ( cd "$1" && /usr/bin/grep -rnE 'docs_root[^|;]*\)/\$\{?[A-Za-z_]*(ARG|arg)' hooks payload/scripts | /usr/bin/grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//' ); }
+expect_eq "no code but the carried line.sh joins the docs root to an operand for itself" "hooks/poker/line.sh" "$(joins "$S")"
+printf '%s\n' 'p="$(docs_root "$r")/$arg"' > "$L/planted-join.sh"
+expect_eq "a join planted beside it is found by its file" "hooks/poker/line.sh payload/scripts/lib/planted-join.sh" "$(joins "$S")"; rm -f "$L/planted-join.sh"
+B="$(git -C "$R" commit -q --allow-empty -m init && git -C "$R" rev-parse HEAD)"
+P="$(s42_plan "$R" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${B:0:8}
+  branch: wave/01-fixture")"; s42_builds_landed "$P"
+git -C "$R" worktree add -q -b wave/01-fixture "$R/.worktrees/01-fixture" "$B" >/dev/null 2>&1
+git -C "$R/.worktrees/01-fixture" commit -q --allow-empty -m C1; C="$(git -C "$R/.worktrees/01-fixture" rev-parse HEAD)"
+printf 'reviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: piece\n' "${B:0:10}" "$C" > "$W/x.md"
+for sp in .bionic/docs/record/wave-01-fixture/x.md record/wave-01-fixture/x.md; do
+  new_roster "$R"; roster_row_fixture session="$SID" name=implementor agent_id=a1 subagent_type=implementor >> "$(roster_of "$R")"
+  printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=aud agent_id=a2 subagent_type=bionic:auditor files="$sp")" >> "$(roster_of "$R")"
+  OS=5f5f5f5f-0000-4000-8000-000000000055; roster_header > "$(roster_of "$R" "$OS")"
+  mkrow session="$OS" name=w plan="$P" deliverable="${sp%x.md}a.md" >> "$(roster_of "$R" "$OS")"; poke "$R" adopt
+  expect_contains "adopt finds a deliverable spelled $sp" "|deliverable_present=yes|" "$OUT"
+  poke "$R" proof-add review record/wave-01-fixture/x.md --question evidence --reader aud
+  expect_eq "the review proof finds a record its reader's row spells $sp (exit 0)" 0 "$RC"
+  [ "$RC" = 0 ] || printf '%s\n' "$OUT" | head -3
+  git -C "$R" checkout -q -- . 2>/dev/null
+done
 
 finish

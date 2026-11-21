@@ -1906,15 +1906,7 @@ EOF
     while [ ${#BIND_ARG_P} -gt 1 ]; do
       case "$BIND_ARG_P" in */) BIND_ARG_P="${BIND_ARG_P%/}" ;; *) break ;; esac
     done
-    case "$BIND_ARG_P" in
-      /*) BIND_PATH="$BIND_ARG_P" ;;
-      *)
-        BIND_PATH="$REPO/$BIND_ARG_P"
-        if [ ! -f "$BIND_PATH" ]; then
-          BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG_P"
-          [ -f "$BIND_DOCS_TRY" ] && BIND_PATH="$BIND_DOCS_TRY"
-        fi ;;
-    esac
+    BIND_PATH="$(docs_path "$REPO" "$BIND_ARG_P")"
 
     BIND_RC=0
     bind_plan "$REPO_REAL" "$SESSION_ID" "$BIND_PATH" bind || BIND_RC=$?
