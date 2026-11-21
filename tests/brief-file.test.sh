@@ -14,6 +14,7 @@
 #   §NAMES   the dispatch wall: a dispatch that binds a plan row names its row's rendered brief file on the
 #            prompt's first line, or is refused with the render to run; the file's path and sum go on the
 #            roster row; a read-only dispatch that binds no row needs no file.
+#   §SPELL   a brief rendered from a row whose Files is spelled from the docs root is admitted by the wall.
 #   §PROSE   with one brief file, prose in the prompt naming other suites changes neither the verdict nor
 #            the roster contract.
 #   §SUM     a file edited after its render, or marked before sums existed, is refused; a roster row that
@@ -192,6 +193,15 @@ Expected artifact: .bionic/docs/record/wave-01-fixture/research-n.md"
 expect_eq "N4 a read-only dispatch that binds no row needs no brief file" "allow" "$(said_as allow)"
 expect_contains "N4b …its row is written (the same reader as N1b)" "|name=w01-research|" "|$WROW"
 expect_absent "N4c …and carries no brief path" "brief=" "$WROW"
+
+section "§SPELL: a brief rendered from a row whose files are spelled from the docs root is admitted (AC-16.2)"
+sed -i.bak 's#^\(| N1 .*\)$#\1\n| N2 | 4 | build | a record only | — | 30 | REQ-6 | record/wave-01-fixture/N2.md | — |#' "$NP"; printf '\n## N2 — a record only\n\nRulings: the record is prose.\n' >> "$NP"
+for sp in record/wave-01-fixture/N2.md .bionic/docs/record/wave-01-fixture/N2.md; do
+  sed -i.bak "s#^\(| N2 .*| REQ-6 | \)[^|]*|#\1$sp |#" "$NP"; poke "$NR" brief N2 w01-N2; NB2=".bionic/docs/record/wave-01-fixture/briefs/w01-N2.md"
+  expect_contains "SP setup: the brief says it lands on no suite ($sp)" "Lands-on: none" "$(cat "$NR/$NB2")"
+  wall w01-N2 bionic:implementor "$NB2"
+  expect_eq "SP the wall admits the tool's own brief for a row whose Files is $sp" "allow" "$(said_as allow)"
+done
 
 section "§PROSE: with one brief file, the prompt's prose changes neither the verdict nor the contract (AC-6.2)"
 wall w01-N1 bionic:implementor "$NB

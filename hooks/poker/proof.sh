@@ -787,7 +787,7 @@ PF_EVIDS_LIST
       esac
       PF_OWN=""
       while IFS= read -r _pf_c; do
-        case "$_pf_c" in '') continue ;; /*) _pf_p="$_pf_c" ;; *) _pf_p="$PV_REPO/${_pf_c#./}" ;; esac
+        [ -n "$_pf_c" ] || continue; _pf_p="$(docs_path "$PV_REPO" "$_pf_c")"
         [ -f "$_pf_p" ] || continue
         if [ "$(cd "$(dirname "$_pf_p")" 2>/dev/null && pwd -P)/$(basename "$_pf_p")" = "$PF_REAL" ]; then PF_OWN=1; break; fi
       done <<PF_OWN_LIST
@@ -813,7 +813,7 @@ PF_OWN_LIST
         _pf_rs="${_pf_rf##*/roster-}"; _pf_rs="${_pf_rs%.state}"
         _pf_open=" $(roster_open_names "$_pf_rf" "${_pf_rf%/*}/sweeper-${_pf_rs}.state" 2>/dev/null | tr '\n' ' ')"
         while IFS=$'\037' read -r _pf_on _pf_ot _pf_c; do
-          case "$_pf_c" in '') continue ;; /*) _pf_p="$_pf_c" ;; *) _pf_p="$PV_REPO/${_pf_c#./}" ;; esac
+          [ -n "$_pf_c" ] || continue; _pf_p="$(docs_path "$PV_REPO" "$_pf_c")"
           [ -f "$_pf_p" ] || continue
           if [ "$(cd "$(dirname "$_pf_p")" 2>/dev/null && pwd -P)/$(basename "$_pf_p")" = "$PF_REAL" ]; then
             PF_OTHER="$_pf_on (${_pf_ot:-no subagent_type})"; break
@@ -1836,11 +1836,7 @@ DSP_READINGS
     fi
     DEBT_PLAN=""
     if [ -n "$DEBT_PLAN_ARG" ]; then
-      case "$DEBT_PLAN_ARG" in
-        /*) DEBT_PLAN="$DEBT_PLAN_ARG" ;;
-        *)  DEBT_PLAN="$REPO_REAL/$DEBT_PLAN_ARG"
-            [ -f "$DEBT_PLAN" ] || DEBT_PLAN="$(docs_root "$REPO_REAL")/$DEBT_PLAN_ARG" ;;
-      esac
+      DEBT_PLAN="$(docs_path "$REPO_REAL" "$DEBT_PLAN_ARG")"
       if [ ! -f "$DEBT_PLAN" ] || [ -L "$DEBT_PLAN" ]; then
         die "REFUSED — no plan file at $DEBT_PLAN_ARG; name the plan whose debt ledger this is."
         exit 2

@@ -1207,8 +1207,11 @@ _units_floor_kept() {
 # no writer slot; the scheduler asks `in_docs` which rows write what a `record` read waits on.
 # Prepended to each program; NO APOSTROPHE inside it (it is single-quoted).
 _units_files_awk() {
+  local h
+  declare -F docs_heads >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/root.sh"
+  h="$(docs_heads)"
+  printf 'function in_docs(e) { return (index(e, ".bionic/") == 1 || e ~ /^(%s)\//) }\n' "${h//$'\n'/|}"
   printf '%s' '
-    function in_docs(e) { return (index(e, ".bionic/") == 1 || index(e, "record/") == 1) }
     function writes_head(cell,   a, m, k, e) {
       m = split(cell, a, ",")
       for (k = 1; k <= m; k++) {

@@ -2514,10 +2514,7 @@ RP_TABLE
     fi
     top="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" && top="$(cd "$top" 2>/dev/null && pwd -P)" || top=""
     [ -n "$top" ] || top="$root"
-    case "$PR_ARG" in
-      /*) src="$PR_ARG" ;;
-      *) if [ -f "$root/$PR_ARG" ]; then src="$root/$PR_ARG"; else src="$(docs_root "$root")/$PR_ARG"; fi ;;
-    esac
+    src="$(docs_path "$root" "$PR_ARG")"
     if [ ! -f "$src" ]; then
       die "REFUSED — no file $(clean "$PR_ARG") (read as $src). Nothing was copied."
       exit 1
