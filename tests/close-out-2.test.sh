@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/close-out-2.test.sh — payload/scripts/close-out.sh, part 2 of 6: sections 4f, §5, LANDINGS and CLOSED.
+# tests/close-out-2.test.sh — payload/scripts/close-out.sh, part 2 of 6: sections 4f, §5, §SCRATCH, LANDINGS and CLOSED.
 #
 # THE SUITE IS SIX PARTS: one close-out.test.sh outran the suite bar, so it runs as parts cut at section boundaries,
 # and the two longest were cut again by the seconds of one run: CARRY left this part for close-out-5.
@@ -234,6 +234,41 @@ for c in workspaces gate; do
     "$(tmp_file_exists "$P7" "$c" "$TS_SID_D")"
 done
 expect_eq "5.14: only B's 2 spared files remain under .bionic/tmp/" "2" "$(tmp_entries "$P7")"
+
+# ============================================================
+section "§SCRATCH — REQ-8 (AC-8.4): the wipe removes nothing a live agent owns under the scratch root"
+# ============================================================
+# The scratch root is `.bionic/tmp/scratch/<session>/<agent name>/` (hooks/execution-recorder.sh), one folder per
+# session and agent, and none of it is keyed by a state class, so it was removed whatever session owned it. A closes;
+# C is another session, live the way section 5 proves B live (a real process named in a session file under the
+# sandboxed home); D is a session nobody registered, dead. A's own folder holds two agents: `w-live`, open on A's
+# roster, and `w-gone`, on no roster.
+# fails-when: after the wipe, a file under a live session's scratch folder, or under a live agent of A's, is gone.
+TS_SID_C="closeout-suite-session-c3c3c3c3"
+P8="$(mk_fixture p8)"; advance_to "$P8" 8
+for sc in "$TS_SID_C/w-c/keep.txt" "$TS_SID_A/w-live/notes.txt" "$TS_SID_A/w-gone/old.txt" "$TS_SID_D/w-d/old.txt"; do
+  mkdir -p "$P8/.bionic/tmp/scratch/${sc%/*}" && printf 'scratch of %s\n' "$sc" > "$P8/.bionic/tmp/scratch/$sc"
+done
+roster_row_fixture session="$TS_SID_A" name=w-live agent_id=alive-1111 \
+  launched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$P8/.bionic/tmp/roster-$TS_SID_A.state"
+sleep 3600 &
+TS_C_PID=$!
+TS_LIVE_PIDS="${TS_LIVE_PIDS} ${TS_C_PID}"
+jq -nc --arg sid "$TS_SID_C" --argjson pid "$TS_C_PID" --arg cwd "$P8" \
+  '{sessionId:$sid,pid:$pid,cwd:$cwd}' > "$SB_HOME/.claude/sessions/${TS_SID_C}.json"
+expect_eq "SC-0 precondition: the four planted scratch files stand, and w-live reads open on A's roster" "4|w-live" \
+  "$(find "$P8/.bionic/tmp/scratch" -type f | wc -l | tr -d ' ')|$(bash -c '. "$1/roster.sh" && roster_open_names "$2"' _ "$REPO_ROOT/payload/scripts/lib" "$P8/.bionic/tmp/roster-$TS_SID_A.state")"
+run_close_as "$TS_SID_A" "$P8" run
+expect_eq "SC-1 run (as A, with C live and D dead) exits 0" "0" "$CO_RC"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -5 | sed 's/^/    | /'
+expect_eq "SC-2 live C's scratch file stands after the wipe" "yes" \
+  "$([ -f "$P8/.bionic/tmp/scratch/$TS_SID_C/w-c/keep.txt" ] && echo yes || echo no)"
+expect_eq "SC-3 A's live agent's scratch file stands after the wipe" "yes" \
+  "$([ -f "$P8/.bionic/tmp/scratch/$TS_SID_A/w-live/notes.txt" ] && echo yes || echo no)"
+expect_eq "SC-4 …while A's gone agent's folder and dead D's folder are removed" "no|no" \
+  "$([ -e "$P8/.bionic/tmp/scratch/$TS_SID_A/w-gone" ] && echo yes || echo no)|$([ -e "$P8/.bionic/tmp/scratch/$TS_SID_D" ] && echo yes || echo no)"
+expect_eq "SC-5 …and A's own roster is removed as before, the scratch root the one entry left" "no|1" \
+  "$(tmp_file_exists "$P8" roster "$TS_SID_A")|$(tmp_entries "$P8")"
 
 # ============================================================
 section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints the run's numbers with each landed row"

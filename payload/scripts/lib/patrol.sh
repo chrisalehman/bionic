@@ -291,6 +291,25 @@ $(patrol_state_session_ids "$root")
 EOF
 }
 
+# WHO IS OUT: the rows of a run a live writer holds, the one question the watcher's merge pass and the close both ask
+# before they close the run. A writer is out while a roster of the run's state directory holds its name open under the
+# run's plan, by the dispatch wall's closure rule (lib/fill.sh `fill_held_ids`: an ack after its launch, a dead
+# session whose files the sweep takes, or a closed run closes it, and nothing else). Every row of the table is asked,
+# whatever its kind or status: a run is closed only when nobody is still writing any part of it.
+# <plan> -> `<id><TAB><name><TAB><session id>` per row out, in table order; rc 2, nothing printed, when the rows or the
+# rosters' reader cannot be had, which no caller may read as "nobody is out".
+patrol_rows_out() {  # <plan>
+  local plan="${1:-}" rows d
+  [ -n "$plan" ] && [ -f "$plan" ] || return 2
+  d="$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )" || return 2
+  # shellcheck source=/dev/null
+  declare -F units_rows >/dev/null 2>&1 || . "$d/units.sh" >/dev/null 2>&1 || return 2
+  declare -F _units_roster_libs >/dev/null 2>&1 && _units_roster_libs || return 2
+  declare -F fill_held_ids >/dev/null 2>&1 || return 2
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 2
+  fill_held_ids "$plan" "$(printf '%s\n' "$rows" | awk -F'\t' '$1 != "" { print $1 }')"
+}
+
 # The transcript file for a session id. Scanned rather than derived from a
 # slugged cwd, the same way hooks/dispatch-preflight.sh's liveness probe scans:
 # the slug rule belongs to the CLI and a copy of it here would be a second

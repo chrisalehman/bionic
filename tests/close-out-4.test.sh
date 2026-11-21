@@ -387,6 +387,41 @@ expect_eq "LANDS-10 a close-out refused after act 3 (the continuation could not 
   "2|yes|yes" \
   "$CO_RC|$(contains "$CO_OUT" "could not append the deferrals")|$(tmp_file_exists "$PLC" engaged "$LA_SID")"
 chmod 644 "$PLC/$CONT_REL"
+# The close typed by hand lands no row a writer holds: with a writer live on the close row it refuses, and lands
+# nothing, because a row landed mid-work reads finished while its writer still writes it. The writer is a roster row of this session dispatched for T4 under this plan, launched a minute ago, as the dispatch wall writes it.
+# fails-when: a landing is written for that row.
+lands_writer() {  # <project> <sid> <row> -> a live writer for <row> on <sid>'s roster, under the project's plan
+  roster_row_fixture session="$2" name="w-$3" row="$3" agent_id="a$3-live" plan="$1/$PLAN_REL" duration="4 hours" \
+    launched_at="$(t=$(( $(date +%s) - 60 )); date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ)" \
+    >> "$1/.bionic/tmp/roster-$2.state"
+}
+PLO="$(mk_fixture lands-out)"; advance_to "$PLO" 8; lands_rows "$PLO"; lands_bind "$PLO" "$LA_SID"; lands_writer "$PLO" "$LA_SID" T4
+LO_CK="$(cksum < "$PLO/$PLAN_REL")"
+expect_eq "LANDS-11 precondition: the session is bound, and T4's writer reads open on its roster" "0|w-T4" \
+  "$LP_RC|$(bash -c '. "$1/roster.sh" && roster_open_names "$2"' _ "$REPO_ROOT/payload/scripts/lib" "$PLO/.bionic/tmp/roster-$LA_SID.state")"
+run_close_as "$LA_SID" "$PLO" run
+expect_eq "LANDS-11a AC-8.3 a writer live on the close row: run refuses, the plan unchanged, and no landing is written for T3 or T4" \
+  "2|$LO_CK||" "$CO_RC|$(cksum < "$PLO/$PLAN_REL")|$(lands_pub "$PLO" T3)|$(lands_pub "$PLO" T4)"
+expect_contains "LANDS-11b …naming the row out and its writer, and that nothing was done" "rows out: T4 (w-T4" "$CO_OUT"
+expect_contains "LANDS-11c …nothing was done" "nothing was done" "$CO_OUT"
+: > "$PLO/.bionic/tmp/roster-$LA_SID.state"
+run_close_as "$LA_SID" "$PLO" run
+expect_eq "LANDS-11d …and with the writer gone, run lands both rows" "0|landed|landed" "$CO_RC|$(lands_state "$PLO" T3)|$(lands_state "$PLO" T4)"
+# The continuation has one writer. A close row that was dispatched and whose Files name the continuation owns
+# it, so the close writes none of it; the writer's file stands byte for byte.
+# fails-when: the close appends to the continuation the close row's writer wrote.
+PLW="$(mk_fixture lands-writes)"; advance_to "$PLW" 8; lands_rows "$PLW"
+awk -v c="$CONT_REL" '/^\| T4 \|/ { print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-1 | " c " | — |"; next } { print }' \
+  "$PLW/$PLAN_REL" > "$PLW/t4" && mv "$PLW/t4" "$PLW/$PLAN_REL"
+printf 'run/v1|ev=dispatch|row=T4|name=w-T4|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$PLW/$LOG_REL"
+seal_fixture "$PLW/$PLAN_REL" "$PLW/$LOG_REL"; lands_bind "$PLW" "$LA_SID"
+mkdir -p "$PLW/${CONT_REL%/*}"; printf '# continuation — written by the close row T4\n\nthe writer'"'"'s words\n' > "$PLW/$CONT_REL"
+LW_CK="$(cksum < "$PLW/$CONT_REL")"
+run_close_as "$LA_SID" "$PLW" run
+expect_eq "LANDS-12 the close row dispatched owns the continuation: run exits 0, lands T4, and the writer's file is as written" \
+  "0|landed|$LW_CK" "$CO_RC|$(lands_state "$PLW" T4)|$(cksum < "$PLW/$CONT_REL")"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -8 | sed 's/^/    | /'
+expect_contains "LANDS-12b …and the card says whose it is" "continuation: ${CONT_REL#.bionic/docs/} is the close row T4's" "$CO_OUT"
 
 # ============================================================
 section "§PARKED — wave-38 T15 (REQ-4 AC-4.3; D17): close-out closes a parked wave without the merge act"
