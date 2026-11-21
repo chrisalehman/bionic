@@ -287,6 +287,8 @@ expect_contains "(ct3-pre) T2's red fails at the head too: published" "LANDED T2
 expect_contains "(ct3) AC-5.1 the standing red's cause reads only the runs it can place: code, no run named" \
   "|cause=code|against=-|" "$(ll_ev "$RT" standing)"
 expect_absent "(ct3b) …and no STANDING report" "STANDING " "$LL_OUT"
+# The landing removed T2's tree; the rows below need a writer's tree at that path, so its branch is checked out there again.
+git -C "$RT" worktree add -q "$RT/.worktrees/T2" wt/T2
 # The positive on the same extractor, same world: the shim handed no --unplaced stamps where it stands,
 # the main checkout (now at the landed head), and that run is a green record there (the wrap 1.17.0 sent).
 printf '#!/bin/bash\necho "PASS: a ran dirty"\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' > "$RT/.worktrees/T2/tests/a.test.sh"
@@ -1092,6 +1094,15 @@ sed -i '' '/AC-9\.[23] /s/| x |/| restated |/' "$SLP"
 ll_verb "$SL" T1
 expect_eq "(sl3) AC-11.2 once both rows differ from their text at dispatch, the row lands" "0|" "$LL_RC|$(sl_stale)"
 expect_contains "(sl3) …LANDED" "LANDED T1 " "$LL_OUT"
+
+section "§GONE: a row that deletes a suite in its set lands with no command between, and the landing says the suite left the set (AC-24.3)"
+# fails-when: the row lands only once a command takes the suite out of its set, or lands saying nothing of it.
+GN="$(ll_world)"; ll_launch "$GN" T1 a,c; ( cd "$GN" && world_cost a.test.sh 5 && world_suite c green >/dev/null )
+git -C "$GN" add tests/c.test.sh && git -C "$GN" commit -qm "suite c" && git -C "$GN/.worktrees/T1" merge -q --no-edit wave/x
+git -C "$GN/.worktrees/T1" rm -q tests/c.test.sh && git -C "$GN/.worktrees/T1" commit -qm "T1: c removed"; ll_verb "$GN" T1
+expect_eq "(gn1) AC-24.3 the row lands on its first ready, a,c in its set and c deleted" "0" "$LL_RC"
+expect_contains "(gn1) …LANDED" "LANDED T1 " "$LL_OUT"
+expect_eq "(gn2) AC-24.3 the landing says c left the set, and a did not" "GONE T1 c.test.sh" "$(printf '%s\n' "$LL_OUT" | /usr/bin/grep '^GONE ' | cut -d' ' -f1-3)"
 
 # ---------------------------------------------------------------------------
 finish

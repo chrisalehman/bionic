@@ -1317,6 +1317,9 @@ ADOPT_READERS
                 # `roster_open_names` predicate (an ack later than the row's launch), not a
                 # `met[]` filter, so only a still-open history is ever offered to copy.
                 adopt_copy_marker "$ADOPT_RF" "$ADOPT_OWN_ROSTER" "$(clean "$RNAME")"
+                # A RULING THE PREDECESSOR'S ROSTER HELD goes into the writer's run, where this session reads it.
+                ruling_adopt "$ADOPT_RF" "$ADOPT_OWN_ROSTER" "$(clean "$RNAME")" \
+                  || die "WARN — a ruling for $RNAME on $ADOPT_RF could not be written to its run."
               else
                 die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
               fi
@@ -2152,8 +2155,8 @@ EOF
   }
 
   # A RULING FOR A LIVE WRITER (wave-33 T10; REQ-1 AC-1.1 to AC-1.4, D1). The orchestrator's binding
-  # instruction to one writer while it works: a `ruling/v1` line on this session's roster (lib/roster.sh
-  # `ruling_record`, which owns the state and its one reader). hooks/ruling-push.sh carries it on the
+  # instruction to one writer while it works: a `ruling` event of the writer's run, named by its row
+  # (lib/roster.sh `ruling_record`, which owns the state and its one reader). hooks/ruling-push.sh carries it on the
   # writer's next tool result; the writer's commit and `ready` refuse while it is unread. `rulings` reads
   # the state; `ruling-ack` is the writer's own acknowledgement, from its tree (the session key is the
   # orchestrator's in a teammate's shell, so it finds the same roster).
@@ -2163,6 +2166,7 @@ EOF
   # launch). A ruling for either would never be shown, so it is never written. No session key is 3,
   # as everywhere in this file.
   poker_verb_rule() {
+    [ "$VERB" != rule ] || RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh rule $(clean "$RULE_WRITER") '<text>'"
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
@@ -2177,13 +2181,13 @@ EOF
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
-      die "REFUSED — this session has no roster at $ROSTER_FILE, so it has no writer to rule for."
+      die_run "REFUSED — this session has no roster at $ROSTER_FILE, so it has no writer to rule for." "bash ${HOOK_DIR}/session-poker.sh adopt"
       exit 2
     fi
     case "$VERB" in
       rule)
         if ! grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null | grep -qF "|name=${RULE_WRITER}|"; then
-          die "REFUSED — no row named $RULE_WRITER on this session's roster ($ROSTER_FILE); a ruling names one live writer."
+          die_run "REFUSED — no row named $RULE_WRITER on this session's roster ($ROSTER_FILE); a ruling names one live writer." "bash ${HOOK_DIR}/session-poker.sh adopt"
           exit 2
         fi
         if ! roster_open_names "$ROSTER_FILE" "$(roster_ack_ledger "$ROSTER_FILE")" | grep -qxF "$RULE_WRITER"; then
@@ -2208,12 +2212,30 @@ EOF
           fi
           RULE_TEXT="$RULE_TEXT words=\"$(said_fold "$RULE_WORDS" | tr '"' "'")\" session=$SAID_SESSION"
         fi
-        RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT")" || RULE_ID=""
+        # A GRANT IS THE RULING'S OWN WIDENING: the writer's row is widened first, by `amend` itself, so every check it
+        # makes is made, and nothing is written when it refuses; then the one event, the ruling, carries what it
+        # granted, where every later brief of the row reads it (`poker_brief_grants`), and says so to the writer.
+        RULE_GRANT=()
+        if [ -n "$RULE_FILES$RULE_SUITES" ]; then
+          RULE_AM="$(AMEND_NAME="$RULE_WRITER" AMEND_FILES="$RULE_FILES" AMEND_SUITES="$RULE_SUITES" AMEND_NARROW="" \
+            AMEND_RUNS="" AMEND_BY="" AMEND_RULED=1 AMEND_REASON="granted by ruling: $(ruling_clean "$RULE_TEXT")" \
+            poker_verb_amend 2>&1)"; RULE_AM_RC=$?
+          case "$RULE_AM_RC:$RULE_AM" in
+            0:*"amended — "*) : ;;
+            *) die "REFUSED — the grant could not widen $RULE_WRITER's row, so neither it nor the ruling is written:"
+               printf '%s\n' "${RULE_AM:-(amend said nothing)}" >&2
+               exit 2 ;;
+          esac
+          RULE_GF="$(printf '%s' "$RULE_FILES" | awk 'NF' | paste -sd, -)"; RULE_GS="$(printf '%s' "$RULE_SUITES" | awk 'NF' | paste -sd, -)"
+          RULE_GRANT=(${RULE_GF:+"files=$RULE_GF"} ${RULE_GS:+"suites=$RULE_GS"})
+          RULE_TEXT="$RULE_TEXT — granted:${RULE_GF:+ files $RULE_GF}${RULE_GS:+ suites $RULE_GS}"
+        fi
+        RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT" ${RULE_GRANT[@]+"${RULE_GRANT[@]}"})" || RULE_ID=""
         if [ -z "$RULE_ID" ]; then
-          die "REFUSED — could not write the ruling to $ROSTER_FILE."
+          die "REFUSED — could not write the ruling to the run $RULE_WRITER's row names, or this session is bound to."
           exit 2
         fi
-        say "ruling $RULE_ID recorded for $RULE_WRITER — its next tool result carries it, and its commit and ready are refused until it is shown; read it with: rulings $RULE_WRITER"
+        say "ruling $RULE_ID recorded for $RULE_WRITER${RULE_GRANT[0]+, its row widened by the grant} — its next tool result carries it, and its commit and ready are refused until it is shown; read it with: rulings $RULE_WRITER"
         exit 0 ;;
       ruling-ack)
         RA_LINE="$(ruling_fold "$ROSTER_FILE" | awk -F"$RULING_US" -v id="$RULING_ID" '$1 == id { print; exit }')"
@@ -2242,7 +2264,7 @@ EOF
           [ -z "$RS_S" ] || RS_STATE="shown=$RS_S by=${RS_B:-?}"
           say "ruling $RS_ID $RS_W recorded=$RS_REC${RS_P:+ pushed=$RS_P} $RS_STATE — $RS_T"
         done <<< "$(ruling_fold "$ROSTER_FILE" "$RULE_WRITER")"
-        [ "$RS_ANY" = yes ] || say "no ruling for $RULE_WRITER on this session's roster"
+        [ "$RS_ANY" = yes ] || say "no ruling for $RULE_WRITER in this session's runs"
         exit 0 ;;
     esac
   }

@@ -1426,14 +1426,18 @@ landing_tree_free() { rm -f "${1:-/nonexistent}.held"; }   # <tree> — the hold
 # (which refuses a tree with changes), prune; the link put back when the removal is refused. The
 # branch is never touched. rc 1 when git refused.
 _wt_tree_remove() {  # <tree abs> <root>
-  local wt="$1" root="$2" link_to plan
+  local wt="$1" root="$2" link_to plan gd stamps=""
   link_to="$(readlink "${wt}/.bionic" 2>/dev/null)"
   plan="$(_wt_tree_record_plan "$wt")"
+  # A door run's stamp lives in the tree's own git dir, which the remove deletes. Stamps are read by the commit they
+  # name, never by the file they sit in (lib/proof.sh `_proof_records`), so the tree's are kept in the common git dir.
+  gd="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)" && [ -f "$gd/bionic-stamps" ] && stamps="$(cat "$gd/bionic-stamps")"
   _wt_drop_legacy_link "$wt" || :
   if ! git -C "$root" worktree remove "$wt" >/dev/null 2>&1; then
     [ -n "$link_to" ] && [ ! -e "${wt}/.bionic" ] && ln -s "$link_to" "${wt}/.bionic" 2>/dev/null
     return 1
   fi
+  [ -z "$stamps" ] || printf '%s\n' "$stamps" >> "$(git -C "$root" rev-parse --absolute-git-dir)/bionic-stamps" 2>/dev/null || :
   git -C "$root" worktree prune >/dev/null 2>&1
   # The row's tree event goes with the tree, best effort: the tree is already gone, and the landing it ended stands.
   [ -z "$plan" ] || worktree_tree_gone "$root" "" "$wt" "$plan" >/dev/null 2>&1 || :
