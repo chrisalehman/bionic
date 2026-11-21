@@ -23,6 +23,12 @@
 #   owing   lib/walls.sh matrix_owing_step  one criterion's owing step asked
 #           lib/walls.sh matrix_owing_open  one criterion's openness asked
 #           lib/walls.sh matrix_owing_load  every criterion's owing step and openness, in one pass
+#   send    lib/proof.sh _proof_facts, proof_held_facts · lib/units.sh _units_facts_of · lib/reader.sh reader_main
+#                                       the whole facts handed on as a string inside a held command (a reader that is
+#                                       /dev/null is handed nothing)
+#   sum     lib/proof.sh _proof_facts, proof_step_held  a checksum of the run's log taken for a key
+#   append  lib/log.sh _log_put         a line the command appended to a run's log
+#   judge   lib/proof.sh _proof_facts   a judgment's entry: a decider's first ask under its own `_PROOF_FRESH=1`
 #
 # THE FIXTURE. One run, built at two sizes: SC_N rows and twice that, each size's every row but the last a landed
 # Step-4 build and the last the integrate row, open. The plan is a version-15 wave at double rigor with
@@ -32,8 +38,9 @@
 # names the plan for resume. Each size is snapshotted once built, and every command is run from that snapshot, with
 # its own TMPDIR, so no command reads what another left, and a kept file of an earlier run is never what is counted.
 #
-# THE FIVE COMMANDS (SC_CMDS): card `release-approval --preview <plan>` · check `current 6 --check` · tick `tick` ·
-# resume `resume <handoff>` · watch `tick --watch`. Each runs once per size with the counters on (`on`), and at
+# THE SIX COMMANDS (SC_CMDS): card `release-approval --preview <plan>` · check `current 6 --check` · tick `tick` ·
+# resume `resume <handoff>` · watch `tick --watch` · wall, the commit wall (hooks/bash-walls.sh) handed the PreToolUse
+# payload of `git commit -m probe` from the bound session, which it admits. Each runs once per size with the counters on (`on`), and at
 # SC_N once more with them off (`off`), for §PRINT.
 #
 # ADDING A CEILING. `sc_count <size> <command> <kind>` prints how many lines of that kind the command wrote at that
@@ -84,8 +91,9 @@ SID="5c1e7a2b-3d4f-4e8a-9b6c-1f2e3d4c5b6a"
 SC_NOW=1791324000     # 2026-10-06T22:00:00Z
 SC_AT=2026-10-06T12:00:00Z
 SC_N=5
-SC_CMDS="card check tick resume watch"
-SC_KINDS="log fold overlay parse table status facts held gate pass matrix owing"
+SC_CMDS="card check tick resume watch wall"
+SC_KINDS="log fold overlay parse table status facts held gate pass matrix owing send sum append judge"
+WALLS="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 SC_OUT="$TMPROOT/out"; mkdir -p "$SC_OUT"
 
 # ---------- the run ----------
@@ -161,7 +169,13 @@ sc_args() {
     tick) printf '%s\n' tick ;;
     resume) printf '%s\n' resume "$SC_ROOT/.bionic/handoffs/handoff.md" ;;
     watch) printf '%s\n' tick --watch ;;
+    wall) : ;;
   esac
+}
+# sc_wall -> the commit wall run from the project of the size last named, handed the bound session's commit payload
+sc_wall() {
+  jq -nc --arg s "$SID" --arg c "$SC_ROOT" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"git commit -m probe"}, tool_use_id:"toolu_probe"}' | sc_env "$WALLS"
 }
 
 # sc_run <size> <command> <on|off> -> the command run from the size's snapshot, restored in place first; it leaves
@@ -174,7 +188,9 @@ sc_run() {
   SC_W="$TMPROOT/$size/live"; SC_ROOT="$SC_W/proj"; SC_PLAN="$SC_ROOT/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
   set --; while IFS= read -r a; do set -- "$@" "$a"; done < <(sc_args "$cmd")
   : > "$f.count"
-  if [ "$mode" = on ]; then
+  if [ "$cmd" = wall ] && [ "$mode" = on ]; then BIONIC_COUNT="$f.count" sc_wall > "$f.out" 2> "$f.err"
+  elif [ "$cmd" = wall ]; then sc_wall > "$f.out" 2> "$f.err"
+  elif [ "$mode" = on ]; then
     BIONIC_COUNT="$f.count" sc_env "$POKER" "$@" > "$f.out" 2> "$f.err"
   else
     sc_env "$POKER" "$@" > "$f.out" 2> "$f.err"
@@ -230,7 +246,7 @@ section "§FIXTURE: each size is built, and each command runs the path its count
 # read nothing.
 expect_eq "FX-1 both sizes are built" " n 2n" "$SC_BUILT"
 for SC_SIZE in n 2n; do
-  expect_eq "FX-2 ($SC_SIZE) the exits: card 0, check 1 (it would refuse), tick 0, resume 0, watch 0" "0 1 0 0 0" \
+  expect_eq "FX-2 ($SC_SIZE) the exits: card 0, check 1 (it would refuse), tick 0, resume 0, watch 0, wall 0 (it admits)" "0 1 0 0 0 0" \
     "$(for SC_C in $SC_CMDS; do cat "$SC_OUT/$SC_SIZE.$SC_C.on.rc" 2>/dev/null || echo -; done | paste -sd' ' -)"
   SC_ROWS="$(sc_rows "$SC_SIZE")"
   expect_regex "FX-3 ($SC_SIZE) the card's head counts every row, all but the integrate row landed" \
@@ -244,13 +260,16 @@ section "§REPORTS: every counter reports, at each size"
 # fails-when: a counted function writes no line when BIONIC_COUNT names a file, or a command counts nothing.
 for SC_SIZE in n 2n; do
   for SC_K in $SC_KINDS; do
+    # A held command hands the facts on as a string nowhere, and none of the six appends to the log, so `send` and
+    # `append` are each proved by a probe of their own (§SEND, §SUM).
+    case "$SC_K" in send|append) continue ;; esac
     SC_BY=""
     for SC_C in $SC_CMDS; do [ "$(sc_count "$SC_SIZE" "$SC_C" "$SC_K")" -eq 0 ] || SC_BY="$SC_BY $SC_C"; done
     expect_nonempty "REP-1 ($SC_SIZE) $SC_K is counted by a command of the five (by:${SC_BY:- none})" "$SC_BY"
   done
   for SC_C in $SC_CMDS; do
     expect_regex "REP-2 ($SC_SIZE) $SC_C counts its reads, each line a known kind and its function" \
-      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|held _proof_facts|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load)( |$))+$' \
+      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|held _proof_facts|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load|send (_proof_facts|proof_held_facts|_units_facts_of|reader_main)|sum (_proof_facts|proof_step_held)|append _log_put|judge _proof_facts)( |$))+$' \
       "$(sort "$SC_OUT/$SC_SIZE.$SC_C.on.count" 2>/dev/null | uniq -c | awk '{ $1 = $1; print }' | paste -sd' ' -)"
   done
 done
@@ -260,7 +279,7 @@ section "§ONCE: one fold of the run's log a command, one answer of its facts at
 # starts is not served the command's one fold, or the facts at the head are judged a second time in one command; or
 # a judgment's pending step is laid over the fold more than once a gate pass.
 for SC_SIZE in n 2n; do
-  for SC_C in card check; do
+  for SC_C in card check wall; do
     expect_eq "ONCE-1 ($SC_SIZE) $SC_C folds the run's log once" 1 "$(sc_count "$SC_SIZE" "$SC_C" fold)"
   done
   for SC_C in card tick resume watch; do
@@ -273,6 +292,66 @@ for SC_SIZE in n 2n; do
     SC_O="$(sc_count "$SC_SIZE" "$SC_C" overlay)"; SC_G="$(sc_count "$SC_SIZE" "$SC_C" gate)"
     expect_eq "ONCE-5 ($SC_SIZE) $SC_C lays a pending step over the fold no more than once a gate pass ($SC_O for $SC_G)" 1 \
       "$([ "$SC_O" -le "$SC_G" ] && echo 1 || echo 0)"
+  done
+done
+
+section "§SEND: inside a held command the facts are read by path, never handed on as a string"
+# fails-when: a reader of any of the six commands is handed the whole fold as a string (a `$( )` of the facts, a held
+# copy printed, a reader's override fed the variable), in the command's first process or any it starts.
+# The counter is proved first, on the same snapshot: a shell that opens a hold and takes the facts as a string counts
+# one send, and one that sends them to /dev/null counts none.
+SS_DIR="$TMPROOT/n/send"; rm -rf "$SS_DIR" && cp -Rp "$TMPROOT/n/snap" "$SS_DIR"
+ss_probe() {  # <sink: string|null> -> the send lines the probe counted
+  : > "$SS_DIR/$1.count"
+  ( cd "$SS_DIR/proj" && env TMPDIR="$SS_DIR/tmp" HOME="$SS_DIR/home" BIONIC_COUNT="$SS_DIR/$1.count" bash -c '
+      . "$1/proof.sh" || exit 2; proof_hold_begin || exit 2
+      if [ "$3" = string ]; then x="$(_proof_facts "$2")"; [ -n "$x" ] || exit 3; else _proof_facts "$2" >/dev/null; fi
+      proof_hold_end' _ "$SC_LIB" "$SS_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" "$1" ) || echo "probe-exit $?"
+  awk '$1 == "send"' "$SS_DIR/$1.count"
+}
+expect_eq "SEND-0 a held shell that takes the facts as a string counts one send (the counter proved)" "send _proof_facts" "$(ss_probe string)"
+expect_eq "SEND-0 …and one that sends them to /dev/null counts none" "" "$(ss_probe null)"
+for SC_SIZE in n 2n; do
+  for SC_C in $SC_CMDS; do
+    expect_eq "SEND-1 ($SC_SIZE) $SC_C hands the facts on as a string nowhere" 0 "$(sc_count "$SC_SIZE" "$SC_C" send)"
+  done
+done
+
+section "§SUM: the log is summed for a key once at the start, after each append and at each judgment's entry"
+# fails-when: an ask sums the log again (each ask re-proves its key), so a command sums more often than it starts,
+# appends and enters a judgment; or the sums grow with the rows; or a line the command appended is not in its next
+# ask's facts; or a judgment's entry does not fold a line written from outside the command.
+# The probe, on a copy of the n snapshot, in one held shell: an ask, a second ask, an append through the log's one
+# writer, an ask; a line written to the log from outside the command, an ask, then a judgment's ask. It prints whether
+# each of the last three asks reads its line: the append's, the outside line before a judgment, the outside line at one.
+SM_DIR="$TMPROOT/n/sum"; rm -rf "$SM_DIR" && cp -Rp "$TMPROOT/n/snap" "$SM_DIR"; : > "$SM_DIR/count"
+SM_SEEN="$( cd "$SM_DIR/proj" && env TMPDIR="$SM_DIR/tmp" HOME="$SM_DIR/home" BIONIC_COUNT="$SM_DIR/count" bash -c '
+    . "$1/proof.sh" && . "$1/log.sh" && _proof_reader_load || exit 2; proof_hold_begin || exit 2
+    l="$(reader_log "$2")" || exit 2
+    _proof_facts "$2" >/dev/null; _proof_facts "$2" >/dev/null
+    RUN_LOG="$l" LOG_AT=2026-10-06T12:30:00Z log_append handoff path=probe-own >/dev/null 2>&1 || exit 3
+    a="$(_proof_facts "$2" | grep -c "|path=probe-own|")"
+    printf "run/v1|ev=handoff|path=probe-out|at=2026-10-06T12:31:00Z\n" >> "$l"
+    b="$(_proof_facts "$2" | grep -c "|path=probe-out|")"
+    c="$(_PROOF_FRESH=1; _proof_facts "$2" >/dev/null; _proof_facts "$2" | grep -c "|path=probe-out|")"
+    proof_hold_end; echo "$a $b $c"' _ "$SC_LIB" "$SM_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )"
+sm_probe() { awk -v k="$1" '$1 == k { n++ } END { print n + 0 }' "$SM_DIR/count"; }   # <kind> -> the probe's count of it
+expect_eq "SUM-0 the probe's asks read the command's own append, not an outside line before a judgment, and that line at one" \
+  "1 0 1" "$SM_SEEN"
+# The copy's run has no seal standing where it now lies, so the append seals it and writes the seal's own line too.
+expect_eq "SUM-0 …it appended (its line and the seal's) and entered one judgment (the counters proved)" "yes 1" \
+  "$([ "$(sm_probe append)" -ge 1 ] && echo yes) $(sm_probe judge)"
+expect_eq "SUM-0 …and summed the log three times: at its start, after its appends, at the judgment's entry" 3 "$(sm_probe sum)"
+for SC_SIZE in n 2n; do
+  for SC_C in $SC_CMDS; do
+    SM_S="$(sc_count "$SC_SIZE" "$SC_C" sum)"; SM_A="$(sc_count "$SC_SIZE" "$SC_C" append)"; SM_J="$(sc_count "$SC_SIZE" "$SC_C" judge)"
+    expect_eq "SUM-1 ($SC_SIZE) $SC_C sums the log at least once and at most once, plus its $SM_A appends, plus its $SM_J judgments' entries ($SM_S)" 1 \
+      "$([ "$SM_S" -ge 1 ] && [ "$SM_S" -le $((1 + SM_A + SM_J)) ] && echo 1 || echo 0)"
+  done
+done
+for SC_C in $SC_CMDS; do
+  for SC_K in sum append judge; do
+    expect_eq "SUM-2 $SC_C counts the same $SC_K at n rows and 2n" "$(sc_count n "$SC_C" "$SC_K")" "$(sc_count 2n "$SC_C" "$SC_K")"
   done
 done
 
@@ -555,10 +634,11 @@ section "§PRINT: counting changes no print"
 # fails-when: a counter writes to the command's stdout or stderr, or moves its exit, so the print with BIONIC_COUNT
 # set differs from the print without it, from the same snapshot.
 # The watcher's pass prints nothing when it has no wake, so what it is compared by is its exit, with FX-5 showing it
-# looked; every other command prints a page.
+# looked; the commit wall prints nothing when it admits, and is compared by its exit too, with ONCE-1 showing it
+# folded; every other command prints a page.
 for SC_C in $SC_CMDS; do
-  if [ "$SC_C" = watch ]; then
-    expect_eq "PR-1 watch has no wake, so its print is its exit, 0" "0" "$(cat "$SC_OUT/n.watch.off.rc" 2>/dev/null)"
+  if [ "$SC_C" = watch ] || [ "$SC_C" = wall ]; then
+    expect_eq "PR-1 $SC_C has no wake or refusal, so its print is its exit, 0" "0" "$(cat "$SC_OUT/n.$SC_C.off.rc" 2>/dev/null)"
   else
     expect_nonempty "PR-1 $SC_C prints something to compare" "$(cat "$SC_OUT/n.$SC_C.off.out" "$SC_OUT/n.$SC_C.off.err" 2>/dev/null)"
   fi

@@ -476,6 +476,10 @@ for k in place facts 'place facts'; do
   gate "git commit -m x"
   expect_eq "with the kept $k read delivered, the refusal is the one before, word for word" "$E0" "$(cat "$SB/gate.err")"
 done
+# The kept files rewritten by hand are this section's own: every world after it is built byte for byte as this one, so
+# under the same key they would answer delivered to the hooks of the sections below, which read the kept place as a
+# hook outside a command does. A held command no longer writes that file over, so it is taken away here.
+rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"
 
 section "SHUT"
 HL="bionic: write refused — this changes the seal's home (only the tool writes there)"

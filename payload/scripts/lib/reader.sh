@@ -196,11 +196,11 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
     # question runs under pipefail, its caller's setting put back after, and the failure is its exit in-process too.
     shopt -qo pipefail || pf=off
     set -o pipefail
-    # INSIDE A HELD COMMAND (lib/proof.sh `_proof_held_dir`) the question reads the command's one fold of the log, the
-    # same facts a fold here would make, and no pending line laid over them: no second fold is made for it.
-    if declare -F _proof_held_dir >/dev/null 2>&1 && _proof_held_dir && _proof_facts "$plan" >/dev/null 2>&1 \
-       && [ -n "$_PROOF_FACTS_LOG" ] && [ "${_PROOF_FACTS_KEY%% *}" = "$plan" ]; then
-      ( reader_facts() { printf '%s' "$_PROOF_FACTS"; }
+    # INSIDE A HELD COMMAND (lib/proof.sh `_proof_held_dir`) the question reads the command's one fold of the log by
+    # its file, the same facts a fold here would make, and no pending line laid over them: no second fold is made for it.
+    if declare -F _proof_held_dir >/dev/null 2>&1 && _proof_held_dir && _proof_facts_held "$plan" 2>/dev/null \
+       && [ -n "$_PROOF_HELD_FOLD" ] && [ -n "$_PROOF_FACTS_LOG" ] && [ "${_PROOF_FACTS_KEY%% *}" = "$plan" ]; then
+      ( _PROOF_READ_FILE="$_PROOF_HELD_FOLD"; reader_facts() { cat "$_PROOF_READ_FILE"; }
         if [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null; else "$fn" "$plan" "$@"; fi )
     elif [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null
     else "$fn" "$plan" "$@"; fi

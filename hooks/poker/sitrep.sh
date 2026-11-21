@@ -289,12 +289,15 @@ _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledge
   # round written since is folded in. Either is the log's fold with nothing pending laid over it, as the log read
   # below is, and the log is not folded again for the ledger alone.
   if [ -n "${_SITREP_FACTS_PLAN:-}" ] && [ -f "$_SITREP_FACTS_PLAN" ] && [ "$(reader_log "$_SITREP_FACTS_PLAN" 2>/dev/null)" = "$log" ]; then
-    ( f="${_SITREP_FACTS:+$_SITREP_FACTS$'\n'}"; reader_facts() { printf '%s' "$f"; }; reader_q_ledger "$_SITREP_FACTS_PLAN" ); return
+    ( f="${_SITREP_FACTS:+$_SITREP_FACTS$'\n'}" _PROOF_READ_FILE="$_SITREP_FACTS_FILE"
+      reader_facts() { if [ -n "$_PROOF_READ_FILE" ]; then cat "$_PROOF_READ_FILE"; else printf '%s' "$f"; fi; }; reader_q_ledger "$_SITREP_FACTS_PLAN" ); return
   fi
   plan="${POKER_HELD_RUN:-}"
   if [ -n "$plan" ] && [ -f "$plan" ] && declare -F _proof_facts >/dev/null 2>&1 && [ "$(reader_log "$plan" 2>/dev/null)" = "$log" ] \
      && _proof_facts "$plan" >/dev/null 2>&1; then
-    ( f="$_PROOF_FACTS"; reader_facts() { printf '%s' "$f"; }; reader_q_ledger "$plan" ); return
+    ( f="$_PROOF_FACTS" _PROOF_READ_FILE="$_PROOF_HELD_FOLD"
+      reader_facts() { if [ -n "$_PROOF_READ_FILE" ]; then cat "$_PROOF_READ_FILE"; else printf '%s' "$f"; fi; }
+      reader_q_ledger "$plan" ); return
   fi
   ( reader_events() { cat "$log"; }; reader_q_ledger "$led" )
 }
@@ -783,25 +786,39 @@ _sitrep_reader() {  # -> 0 once lib/proof.sh and the reader under it are loaded 
   { declare -F _proof_facts >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
   declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load
 }
-_SITREP_FACTS_PLAN=""; _SITREP_FACTS=""
+_SITREP_FACTS_PLAN=""; _SITREP_FACTS=""; _SITREP_FACTS_FILE=""
 # A fold that failed (a process refused under memory pressure) is empty or short: held, every fact asked after would
 # read absent. So it is never held, and each read below takes the fold before it pipes it and exits 2 when it failed.
 _sitrep_hold() {  # <plan> -> 0 once the plan's fold, as it stands now, is held in this shell; 2, nothing held, when it cannot be folded
-  _SITREP_FACTS_PLAN=""; _SITREP_FACTS=""
+  _SITREP_FACTS_PLAN=""; _SITREP_FACTS=""; _SITREP_FACTS_FILE=""
   _sitrep_reader || return 2
-  if [ -f "$1" ]; then _proof_findings_hold "$1" || return 2; _SITREP_FACTS="${_PROOF_FACTS%$'\n'}"; fi
+  # Inside a held command the fold is held as its file (lib/proof.sh `_proof_held_facts_at`), read by path.
+  if [ -f "$1" ]; then
+    _proof_findings_hold "$1" || return 2
+    _SITREP_FACTS_FILE="${_PROOF_HELD_FACTS_FILE:-}"; [ -n "$_SITREP_FACTS_FILE" ] || _SITREP_FACTS="${_PROOF_FACTS%$'\n'}"
+  fi
   _SITREP_FACTS_PLAN="$1"
 }
 sitrep_facts() {  # <plan> [<event type>…] -> the run's standing facts, of those types when named, one run/v1 line each; 2 when the fold fails
-  local t=" ${*:2} " f="$_SITREP_FACTS"
+  local t=" ${*:2} "
   _sitrep_reader || return 0
-  [ "$_SITREP_FACTS_PLAN" = "$1" ] || f="$(_proof_facts "$1")" || return 2
-  printf '%s\n' "$f" | awk -F'|' -v t="$t" "$_READER_AWK"'NF && (t == "  " || index(t, " " ev() " "))'
+  _sitrep_facts_at "$1" || return 2
+  _proof_facts_awk -F'|' -v t="$t" "$_READER_AWK"'NF && (t == "  " || index(t, " " ev() " "))'
+}
+# _sitrep_facts_at <plan> -> 0 with the plan's facts ready as lib/proof.sh `proof_facts_at` leaves them: the fold this
+# shell holds for it (`_sitrep_hold`), else the fold's own; 2 when the fold fails
+_sitrep_facts_at() {
+  if [ -n "$_SITREP_FACTS_PLAN" ] && [ "$_SITREP_FACTS_PLAN" = "$1" ]; then
+    _PROOF_FACTS_FILE="$_SITREP_FACTS_FILE"; _PROOF_FACTS_TEXT="${_SITREP_FACTS:+$_SITREP_FACTS$'\n'}"; return 0
+  fi
+  proof_facts_at "$1"
 }
 _sitrep_ask() {  # <plan> <reader question's function> [args] -> its answer over the plan's fold; 2 when the fold fails
   local plan="$1" f; shift
   _sitrep_reader || return 1
-  f="$(sitrep_facts "$plan")" || return 2
+  _sitrep_facts_at "$plan" || return 2
+  if [ -n "$_PROOF_FACTS_FILE" ]; then ( _PROOF_READ_FILE="$_PROOF_FACTS_FILE"; reader_facts() { cat "$_PROOF_READ_FILE"; }; "$@" ); return; fi
+  f="$(_proof_facts_awk -F'|' "$_READER_AWK"'NF')" || return 2
   ( reader_facts() { printf '%s' "${f:+$f$'\n'}"; }; "$@" )
 }
 # _SITREP_EPOCH_AWK: `ep(at)`, beside _PATROL_ISO_AWK, the epoch of a fact's UTC instant, to the minute or the second; -1 for any other text

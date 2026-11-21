@@ -76,6 +76,12 @@ log_append() {  # <event type> <key>=<value>… -> 0 appended, 2 refused, 1 not 
 LOG_SEALED_WHY="no seal stood for this open run, so it was sealed as it was found"
 
 _log_put() {  # <log> <line> -> 0 appended, 1 not; inside the seal when the log is a run's
+  local rc
+  _log_put_line "$@"; rc=$?
+  _log_moved
+  return "$rc"
+}
+_log_put_line() {
   local log plan
   log="$(_seal_canon "$1")"
   _log_plan "$log" || { _wt_proofs_put "$1" "$2"; return; }
@@ -96,6 +102,19 @@ _log_put() {  # <log> <line> -> 0 appended, 1 not; inside the seal when the log 
     64) _wt_proofs_put "$1" "$2"; return ;;
   esac
   return "$SEAL_RC"
+}
+
+# _log_moved -> a log was written to. Inside a held command (lib/proof.sh `_proof_facts_held`) every key line the command
+# holds is removed, so the next ask in any of its processes sums the log again and folds what this line added; the
+# files folded under the old key stay, and serve again only if the sum finds it unchanged. Counted (`append`,
+# tests/speed-counts.test.sh) when BIONIC_COUNT names a file.
+_log_moved() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'append _log_put\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  case "${BIONIC_HELD:-}" in */bionic-held-*) ;; *) return 0 ;; esac
+  [ -d "$BIONIC_HELD" ] && [ ! -L "$BIONIC_HELD" ] && [ -O "$BIONIC_HELD" ] || return 0
+  set -- "$BIONIC_HELD"/key-*
+  [ ! -e "$1" ] || rm -f "$@" 2>/dev/null
+  return 0
 }
 
 # _log_plan <canonical log> -> _LOG_PLAN, the plan of the run whose log it is; rc 1 when no plan is. The record is

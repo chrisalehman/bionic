@@ -2055,12 +2055,15 @@ cp -R "$BIONIC_HOOKS_DIR" "$SR_FM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/
 sed 's|^sitrep_gather() {$|sitrep_gather() { [ -z "${SR_GATHER_MARK:-}" ] \|\| echo gather >> "$SR_GATHER_MARK";|' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$SR_FM/hooks/poker/sitrep.sh"
 printf '#!/bin/bash\ncat "$2" > "$SR_CARD_KEPT"\necho drawn\n' > "$SR_FM/payload/scripts/card.sh"
 # and the kept fold counts its entries, so a sheet that reads its findings by folding again is seen: an entry is an ask
-# of _proof_facts that the fold this shell already holds under the same key does not answer
+# of _proof_facts that the fold this shell already holds under the same key does not answer. A fold is counted on
+# either path: outside a held command after the memo's check, inside one where the held fold reads the log.
 SR_FA_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/proof.sh"
-sed '/^  if \[ "\$_PROOF_FACTS_KEY" = "\$key" \] && .*then _proof_facts_out; return; fi$/a\
+sed -e '/^  if \[ "\$_PROOF_FACTS_KEY" = "\$key" \] && .*then _proof_facts_out; return; fi$/a\
+  [ -z "${SR_FOLD_MARK:-}" ] || echo fold >> "$SR_FOLD_MARK"
+' -e '/^  ev="\$d\/\.events-\$id\.\$\$\.\$RANDOM"$/a\
   [ -z "${SR_FOLD_MARK:-}" ] || echo fold >> "$SR_FOLD_MARK"
 ' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
-expect_eq "FA4 precondition: the counting plants took effect (each shipped file and its plant differ, the fold's by one line)" "yes|1" \
+expect_eq "FA4 precondition: the counting plants took effect (each shipped file and its plant differ, the fold's by one line on each path)" "yes|2" \
   "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$SR_FM/hooks/poker/sitrep.sh" || echo yes)|$(diff "$SR_FA_LIB" "$SR_FM/payload/scripts/lib/proof.sh" | /usr/bin/grep -c '^> .*SR_FOLD_MARK')"
 SR_FA_MARK="$TMPROOT/fast-gathers"; SR_FA_KEPT="$TMPROOT/fast-kept"; : > "$SR_FA_MARK"
 export SR_GATHER_MARK="$SR_FA_MARK" SR_CARD_KEPT="$SR_FA_KEPT" SR_FOLD_MARK="$TMPROOT/fast-folds"
