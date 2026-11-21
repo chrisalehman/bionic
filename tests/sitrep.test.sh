@@ -1929,7 +1929,7 @@ expect_eq "WA-4 the release and the merge both wait on D30" \
 section "§WAIT-LINE: a put that names the rows it holds prints them on its wait line and on the sheet; one that names none says nothing waits"
 # ============================================================
 # FIXTURE FIDELITY: §WAIT's world; the put is the real `decisions put` with the rows after its title. No row reads
-# approval:D40, as no row of wave 51 read D35 while three of them waited on it. fails-when: the line says no task waits
+# approval:D40: a sealed plan cannot gain that read while its rows wait on the decision. fails-when: the line says no task waits
 # while a row is held.
 sr_poke decisions put D40 "the decision D40" T9 T20 > "$TMPROOT/wl.out" 2>&1
 expect_eq "WL-1 AC-27.3 D40 put holding T9 and the landed T20: the wait line names T9, on the chain, and not T20" \
