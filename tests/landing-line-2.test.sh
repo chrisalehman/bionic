@@ -287,6 +287,8 @@ expect_contains "(ct3-pre) T2's red fails at the head too: published" "LANDED T2
 expect_contains "(ct3) AC-5.1 the standing red's cause reads only the runs it can place: code, no run named" \
   "|cause=code|against=-|" "$(ll_ev "$RT" standing)"
 expect_absent "(ct3b) …and no STANDING report" "STANDING " "$LL_OUT"
+# The landing removed T2's tree; the rows below need a writer's tree at that path, so its branch is checked out there again.
+git -C "$RT" worktree add -q "$RT/.worktrees/T2" wt/T2
 # The positive on the same extractor, same world: the shim handed no --unplaced stamps where it stands,
 # the main checkout (now at the landed head), and that run is a green record there (the wrap 1.17.0 sent).
 printf '#!/bin/bash\necho "PASS: a ran dirty"\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' > "$RT/.worktrees/T2/tests/a.test.sh"
@@ -1083,6 +1085,54 @@ expect_eq "(oh1) T2 lands, started again once by its own carrier, and no command
   "$(cat "$WORLD_ROOT/o2.out.rc") $(/usr/bin/grep -c "^restart: .* carrier=${O2C%%:*} " "$WORLD_ROOT/o2.out") $(/usr/bin/grep -c 'command not found' "$WORLD_ROOT/o2.out")"
 expect_eq "(oh2) …each of its events written once, after the world's" "ready candidate verdict published" "$(ll_acts "$RO" | /usr/bin/grep '|row=T2|' | cut -d'|' -f2 | sed 's/^ev=//' | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "(oh3) T1, whose head never moved under it, lands and never starts again" "0 0" "$(cat "$WORLD_ROOT/o1.out.rc") $(/usr/bin/grep -c '^restart' "$WORLD_ROOT/o1.out")"
+
+section "§STALE: a landing that deletes a section or words a criterion's eval cites is returned naming it, until the criterion is restated or waived (AC-11.1, AC-11.2)"
+# fails-when: T1 deletes §RUN from a.test.sh and the words two evals quote, and lands with nothing said; or it lands while
+# a criterion reads as its dispatch recorded it, unwaived; or a criterion written in free prose holds it.
+SL="$(ll_world)"; SLP="$(ll_plan "$SL")"; ll_launch "$SL" T1 a.test.sh
+printf '# §RUN: one case\n' >> "$SL/tests/a.test.sh"; printf 'echo "the gone words"\n' > "$SL/p.sh"
+git -C "$SL" add -A && git -C "$SL" commit -qm "a section and the words"
+git -C "$SL/.worktrees/T1" merge -q --no-edit wave/x && sed -i '' '/§RUN/d' "$SL/.worktrees/T1/tests/a.test.sh" \
+  && printf 'echo\n' > "$SL/.worktrees/T1/p.sh" && git -C "$SL/.worktrees/T1" commit -qam "T1: both gone"
+{ printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|---|\n'; printf '%s\n' \
+  '| REQ-1 | r | AC-9.1 | hermetic | `tests/run.sh --only a.test.sh` §RUN → one case | x | T1 |' \
+  '| REQ-1 | r | AC-9.2 | hermetic | `tests/run.sh --only b.test.sh` → prints `the gone words` | x | T1 |' \
+  '| REQ-1 | r | AC-9.3 | hermetic | `tests/run.sh --only b.test.sh` → it says "the gone words" | x | T1 |' \
+  '| REQ-1 | r | AC-9.4 | hermetic | `tests/run.sh --only b.test.sh` → it says the gone words | x | T1 |' \
+  '| REQ-1 | r | AC-9.5 | hermetic | `tests/run.sh --only a.test.sh` §RU, a prefix of the name the row deletes | x | T1 |'; } >> "$SLP"
+( eval "$(sed -n '/^line_field() {/,/^}/p; /^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
+  BIONIC_LIB="$REPO/payload/scripts/lib" BIONIC_ROOT="$SL" BIONIC_SID="$WORLD_SID"
+  dispatch_event "status=confirmed|row=T1|name=wx-T1|brief=.bionic/docs/record/wave-x/briefs/T1.md|brief_sum=s|plan=$SLP" )
+SL_REC="$(ll_field "$(ll_ev "$SL" dispatch | tail -1)" criteria)"
+expect_eq "(sl0) the dispatch records each criterion's sum, as the plan reads it, on its event" \
+  "$(bash -c '. "$1" && plan_read_criterion_sums "$2"' _ "$REPO/payload/scripts/lib/plan-read.sh" "$SLP" | tr '\t\n' ':,' | sed 's/,$//')" "$SL_REC"
+expect_regex "(sl0) …four criteria, each with a number" '^AC-9\.1:[0-9]+,AC-9\.2:[0-9]+,AC-9\.3:[0-9]+,AC-9\.4:[0-9]+,AC-9\.5:[0-9]+$' "$SL_REC"
+sl_stale() { printf '%s\n' "${1:-$LL_OUT}" | awk '$1 == "STALE" { printf "%s%s %s", n++ ? "|" : "", $2, $3 }'; }
+ll_verb "$SL" T1
+expect_eq "(sl1) AC-11.1 the row is returned STALE naming the section's criterion and both quoting ones; the prose one and a prefix of the name hold nothing" \
+  "1|T1 AC-9.1|T1 AC-9.2|T1 AC-9.3" "$LL_RC|$(sl_stale)"
+expect_contains "(sl1) …each line names what the row deletes" "§RUN of tests/a.test.sh" "$LL_OUT"
+expect_eq "(sl1) …the log returns it, why=stale, and no suite ran" "why=stale 0" \
+  "$(ll_ev "$SL" returned | tail -1 | tr '|' '\n' | grep '^why=') $(ll_ev "$SL" verdict | grep -c '|row=T1|')"
+SLH="$( cd "$SL" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$SL/.worktrees/T1" --by-hand --reason pair 2>&1 )"; SLH_RC=$?
+expect_eq "(sl1h) …a landing by hand is refused the same way, and nothing publishes" "2|T1 AC-9.1|T1 AC-9.2|T1 AC-9.3|0" \
+  "$SLH_RC|$(sl_stale "$SLH")|$(ll_ev "$SL" published | grep -c '|row=T1|')"
+printf 'run/v1|ev=waiver|ac=AC-9.1|by=Dana|said=waive it|at=2026-10-20T00:00:00Z\n' >> "$(ll_log "$SL")"
+ll_verb "$SL" T1
+expect_eq "(sl2) AC-11.2 the waived criterion no longer holds it; the two that read as at dispatch still do" "1|T1 AC-9.2|T1 AC-9.3" "$LL_RC|$(sl_stale)"
+sed -i '' '/AC-9\.[23] /s/| x |/| restated |/' "$SLP"
+ll_verb "$SL" T1
+expect_eq "(sl3) AC-11.2 once both rows differ from their text at dispatch, the row lands" "0|" "$LL_RC|$(sl_stale)"
+expect_contains "(sl3) …LANDED" "LANDED T1 " "$LL_OUT"
+
+section "§GONE: a row that deletes a suite in its set lands with no command between, and the landing says the suite left the set (AC-24.3)"
+# fails-when: the row lands only once a command takes the suite out of its set, or lands saying nothing of it.
+GN="$(ll_world)"; ll_launch "$GN" T1 a,c; ( cd "$GN" && world_cost a.test.sh 5 && world_suite c green >/dev/null )
+git -C "$GN" add tests/c.test.sh && git -C "$GN" commit -qm "suite c" && git -C "$GN/.worktrees/T1" merge -q --no-edit wave/x
+git -C "$GN/.worktrees/T1" rm -q tests/c.test.sh && git -C "$GN/.worktrees/T1" commit -qm "T1: c removed"; ll_verb "$GN" T1
+expect_eq "(gn1) AC-24.3 the row lands on its first ready, a,c in its set and c deleted" "0" "$LL_RC"
+expect_contains "(gn1) …LANDED" "LANDED T1 " "$LL_OUT"
+expect_eq "(gn2) AC-24.3 the landing says c left the set, and a did not" "GONE T1 c.test.sh" "$(printf '%s\n' "$LL_OUT" | /usr/bin/grep '^GONE ' | cut -d' ' -f1-3)"
 
 # ---------------------------------------------------------------------------
 finish

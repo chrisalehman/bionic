@@ -10,3 +10,4 @@ run/v1|ev=cancel|of=admitted|id=fixture.2|fixture=hand-written|at=2026-11-07T03:
 run/v1|ev=cancel|of=dispatch|row=T13|name=w49-T13|fixture=hand-written|at=2026-11-07T03:28:45Z
 run/v1|ev=abandon|why=a run abandoned and taken back|fixture=hand-written|at=2026-11-07T03:28:50Z
 run/v1|ev=cancel|of=abandon|why=a run abandoned and taken back|fixture=hand-written|at=2026-11-07T03:28:55Z
+run/v1|ev=ruling|id=r-fixture-1|row=T14|writer=w49-T14|recorded=1762486140|text=a ruling for the writer of T14|fixture=hand-written|at=2026-11-07T03:29:00Z
