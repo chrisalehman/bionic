@@ -627,6 +627,11 @@ sr_ev "ev=finding|ref=$SP_REC#2|to=defer|by=fixture|words=a thing|at=2026-10-06T
 sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/critic-evidence.md|question=evidence|reader=w-T1|result=fail|scope=whole|at=2026-10-06T13:00:00Z"
 sr_ev "ev=waiver|question=evidence|head=$SR_H|by=Chris Lehman|said=waive it|at=2026-10-06T14:00:00Z"
 SP_CARRY="carry:record:wave-02-fx:critic-structure.md:2"
+sr_put_page() {  # <ISO> <key> -> a release approval page written at <ISO> putting <key>, its replay lines as plan.sh rr_record writes them
+  printf 'Release approval\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=%s|decisions=1\nrelease-approval/v1|dec=1|key=%s|default=-|other=-|pick=default|choices=waive/withhold|why=-\n' \
+    "$SR_PLAN" "$SR_H" "$1" "$2" > "$SR_DIR/release-approval-$(printf '%s' "$1$2" | cksum | cut -c1-8).md"
+}
+sr_put_page 2026-10-06T13:00:00Z waive:evidence   # the waiver is put to you as the review fails, so its minutes are yours
 sr_ask_ev "key=waive:evidence|reply=waive|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "SP1 a closed waiver with no opened=: from the review's fail line to the waived: line, 60 minutes, nothing partial" \
@@ -648,6 +653,21 @@ expect_eq "SP4 a closed ask the record holds no span for: the count is marked pa
 sr_ask_ev "key=waive:evidence|reply=waive|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "SP4b …beside the asks it did time, whose minutes stand" "60 min partial, 1 ask not timed: waive:evidence" "$(sr_m waste.waiting-on-you)"
+
+# ============================================================
+section "§WAITING: a waiver a failed review opens is not yours until it is put to you; from the put its minutes are"
+# ============================================================
+# FIXTURE FIDELITY: §SPAN's world with its integrate row, the waiver opened as proof-add opens it on a failed review,
+# and its put the release approval page that lists it (sr_put_page). fails-when: minutes are added with nothing put.
+sr_mw_world waiting
+awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | 10 | REQ-1 | lib/t18.sh | — |"; next } { print }' \
+  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ask_ev "key=waive:adversarial|sent=-|title=waiver: adversarial|prompt=proof-add: the adversarial review failed: fix it, or waive adversarial|at=2026-10-06T13:00:00Z"
+sr_run "$SR_PLAN"; WT_BEFORE="$(sr_m waste.waiting-on-you)"
+sr_put_page 2026-10-06T20:00:00Z waive:adversarial
+sr_run "$SR_PLAN"
+expect_eq "WT-1 AC-27.1 open since 13:00Z and put at 20:00Z: the two hours to now are yours, the seven before them are not" \
+  "0 min|120 min: waive:adversarial" "$WT_BEFORE|$(sr_m waste.waiting-on-you)"
 
 # ============================================================
 section "§WAITS: a held or pending task's note names everything it waits on, in words, never a count of the rest"
@@ -1790,8 +1810,8 @@ SR_AT=$((SR_NOW - 3600)) sr_run "$SR_PLAN"
 SR_SC="$(SR_AT=$((SR_NOW - 3600)) sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null)"
 expect_eq "SCO1 the scorecard's widest landing prints against target < 15, the landing bar" \
   "widest landing ready→landed: T3 12.0 min · target < 15" "$(printf '%s\n' "$SR_SC" | /usr/bin/grep '^widest landing ')"
-expect_eq "SCO2 …and its last three lines are the sheet's pace, correctness and waste measurements, seven lines in all" \
-  "pace: $(sr_m pace.work-landed) of the live work's sized minutes landed, in $(sr_m pace.time-used) of the forecast time|correctness: suites run $(sr_m tests.suites-run); whole run $(sr_m tests.whole-run); reviews $(sr_m reviews); $(sr_m findings.open) open findings|waste: dropped $(sr_m waste.dropped); $(sr_m waste.runs-discarded) suite runs discarded; $(sr_m waste.ready-unstarted) ready and unstarted; $(sr_m waste.waiting-on-you) waiting on you|7" \
+expect_eq "SCO2 …and its last three lines are the sheet's pace, correctness and waste measurements, eight lines in all" \
+  "pace: $(sr_m pace.work-landed) of the live work's sized minutes landed, in $(sr_m pace.time-used) of the forecast time|correctness: suites run $(sr_m tests.suites-run); whole run $(sr_m tests.whole-run); reviews $(sr_m reviews); $(sr_m findings.open) open findings|waste: dropped $(sr_m waste.dropped); $(sr_m waste.runs-discarded) suite runs discarded; $(sr_m waste.ready-unstarted) ready and unstarted; $(sr_m waste.waiting-on-you) waiting on you|8" \
   "$(printf '%s\n' "$SR_SC" | tail -3 | sr_join)|$(printf '%s\n' "$SR_SC" | /usr/bin/grep -c .)"
 printf 'run/v1|ev=approval|key=merge|by=fixture|said=1|at=2026-10-06T14:00:00Z\n' >> "$SR_DIR/run.log"; sr_launch T9 14:04:30
 expect_eq "SCO4 a merge approved in the log alone, no state line, starts the agent minutes: a launch 4.5 min after it reads 5" \
@@ -1847,6 +1867,25 @@ sr_r_put $((SR_E0 + 81000)) D4
 expect_eq "RD-2 a round still open is a stop, its wait running to now" "$(sr_r_want 6 566)" "$(sr_r_card $((SR_E0 + 82800)))"
 
 # ============================================================
+section "§ASKS: the scorecard's asks put to you after the plan's approval and their minutes, an overlap counted once and an ask never put counting nothing"
+# ============================================================
+# FIXTURE FIDELITY: the asks' rounds in the shapes lib/owed.sh writes, on a world approved at 10:00Z; the waiver as
+# proof-add opens it and its put the release approval page that lists it (§SPAN's sr_put_page). fails-when: the overlap
+# is counted twice, or an ask never put is counted.
+sr_world asks "6 6 12 12"; sr_bind
+sr_ask_ev "key=approve:step2|sent=-|at=2026-10-06T09:00:00Z"; sr_ask_ev "key=approve:step2|reply=approve|at=2026-10-06T09:30:00Z"
+sr_ask_ev "key=decide:D1|sent=-|at=2026-10-06T11:00:00Z"; sr_ask_ev "key=decide:D1|reply=ruled|at=2026-10-06T12:00:00Z"
+sr_ask_ev "key=decide:D2|sent=-|at=2026-10-06T11:30:00Z"; sr_ask_ev "key=decide:D2|reply=ruled|at=2026-10-06T12:30:00Z"
+sr_ask_ev "key=waive:evidence|sent=-|prompt=proof-add: fix it, or waive evidence|at=2026-10-06T11:00:00Z"; sr_ask_ev "key=waive:evidence|reply=passing reading|at=2026-10-06T13:00:00Z"
+sr_as() { sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null | /usr/bin/grep -E '^(asks put to you|human-wait)' | sr_join; }
+AS_UNPUT="$(sr_as)"
+sr_put_page 2026-10-06T12:00:00Z waive:evidence
+expect_eq "AS-1 AC-28.1 D1 and D2 overlap half an hour and count 90 minutes, where the old sum counts 120; the waiver never put adds nothing; the step card before the approval is no ask of the half" \
+  "human-wait minutes: 120 · no target (the user's)|asks put to you: 2 · 90 min" "$AS_UNPUT"
+expect_eq "AS-2 …put at 12:00Z, the waiver is an ask put to you and adds its half hour past D2's close" \
+  "human-wait minutes: 120 · no target (the user's)|asks put to you: 3 · 120 min" "$(sr_as)"
+
+# ============================================================
 section "§WAIT: a decision's wait line names everything that waits on it: a row not landed or dropped that reads it, the release its newest approval page lists it on, the merge an open held-merge ask names it in"
 # ============================================================
 # FIXTURE FIDELITY: the world's plan bound by the bind verb, the put through the real `decisions put`, the held merge
@@ -1885,6 +1924,23 @@ printf 'release-approval/v1|dec=2|key=approve:D30|default=approve D30|other=-|pi
   >> "$SR_DIR/release-approval-${SR_H:0:8}.md"
 expect_eq "WA-4 the release and the merge both wait on D30" \
   "Answered in an hour rather than now, the predicted close moves an hour later: the release and the merge wait on it." "$(sr_wait D30)"
+
+# ============================================================
+section "§WAIT-LINE: a put that names the rows it holds prints them on its wait line and on the sheet; one that names none says nothing waits"
+# ============================================================
+# FIXTURE FIDELITY: §WAIT's world; the put is the real `decisions put` with the rows after its title. No row reads
+# approval:D40, as no row of wave 51 read D35 while three of them waited on it. fails-when: the line says no task waits
+# while a row is held.
+sr_poke decisions put D40 "the decision D40" T9 T20 > "$TMPROOT/wl.out" 2>&1
+expect_eq "WL-1 AC-27.3 D40 put holding T9 and the landed T20: the wait line names T9, on the chain, and not T20" \
+  "Answered in an hour rather than now, the predicted close moves an hour later: T9 is on the longest chain and waits on it." \
+  "$(sed -n 's/^wait: //p' "$TMPROOT/wl.out")"
+expect_eq "WL-2 …and D41 put naming none: nothing waits (WL-1 read the same line)" "$SR_W_NONE" "$(sr_wait D41)"
+sr_run "$SR_PLAN"
+expect_eq "WL-3 the sheet's ask for D40 holds T9, its label 4/9, read from the put's round" "4/9" "$(sr_f "$(sr_ask decide:D40)" holds)"
+sr_poke decisions put D42 "the decision D42" T99 > "$TMPROOT/wl.out" 2>&1; WL_RC=$?
+expect_eq "WL-4 a put naming a row the plan has not is refused, no round written, where D40's put wrote its round naming T9" \
+  "1|0|1" "$WL_RC|$(/usr/bin/grep -c '|d=D42|' "$SR_DIR/run.log")|$(/usr/bin/grep -c '|d=D40|verb=put|.*|holds=T9 T20|' "$SR_DIR/run.log")"
 
 # ============================================================
 section "§ONE-BLOCKS: the sheet, the handoff head and the Patrol line read the one function, so what blocks the user reads the same on all three"
