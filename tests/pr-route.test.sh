@@ -29,7 +29,8 @@
 #             row out; the writer gone, the next pass closes the run and leaves the writer's continuation as written.
 #   §MERGE-LOOK a pass over an unchanged run with the request open runs no tick and asks the host alone, and the pass
 #             after the merge still reads the run as merged; a change to what the tick reads, a writer out, or a
-#             request closed unmerged runs the tick.
+#             request closed unmerged runs the tick; over a fresh state folder, a file the tick writes in its own
+#             first pass moves nothing, so the first quiet pass keeps its look.
 #   §TAG      the close of a merged, approved run leaves the release's tag on the remote at the merge commit and the
 #             run delivered; with no approval in the log, no release named, or the merge not seen, no tag is made; a tag
 #             that stands elsewhere is left and said and is never moved; a push the remote refuses holds the close with
@@ -658,6 +659,8 @@ section "§MERGE-LOOK: a pass over an unchanged run with the request open asks t
 # is not reached; an input the tick reads moves and the pass does not run the tick (a denied request is not told); or
 # the request closed unmerged is not told to the person, and the pass after it does not rest; or, with a writer out on
 # the roster, a pass over an unchanged run runs no tick, so what the tick's clock reads of the row is never read.
+# A file the tick writes in its first pass over a fresh state folder (the told file) that the token does not leave out keeps no
+# look at the first quiet pass, so the pass after it pays a whole tick again.
 # The watcher names the file its passes keep what they read in (BIONIC_WATCH_LOOK); the first passes settle it, as the
 # fetch of the first moves origin/main, which the tick reads.
 prr_look_pass() {  # <world file stem> <n> -> PASS_OUT PASS_RC, and the pass's counts in <stem>.count.<n>
@@ -722,6 +725,29 @@ prr_look_warm lookrow
 prr_look_pass lookrow 3
 expect_eq "LK-7 a writer out on the roster: three quiet passes over the unchanged run, and the third still judges (its tick ran)" \
   "$PRR_QUIET $PRR_QUIET $PRR_QUIET|yes" "$LK_R1 $LK_R2 $PASS_RC|$([ "$(prr_look_n lookrow 3 gate)" -gt 0 ] && echo yes)"
+
+# A FRESH STATE FOLDER: the tick writes state files of its own in its first pass, the told file among them when the log
+# holds a red the branch carries; none of them is a change from outside, so the first quiet pass over the open request
+# keeps its look and the pass after it asks the host alone. The fetch is made first, as the fetch of the first pass moves
+# origin/main, which the tick reads.
+prr_watch_world lookfresh
+git -C "$R" fetch --quiet origin
+printf 'run/v1|ev=standing|head=%s|suite=a.test.sh|lines=3|log=/rec/line/T1-a-%s.log|at=2026-10-06T10:00:00Z\n' \
+  "$(prr_head)" "$(prr_head | cut -c1-12)" >> "$L"
+LK_FR_BEFORE="$(ls "$R/.bionic/tmp" | /usr/bin/grep -c '^line-told-')"
+: > "$WORLD_ROOT/lookfresh.look"
+prr_look_pass lookfresh 1
+LK_FR1="$PASS_RC|$([ "$(prr_look_n lookfresh 1 gate)" -gt 0 ] && echo yes)|$LK_FR_BEFORE>$(ls "$R/.bionic/tmp" | /usr/bin/grep -c '^line-told-')"
+expect_eq "LK-8a precondition: the first pass is quiet, its tick judged, and its tick wrote the told file the folder lacked" \
+  "$PRR_QUIET|yes|0>1" "$LK_FR1"
+prr_look_pass lookfresh 2
+expect_eq "LK-8 a fresh state folder: the pass after the first quiet pass is quiet, and judges nothing, runs no status pass and no facts answer" \
+  "$PRR_QUIET|0 0 0" "$PASS_RC|$(prr_look_n lookfresh 2 gate) $(prr_look_n lookfresh 2 status) $(prr_look_n lookfresh 2 facts)"
+prr_gh pr merge 1 --squash
+prr_look_pass lookfresh 3
+# The red is planted by hand, so the run's seal holds the close; the merge is read all the same, and the wake says so.
+expect_eq "LK-9 …and the pass after the merge reads the run as merged: it wakes, naming the merge" "$PRR_WAKE|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - close-out held' && echo yes)"
 
 # ============================================================
 section "§TAG: the close tags the merge once the release is approved, and never moves a tag (AC-21.1, AC-21.2)"
