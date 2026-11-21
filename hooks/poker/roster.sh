@@ -2166,6 +2166,7 @@ EOF
   # launch). A ruling for either would never be shown, so it is never written. No session key is 3,
   # as everywhere in this file.
   poker_verb_rule() {
+    [ "$VERB" != rule ] || RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh rule $(clean "$RULE_WRITER") '<text>'"
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
@@ -2180,13 +2181,13 @@ EOF
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
-      die "REFUSED — this session has no roster at $ROSTER_FILE, so it has no writer to rule for."
+      die_run "REFUSED — this session has no roster at $ROSTER_FILE, so it has no writer to rule for." "bash ${HOOK_DIR}/session-poker.sh adopt"
       exit 2
     fi
     case "$VERB" in
       rule)
         if ! grep '^roster-state/' "$ROSTER_FILE" 2>/dev/null | grep -qF "|name=${RULE_WRITER}|"; then
-          die "REFUSED — no row named $RULE_WRITER on this session's roster ($ROSTER_FILE); a ruling names one live writer."
+          die_run "REFUSED — no row named $RULE_WRITER on this session's roster ($ROSTER_FILE); a ruling names one live writer." "bash ${HOOK_DIR}/session-poker.sh adopt"
           exit 2
         fi
         if ! roster_open_names "$ROSTER_FILE" "$(roster_ack_ledger "$ROSTER_FILE")" | grep -qxF "$RULE_WRITER"; then
