@@ -22,8 +22,11 @@ command -v jq >/dev/null 2>&1 || { echo "bash-walls: jq absent — suite cannot 
 [ -f "$HOOK" ] || { echo "bash-walls: no hook at $HOOK — suite refuses to run"; exit 1; }
 bash -n "$HOOK" || { echo "bash-walls: $HOOK does not parse — suite refuses to run"; exit 1; }
 
-SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/bash-walls-test.XXXXXX")" && pwd -P)"
-cleanup() { rm -rf "$SANDBOX"; }
+# `cd ""` succeeds where it stands, so a mktemp that failed would name the suite's own directory as the sandbox, and
+# the cleanup below would remove it: the sandbox is made, or the suite stops here.
+SANDBOX="$(d="$(mktemp -d "${TMPDIR:-/tmp}/bash-walls-test.XXXXXX")" && cd "$d" && pwd -P)" \
+  || { echo "bash-walls: no sandbox under ${TMPDIR:-/tmp}" >&2; exit 1; }
+cleanup(){ rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
 SID="5f4e3d2c-1b0a-4998-8877-665544332211"
@@ -31,7 +34,10 @@ ACTOR="at23writer-9f8e7d6c5b4a3210"
 FAKE_HOME="$SANDBOX/home"
 mkdir -p "$FAKE_HOME"
 
-. "$(dirname "$0")/lib/plan-fixture.sh"
+# A helper is found beside this file, wherever the suite that sources it stands; one that does not load stops the suite.
+BW_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+[ -r "$BW_HERE/lib/plan-fixture.sh" ] && . "$BW_HERE/lib/plan-fixture.sh" \
+  || { echo "bash-walls.prelude.sh: cannot load $BW_HERE/lib/plan-fixture.sh" >&2; exit 1; }
 
 # ---------- fixtures ----------
 
@@ -44,6 +50,10 @@ mk_repo() {
   local repo="$SANDBOX/$1"
   mkdir -p "$repo/.bionic/tmp" "$repo/.bionic/docs/plans" "$repo/.bionic/docs/record"
   git -C "$repo" init -q 2>/dev/null
+  # Nothing is written until git agrees the repository is the one just made: a path that is empty, no directory, or
+  # inside another repository would carry this identity and these commits to whatever repository answers for it.
+  [ -n "$1" ] && [ -d "$repo" ] && [ "$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$repo" && pwd -P)" ] \
+    || { echo "mk_repo: no repository of its own at '$repo'" >&2; return 1; }
   git -C "$repo" config user.email t@example.com
   git -C "$repo" config user.name "T"
   printf 'seed\n' > "$repo/README.md"
@@ -193,7 +203,7 @@ eg6_world() {
   seal_fixture "$EG6_PAGE" "$(plan_fixture_log "$EG6_PAGE")"
   git -C "$repo" branch -f wave/01-fixture HEAD >/dev/null 2>&1
 }
-R_EG6="$(mk_repo eg6)"
+R_EG6="$(mk_repo eg6)" || { echo "bash-walls.prelude.sh: the eg6 fixture was not made" >&2; exit 1; }
 H_EG6="$(git -C "$R_EG6" rev-parse HEAD)"
 eg6_gate() {  # <plan text> -> ST, ERR of a main-checkout commit against the run at 15 the text stands for (eg6_world)
   eg6_world "$R_EG6" "$1"

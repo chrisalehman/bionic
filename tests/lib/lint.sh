@@ -15,6 +15,7 @@
 #   BP        a writer piped into a reader that quits early where the status is read, not in tests/lib/quitting-readers.allow;
 #             an allow line it cannot read, when the row changed that file
 #   HEADER    a suite header that lists a section its body lacks, or omits one its body has
+#   SETUP     a shared setup (tests/*.prelude.sh) that loads a helper on a line whose status nothing reads
 #   REFUSALS  a refusal call, as payload/scripts/one-reader-check.sh finds one, in a registered hook's own file
 #
 # What a row changed decides what is read: a changed ceiling widens EXIT to every file it names, a changed allow file
@@ -380,6 +381,58 @@ function opener(line,   i, n, c, top, rest, d, st) {
   print
 }
 CENSUS_BLANK_EOF
+# A shared setup's line, read with its heredoc bodies blanked by census-blank.awk. A load is `.` or `source` in a
+# command's place, read on the line flattened: a `$( )` with no parens inside, a `${ }`, a quoted word and an fd copy
+# each become one letter, so a path holds no operator and a quoted child script holds no load of this file's. A load
+# reads its status when the next operator of its statement is `&&`, or a `||` with an exit or a return after it, or
+# when an `if`, `elif`, `while` or `until` tests it; a `;` that closes a `{ }` or `( )` group does not end the
+# statement. Prints `<F>:<line> TAB <text>` for each line holding a load that reads none; with LOADS=1, one line per
+# load found, whatever it reads.
+cat > "$LINT_TMP/setup.awk" <<'SETUP_AWK_EOF'
+function flat(s) {
+  while (match(s, /\$\([^()]*\)/)) s = substr(s, 1, RSTART - 1) "X" substr(s, RSTART + RLENGTH)
+  gsub(/\$\{[^}]*\}/, "V", s); gsub(/"[^"]*"/, "S", s); gsub(/'[^']*'/, "Q", s); gsub(/[0-9]*[<>]&[0-9-]*/, "R", s)
+  sub(/(^|[ \t])#.*$/, "", s)
+  return s
+}
+function reads_status(rest,   i, n, c, d) {
+  n = length(rest); d = 0
+  for (i = 1; i <= n; i++) {
+    c = substr(rest, i, 2)
+    if (c == "&&") return 1
+    if (c == "||") return (substr(rest, i + 2) ~ /(^|[^A-Za-z0-9_])(exit|return)([^A-Za-z0-9_]|$)/)
+    c = substr(rest, i, 1)
+    if (c == "{" || c == "(") d++
+    else if (c == "}" || c == ")") d--
+    else if ((c == ";" || c == "&" || c == "|") && d <= 0) {
+      if (c == ";" && substr(rest, i + 1) ~ /^[ \t]*[})]/) continue
+      return 0
+    }
+  }
+  return 0
+}
+{
+  # a line ending in `\` goes on in the next one: the statement is read whole, at its first line's number
+  if (buf == "") { at = FNR; line = $0 } else line = buf " " $0
+  if (line ~ /\\$/) { buf = substr(line, 1, length(line) - 1); next }
+  buf = ""; s = flat(line)
+  while (match(s, /(^[ \t]*|[;&|({!][ \t]*|(^|[^A-Za-z0-9_])(then|do|else|if|elif|while|until)[ \t]+)(\.|source)[ \t]+[^ \t;&|)]+/)) {
+    st = RSTART; ln = RLENGTH; m = substr(s, st, ln)
+    k = match(m, /(\.|source)[ \t]+[^ \t;&|)]+$/)
+    pre = substr(s, 1, st + k - 2); rest = substr(s, st + ln)
+    if (LOADS) print F ":" at "\t" line
+    else if (pre !~ /(^|[;{(]|(^|[^A-Za-z0-9_])(then|do|else))[ \t]*(if|elif|while|until)[ \t][^;]*$/ && !reads_status(rest)) {
+      print F ":" at "\t" line; next
+    }
+    s = rest
+  }
+}
+SETUP_AWK_EOF
+# setup_loads <file>... -> `<file>:<line> TAB <text>` per load in each shared setup, outside its heredoc bodies
+setup_loads() { local f; for f in "$@"; do awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk -v F="$f" -v LOADS=1 -f "$LINT_TMP/setup.awk"; done; }
+# setup_refusals <file>... -> `<file>:<line> TAB <text>` per line of a shared setup holding a load whose status nothing reads
+setup_refusals() { local f; for f in "$@"; do awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk -v F="$f" -f "$LINT_TMP/setup.awk"; done; }
+
 # census_calls <tests dir> -> `<suite> TAB <section|setup> TAB <key>` per call outside a heredoc body.
 census_calls() {
   local d f
@@ -482,6 +535,14 @@ lint_header() {  # <root> <paths file>
   header_refusals "$d" | sed 's|^|HEADER tests/|'
 }
 
+lint_setup() {  # <root> <paths file>
+  local p
+  while IFS= read -r p; do
+    case "$p" in (tests/*/*) continue ;; (tests/*.prelude.sh) ;; (*) continue ;; esac
+    [ ! -f "$1/$p" ] || ( cd "$1" && setup_refusals "$p" )
+  done < "$2" | LC_ALL=C awk -F'\t' '{ print "SETUP " $1 " a shared setup loads a helper with no stop: " $2 }'
+}
+
 # A registered hook's own file holds no refusal: its words live in the library the hook calls. The check reads which
 # hooks are registered from hooks/hooks.json, so a copy holding that file and the changed top-level hooks is judged as
 # the tree would be for them; a changed hooks.json may register any hook, so then every one is read. A tree with no
@@ -509,7 +570,7 @@ lint_main() {  # <root> [<path>...] -> the hits; 0 none · 1 hits · 2 a check c
   root="$(cd "${1:-}" 2>/dev/null && pwd -P)" || { echo "lint.sh: no root ${1:-<none>}" >&2; return 2; }
   shift
   if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; else cat; fi | awk 'NF' | LC_ALL=C sort -u > "$LINT_TMP/paths"
-  for c in exit quit header refusals; do
+  for c in exit quit header setup refusals; do
     out="$("lint_$c" "$root" "$LINT_TMP/paths")" || rc=2
     [ -z "$out" ] || hits="${hits}${out}
 "

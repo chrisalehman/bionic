@@ -32,20 +32,24 @@
 # is read from a page whose presence was read first; every refusal of reply is held to a byte-identical plan (cmp)
 # beside a reply that wrote.
 
-. "$(dirname "$0")/lib/bound-marker.sh"
-. "$(dirname "$0")/lib/roster-row.sh"
-. "$(dirname "$0")/lib/swept-marker.sh"
-. "$(dirname "$0")/lib/live-answer.sh"
+# A helper is found beside this file, wherever the suite that sources it stands; one that does not load stops the suite
+# before the world below is built, since every write it makes goes through the path a helper's maker returns.
+RA_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+for RA_HELPER in lib/bound-marker lib/roster-row lib/swept-marker lib/live-answer; do
+  [ -r "$RA_HERE/$RA_HELPER.sh" ] && . "$RA_HERE/$RA_HELPER.sh" \
+    || { echo "release-approval.prelude.sh: cannot load $RA_HERE/$RA_HELPER.sh" >&2; exit 1; }
+done
 
 POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 CARD="${BIONIC_CARD_UNDER_TEST:-${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh}"
 FC_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 S46_LIB="${FC_LIB}/proof.sh"
-. "$(dirname "$0")/session-poker.prelude.sh"
+[ -r "$RA_HERE/session-poker.prelude.sh" ] && . "$RA_HERE/session-poker.prelude.sh" \
+  || { echo "release-approval.prelude.sh: cannot load $RA_HERE/session-poker.prelude.sh" >&2; exit 1; }
 POKE_BOUND=180
 
 # ---------- the world ----------
-RFC="$(make_repo final)"
+RFC="$(make_repo final)" || { echo "release-approval.prelude.sh: the final fixture was not made" >&2; exit 1; }
 git -C "$RFC" config user.email t@example.com; git -C "$RFC" config user.name "Dana Fixture"
 printf '.bionic\n' > "$RFC/.gitignore"
 mkdir -p "$RFC/tests" "$RFC/lib" "$RFC/.bionic/docs/plans" "$RFC/.bionic/docs/record/wave-x"
