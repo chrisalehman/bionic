@@ -35,6 +35,7 @@
 #   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
 #   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
 #   §DEPS-15   a row at 15 waits by its deps and kind alone: no step hold; a questions tag judged
+#   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1054,5 +1055,41 @@ DQ_TAIL="which is no list of questions: each one of evidence adversarial structu
 for v in 's/: evidence |/: evidense |/' 's/: evidence |/: |/' 's/: evidence |/: evidence,evidence |/' 's/| three |/| three · questions: structure |/'; do sed "$v" "$W5" > "$W5.v"; DQ_OUT="$DQ_OUT $(call units_validate "$W5.v")"; done
 expect_eq "DEPS-5 at 15 the validator holds the questions tag to the verb's rule: a word outside the set, an empty tag, a question twice, a tag on a row no review" \
   "|0 T6: task declares questions: evidense, $DQ_TAIL T6: task declares questions: (empty), $DQ_TAIL T6: task declares questions: evidence,evidence, $DQ_TAIL T3: task declares questions: structure; only a review row is dealt questions" "$DQ_OUT"
+
+section "§HELD — inside a held command the table's answer and the status pass are kept for the command, keyed by what they read"
+# fails-when: a read inside a held command is not served the command's one read (the count grows), or a plan edited or a
+# fact of a row set during the command is served the answer kept before it (a stale read), or anything is kept outside a
+# held command. The libraries in one child shell, as a command's process holds them (lib/proof.sh `proof_hold_begin`).
+HD_P="$SANDBOX/docs/plans/e/held.plan.md"; HD_C="$SANDBOX/held.count"; mkdir -p "${HD_P%/*}"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n%s\n%s\n' \
+  '| T1 | 4 | build | one | — | 30m | REQ-1 | a.sh | — |' '| T2 | 4 | build | two | — | 30m | REQ-1 | b.sh | — |' > "$HD_P"
+HD_F1='run/v1|ev=dispatch|row=T1|name=w-T1|brief=b|sum=s|at=2026-11-01T00:00:01Z'
+HD_F2='run/v1|ev=published|row=T1|commit=c1|by=w-T1|at=2026-11-01T00:00:02Z'
+# shellcheck disable=SC2016  # the child shell's script
+hd_run() {  # <script> -> the child's print; the counters in $HD_C, made empty first
+  : > "$HD_C"
+  BIONIC_COUNT="$HD_C" HD_P="$HD_P" HD_F1="$HD_F1" HD_F2="$HD_F2" TMPDIR="$SANDBOX" bash -c '. "$1/proof.sh" && . "$1/units.sh" || exit 127
+    _units_lib reader.sh reader_q_statuses || exit 127
+    hd_st() { _UNITS_FACTS_PLAN="$HD_P" _UNITS_FACTS="$1" _units_statuses "$HD_P" | paste -sd" " -; }
+    '"$1" _ "${LIB%/*}" 2>&1
+}
+hd_n() { awk -v k="$1" '$1 == k { n++ } END { print n + 0 }' "$HD_C"; }   # <kind> -> its count in $HD_C
+HD_OUT="$(hd_run 'proof_hold_begin || exit 3; a="$(_units_read "$HD_P")"; ra=$?; b="$(_units_read "$HD_P")"; rb=$?
+  printf "%s|%s|%s\n" "$ra$rb" "$([ "$a" = "$b" ] && echo same)" "$(printf "%s\n" "$a" | grep -c "^T[12]	")"
+  printf "| T3 | 4 | build | three | — | 30m | REQ-1 | c.sh | — |\n" >> "$HD_P"; c="$(_units_read "$HD_P")"
+  printf "%s\n" "$(printf "%s\n" "$c" | grep -c "^T[123]	")"; proof_hold_end')"
+expect_eq "HELD-1 two reads in one held command: one read counted, the same answer and exit, both rows read (the reader proved)" \
+  "00|same|2" "$(printf '%s\n' "$HD_OUT" | sed -n 1p)"
+expect_eq "HELD-2 the plan edited during the command is read again: a second read counted, the new row in its answer" \
+  "2 3" "$(hd_n table) $(printf '%s\n' "$HD_OUT" | sed -n 2p)"
+HD_OUT="$(hd_run '_units_read "$HD_P" >/dev/null; _units_read "$HD_P" >/dev/null; ls "$TMPDIR" | grep -c "^units-" ')"
+expect_eq "HELD-3 outside a held command every read is made and nothing is kept" "2 0" "$(hd_n table) $HD_OUT"
+HD_OUT="$(hd_run 'proof_hold_begin || exit 3; hd_st "$HD_F1"; hd_st "$HD_F1"
+  hd_st "$HD_F1"$'"'"'\n'"'"'"run/v1|ev=step|n=6|at="; hd_st "$HD_F1"$'"'"'\n'"'"'"$HD_F2"; proof_hold_end')"
+expect_eq "HELD-4 the status pass: asked twice, and with a pending step that names no row laid over, it is passed once; T1 dispatched" \
+  "1|row=T1 state=dispatched name=w-T1 brief=b sum=s|3" \
+  "$(printf '%s\n' "$HD_OUT" | head -3 | sort -u | wc -l | tr -d ' ')|$(printf '%s\n' "$HD_OUT" | sed -n 1p)|$(printf '%s\n' "$HD_OUT" | head -3 | grep -c 'state=dispatched')"
+expect_eq "HELD-5 a fact of a row set since is passed again and read: a second status pass, T1 landed" \
+  "2|row=T1 state=landed name=w-T1 brief=b sum=s commit=c1" "$(hd_n status)|$(printf '%s\n' "$HD_OUT" | sed -n 4p)"
 
 finish

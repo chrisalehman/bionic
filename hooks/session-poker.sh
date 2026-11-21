@@ -2139,14 +2139,71 @@ launch_sync_hand() {  # <verb> <operand>...
 sitrep_now() {  # -> now, epoch seconds: BIONIC_NOW_EPOCH when it is a number, else the clock
   case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) date -u +%s ;; *) printf '%s\n' "$BIONIC_NOW_EPOCH" ;; esac
 }
-sitrep_date() {  # <epoch> <strftime format> -> the local rendering, BSD date then GNU
+sitrep_date() {  # <epoch> <strftime format> -> the local rendering: from the zone this command holds, else BSD date then GNU
+  if _sitrep_local "$1" "$2"; then printf '%s\n' "$_SITREP_LOCAL"; return 0; fi
   date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2" 2>/dev/null
 }
 sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when its local day is not now's
-  local t
+  local t d
+  if _sitrep_local "$1" '%-I:%M %p|%Y-%m-%d' && t="$_SITREP_LOCAL" && _sitrep_local "$2" '%Y-%m-%d'; then
+    d="${t#*|}"; t="${t%%|*}"; [ "$d" = "$_SITREP_LOCAL" ] || t="$t $d"
+    printf '%s\n' "$t"; return 0
+  fi
   t="$(sitrep_date "$1" '%-I:%M %p')"
   [ "$(sitrep_date "$1" '%Y-%m-%d')" = "$(sitrep_date "$2" '%Y-%m-%d')" ] || t="$t $(sitrep_date "$1" '%Y-%m-%d')"
   printf '%s\n' "$t"
+}
+
+# THE LOCAL CLOCK WITHOUT A PROCESS A READING. The sheet reads many instants on the local clock (each task's landing,
+# each ask, each decision round), and a `date` started for each is most of a late run's tick. So a command that reads
+# them holds its zone once (`sitrep_zone_prime`): one perl lists the zone's offset and abbreviation from 400 days
+# before now to 400 days after, each change found to the second, from the C library's localtime, which `date` reads
+# too. A reading is then arithmetic (`_sitrep_local`). An instant outside the span, a format naming a field it does
+# not render, or no perl reads the clock as before, with `date`.
+_SITREP_ZONE=""   # `<from epoch> <offset seconds> <abbreviation>`, each change in order, then `<end epoch> - -`
+sitrep_zone_prime() {  # -> _SITREP_ZONE set in this shell, so every reading in it and its subshells is arithmetic; nothing without perl
+  [ -z "$_SITREP_ZONE" ] || return 0
+  command -v perl >/dev/null 2>&1 || return 0
+  # shellcheck disable=SC2016  # perl's own variables
+  _SITREP_ZONE="$(perl -MPOSIX=strftime -MTime::Local=timegm -e '
+    my $now = $ARGV[0]; my ($lo, $hi) = ($now - 400 * 86400, $now + 400 * 86400);
+    sub zo { my @l = localtime($_[0]); return (timegm(@l[0 .. 5]) - $_[0]) . " " . strftime("%Z", @l) }
+    my $t = $lo; my $z = zo($t); my @out = ("$t $z");
+    while ($t < $hi) {
+      my $n = $t + 86400; my $nz = zo($n);
+      if ($nz ne $z) { my ($a, $b) = ($t, $n); while ($b - $a > 1) { my $m = int(($a + $b) / 2); if (zo($m) eq $z) { $a = $m } else { $b = $m } } push @out, "$b $nz"; $z = $nz }
+      $t = $n;
+    }
+    push @out, "$hi - -"; print join(" ", @out), "\n";' "$(sitrep_now)" 2>/dev/null)" || _SITREP_ZONE=""
+  case "$_SITREP_ZONE" in *' - -') ;; *) _SITREP_ZONE="" ;; esac
+}
+_SITREP_DAYS="Sunday Monday Tuesday Wednesday Thursday Friday Saturday"
+_sitrep_local() {  # <epoch> <format of %Y %m %d %H %M %S %-I %I %p %A %Z> -> 0 with _SITREP_LOCAL its local rendering from _SITREP_ZONE; 1 when it cannot render it
+  local e="$1" f="$2" o="" a="" t days secs z era doe yoe y doy mp d m h i mi se w p
+  _SITREP_LOCAL=""
+  case "$e" in ''|*[!0-9]*) return 1 ;; esac
+  [ -n "$_SITREP_ZONE" ] || return 1
+  # shellcheck disable=SC2086  # the zone's words, split
+  set -- $_SITREP_ZONE
+  while [ "$#" -ge 3 ] && [ "$e" -ge "$1" ]; do o="$2"; a="$3"; shift 3; done
+  case "$o" in ''|-) return 1 ;; esac
+  # The civil date of the local day (Howard Hinnant's civil-from-days, as lib/time.sh reads the other way).
+  t=$((e + o)); days=$((t / 86400)); secs=$((t % 86400))
+  z=$((days + 719468)); era=$((z / 146097)); doe=$((z - era * 146097))
+  yoe=$(( (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 )); y=$((yoe + era * 400))
+  doy=$((doe - (365 * yoe + yoe / 4 - yoe / 100))); mp=$(( (5 * doy + 2) / 153 )); d=$((doy - (153 * mp + 2) / 5 + 1))
+  if [ "$mp" -lt 10 ]; then m=$((mp + 3)); else m=$((mp - 9)); fi
+  [ "$m" -gt 2 ] || y=$((y + 1))
+  h=$((secs / 3600)); mi=$(( (secs % 3600) / 60 )); se=$((secs % 60)); i=$((h % 12)); [ "$i" -ne 0 ] || i=12; p=AM; [ "$h" -lt 12 ] || p=PM
+  # shellcheck disable=SC2086  # the day names, split
+  set -- $_SITREP_DAYS; shift $(( (days + 4) % 7 )); w="$1"
+  [ "$m" -gt 9 ] || m="0$m"; [ "$d" -gt 9 ] || d="0$d"; [ "$mi" -gt 9 ] || mi="0$mi"; [ "$se" -gt 9 ] || se="0$se"
+  case "$f" in *%%*) return 1 ;; esac
+  f="${f//%Y/$y}"; f="${f//%m/$m}"; f="${f//%d/$d}"; f="${f//%-I/$i}"; [ "$i" -gt 9 ] || i="0$i"; f="${f//%I/$i}"
+  [ "$h" -gt 9 ] || h="0$h"; f="${f//%H/$h}"; f="${f//%M/$mi}"; f="${f//%S/$se}"; f="${f//%A/$w}"; f="${f//%Z/$a}"
+  f="${f//%p/$p}"
+  case "$f" in *%*) return 1 ;; esac
+  _SITREP_LOCAL="$f"
 }
 
 # ---------------------------------------------------------------- the plan transaction
@@ -2477,19 +2534,23 @@ esac
 # ends. A poker started inside a held command, the judge the card asks, holds nothing of its own. The verbs that judge
 # or read the run's facts fold the bound run first, in the verb's own shell, so every subshell they start inherits it.
 POKER_HOLD_PRIMED="current judge release-approval tick resume sitrep"
-poker_hold_prime() {  # -> the bound run's facts folded in this shell, for the verbs that read them; nothing otherwise
+poker_hold_prime() {  # <verb's args> -> the bound run's facts folded in this shell, for the verbs that read them; nothing otherwise
   local run
   case " $POKER_HOLD_PRIMED " in *" $VERB "*) ;; *) return 0 ;; esac
+  # The verbs that read the sheet's instants hold the local zone first (`sitrep_zone_prime`); the watcher's pass reads none.
+  case "$VERB ${1:-}" in 'tick --watch') ;; tick*|resume*|sitrep*) sitrep_zone_prime ;; esac
   declare -F _proof_facts >/dev/null 2>&1 || return 0
   run="$(session_run "$(project_root "$PWD")" "${CLAUDE_CODE_SESSION_ID:-}" 2>/dev/null)" || return 0
-  case "$run" in 'bound-open '*) [ ! -f "${run#bound-open }" ] || _proof_facts "${run#bound-open }" >/dev/null 2>&1 ;; esac
+  case "$run" in 'bound-open '*) [ ! -f "${run#bound-open }" ] || { _proof_facts "${run#bound-open }" >/dev/null 2>&1 && POKER_HELD_RUN="${run#bound-open }"; } ;; esac
   return 0
 }
+# shellcheck disable=SC2034  # read by hooks/poker/sitrep.sh, sourced below
+POKER_HELD_RUN=""   # the bound run poker_hold_prime folded; a reader of its log by another path asks that fold (sitrep.sh `_sitrep_ledger_facts`)
 if declare -F proof_hold_begin >/dev/null 2>&1 && proof_hold_begin; then
-  ( poker_hold_prime; poker_dispatch "$@" )
+  ( poker_hold_prime "$@"; poker_dispatch "$@" )
   POKER_HOLD_RC=$?
   proof_hold_end
   exit "$POKER_HOLD_RC"
 fi
-poker_hold_prime
+poker_hold_prime "$@"
 poker_dispatch "$@"

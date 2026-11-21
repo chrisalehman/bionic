@@ -149,9 +149,53 @@ _units_plan_read() {
   return 0
 }
 _units_plan_read
+_UNITS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+
+# ONE READ A COMMAND (lib/proof.sh `_proof_held_dir`). Inside a held command an answer this library computes from the
+# plan or the facts is kept in the command's directory, so every process the command starts, the judge the card asks
+# and the tick resume runs among them, is served the one read. A kept answer's key is whole on its first line: the
+# answer's kind, the plan, and the cksum of every input it is computed from, so a plan edited or a log written during
+# the command is read again, never served stale. Outside a held command nothing is kept.
+# _units_hold <kind> <plan> <key> -> 0 with _UNITS_HOLD_FILE and _UNITS_HOLD_KEY set when this command holds its reads
+_units_hold() {
+  _UNITS_HOLD_FILE=""; _UNITS_HOLD_KEY=""
+  declare -F _proof_held_dir >/dev/null 2>&1 && _proof_held_dir && [ -n "${3:-}" ] || return 1
+  _UNITS_HOLD_KEY="$1 $2 ${3//$'\n'/ }"
+  _UNITS_HOLD_FILE="$_PROOF_HELD_DIR/units-$1-$(printf '%s' "$2" | cksum | tr -c '0-9\n' '-')"
+}
+# _units_held -> 0 with the answer kept under _UNITS_HOLD_KEY in _UNITS_HELD_OUT and its exit in _UNITS_HELD_RC; 1 when
+# none is kept under it
+_units_held() {
+  local got
+  _UNITS_HELD_OUT=""; _UNITS_HELD_RC=""
+  [ -n "$_UNITS_HOLD_FILE" ] && [ -f "$_UNITS_HOLD_FILE" ] && got="$(cat "$_UNITS_HOLD_FILE" 2>/dev/null; printf x)" || return 1
+  [ "${got%%$'\n'*}" = "$_UNITS_HOLD_KEY" ] || return 1
+  got="${got%x}"; got="${got#*$'\n'}"
+  _UNITS_HELD_RC="${got%%$'\n'*}"; _UNITS_HELD_OUT="${got#*$'\n'}"
+}
+# _units_keep <exit> <answer> -> the answer and its exit kept under _UNITS_HOLD_KEY, when a key is set
+_units_keep() {
+  local tmp
+  [ -n "$_UNITS_HOLD_FILE" ] && tmp="$(mktemp "$_UNITS_HOLD_FILE.XXXXXX" 2>/dev/null)" || return 0
+  { printf '%s\n%s\n' "$_UNITS_HOLD_KEY" "$1"; printf '%s' "$2"; } > "$tmp" && mv -f "$tmp" "$_UNITS_HOLD_FILE" 2>/dev/null || rm -f "$tmp"
+}
+
+# The table's answer is the plan's text read by this library and lib/plan-read.sh, so it is kept under their cksum.
 _units_read() {
+  local out rc
+  [ -n "${1:-}" ] && [ -f "$1" ] && declare -F plan_read_table >/dev/null 2>&1 || {
+    [ -z "${BIONIC_COUNT:-}" ] || printf 'table _units_read\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+    return 1; }
+  if _units_hold table "$1" "$(cksum "$1" "$_UNITS_DIR/units.sh" "$_UNITS_DIR/plan-read.sh" 2>/dev/null)" \
+     && _units_held; then
+    printf '%s' "$_UNITS_HELD_OUT"; return "$_UNITS_HELD_RC"
+  fi
   [ -z "${BIONIC_COUNT:-}" ] || printf 'table _units_read\n' 2>/dev/null >>"$BIONIC_COUNT" || :
-  [ -n "${1:-}" ] && [ -f "$1" ] && declare -F plan_read_table >/dev/null 2>&1 || return 1
+  out="$(_units_read_table "$1"; printf 'x%s' "$?")"; rc="${out##*x}"; out="${out%x*}"
+  _units_keep "$rc" "$out"
+  printf '%s' "$out"; return "$rc"
+}
+_units_read_table() {
   plan_read_table "$1" Tasks id 2>/dev/null | awk -F'\t' '
     BEGIN {
       # The contract order. `disp` is the spelling a violation names; `want` the header name it answers to.
@@ -2470,10 +2514,7 @@ UNITS_RUN
     }')"
   case "$out" in
     'ask '*|*$'\n''ask '*)
-      if _units_lib reader.sh reader_q_statuses; then
-        sts="$(if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then reader_facts() { printf '%s' "$_UNITS_FACTS"; }; fi
-          reader_q_statuses "$(_units_origin "$plan")" 2>/dev/null)" || sts=""
-      fi
+      if _units_lib reader.sh reader_q_statuses; then sts="$(_units_statuses "$(_units_origin "$plan")" 2>/dev/null)" || sts=""; fi
       # The join: each row's first line is its state, and a dispatch is under a name when a `name=` line is not empty.
       out="$({ printf '%s\n' "$sts"; printf '\034\n'; printf '%s\n' "$out"; } | awk '
         $0 == "\034" { part = 1; next }
@@ -2490,6 +2531,22 @@ UNITS_RUN
 $out
 UNITS_FOUND
   return "$found"
+}
+
+# _units_statuses <plan> -> lib/reader.sh `reader_q_statuses` over the facts this call holds (`_units_fold`), else over the
+# reader's own fold. Its answer reads only the facts that name a row (`_READER_ROW_AWK` and `_READER_DROP_AWK` read a
+# line by its `row=`), so it is kept under the cksum of those lines and the reader's libraries: a judgment's pending
+# step, which names no row, is laid over the same answer, and a pending landing or tree, which does, is passed again.
+_units_statuses() {
+  local out rc
+  if [ -n "${_UNITS_FACTS_PLAN:-}" ] && _units_hold statuses "$1" "$(printf '%s\n' "$_UNITS_FACTS" | grep -F '|row=' | cksum) $(cksum "$_UNITS_DIR/reader.sh" "$_UNITS_DIR/line.sh" 2>/dev/null)" \
+     && _units_held; then
+    printf '%s' "$_UNITS_HELD_OUT"; return "$_UNITS_HELD_RC"
+  fi
+  out="$(if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then reader_facts() { printf '%s' "$_UNITS_FACTS"; }; fi
+    reader_q_statuses "$1"; printf 'x%s' "$?")"; rc="${out##*x}"; out="${out%x*}"
+  [ "$rc" -ne 0 ] || _units_keep "$rc" "$out"
+  printf '%s' "$out"; return "$rc"
 }
 
 # _units_files_tokens <Files cell> -> one entry per line, as the readiness program reads a Files cell: comma-split,
