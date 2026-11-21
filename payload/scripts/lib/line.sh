@@ -2216,7 +2216,7 @@ _line_stale() {  # <plan> <row> <root> <base> <candidate> -> `<criterion><TAB><w
   while IFS=$'\t' read -r k c p w; do
     if [ "$k" = S ]; then
       ! git -C "$root" cat-file -e "$cand:$p" 2>/dev/null \
-        || ! git -C "$root" show "$cand:$p" | LC_ALL=C grep -Eq "§${w}([^A-Za-z0-9_-]|\$)" || continue
+        || ! git -C "$root" show "$cand:$p" | LC_ALL=C grep -E "§${w}([^A-Za-z0-9_-]|\$)" >/dev/null || continue
       out="${out}${c}	§${w} of ${p}
 "
     else

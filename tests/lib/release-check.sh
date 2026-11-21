@@ -258,9 +258,9 @@ ratio_count() {
   if [ -z "$lst" ] && ! git rev-parse --verify -q "$rev^{tree}" >/dev/null 2>&1; then
     return 1
   fi
-  printf '%s\n' "$lst" | /usr/bin/grep -q ' C$' || return 2
+  case "$lst" in *' C'|*' C'$'\n'*) ;; *) return 2 ;; esac
   printf '%s\n' "$lst" | git cat-file --batch='%(objectsize) %(rest)' 2>/dev/null | LC_ALL=C awk '
-    left <= 0 { if ($2 != "T" && $2 != "C") { bad = 1; exit } left = $1 + 1; k = $2; next }
+    left <= 0 { if ($2 != "T" && $2 != "C") { bad = 1; next } left = $1 + 1; k = $2; next }
     { left -= length($0) + 1; gsub(/[[:space:]]/, ""); n[k] += length($0) }
     END { if (bad || left > 0) exit 1; printf "%d %d\n", n["T"], n["C"] }' || return 3
 }
