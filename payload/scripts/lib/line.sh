@@ -1660,7 +1660,7 @@ _line_close_ack() {  # <root> <name> -> 0 acked or closed already · 1 not writt
   local roster="${1%/}/.bionic/tmp/roster-${LINE_SID:-}.state"
   LINE_ACKED=""
   [ -n "${LINE_SID:-}" ] && _line_load_roster || return 1
-  roster_open_names "$roster" "$(roster_ack_ledger "$roster")" "$LINE_SID" | grep -qxF -- "$2" || return 0
+  roster_open_names "$roster" "$(roster_ack_ledger "$roster")" "$LINE_SID" | grep -xF -- "$2" >/dev/null || return 0
   ( cd "$1" && CLAUDE_CODE_SESSION_ID="$LINE_SID" \
       bash "$_LINE_LIB_DIR/../../hooks/session-sweeper.sh" ack "$2" --by patrol --reason landed ) >/dev/null 2>&1 || return 1
   LINE_ACKED=1

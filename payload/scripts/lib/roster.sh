@@ -955,7 +955,7 @@ ruling_record() {  # <roster> <writer> <text> [<key=value>...: what it grants] -
   id="r${now}-$$"
   _ruling_put "$f" "$w" "id=$id" "recorded=$now" "${@:4}" "text=$t" || return 1
   for r in "${f%/*}"/roster-*.state; do
-    [ "$r" = "$f" ] || /usr/bin/grep '^roster-state/' "$r" 2>/dev/null | /usr/bin/grep -qF "|name=${w}|" || continue
+    [ "$r" = "$f" ] || /usr/bin/grep '^roster-state/' "$r" 2>/dev/null | /usr/bin/grep -F "|name=${w}|" >/dev/null || continue
     flag="$(ruling_pending_flag "$r")" && : >> "$flag" 2>/dev/null
   done
   printf '%s' "$id"
