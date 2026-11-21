@@ -1910,16 +1910,27 @@ matrix_row_owes() {
 # lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read. A fourth argument,
 # any word, prints only those that also await their person (`matrix_row_awaits`, fed as the commit gate feeds it).
 matrix_unruled() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC MATRIX_OWING MATRIX_OWING_OF _MO_STEP _MO_OPEN RIGOR ac tier status ev aud conf waiver defer
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC MATRIX_OWING MATRIX_OWING_OF RIGOR
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
   matrix_load "$PLAN" "${3:-}" || return 2
+  matrix_unruled_held "$PLAN" "$2" "${4:-}"
+}
+
+# matrix_unruled_held <plan> <step> [awaiting] -> matrix_unruled's answer over the criteria matrix_load already holds for
+# <plan>, at the rigor RIGOR names, so a caller that reads the loaded rows itself as well (the release approval card)
+# loads the criteria once and still asks the gate's own walk. Nothing at `single` rigor; 2 when what is held is another
+# plan's or nothing.
+matrix_unruled_held() {
+  local PLAN="$1" _MO_STEP _MO_OPEN ac tier status ev aud conf waiver defer
+  matrix_auditor_required || return 0
+  [ "${MATRIX_TASKS_OF:-}" = "$1" ] || return 2
   while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
     [ -n "$ac" ] || continue
     _matrix_owing "$PLAN" "$ac"
     defer=0; matrix_row_deferred "$PLAN" "$_MO_STEP" "$2" "$status" "$_MO_OPEN" && defer=1
     matrix_row_owes "$2" "$tier" "$status" "$aud" "$conf" "$waiver" "$defer" >/dev/null || continue
-    [ -z "${4:-}" ] || matrix_row_awaits "$tier" "$status" "$aud" "$conf" "$waiver" || continue
+    [ -z "${3:-}" ] || matrix_row_awaits "$tier" "$status" "$aud" "$conf" "$waiver" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)

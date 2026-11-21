@@ -1742,6 +1742,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   if [ -n "$stamp" ] && _proof_held_dir; then
     held="$_PROOF_HELD_DIR/fold-$(printf '%s' "$plan" | cksum | tr -c '0-9\n' '-')"
     if [ -f "$held" ] && got="$(cat "$held" 2>/dev/null)" && [ "${got%%$'\n'*}" = "$key" ] && _proof_kept_split "$got"; then
+      [ -z "${BIONIC_COUNT:-}" ] || printf 'held _proof_facts\n' 2>/dev/null >>"$BIONIC_COUNT" || :
       _PROOF_FACTS_LOG=1; _PROOF_FACTS_KEY="$key"; _proof_facts_out; return
     fi
   fi

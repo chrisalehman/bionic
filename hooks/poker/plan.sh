@@ -1417,7 +1417,7 @@ BRF_EOF
   # rr_rows <plan> <current> [head] -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<person>\037<reason>`
   # per criterion, the reader's order. THE RULING IS THE GATE'S: each criterion is read through its readers (`matrix_load`,
   # the reader's answer, and `matrix_table_rows`), and it is unruled exactly when the gate at 8 asks something of it:
-  # walls.sh `matrix_unruled` names it (the ruling the advance asks, at double rigor), or `matrix_row_awaits` holds (the
+  # walls.sh `matrix_unruled_held`, the walk `matrix_unruled` runs, names it (the ruling the advance asks, at double rigor), or `matrix_row_awaits` holds (the
   # person's confirmation the commit at 8 asks at any rigor), sourced in a subshell as the facts judge sources them, so
   # the card and the gate cannot answer one row two ways: at single rigor no auditor's word is owed, so no row waits on one. A
   # WAIVER IS A FACT OF THE RUN: the reader's status says waived only where a waiver event names the criterion. A row the
@@ -1432,10 +1432,17 @@ BRF_EOF
   # walls.sh cannot be loaded or the run's facts could not be read: the card never guesses a ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
-    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_unruled >/dev/null 2>&1 \
+    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_unruled_held >/dev/null 2>&1 \
         && declare -F matrix_row_awaits >/dev/null 2>&1 && declare -F matrix_row_deferred >/dev/null 2>&1 || exit 2
-      PLAN="$1"; unruled="$(matrix_unruled "$PLAN" 8 "${3:-}")" || exit 2
+      # ONE LOAD, ONE OWING PASS: the criteria are loaded once in this shell, every criterion's owing step and openness
+      # read in one pass over them, and the gate's walk at 8 asked of what is loaded, so the subshell it runs in and the
+      # loop below read the same rows.
+      PLAN="$1"
+      # shellcheck disable=SC2034  # RIGOR is read by walls.sh matrix_auditor_required inside matrix_unruled_held
+      RIGOR="$(plan_frontmatter_get "$PLAN" rigor)"
       matrix_load "$PLAN" "${3:-}" || exit 2
+      matrix_owing_load "$PLAN" >/dev/null 2>&1
+      unruled="$(matrix_unruled_held "$PLAN" 8)" || exit 2
       while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
         [ -n "$ac" ] || continue
         ruled=1; case $'\n'"$unruled"$'\n' in *$'\n'"$ac"$'\n'*) ruled=0 ;; esac
@@ -1445,8 +1452,8 @@ BRF_EOF
           if user_confirmed_attributed "$conf"; then person=confirmed
           elif matrix_row_ruled "$tier" "$status" "$aud" "you 1970-01-01 confirmed" "$waiver"; then person=awaits; fi
         fi
-        owe="$(matrix_owing_step "$PLAN" "$ac")"
-        ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" || ruled="owed:$owe"
+        _matrix_owing "$PLAN" "$ac"; owe="$_MO_STEP"
+        ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$_MO_OPEN" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
         printf '%s\037%s\037%s\037%s\037%s\037%s\037\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled" "$person"
       done <<RR_MATRIX
