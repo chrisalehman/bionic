@@ -321,6 +321,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh check-from '<their words>' [<commit>]   the person's word that the commit, the working head unless named, judges every landing and release check after it: one approval of key judge in the run's log, naming the words and who typed them"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh publish   the bound run's pull request, on the release approval at the working head and nothing else: the working branch pushed to origin and the request opened against the integration branch through gh, recorded as a published event of part pr; at a head already published it does nothing, at a new head it pushes and keeps the request; a failed push or request exits 4 with the cause and opens an ask for the user"
+  die "  bash ${HOOK_DIR}/session-poker.sh pr-facts   the bound run's pull request facts, printed from the reader and never typed: ## Testing, ## Review, ## Known limits and ## Decision records, the four sections publish puts after the orchestrator's ## Summary, ## What changed and ## Upgrade notes from record/<wave>/pr-summary.md (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task|walk> <evidence>   record a proof in the run's log, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the regression's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
@@ -604,6 +605,9 @@ case "$VERB" in
   # THE RUN'S PULL REQUEST: nothing after the verb; the branch, its head and the base are the bound plan's.
   publish)
     [ $# -eq 0 ] || usage "publish takes no argument: it publishes the bound run's working branch against its integration branch."
+    ;;
+  pr-facts)
+    [ $# -eq 0 ] || usage "pr-facts takes no argument: it prints the bound run's facts."
     ;;
   # THE ENTRY ROW'S RENDER OF THE KNOWN LIMITS: the row id alone; the head is the working branch's.
   known-limits-part)
@@ -2473,6 +2477,7 @@ case "$VERB" in
   task-add) poker_verb_task_add "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   publish) poker_verb_publish "$@" ;;
+  pr-facts) poker_verb_pr_facts "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;
   handoff) poker_verb_handoff "$@" ;;
   brief) poker_verb_brief "$@" ;;
