@@ -819,14 +819,13 @@ co_scorecard() {  # -> sets CO_SC_LINES
 # `line_reviews_state` renders it, the one renderer the integrate row's `reviews-part` uses too. That verb writes it
 # before the pull request opens, so the merge carries it to the integration branch and close-out finds it already
 # listed and writes nothing. A run whose part no earlier verb wrote, one with no pull request among them, gets it here:
-# the commit is made in the object store on the working branch's tip, under close-out's own author, as the line makes
-# its numbers commit. `run` makes it before its first act, so a commit that cannot be made refuses with nothing done,
+# the commit is made in the object store on the working branch's tip, under the checkout's own author, as the line
+# makes its numbers commit. `run` makes it before its first act, so a commit that cannot be made refuses with nothing done,
 # and publishes it after the merge acts: the branch moves to it (lib/line.sh `line_reviews_move`) and the run's log
 # gains a published event, `part=reviews commit=<c> branch=<working> by=close-out`, so the branch holds no commit the
 # log does not name. No `release:`, no CHANGELOG.md on the branch, no entry for the release, no review or waiver registered, or a
 # part that already reads as rendered: nothing is made and no line is written.
 # Sets CO_RV_LINE (the `reviews:` line's words), CO_RV_COMMIT (the commit, made, not yet published), CO_RV_BASE.
-CO_RV_AUTHOR="bionic close-out"; CO_RV_EMAIL="close-out@bionic.invalid"
 CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
 co_line_load() {  # -> 0 once lib/line.sh (the renderer, the landing record's writer and the checkout reader) is loaded
   declare -F line_reviews_state >/dev/null 2>&1 && declare -F line_event >/dev/null 2>&1 && return 0
@@ -857,7 +856,7 @@ co_reviews_prepare() {  # <check|run> -> CO_RV_LINE, and in run CO_RV_COMMIT; rc
   fi
   why="$(line_reviews_checkout "$ROOT" "$WORKING")"
   [ -z "$why" ] || { rm -rf "$tmp"; CO_RV_LINE="not rendered — $why"; return 1; }
-  if line_reviews_commit "$ROOT" "$tip" "$tmp/new" "$CO_RV_AUTHOR" "$CO_RV_EMAIL" \
+  if line_reviews_commit "$ROOT" "$tip" "$tmp/new" \
        "close-out: the $LINE_RV_VER entry's reviews, rendered from the plan"; then
     rm -rf "$tmp"
     CO_RV_COMMIT="$LINE_RV_COMMIT"; CO_RV_BASE="$tip"

@@ -813,8 +813,8 @@ expect_absent "RV-6 …and the hand-written line is gone from it" "a hand-writte
   "$(printf '%s\n' "$RV_GOT" | rv_part /dev/stdin 9.9.9)"
 expect_eq "RV-7 the rest of the file is as it was: the prose, the limits, the older entry" "$RV_REST0" \
   "$(printf '%s\n' "$RV_GOT" | rv_rest /dev/stdin 9.9.9)"
-expect_eq "RV-8 the commit is close-out's own, on the release head" "bionic close-out|$RV_H2" \
-  "$(fixture_git "$PRV" log -1 --format='%an|%P' "$RV_TIP")"
+expect_eq "RV-8 the commit is the checkout's own author's, on the release head" "fixture <fixture@example.invalid>|$RV_H2" \
+  "$(fixture_git "$PRV" log -1 --format='%an <%ae>|%P' "$RV_TIP")"
 expect_eq "RV-9 …and touches CHANGELOG.md alone" "CHANGELOG.md" "$(fixture_git "$PRV" diff --name-only "$RV_H2" "$RV_TIP")"
 expect_eq "RV-10 the checkout holding the branch is at the commit, its file the committed one" "$RV_TIP|$RV_GOT" \
   "$(fixture_git "$PRV-wave" rev-parse HEAD)|$(cat "$PRV-wave/CHANGELOG.md")"
@@ -891,8 +891,8 @@ expect_contains "BP-1b …saying why once, naming the verb that renders it" "NOT
 expect_contains "BP-1c …the verb" "reviews-part T3" "$(printf '%s\n' "$LP_OUT" | /usr/bin/grep '^poker: NOT-LANDED T3')"
 lands_poker "$PBP" "$BP_SID" reviews-part T3
 BP_TIP="$(rv_tip "$PBP")"
-expect_eq "BP-2 reviews-part renders the part: exit 0, a commit by the line's author on the release head" "0|bionic line|$BP_H" \
-  "$LP_RC|$(fixture_git "$PBP" log -1 --format='%an|%P' "$BP_TIP")"
+expect_eq "BP-2 reviews-part renders the part: exit 0, a commit by the checkout's own author on the release head" "0|fixture <fixture@example.invalid>|$BP_H" \
+  "$LP_RC|$(fixture_git "$PBP" log -1 --format='%an <%ae>|%P' "$BP_TIP")"
 expect_eq "BP-3 …touching CHANGELOG.md alone" "CHANGELOG.md" "$(fixture_git "$PBP" diff --name-only "$BP_H" "$BP_TIP")"
 BP_PART="$(fixture_git "$PBP" show "$BP_TIP:CHANGELOG.md" 2>/dev/null | rv_part /dev/stdin 9.9.9)"
 expect_eq "BP-4 …one bullet per review proof of the run's log, under the part's heading" \

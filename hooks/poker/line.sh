@@ -680,7 +680,7 @@ record_row_land() {
 #
 # THE INTEGRATE ROW RENDERS THE ENTRY'S REVIEWS PART BEFORE IT OPENS ITS PULL REQUEST. `reviews-part <row>` renders the
 # release entry's `### The reviews` part from the plan (lib/line.sh `line_reviews_state`, close-out's renderer too) and
-# commits it under the line's author where `part_target` says, the working branch when run from its checkout, so the
+# commits it under the checkout's own author where `part_target` says, the working branch when run from its checkout, so the
 # branch the pull request is opened from carries it, and the merge brings it to the integration branch. Its last lines are the release reply's waivers, so in the release
 # order it refuses until `approved: release` is written: a part rendered before the reply would miss them. The judge
 # holds the commit covered by the release check and the approval at its parent while it is the fresh render (lib/proof.sh
@@ -688,7 +688,6 @@ record_row_land() {
 # `ev=integrate|row=<row>|part=reviews|commit=<c>|branch=<b>|tree=<t>`, so no branch holds a commit the record does not
 # name. Nothing to render, or the part already listed: nothing is made, exit 0. The branch moves on this machine alone;
 # it leaves it by the person's push. The record row's landing refuses the integrate row while the part would still render.
-REVIEWS_PART_AUTHOR="bionic line"; REVIEWS_PART_EMAIL="line@bionic.invalid"
 
 # THE PARTS RENDER IN THE CHECKOUT THE VERB RUNS FROM. A row's tree renders the part its own landing carries, so the
 # working branch takes it by that landing and never twice. `part_target <plan> <root>` sets PT_TREE (the checkout that
@@ -725,7 +724,7 @@ part_land() {
   if [ -n "$why" ]; then
     rm -rf "$5"; die "REFUSED — $why; nothing was rendered."; exit 2
   fi
-  if ! line_reviews_commit "$PT_TREE" "$PT_HEAD" "$5/new" "$REVIEWS_PART_AUTHOR" "$REVIEWS_PART_EMAIL" "$3"; then
+  if ! line_reviews_commit "$PT_TREE" "$PT_HEAD" "$5/new" "$3"; then
     rm -rf "$5"; die "REFUSED — on $PT_BRANCH: $LINE_RV_SAID; nothing was rendered."; exit 2
   fi
   rm -rf "$5"
@@ -1043,7 +1042,7 @@ poker_verb_pr_facts() {
 # looks for stands in the part it scans. The part replaces the entry's own (its heading to the next heading; a doubled
 # heading is one part), else goes in before `### The landing numbers`, else at the entry's end (lib/line.sh
 # `line_entry_part`, the one rule that places a part of an entry), and nothing else in
-# the file changes. It is committed under the line's author through the reviews part's commit path (`part_target`,
+# the file changes. It is committed under the checkout's own author through the reviews part's commit path (`part_target`,
 # `part_land`): in a row's tree on its branch, which its landing carries to the working branch the check judges, or on
 # the working branch from its checkout, and the landing record gains
 # `ev=<row kind>|row=<row>|part=known-limits|commit=<c>|branch=<b>|tree=<t>`.

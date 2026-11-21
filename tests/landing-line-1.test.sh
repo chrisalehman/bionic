@@ -1343,10 +1343,13 @@ expect_eq "(k0) precondition: the owed list reads two deferrals, and the second'
 expect_eq "(k0b) …and the entry on the branch carries the hand's limit" "- a limit typed by hand" "$(kl_part "$RK" | /usr/bin/grep '^- ')"
 KL_OUT="$(ww_poke "$RK" known-limits-part T3)"; KL_RC=$?
 KL_T="$(kl_tip "$RK")"
-expect_eq "(k1) known-limits-part renders the part: exit 0, a commit by the line's author on the old head" "0|bionic line|$KL_H" \
-  "$KL_RC|$(git -C "$RK" log -1 --format='%an|%P' "$KL_T" 2>/dev/null)"
+expect_eq "(k1) known-limits-part renders the part: exit 0, a commit by the checkout's own author on the old head" "0|world <world@example.invalid>|$KL_H" \
+  "$KL_RC|$(git -C "$RK" log -1 --format='%an <%ae>|%P' "$KL_T" 2>/dev/null)"
 [ "$KL_RC" = 0 ] || printf '%s\n' "$KL_OUT" | sed 's/^/    | /' | head -8
 expect_eq "(k2) …touching CHANGELOG.md alone" "CHANGELOG.md" "$(git -C "$RK" diff --name-only "$KL_H" "$KL_T" 2>/dev/null)"
+KL_CODE="$(/usr/bin/grep -rn 'line_reviews_commit' "$BIONIC_HOOKS_DIR" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null | wc -l | tr -d ' ')"
+expect_eq "(k2b) the scan of the code finds the commit's maker, and no author name or address of the tool's own beside it" "yes|" \
+  "$([ "${KL_CODE:-0}" -gt 0 ] && echo yes)|$(/usr/bin/grep -rnE 'bionic\.invalid|bionic line|bionic close-out' "$BIONIC_HOOKS_DIR" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null)"
 expect_eq "(k3) the part holds each stated sentence, unescaped, in the order registered, and nothing else" \
   "- $KL_S1|- $KL_S2" "$(kl_part "$RK" | /usr/bin/grep '^- ' | paste -sd'|' -)"
 expect_eq "(k4) the part keeps its place before The landing numbers" "### The work|### Known limits|### The landing numbers" "$(kl_heads "$RK")"
