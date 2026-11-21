@@ -16,8 +16,9 @@
 # A value holding `|` or a line break would split a field or a line, so it is refused unwritten.
 #
 # THE CLOSED LIST. LOG_TYPES is every event type a line may carry: the 28 of the kernel map, `hand`
-# (any act taken by hand to keep the run going) and `drop` (a row's work no longer owed, in the person's
-# words). A type outside it is refused, so a misspelt or retired event cannot become a fact the reader has
+# (any act taken by hand to keep the run going), `drop` (a row's work no longer owed, in the person's
+# words) and `ruling` (the orchestrator's binding word to one row's writer, its push and its reading:
+# lib/roster.sh). A type outside it is refused, so a misspelt or retired event cannot become a fact the reader has
 # no question for.
 #
 # EXITS. 0 appended; 2 refused with the file untouched (no type, a type outside the list, a field that is
@@ -51,7 +52,7 @@ fi
 declare -F seal_write >/dev/null 2>&1 || . "$_LOG_LIB_DIR/seal.sh"
 
 LOG_TYPES=" ready candidate verdict published returned stalled standing admitted void run walk step approval"
-LOG_TYPES="${LOG_TYPES} proof finding waiver decision order bind handoff dispatch tree born ask stop debt abandon cancel hand drop "
+LOG_TYPES="${LOG_TYPES} proof finding waiver decision order bind handoff dispatch tree born ask stop debt abandon cancel hand drop ruling "
 
 log_append() {  # <event type> <key>=<value>… -> 0 appended, 2 refused, 1 not written
   local ev="${1:-}" f k line at="${LOG_AT:-}"

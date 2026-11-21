@@ -120,27 +120,43 @@ expect_eq "W1.c the next pass over the same fill is quiet: the wake was told onc
 expect_eq "W1.d …with nothing on stdout" "" "$WP_OUT"
 
 # AN AGENT THAT REPORTED. w-1's deliverable landed, its Done marker is written and its completion message is in the
-# transcript, and it is still on the panel: the tick stands it down.
+# transcript, and it is still on the panel. A writer's record is the first thing it writes, so the tick stands it
+# down only once its row has landed; a read-only role has no landing and is stood down on its record.
 wk_msg() {
   jq -nc --arg b "<teammate-message teammate_id=\"$1\" color=\"blue\" summary=\"r\">
 report
 </teammate-message>" '{type:"user",timestamp:"2026-09-05T00:50:10.000Z",message:{role:"user",content:$b}}'
 }
-RS="$(make_repo wp-reported)"; new_roster "$RS"; bound_ago "$RS"
-WK_PLAN="$(wave_plan_at "$RS" "epic-99-fixture/wave-41.plan.md" \
-  "writers=1 suites=2 worktrees=8 test_jobs=8 source=user" \
-  "| R1 | 4 | build | ready row | implementor | — | 15m | REQ-x | r1.sh | pending |")"
-bind_marker "$RS" "$WK_PLAN"
-echo "done" > "$RS/w1-report.md"; backdate "$RS/w1-report.md" 300
-add_row "$RS" name=w-1 agent_id=aw1-41414141414141 deliverable="$RS/w1-report.md" \
-  duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$RS" w-1)"
+wk_reported() {  # <label> [subagent_type] -> repo; w-1 reported, on the panel, its row not landed
+  local r p; r="$(make_repo "$1")"; new_roster "$r"; bound_ago "$r"
+  p="$(wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" "writers=1 suites=2 worktrees=8 test_jobs=8 source=user" \
+    "| R1 | 4 | build | ready row | implementor | — | 15m | REQ-x | r1.sh | pending |")"
+  bind_marker "$r" "$p"
+  echo "done" > "$r/w1-report.md"; backdate "$r/w1-report.md" 300
+  add_row "$r" name=w-1 agent_id=aw1-41414141414141 deliverable="$r/w1-report.md" ${2:+subagent_type="$2"} \
+    duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$r" w-1)"
+  printf '%s' "$r"
+}
+wk_orders() { cat "$1/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null; }
 plant_answer "$TMPROOT/wk.panel" fresh "w-1:idle"
 { head -1 "$TMPROOT/wk.panel"; wk_msg w-1; tail -n +2 "$TMPROOT/wk.panel"; } > "$WP_TR"
+RS="$(wk_reported wp-reported)"
+wp_pass "$RS"
+expect_eq "W2-0 a writer whose record is on disk and whose row has not landed: no stand-down wakes the pass" \
+  "" "$(printf '%s' "$WP_OUT" | grep -E 'STANDDOWN|met:')"
+expect_absent "W2-0a …and no stop order is written for it" "|target=w-1" "$(wk_orders "$RS")"
+bash -c '. "$1/roster.sh" && roster_mark_landed "$2" w-1 "$3" 2026-09-05T00:51:00Z' _ "$WP_LIB" "$(roster_of "$RS")" \
+  "$(printf 'a%.0s' $(seq 1 40))"
 wp_pass "$RS"
 WK_SD="$WP_OUT"
-expect_eq "W2 an agent that reported and is still on the panel: the pass wakes" "$WP_WAKE" "$WP_RC"
-expect_contains "W2.a …its line names the agent" "w-1" "$WK_SD"
+expect_eq "W2 the same writer once its row has landed: the pass wakes" "$WP_WAKE" "$WP_RC"
+expect_contains "W2.a …its line names the agent" "STANDDOWN w-1" "$WK_SD"
 expect_contains "W2.b …and the act" "TaskStop" "$WK_SD"
+expect_contains "W2.c …and the stop order is written" "|target=w-1" "$(wk_orders "$RS")"
+RR="$(wk_reported wp-reported-ro bionic:researcher)"
+wp_pass "$RR"
+WK_RO="$WP_OUT"
+expect_contains "W2.d a read-only agent has no landing: its record on disk stands it down" "STANDDOWN w-1" "$WK_RO"
 
 # AN AGENT QUIET PAST ITS CADENCE. T1 active, w1's progress file ten cadences old, no carrier and no request.
 RN="$(make_repo wp-cadence)"; new_roster "$RN"; bound_ago "$RN"
@@ -226,6 +242,20 @@ printf '%s\n' 'poker: HELD T2 ext:ci' 'poker: LEDGER T4 no-launch' 'poker: WAITI
   'poker: QUIET — 1 open row(s) on this roster' 'poker: no FILL — width=8 occupied=1 gap=7, and no pending task is ready.' \
   > "$TMPROOT/advice.print"
 expect_eq "P3 a print of advice and quiet lines composes no line" "" "$(wp_line "$TMPROOT/advice.print")"
+# EACH CAUSE OFFERS ONLY A VERB THAT ACCEPTS IT. A met stand-down offers the hold verb, and hold takes the row in its
+# own world; a stand-down for load leaves the row live, which hold refuses, so its wake names the load and no hold.
+wk_hold_ok() {  # <label> <wake text> <repo>
+  expect_contains "P4-$1 the met wake offers the hold verb" "hold" "$2"
+  poke "$3" hold w-1 "kept up on purpose"
+  expect_eq "P4-$1.a …and hold, run in its world, accepts the row (exit 0)" "0|held — w-1" "$RC|$(printf '%s' "$OUT" | grep -o 'held — w-1' | head -1)"
+}
+wk_hold_ok SD "$WK_SD" "$RS"; wk_hold_ok RO "$WK_RO" "$RR"
+printf 'poker: STANDDOWN wl-T14 — load 14.0 over 6.36; its row T14 is pending again with its tree kept, so TaskStop it\n' \
+  > "$TMPROOT/load.print"
+WP_LOAD="$(wp_line "$TMPROOT/load.print")"
+expect_regex "P5 a stand-down for load wakes with LOAD, the writer's name and the load" '^bionic watch: LOAD wl-T14 .*14[.]0' "$WP_LOAD"
+expect_contains "P5.a …and the act it offers" "TaskStop" "$WP_LOAD"
+expect_absent "P5.b …which is never the hold verb" "hold" "$WP_LOAD"
 
 # ============================================================
 section "§GATE: a denied reserved request wakes the pass with the gate act, and its ask is open on the register (AC-12.3)"
