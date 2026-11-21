@@ -2271,16 +2271,25 @@ sitrep_tick_line() {
   # REFUSED (1), nothing written: a number that is not D<n>, a title that is empty or more than one line, a row the
   # plan does not have.
   decisions_put() {  # <plan> <ledger> <D<n>> <title> [<rows, space-separated>]
-    local plan="$1" led="$2" d="$3" title="$4" holds="${5:-}" wait r ids h
+    local plan="$1" led="$2" d="$3" title="$4" holds="${5:-}" wait r ids=" " h rows
     case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
     if [ -z "$d" ]; then
       die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
       exit 1
     fi
     case "$title" in ''|*$'\n'*) die "REFUSED — the title is one line saying what is decided; nothing is written."; exit 1 ;; esac
-    ids=" $(units_rows "$plan" 2>/dev/null | cut -f1 | tr '\n' ' ') "
+    # A row's id is its record's `id` cell as the units library hands it out (`units_field_v`): a cut of the records
+    # here would be a second reading of the plan's table.
+    rows="$(units_rows "$plan" 2>/dev/null)"
+    while IFS= read -r r; do
+      units_field_v h "$r" id
+      [ -z "$h" ] || ids="$ids$h "
+    done <<< "$rows"
+    # The refusal stands on a line of its own: on the case line the heading in its words would read as a match.
     for h in $holds; do
-      case "$ids" in *" $h "*) ;; *) die "REFUSED — the plan has no row '$(clean "$h")' for $d to hold; nothing is written. Name a row of the plan's ## Tasks table: bash ${HOOK_DIR}/session-poker.sh decisions put $d '<title>' <row>"; exit 1 ;; esac
+      case "$ids" in *" $h "*) continue ;; esac
+      die "REFUSED — the plan has no row '$(clean "$h")' for $d to hold; nothing is written. Name a row of the plan's ## Tasks table: bash ${HOOK_DIR}/session-poker.sh decisions put $d '<title>' <row>"
+      exit 1
     done
     wait="$(decision_wait "$plan" "$d" "$REPO_REAL" "$holds")"
     decisions_append "$plan" "d=$d" verb=put by=orchestrator "title=$title" ${wait:+"wait=$wait"} ${holds:+"holds=$holds"} || exit 1
