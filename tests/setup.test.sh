@@ -176,5 +176,7 @@ expect_true "PB1 the rendered file's span was read (the extractor is not empty)"
 expect_true "PB2 the install wrote a span (the twin of the next row)" test -s "$TMP/pb-installed-span"
 expect_true "PB3 the installed span is the rendered span, byte for byte" cmp -s "$TMP/pb-rendered-span" "$TMP/pb-installed-span"
 expect_true "PB4 every byte outside the span is the user's, as planted" cmp -s "$TMP/pb-planted.md" "$TMP/pb-outside"
+expect_true "PB5 the installed span carries the reader principle's line (a positive beside PB3's equality)" \
+  grep -q -F '**Write for a reader with no context.** The reader has not seen your tool calls' "$TMP/pb-installed-span"
 
 finish
