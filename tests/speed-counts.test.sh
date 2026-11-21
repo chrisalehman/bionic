@@ -33,9 +33,9 @@
 #     expect_eq "ONCE-fold card counts one fold" 1 "$(sc_count n card fold)"
 #     expect_eq "SCALE-status check is the same at n and 2n" "$(sc_count n check status)" "$(sc_count 2n check status)"
 #
-# FIXTURE FIDELITY (.claude/rules/test-harness.md, "Fixture fidelity"). SYNTHESIZED, in the shape of the copy of
-# wave 50's record the speed protocol times (.bionic/tests/w52-speed.md): a double multi_agent wave past Step 4, its
-# rows landed but the integrate row, its request open. What a count depends on is pinned by §FIXTURE, not assumed:
+# FIXTURE FIDELITY (.claude/rules/test-harness.md, "Fixture fidelity"). SYNTHESIZED, in the shape of the recorded
+# run the speed protocol times: a double multi_agent run past Step 4, its rows landed but the integrate row, its
+# request open. What a count depends on is pinned by §FIXTURE, not assumed:
 # the triple that turns the ledger arm on, a head the judge can deal (a base-sha that is a commit, every owed proof
 # passing there), the request the watcher looks at, and a TMPDIR of the command's own, so no kept facts or place
 # cache from another run is read. A size differs from the other by its rows alone.
