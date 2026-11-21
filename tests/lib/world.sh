@@ -54,6 +54,9 @@ if git -C "$WORLD_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
   rm -rf "$WORLD_ROOT"
   exit 1
 fi
+# A maker here that cannot make its fixture stops the suite that asked for it (tests/lib/maker-stop.sh).
+[ -r "${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" ] && . "${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" \
+  || { echo "world.sh: cannot load ${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" >&2; return 1 2>/dev/null || exit 1; }
 export WORLD_ROOT
 export WORLD_SID="11111111-2222-4333-8444-555555555555"
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate"
@@ -242,15 +245,17 @@ world_verbs() {
 # a roster at .bionic/tmp/roster-<WORLD_SID>.state with rows wx-T1 and wx-T2; and two row trees,
 # .worktrees/T1 on `wt/T1` and .worktrees/T2 on `wt/T2`, each cut from wave/x with one
 # commit of its own (T1.txt, T2.txt) and a .bionic link to the root's, as spawn-worktree
-# plants it. `.bionic` and `.worktrees/` are ignored, so every checkout reads clean.
-world_repo() (
+# plants it. `.bionic` and `.worktrees/` are ignored, so every checkout reads clean. A world that cannot be built
+# stops the suite, with one line naming world_repo.
+world_repo() { _world_repo || maker_stop world_repo "no fixture repository under $WORLD_ROOT"; }
+_world_repo() (
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
   root="$(mktemp -d "$WORLD_ROOT/repo.XXXXXX")" && root="$(cd "$root" && pwd -P)" || exit 1
   [ -n "$root" ] || exit 1
   git -C "$root" init --quiet || exit 1
   # Rule 12: nothing writes until git agrees the repository is the one just made.
   [ "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" = "$root" ] \
-    || { echo "world_repo: git's toplevel is not $root — refusing" >&2; exit 1; }
+    || maker_stop world_repo "git's toplevel is not $root"
   git -C "$root" symbolic-ref HEAD refs/heads/main
   git -C "$root" config user.name "world"
   git -C "$root" config user.email "world@example.invalid"

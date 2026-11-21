@@ -16,6 +16,7 @@
 #             an allow line it cannot read, when the row changed that file
 #   HEADER    a suite header that lists a section its body lacks, or omits one its body has
 #   SETUP     a shared setup (tests/*.prelude.sh) that loads a helper on a line whose status nothing reads
+#   STOP      a shared setup or a tests/lib file that calls maker_stop and does not load tests/lib/maker-stop.sh
 #   REFUSALS  a refusal call, as payload/scripts/one-reader-check.sh finds one, in a registered hook's own file
 #
 # What a row changed decides what is read: a changed ceiling widens EXIT to every file it names, a changed allow file
@@ -432,6 +433,22 @@ SETUP_AWK_EOF
 setup_loads() { local f; for f in "$@"; do awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk -v F="$f" -v LOADS=1 -f "$LINT_TMP/setup.awk"; done; }
 # setup_refusals <file>... -> `<file>:<line> TAB <text>` per line of a shared setup holding a load whose status nothing reads
 setup_refusals() { local f; for f in "$@"; do awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk -v F="$f" -f "$LINT_TMP/setup.awk"; done; }
+# stop_refusals <file>... -> `<file>:<line> TAB <text>` at the first call of maker_stop in each file that holds no
+# load of maker-stop.sh. Without the function a call answers 127 and the maker goes on to write through the path it
+# just refused, so a file that stops through it loads it itself, and the load reads its status (SETUP). A comment
+# or a heredoc body holds no call; maker-stop.sh itself is the definition.
+stop_refusals() {
+  local f at
+  for f in "$@"; do
+    case "$f" in (maker-stop.sh|*/maker-stop.sh) continue ;; esac
+    at="$(awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk '
+      { s = $0; sub(/(^|[ \t])#.*$/, "", s) }
+      !done && s ~ /(^|[^A-Za-z0-9_])maker_stop([ \t]|$)/ { print FNR "\t" $0; done = 1 }')"
+    [ -n "$at" ] || continue
+    case "$(setup_loads "$f" | cut -f2)" in (*maker-stop.sh*) continue ;; esac
+    printf '%s:%s\n' "$f" "$at"
+  done
+}
 
 # census_calls <tests dir> -> `<suite> TAB <section|setup> TAB <key>` per call outside a heredoc body.
 census_calls() {
@@ -543,6 +560,14 @@ lint_setup() {  # <root> <paths file>
   done < "$2" | LC_ALL=C awk -F'\t' '{ print "SETUP " $1 " a shared setup loads a helper with no stop: " $2 }'
 }
 
+lint_stop() {  # <root> <paths file>
+  local p
+  while IFS= read -r p; do
+    case "$p" in (tests/lib/*/*) continue ;; (tests/*.prelude.sh|tests/lib/*.sh) ;; (*) continue ;; esac
+    [ ! -f "$1/$p" ] || ( cd "$1" && stop_refusals "$p" )
+  done < "$2" | LC_ALL=C awk -F'\t' '{ print "STOP " $1 " a maker stops through maker_stop, which this file does not load: " $2 }'
+}
+
 # A registered hook's own file holds no refusal: its words live in the library the hook calls. The check reads which
 # hooks are registered from hooks/hooks.json, so a copy holding that file and the changed top-level hooks is judged as
 # the tree would be for them; a changed hooks.json may register any hook, so then every one is read. A tree with no
@@ -570,7 +595,7 @@ lint_main() {  # <root> [<path>...] -> the hits; 0 none · 1 hits · 2 a check c
   root="$(cd "${1:-}" 2>/dev/null && pwd -P)" || { echo "lint.sh: no root ${1:-<none>}" >&2; return 2; }
   shift
   if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; else cat; fi | awk 'NF' | LC_ALL=C sort -u > "$LINT_TMP/paths"
-  for c in exit quit header setup refusals; do
+  for c in exit quit header setup stop refusals; do
     out="$("lint_$c" "$root" "$LINT_TMP/paths")" || rc=2
     [ -z "$out" ] || hits="${hits}${out}
 "

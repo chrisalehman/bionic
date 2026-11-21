@@ -32,6 +32,8 @@
 EG_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 [ -r "$EG_HERE/lib/plan-fixture.sh" ] && . "$EG_HERE/lib/plan-fixture.sh" \
   || { echo "canonical-sdlc-evidence-gate.prelude.sh: cannot load $EG_HERE/lib/plan-fixture.sh" >&2; exit 1; }
+[ -r "$EG_HERE/lib/maker-stop.sh" ] && . "$EG_HERE/lib/maker-stop.sh" \
+  || { echo "canonical-sdlc-evidence-gate.prelude.sh: cannot load $EG_HERE/lib/maker-stop.sh" >&2; exit 1; }
 cleanup_dirs=()
 cleanup() {
   for d in ${cleanup_dirs[@]+"${cleanup_dirs[@]}"}; do
@@ -53,7 +55,7 @@ trap cleanup EXIT
 # the case is actually about the evidence arm itself (Section 39).
 make_home() {
   local dir
-  dir=$(mktemp -d) && [ -n "$dir" ] && [ -d "$dir" ] || return 1
+  dir=$(mktemp -d) && [ -n "$dir" ] && [ -d "$dir" ] || maker_stop make_home "no folder under ${TMPDIR:-/tmp}"
   mkdir -p "$dir/.claude/plans" "$dir/.bionic/docs/plans"
   write_generic_evidence "$dir"
   engage "$dir"
@@ -82,10 +84,10 @@ write_generic_evidence() {
 eg_head_repo() {  # <dir> — makes <dir> a repository whose HEAD is $EG_HEAD (idempotent)
   # `git -C ""` acts where the suite stands, and a directory inside another repository answers for that one: the
   # commit is made only in a repository whose top is <dir> itself.
-  [ -n "$1" ] && [ -d "$1" ] || return 1
+  [ -n "$1" ] && [ -d "$1" ] || maker_stop eg_head_repo "no directory at '$1'"
   [ -e "$1/.git" ] && return 0
-  git -C "$1" init -q 2>/dev/null || return 1
-  [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$1" && pwd -P)" ] || return 1
+  git -C "$1" init -q 2>/dev/null && [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$1" && pwd -P)" ] \
+    || maker_stop eg_head_repo "no repository of its own at '$1'"
   GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' GIT_COMMITTER_DATE='2026-01-01T00:00:00Z' \
     git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid \
       -c commit.gpgsign=false -c core.hooksPath=/dev/null \

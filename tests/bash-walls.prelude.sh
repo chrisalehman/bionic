@@ -38,6 +38,8 @@ mkdir -p "$FAKE_HOME"
 BW_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 [ -r "$BW_HERE/lib/plan-fixture.sh" ] && . "$BW_HERE/lib/plan-fixture.sh" \
   || { echo "bash-walls.prelude.sh: cannot load $BW_HERE/lib/plan-fixture.sh" >&2; exit 1; }
+[ -r "$BW_HERE/lib/maker-stop.sh" ] && . "$BW_HERE/lib/maker-stop.sh" \
+  || { echo "bash-walls.prelude.sh: cannot load $BW_HERE/lib/maker-stop.sh" >&2; exit 1; }
 
 # ---------- fixtures ----------
 
@@ -53,7 +55,7 @@ mk_repo() {
   # Nothing is written until git agrees the repository is the one just made: a path that is empty, no directory, or
   # inside another repository would carry this identity and these commits to whatever repository answers for it.
   [ -n "$1" ] && [ -d "$repo" ] && [ "$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$repo" && pwd -P)" ] \
-    || { echo "mk_repo: no repository of its own at '$repo'" >&2; return 1; }
+    || maker_stop mk_repo "no repository of its own at '$repo'"
   git -C "$repo" config user.email t@example.com
   git -C "$repo" config user.name "T"
   printf 'seed\n' > "$repo/README.md"
