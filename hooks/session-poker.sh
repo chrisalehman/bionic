@@ -302,6 +302,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> [--born …]   record the birth of row <id>, which an edit of the bound plan wrote first: the row is read back and judged as a row born mid-run, one born event is appended, and the plan is not written; a short row is refused with the lines it would accept; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite; task-add <id> --drop '<the person's words>' says a pending row's work is no longer owed: one drop event, the plan not written"
+  die "  bash ${HOOK_DIR}/session-poker.sh start <id> [<name>] [--role <role>]   start row <id>, written into the bound plan first: its birth (as task-add), its brief (as brief) and its tree (spawn-worktree.sh create --for the name), then the Agent call printed whole and the one task-list entry it owes; an act that stands is kept, and a tree the row recorded is marked for the name"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh judge <N> [<N>…]   the advance's judgment for each step from 5 to 8 in one process: what current <N> --check prints for each, each closed by judged <N> exit <rc>; appends nothing; exits 0 when every step would advance"
@@ -905,6 +906,19 @@ $1"; shift ;;
   brief)
     { [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "$1" ]; } || usage "brief takes the plan row's id and, optionally, the name its agent is dispatched under, as in: brief T2 w01-T2."
     BRF_ID="$1"; BRF_NAME="${2:-}"
+    ;;
+  # ONE VERB STARTS A ROW: the row's id, optionally the name its agent is dispatched under (the fill's name when left
+  # out), and --role for a row whose cells name none.
+  start)
+    ST_ID=""; ST_NAME=""; ST_ROLE=""
+    ST_USAGE="start takes the plan row's id, optionally the name its agent is dispatched under, and --role <role> once, as in: start T7 w01-T7 --role bionic:critic."
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --role) { [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$ST_ROLE" ]; } || usage "$ST_USAGE"; ST_ROLE="$2"; shift 2 ;;
+        *) if [ -z "$ST_ID" ]; then ST_ID="$1"; elif [ -z "$ST_NAME" ]; then ST_NAME="$1"; else usage "$ST_USAGE"; fi; shift ;;
+      esac
+    done
+    [ -n "$ST_ID" ] || usage "$ST_USAGE"
     ;;
   # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). A subcommand, its operands, and at most one
   # plan last, which names the run as landing-report's does; without it, the session's bound run.
@@ -2443,6 +2457,7 @@ case "$VERB" in
   known-limits-part) poker_verb_known_limits_part "$@" ;;
   handoff) poker_verb_handoff "$@" ;;
   brief) poker_verb_brief "$@" ;;
+  start) poker_verb_start ;;
   current) poker_verb_current "$@" ;;
   judge) poker_verb_judge "$@" ;;
   reply) poker_verb_reply "$@" ;;
