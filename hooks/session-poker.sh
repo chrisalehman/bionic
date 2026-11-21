@@ -39,7 +39,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, one handoff event names it (writes the file, and the run's log when bound)
 #     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, this session's roster and the recap)
 #     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register: this run's rulings from record/<wave>/design-ledger.md and its log, or every run's with the ADRs (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>'   a decision put: one round in the run's log, and the wait line it prints
+#     bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>' [<row>…]   a decision put: one round in the run's log naming the rows it holds, and the wait line it prints
 #     bash <plugin-root>/hooks/session-poker.sh decisions rule D<n> '<reply>'   a decision ruled on the user's reply: its round in the run's log and its ask closed, in one act
 #     bash <plugin-root>/hooks/session-poker.sh brief <row> [<name>]   render the dispatch brief into record/<wave>/briefs/<name>.md from the row, its plan section and the reader (writes that file, never the plan)
 #
@@ -344,7 +344,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, adopt and tick; print the run in a dozen lines (bound, step, agents running, landed since, owed now, watch) and the path of the recap file holding the rest (task-list:, settled:, open:, the step file). A closed or no-run file binds nothing"
   die "  bash ${HOOK_DIR}/session-poker.sh promote <adr|design|requirement> <path>   copy one durable record into the project's tracked home (docs-tracked: in .bionic/config.yaml, docs/ when absent) as <home>/<kind>s/<name>, the run number dropped from the name; a plan, a log or a run record is refused and nothing is copied"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions [--all]   the bound run's rulings, D<n> · \"<reply>\" · <who> <date> · <title>, from record/<wave>/design-ledger.md and the run's log as one list; --all: every run's, keyed by wave, with the ADRs (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>'   during a run, append the decision's put to the run's log and print its wait line: what an hour's wait moves, from the tasks that read approval:D<n> and the longest chain"
+  die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>' [<row>…]   during a run, append the decision's put to the run's log and print its wait line: what an hour's wait moves, from the rows the put names as held, the tasks that read approval:D<n> and the longest chain"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions rule D<n> '<reply>'   during a run, on the user's reply, append the ruling, its reply and who said it, to the run's log and close the decision's ask; approve D<n> and a release approval card's reply rule through the same writer; a decision already ruled is refused"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row> [<name>]   render the dispatch brief of that plan row into record/<wave>/briefs/<name>.md (<name> the agent's, else the fill's for the row): the scaffold from the row, the judgment from the task's own section of the plan, the review range, Questions and Lands-red from the reader; it never rewrites a brief it did not render, and never changes the plan"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   append one debt to the run's log per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
@@ -910,11 +910,11 @@ $1"; shift ;;
     ;;
   # THE REGISTER (wave-38 T13; D24, AC-3.4). At most one flag, --all.
   decisions)
-    DC_ALL=no DC_PUT="" DC_TITLE="" DC_RULE="" DC_REPLY=""
+    DC_ALL=no DC_PUT="" DC_TITLE="" DC_HOLDS="" DC_RULE="" DC_REPLY=""
     if [ $# -eq 1 ] && [ "$1" = --all ]; then DC_ALL=yes
     elif [ $# -ge 1 ] && [ "$1" = put ]; then
-      [ $# -eq 3 ] || usage "decisions put takes two arguments: the decision's number and what is decided, as in: decisions put D7 'which findings reach the user'."
-      DC_PUT="$2"; DC_TITLE="$3"
+      [ $# -ge 3 ] || usage "decisions put takes the decision's number, what is decided and the rows it holds, if any, as in: decisions put D7 'which findings reach the user' T4 T5."
+      DC_PUT="$2"; DC_TITLE="$3"; shift 3; DC_HOLDS="$*"
     elif [ $# -ge 1 ] && [ "$1" = rule ]; then
       [ $# -eq 3 ] || usage "decisions rule takes two arguments: the decision's number and the user's reply, as in: decisions rule D7 '1'."
       DC_RULE="$2"; DC_REPLY="$3"
