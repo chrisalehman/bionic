@@ -568,6 +568,20 @@ co_lands_refusal() {  # <rows> -> why this session cannot land them, or nothing
   fi
   return 0
 }
+# co_rows_out -> returns while no row of the run has a live writer; otherwise refuses before the first act, naming each
+# row out and the writer holding it. THE CLOSE LANDS NO ROW A WRITER HOLDS, and removes nothing a writer still reads:
+# landed at the merge, an active close row reads finished while its writer is mid-work. Who is out is the watcher's
+# own question (lib/patrol.sh `patrol_rows_out`), so the close typed by hand and the merge pass refuse on one answer;
+# an answer that cannot be had refuses too. It is asked in a command substitution, never in this shell: the rosters'
+# reader sources lib/fill.sh and through it lib/gate.sh, whose `gate_ask` would replace this file's own.
+co_rows_out() {
+  local held said
+  held="$(patrol_rows_out "$PLAN")" \
+    || _co_held "who is out cannot be read" "the rows of $PLAN or the rosters that hold them cannot be read, so whether a writer is out is unknown — nothing was done"
+  [ -n "$held" ] || return 0
+  said="$(printf '%s\n' "$held" | awk -F'\t' '$1 != "" { printf "%s%s (%s on roster %s)", (n++ ? ", " : ""), $1, $2, substr($3, 1, 8) }')"
+  _co_held "rows of the run are out" "rows out: $said — the close runs once each writer is acked or gone — nothing was done"
+}
 act_lands() {  # <rows> -> each landed by one published event at the integration head; LANDS_LINE
   local rows="$1" id ih left
   if [ -z "$rows" ]; then
@@ -958,11 +972,53 @@ _co_tmp_owner() {
   return 0
 }
 
+# THE SCRATCH ROOT IS SPARED BY WHO OWNS EACH FOLDER IN IT. `scratch/<session>/<agent name>/` is a dispatched
+# agent's own (hooks/execution-recorder.sh), and no state class keys it, so the rule above would take every
+# session's whole. Here a folder of another session stands while that session is live (`patrol_live_session_ids`),
+# and in this session's own folder an agent's stands while its name is open on this session's roster (the one close
+# predicate, `roster_open_names`, with the sweeper's acks applied); every other folder is removed. Asked before the
+# removal pass, which takes the roster it reads. <scratch root> -> rc 0 when something under it was kept, with
+# CO_SCRATCH_KEPT the folders kept; rc 1 when nothing was, and the caller removes the root.
+CO_SCRATCH_KEPT=0
+_co_tmp_scratch() {
+  local root="$1" live own="" s n
+  CO_SCRATCH_KEPT=0
+  live="$(patrol_live_session_ids 2>/dev/null)"
+  [ -z "$CO_SID" ] || own="$(roster_open_names "$TMP_DIR/roster-$CO_SID.state" "$TMP_DIR/sweeper-$CO_SID.state" "$CO_SID")"
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    if [ -n "$CO_SID" ] && [ "${s##*/}" = "$CO_SID" ] && [ -d "$s" ] && [ ! -L "$s" ]; then
+      while IFS= read -r n; do
+        [ -n "$n" ] || continue
+        case "
+$own
+" in
+          *"
+${n##*/}
+"*) if [ -d "$n" ] && [ ! -L "$n" ]; then CO_SCRATCH_KEPT=$((CO_SCRATCH_KEPT + 1)); continue; fi ;;
+        esac
+        rm -rf "$n"
+      done <<< "$(find "$s" -mindepth 1 -maxdepth 1 2>/dev/null)"
+      [ -n "$(find "$s" -mindepth 1 -maxdepth 1 2>/dev/null)" ] || rm -rf "$s"
+      continue
+    fi
+    case "
+$live
+" in
+      *"
+${s##*/}
+"*) if [ -d "$s" ] && [ ! -L "$s" ]; then CO_SCRATCH_KEPT=$((CO_SCRATCH_KEPT + 1)); continue; fi ;;
+    esac
+    rm -rf "$s"
+  done <<< "$(find "$root" -mindepth 1 -maxdepth 1 2>/dev/null)"
+  [ "$CO_SCRATCH_KEPT" -gt 0 ]
+}
+
 # THIS SESSION'S ENGAGED MARKER IS KEPT, AND REMOVED AS THE LAST ACT (wave-36 T14; D13, C70). It is also the
 # session's binding, and every plan verb asks it first: wiped here, a close-out refused later in the tail left the
 # person with no verb to repair the plan by (NOT-ENGAGED). `act_disengage` removes it after everything else.
 act_tmp() {
-  local before after entry owner dead_ids spare_list="" removed=0 spared=0 is_spared keep="" kept=0
+  local before after entry owner dead_ids spare_list="" removed=0 spared=0 is_spared keep="" kept=0 sk=0
   before="$(tmp_count)"
   if [ -n "$CO_SID" ]; then
     keep="$(engaged_marker_path "$ROOT" "$CO_SID" 2>/dev/null)" || keep=""
@@ -978,6 +1034,11 @@ act_tmp() {
     # sweeper's verdict on this pid would be), and neither is anything unkeyed.
     while IFS= read -r entry; do
       [ -n "$entry" ] || continue
+      if [ "$entry" = "$TMP_DIR/scratch" ] && [ -d "$entry" ] && [ ! -L "$entry" ]; then
+        _co_tmp_scratch "$entry" && { spare_list="${spare_list}${entry}
+"; sk=1; }
+        continue
+      fi
       owner="$(_co_tmp_owner "${entry##*/}")"
       [ -n "$owner" ] || continue
       [ "$owner" = "$CO_SID" ] && continue
@@ -1015,9 +1076,10 @@ $entry
   fi
 
   after="$(tmp_count)"
-  [ "$after" = "$((spared + kept))" ] || _co_refuse "$after entries remain under $TMP_DIR after the wipe ($((spared + kept)) expected, for a live neighbour's spared state and this session's engaged marker)"
+  [ "$after" = "$((spared + kept + sk))" ] || _co_refuse "$after entries remain under $TMP_DIR after the wipe ($((spared + kept + sk)) expected, for a live neighbour's spared state, this session's engaged marker and the scratch of a live agent)"
   TMP_LINE="$before entries under $TMP_DIR ($removed removed, $spared spared for a live neighbour session"
   [ "$kept" -eq 0 ] || TMP_LINE="$TMP_LINE, 1 kept: this session's engaged marker, removed as close-out's last act"
+  [ "$sk" -eq 0 ] || TMP_LINE="$TMP_LINE, scratch kept for $CO_SCRATCH_KEPT live folder(s) under it"
   TMP_LINE="$TMP_LINE; this session's own state and every dead session's are never spared)"
 }
 
@@ -1534,8 +1596,32 @@ co_cont_hh_none() {  # -> 0 when the continuation holds no `hand-holds: ` line u
   [ -f "$CONT" ] || return 0
   ! awk '/^## / { s = ($0 == "## Hand-holds"); next } s && index($0, "hand-holds: ") == 1 { f = 1 } END { exit !f }' "$CONT"
 }
+# THE CONTINUATION HAS ONE WRITER. A close row whose Files name it, and which was dispatched (the run's log holds its
+# dispatch), has a writer of its own for that file, so the close writes none of it, the file there or not: two writers
+# of one file is how a close appended to a continuation its row's writer was still writing. A close row nobody
+# dispatched has no writer, and the close stays the file's one writer, as before. Files entries are read from the
+# project's root and from the docs root, the two spellings a planner writes.
+# co_cont_owner -> the id of the close row that owns the continuation, or nothing
+co_cont_owner() {
+  local rows id files e
+  rows="$(units_rows "$PLAN" 2>/dev/null | CO_SENT=" $(co_facts dispatch row 2>/dev/null | tr '\n' ' ') " awk -F'\t' '
+    $3 == "close" && $10 != "dropped" && index(ENVIRON["CO_SENT"], " " $1 " ") { print $1 "\t" $9 }')"
+  while IFS=$'\t' read -r id files; do
+    [ -n "$id" ] || continue
+    while IFS= read -r e; do
+      [ -n "$e" ] || continue
+      if [ "$ROOT/$e" = "$CONT" ] || [ "$DROOT/$e" = "$CONT" ]; then printf '%s' "$id"; return 0; fi
+    done <<< "$(_units_files_tokens "$files")"
+  done <<< "$rows"
+  return 0
+}
 act_continuation() {
-  local hh_none=no
+  local hh_none=no owner
+  owner="$(co_cont_owner)"
+  if [ -n "$owner" ]; then
+    CONT_LINE="$CONT_REL is the close row $owner's to write (its Files name it) — the close writes none of it"
+    return 0
+  fi
   co_cont_hh_none && hh_none=yes
   act_continuation_write
   if [ "$hh_none" = yes ] && ! co_cont_hh_none; then CO_HH_CONT="$CO_HH_LINE"; fi
@@ -2134,7 +2220,7 @@ co_close_archived() {
 # usually a refusal, because the block `run` is about to write is not written yet. That is
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
-  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count missing CK_LINE
+  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count missing CK_LINE CK_OWNER
   if [ "$CURRENT" = 8 ]; then
     say "step: current: 8"
   else
@@ -2213,7 +2299,10 @@ do_check() {
   say "$(co_debt_card)"
   CO_DEBT_BAD="$(co_debt_refusal)" || _co_refuse "$CO_UNREAD"
   [ -z "$CO_DEBT_BAD" ] || co_would "debt-lines: WOULD REFUSE — $CO_DEBT_BAD" "a carried debt line does not parse"
-  if [ -f "$CONT" ]; then
+  CK_OWNER="$(co_cont_owner)"
+  if [ -n "$CK_OWNER" ]; then
+    say "continuation: $CONT_REL is the close row $CK_OWNER's to write (its Files name it) — run writes none of it"
+  elif [ -f "$CONT" ]; then
     if ! co_cont_has_deferrals; then
       CK_LINE="continuation: $CONT_REL already written — run appends the ## Deferrals section"
     else
@@ -2283,13 +2372,15 @@ do_check() {
 # ─── run ─────────────────────────────────────────────────────────────────────
 
 do_run() {
-  # NOTHING IS TOUCHED UNTIL ALL NINE OF THESE PASS, in this order: the step `run` closes, the deploy the plan owes
-  # (co_deploy_judge), the presence check (a `| wave |` table, a release with no `|`), every debt line the
+  # NOTHING IS TOUCHED UNTIL ALL TEN OF THESE PASS, in this order: the step `run` closes, nobody out on a row of the
+  # run (co_rows_out), the deploy the plan owes (co_deploy_judge), the presence check (a `| wave |` table, a release
+  # with no `|`), every debt line the
   # continuation carries parsing (co_debt_refusal), this session bound to the plan when it has rows the merge lands
   # (co_lands_refusal), the merge verdict (act 1 is a readback and touches nothing), the branch census, the facts the
   # run owes (`facts_judge`), and the gate's answer about the plan `run` will write. Any refusal leaves every branch,
   # every tmp entry, the plan and the epic plan exactly as they were.
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
+  co_rows_out
   co_deploy_judge
   [ -z "$CO_DEPLOY_WHY" ] || _co_held "$CO_DEPLOY_SAYS" "$CO_DEPLOY_WHY — nothing was done"
   MISSING="$(presence_missing)"
