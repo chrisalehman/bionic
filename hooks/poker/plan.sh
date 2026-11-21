@@ -1376,7 +1376,7 @@ BRF_EOF
   #   Goals         each goal the plan declares, its mark and its reading, reached ones included
   #   run.so-far    one line, the reader's acts taken by hand and open asks over the run, the sheet's line word for word
   #   hand-holds    one line, landing-report's counts over the window from the last build landing to this render
-  #   test-ratio    one line beside it, the release check's count of shell lines under tests/ against the rest
+  #   test-ratio    one line beside it, the release check's reading of test characters against code, limit and room
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
   #   Reviews       evidence, adversarial, structure: each question's newest reading, by the role that holds it
   #   Findings      a count, then one sentence each, the severity code first: fixed / awaiting your decision / carried
@@ -1935,9 +1935,9 @@ RR_AGAINST_EOF
     # (`sitrep_test_ratio`, the reader the situation report's waste line uses), so the page quotes the check and
     # counts nothing. A check that ran at an earlier head says which, and no check says nothing.
     RR_TR=""
-    read -r _rr_t _rr_c _rr_h <<< "$(sitrep_test_ratio "$PV_PLAN" "$PV_REPO")"
-    if [ -n "${_rr_c:-}" ]; then
-      RR_TR="test-ratio: $_rr_t/$_rr_c"
+    read -r _rr_h _rr_r <<< "$(sitrep_test_ratio "$PV_PLAN" "$PV_REPO")"
+    if [ -n "${_rr_r:-}" ]; then
+      RR_TR="test-ratio: $_rr_r"
       [ "${_rr_h:-}" = "$RR_HEAD" ] || RR_TR="$RR_TR at ${_rr_h:0:8}"
     fi
 

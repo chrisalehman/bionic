@@ -30,14 +30,15 @@
 #                   until the entry is rendered again.
 #   §PROJECT        the check run from a tree that holds no plan reads the project's plan and record from
 #                   BIONIC_CHECK_PROJECT, so an unstated deferral refuses from that tree as it does from the project's own.
-#   §RATIO          the cap on tests: the tracked shell lines under tests/ against the tracked shell lines everywhere
-#                   else, counted in the tree at BIONIC_CHECK_HEAD. A head whose tests exceed its code is refused in
-#                   one line naming both counts; a head under passes with `test-ratio: <tests>/<code>`; the counts are
-#                   the head's, never the working files'; a directory reached through a symlink counts once; a head
-#                   with no shell code outside tests/ is a refusal, never a pass.
-#   §RATIO-BASE     a head over the cap is admitted when its test lines are at or under the tree at BIONIC_CHECK_BASE's
-#                   and refused when they rose; the line then carries `(base <tests>/<code>)`; a head under the cap
-#                   passes as before; a base that names no commit compares nothing, so the head alone is judged.
+#   §JOIN           the cap on tests reads the non-whitespace characters of the tracked, non-link shell files under
+#                   tests/ against those everywhere else, in the tree at BIONIC_CHECK_HEAD, never the working files:
+#                   tests split over lines and the same tests joined onto one read the same; a link counts nothing.
+#   §DELETE         the limit is 1.25 times the larger of the head's code and BIONIC_CHECK_BASE's, so a commit that
+#                   deletes code is admitted and so is the next one that adds a test line; no base, the head's alone.
+#   §OVER           a head past the limit exits 1 in one line naming both counts, unless its tests are at or under
+#                   the base's; a head with no shell code outside tests/ is a refusal, never a pass.
+#   §LINE           a pass prints `test-ratio: <tests>/<code> chars · limit <n> · room <n>`, a refusal the same after
+#                   `release-check: `, the limit rounded down; release-approval.test.sh §RATIO pins its readers.
 #   §CORR           the 1.19.0 entry against wave-36's REQ-8 and REQ-9 (AC-8.1, AC-8.3, AC-8.4, AC-9.1,
 #                   AC-9.2): the block exists at its own heading, dated; the Corrections
 #                   section names the two refusals 1.18.0 introduced, the text-only floor arm, D22's two
@@ -494,9 +495,9 @@ pj_check "$PJ_T" "$M"
 expect_contains "(pj4) CONTROL the variable unset: no plan holds the numbers" \
   "landing-numbers: 2.3.4 — no plan under $PJ_T/.bionic/docs names release: 2.3.4" "$OUT"
 
-section "§RATIO — tests may not outgrow the code: shell lines under tests/ against shell lines elsewhere, at the head"
+section "§JOIN — the cap reads the non-whitespace characters of tracked shell files, so joining lines changes no reading"
 
-# fx_ratio <dir> <tests lines> <code lines> — a committed pair whose tracked shell files hold exactly that many lines.
+# fx_lines <n> — n lines of `:`, so n characters; fx_ratio <dir> <tests> <code> — a committed pair holding that many.
 fx_lines() { awk -v n="$1" 'BEGIN { for (i = 0; i < n; i++) print ":" }'; }
 fx_ratio() {
   fx_repo "$1" 2.3.4 2.3.4 || return 1
@@ -504,103 +505,94 @@ fx_ratio() {
   fx_lines "$2" > "$1/tests/big.test.sh" && fx_lines "$3" > "$1/code.sh" &&
   git -C "$1" add -A && git -C "$1" commit -q -m "the shell files"
 }
-
-R="$TMP/ratio-over"; fx_ratio "$R" 50 10
-run_check "$R"
-expect_status "(R-1) a head whose tests/ shell lines exceed the rest: the check fails" 1 "$RC"
-expect_contains "(R-1) …and the line names both counts" "test-ratio 50/10" "$OUT"
-expect_contains "(R-1) …and says tests exceed code at the head" "tests exceed code at HEAD" "$OUT"
-expect_eq "(R-1) …in one line" "1" "$(lines_of "$OUT")"
-
-R="$TMP/ratio-under"; fx_ratio "$R" 10 50
-run_check "$R"
-expect_status "(R-2) a head under: the check passes" 0 "$RC"
-expect_contains "(R-2) …and prints the ratio" "test-ratio: 10/50" "$OUT"
-expect_absent "(R-2) …with no refusal beside it" "tests exceed code" "$OUT"
-R="$TMP/ratio-equal"; fx_ratio "$R" 40 40
-run_check "$R"
-expect_status "(R-2b) tests equal to code is not over: the check passes" 0 "$RC"
-expect_contains "(R-2b) …printing the ratio" "test-ratio: 40/40" "$OUT"
-
-# (R-3) the head's counts, never the working files': the committed head is under, the working files are far over.
-R="$TMP/ratio-head"; fx_ratio "$R" 10 50
-fx_lines 900 > "$R/tests/untracked.test.sh"; fx_lines 1 > "$R/code.sh"
-expect_nonempty "(R-3) setup: the repository really is dirty" "$(git -C "$R" status --porcelain)"
-run_check "$R"
-expect_status "(R-3) working files edited and added after the commit: the check still passes" 0 "$RC"
-expect_contains "(R-3) …on the head's counts" "test-ratio: 10/50" "$OUT"
-git -C "$R" add -A; git -C "$R" commit -q -m "now over"
-run_check "$R"
-expect_status "(R-3) setup: the same files committed are over, so the dirty pass above was the head" 1 "$RC"
-OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD='HEAD~1' bash "$CHECK" "$LIST" 2>&1)"; RC=$?
-expect_contains "(R-3) …and BIONIC_CHECK_HEAD=HEAD~1 reads the earlier commit's counts" "test-ratio: 10/50" "$OUT"
-
-# (R-4) a symlinked directory counts once: the blob the link names, never the files seen through it.
-R="$TMP/ratio-link"; fx_repo "$R" 2.3.4 2.3.4
-mkdir -p "$R/lib" "$R/tests" && fx_lines 20 > "$R/lib/x.sh" && fx_lines 5 > "$R/tests/t.test.sh"
-ln -s lib "$R/lib2" && ln -s lib/x.sh "$R/alias.sh" && ln -s ../lib "$R/tests/viaLink"
-git -C "$R" rm -q -f code.sh && git -C "$R" add -A && git -C "$R" commit -q -m "links"
-expect_eq "(R-4) setup: the links are committed as links" "3" "$(git -C "$R" ls-tree -r HEAD | awk '$1 == "120000"' | wc -l | tr -d ' ')"
-run_check "$R"
-expect_status "(R-4) the check passes" 0 "$RC"
-expect_contains "(R-4) …the code is the 20 lines of the real file, counted once, and the tests are their own 5" "test-ratio: 5/20" "$OUT"
-
-# (R-5) no shell outside tests/ is no code to count against: a refusal, never a pass.
-R="$TMP/ratio-nocode"; fx_repo "$R" 2.3.4 2.3.4
-git -C "$R" rm -q -f code.sh; mkdir -p "$R/tests"; fx_lines 3 > "$R/tests/t.test.sh"; git -C "$R" add -A; git -C "$R" commit -q -m "tests only"
-run_check "$R"
-expect_status "(R-5) a head with no shell outside tests/: the check refuses (exit 2)" 2 "$RC"
-expect_contains "(R-5) …in a line that says so" "no shell file outside tests/" "$OUT"
-expect_eq "(R-5) …one line" "1" "$(lines_of "$OUT")"
-
-section "§RATIO-BASE — a head over the cap is admitted when its test lines are at or under the base's, refused when they rose"
-
-# run_check_base <repo> <base> — the check at HEAD with BIONIC_CHECK_BASE=<base>, the range the release runner passes; sets OUT and RC
+fx_commit() { git -C "$1" add -A && git -C "$1" commit -q -m "$2"; }   # <dir> <message>
+ratio_line() { printf '%s\n' "$OUT" | /usr/bin/grep 'test-ratio'; }   # -> OUT's reading, a pass's or a refusal's
+# run_check_base <repo> <base> — the check at HEAD with BIONIC_CHECK_BASE=<base>, as the release runner passes it; sets OUT and RC
 run_check_base() {
   OUT="$(cd "$1" && env -u BIONIC_CHECK_HEAD BIONIC_CHECK_BASE="$2" bash "$CHECK" "$LIST" 2>&1)"; RC=$?
 }
-# fx_retest <dir> <tests lines> — the tests file rewritten to that many lines and committed
-fx_retest() {
-  fx_lines "$2" > "$1/tests/big.test.sh" && git -C "$1" add -A && git -C "$1" commit -q -m "tests at $2 lines"
-}
 
-# (RB-1) over the cap at the base, one test line cut: the landing is admitted and the line carries both sides.
-R="$TMP/ratiob-cut"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
-fx_retest "$R" 49
-run_check_base "$R" "$RB_BASE"
-expect_status "(RB-1) over the cap at the base, one test line cut: the check passes" 0 "$RC"
-expect_contains "(RB-1) …and prints the head's ratio beside the base's" "test-ratio: 49/10 (base 50/10)" "$OUT"
-expect_absent "(RB-1) …with no refusal beside it" "tests exceed code" "$OUT"
+R="$TMP/join-split"; fx_ratio "$R" 0 40
+printf 'true &&\n  true &&\n  true\n' > "$R/tests/big.test.sh"; fx_commit "$R" "three lines"
+run_check "$R"; J_SPLIT="$(ratio_line)"
+expect_eq "(J-1) tests on three lines read as their 16 characters against the code's 40" \
+  "test-ratio: 16/40 chars · limit 50 · room 34" "$J_SPLIT"
+R="$TMP/join-one"; fx_ratio "$R" 0 40
+printf 'true && true && true\n' > "$R/tests/big.test.sh"; fx_commit "$R" "one line"
+run_check "$R"
+expect_eq "(J-2) the same tests joined onto one line read the same" "$J_SPLIT" "$(ratio_line)"
+fx_lines 900 > "$R/tests/untracked.test.sh"; fx_lines 1 > "$R/code.sh"
+run_check "$R"
+expect_eq "(J-3) the head's tree is read, never the working files: an untracked test file and edited code change nothing" \
+  "$J_SPLIT" "$(ratio_line)"
 
-# (RB-2) over the cap at the base, one test line added: refused, in one line that names both sides.
-R="$TMP/ratiob-rise"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
-fx_retest "$R" 51
-run_check_base "$R" "$RB_BASE"
-expect_status "(RB-2) over the cap at the base, one test line added: the check fails" 1 "$RC"
-expect_contains "(RB-2) …the line names both counts and says tests exceed code at the head" "test-ratio 51/10 — tests exceed code at HEAD" "$OUT"
-expect_contains "(RB-2) …and the base's counts it rose from" "(base 50/10)" "$OUT"
-expect_eq "(RB-2) …in one line" "1" "$(lines_of "$OUT")"
+# (J-4) a link is no blob of text, so a directory reached through one counts once, by its real files.
+R="$TMP/ratio-link"; fx_repo "$R" 2.3.4 2.3.4
+mkdir -p "$R/lib" "$R/tests" && fx_lines 20 > "$R/lib/x.sh" && fx_lines 5 > "$R/tests/t.test.sh"
+ln -s lib "$R/lib2" && ln -s lib/x.sh "$R/alias.sh" && ln -s ../lib "$R/tests/viaLink"
+git -C "$R" rm -q -f code.sh && fx_commit "$R" "links"
+expect_eq "(J-4) setup: the links are committed as links" "3" "$(git -C "$R" ls-tree -r HEAD | awk '$1 == "120000"' | wc -l | tr -d ' ')"
+run_check "$R"
+expect_eq "(J-4b) …the code is the 20 characters of the real file, counted once, and the tests are their own 5" \
+  "test-ratio: 5/20 chars · limit 25 · room 20" "$(ratio_line)"
 
-# (RB-3) the same test lines as the base is not a rise.
-R="$TMP/ratiob-same"; fx_ratio "$R" 50 10; RB_BASE="$(git -C "$R" rev-parse HEAD)"
-printf ':\n' >> "$R/code.sh"; git -C "$R" add -A; git -C "$R" commit -q -m "one code line more"
-run_check_base "$R" "$RB_BASE"
-expect_status "(RB-3) over the cap at the base, test lines unchanged: the check passes" 0 "$RC"
-expect_contains "(RB-3) …printing both ratios" "test-ratio: 50/11 (base 50/10)" "$OUT"
+section "§DELETE — the limit is 1.25 times the larger of the head's code and the base's, so deleting code takes no room"
 
-# (RB-4) the control: under the cap at the head, lines added, the base beside the ratio and no refusal.
-R="$TMP/ratiob-under"; fx_ratio "$R" 10 50; RB_BASE="$(git -C "$R" rev-parse HEAD)"
-fx_retest "$R" 20
-run_check_base "$R" "$RB_BASE"
-expect_status "(RB-4) under the cap at the head, test lines added: the check passes" 0 "$RC"
-expect_contains "(RB-4) …printing both ratios" "test-ratio: 20/50 (base 10/50)" "$OUT"
-
-# (RB-5) a base the repository cannot read compares nothing: the head alone is judged, as with no base.
-R="$TMP/ratiob-nobase"; fx_ratio "$R" 50 10
+# One character of room at the base: 49 test characters against 40 of code, a limit of 50.
+R="$TMP/delete"; fx_ratio "$R" 49 40; D_BASE="$(git -C "$R" rev-parse HEAD)"
+fx_lines 20 > "$R/code.sh"; fx_commit "$R" "half the code deleted"
+run_check_base "$R" "$D_BASE"
+expect_status "(D-1) a commit that only deletes code is admitted" 0 "$RC"
+expect_eq "(D-1b) …its limit set by the base's 40 characters of code, not the head's 20" \
+  "test-ratio: 49/20 chars · limit 50 · room 1" "$(ratio_line)"
+printf ':\n' >> "$R/tests/big.test.sh"; fx_commit "$R" "one test line"
+run_check_base "$R" "$D_BASE"
+expect_status "(D-2) the next commit, which adds one test line, is admitted too" 0 "$RC"
+expect_eq "(D-2b) …into the room the deletion left standing" "test-ratio: 50/20 chars · limit 50 · room 0" "$(ratio_line)"
+run_check "$R"
+expect_status "(D-3) CONTROL with no base, the same head is judged on its own 20 characters of code: refused" 1 "$RC"
 run_check_base "$R" "0000000000000000000000000000000000000000"
-expect_status "(RB-5) a base that names no commit, a head over the cap: the check fails" 1 "$RC"
-expect_contains "(RB-5) …on the head's counts" "test-ratio 50/10 — tests exceed code at HEAD" "$OUT"
-expect_absent "(RB-5) …with no base counts invented" "(base" "$OUT"
+expect_status "(D-4) …and so it is under a base that names no commit, which compares nothing" 1 "$RC"
+expect_absent "(D-4b) …with no base counts invented" "limit 50" "$OUT"
+
+section "§OVER — a head whose test characters pass 1.25 times its code is refused, unless they are at or under the base's"
+
+R="$TMP/over"; fx_ratio "$R" 51 40
+run_check "$R"
+expect_status "(O-1) 51 test characters against 40 of code, past the limit of 50: the check fails" 1 "$RC"
+expect_eq "(O-1b) …in one line naming both counts" \
+  "release-check: test-ratio: 51/40 chars · limit 50 · room -1 — tests pass 1.25 times the code at HEAD" "$(ratio_line)"
+expect_eq "(O-1c) …and no other line of its own" "1" "$(lines_of "$OUT")"
+R="$TMP/over-base"; fx_ratio "$R" 60 40; O_BASE="$(git -C "$R" rev-parse HEAD)"
+fx_lines 59 > "$R/tests/big.test.sh"; fx_commit "$R" "one test character cut"
+run_check_base "$R" "$O_BASE"
+expect_status "(O-2) over the limit at the base, one test character cut: admitted" 0 "$RC"
+expect_eq "(O-2b) …the line saying the room is still short" "test-ratio: 59/40 chars · limit 50 · room -9" "$(ratio_line)"
+fx_lines 61 > "$R/tests/big.test.sh"; fx_commit "$R" "two test characters added"
+run_check_base "$R" "$O_BASE"
+expect_status "(O-3) …and once the tests rise past the base's 60: refused" 1 "$RC"
+expect_contains "(O-3b) …naming both counts" "test-ratio: 61/40 chars" "$OUT"
+
+# (O-4) no shell outside tests/ is no code to count against: a refusal, never a pass.
+R="$TMP/ratio-nocode"; fx_repo "$R" 2.3.4 2.3.4
+git -C "$R" rm -q -f code.sh; mkdir -p "$R/tests"; fx_lines 3 > "$R/tests/t.test.sh"; fx_commit "$R" "tests only"
+run_check "$R"
+expect_status "(O-4) a head with no shell outside tests/: the check refuses (exit 2)" 2 "$RC"
+expect_contains "(O-4b) …in a line that says so" "no shell file outside tests/" "$OUT"
+expect_eq "(O-4c) …one line" "1" "$(lines_of "$OUT")"
+
+section "§LINE — a pass and a refusal each print the reading, the limit and the room; the limit rounds down"
+
+# 41 characters of code allow 51.25, so 51. The readers of this line are pinned in release-approval.test.sh §RATIO.
+R="$TMP/line"; fx_ratio "$R" 51 41
+run_check "$R"
+expect_status "(L-1) tests at the limit: a pass" 0 "$RC"
+expect_eq "(L-1b) …printing room 0" "test-ratio: 51/41 chars · limit 51 · room 0" "$(ratio_line)"
+printf ':\n' >> "$R/tests/big.test.sh"; fx_commit "$R" "one test character past"
+run_check "$R"
+expect_status "(L-2) one character past it: a refusal" 1 "$RC"
+expect_eq "(L-2b) …printing room -1" \
+  "release-check: test-ratio: 52/41 chars · limit 51 · room -1 — tests pass 1.25 times the code at HEAD" "$(ratio_line)"
 
 section "§CORR — the 1.19.0 entry names the run and corrects 1.18.0 (REQ-8 AC-8.1, AC-8.3, AC-8.4; REQ-9 AC-9.1, AC-9.2)"
 

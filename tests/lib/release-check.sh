@@ -40,15 +40,15 @@ set +x +v
 #      entry is rendered again after it. An entry naming no head, and no plan naming the release, each
 #      pass with one `landing-numbers:` line.
 #
-#   5. the cap on tests: the tracked `*.sh` lines under tests/ against the tracked `*.sh` lines everywhere else, in
-#      the tree at BIONIC_CHECK_HEAD, never the working files. A head whose tests exceed its code is ONE line naming
-#      both counts and exit 1; a head under (equal passes) prints `test-ratio: <tests>/<code>`, the line the release
-#      approval page and the situation report read. A head with no shell file outside tests/ has nothing to count
-#      against: ONE line and exit 2, never a pass. A head over its cap is admitted when its test lines are at or under
-#      the tree at BIONIC_CHECK_BASE's, and the line then carries `(base <tests>/<code>)` beside the ratio, so the trend
-#      shows per landing; one that raised them is refused. A symlink is a blob of mode 120000 and is not counted, so a
-#      directory reached through one counts once, by its real files. One `git ls-tree` and one `git cat-file --batch`
-#      read the head: a `git show` per file would cost a minute where this costs a second.
+#   5. the cap on tests: the non-whitespace characters of the tracked `*.sh` files under tests/ against those
+#      everywhere else, in the tree at BIONIC_CHECK_HEAD, never the working files, so joining lines changes no reading.
+#      Tests may be 1.25 times the code, the code counted as the larger of the head's and BIONIC_CHECK_BASE's, so code
+#      deleted since the base takes no room. A pass prints `test-ratio: <tests>/<code> chars · limit <n> · room <n>`,
+#      the line the release approval page and the situation report read; a head past the limit prints the same line
+#      after `release-check: ` and exits 1. A head with no shell file outside tests/ has nothing to count against: ONE
+#      line and exit 2, never a pass. A head over the limit is admitted when its tests are at or under the base's. A
+#      symlink is not counted, so a directory reached through one counts once. One `git ls-tree` and one `git cat-file
+#      --batch` read the head: a `git show` per file would cost a minute where this costs a second.
 #
 # On a mismatch it prints ONE line naming both versions and exits 1. A missing list path, a list
 # that is not a file, and a pair that cannot be read (no release heading, no `.version`, a path
@@ -244,36 +244,34 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
   [ "$bad" -ne 0 ] || echo "landing-numbers: $ver agrees with the landing report at $h12"
   return "$bad"
 }
-# ratio_count <rev> -> `<tests> <code>` shell lines of the tree at <rev> on stdout, status 0; status 1 when the tree
-# cannot be read, 2 when it holds no shell file outside tests/, 3 when its blobs cannot be read. The blobs of both sides
-# ride one `git cat-file --batch`: the code side's names follow a name no object has, whose `missing` line splits the
-# stream. A blob is its header line, its newline-counted content and the one newline git prints after it, so its lines
-# are the stream's lines less two. LC_ALL=C keeps awk off multibyte rules for files that are not valid text.
+# ratio_count <rev> -> `<tests> <code>`, the non-whitespace characters of the shell files of the tree at <rev>, on
+# stdout, status 0; status 1 when the tree cannot be read, 2 when it holds no shell file outside tests/, 3 when its
+# blobs cannot be read. Characters, not lines, so joining lines changes no reading. Every blob rides one
+# `git cat-file --batch` whose header is its size and its side; the size says where its content ends, so no line of
+# content is ever read as a header. LC_ALL=C counts bytes, so a file that is not valid text is still read whole.
 ratio_count() {
-  local rev="$1" lst nt nc c sentinel="0000000000000000000000000000000000000000"
-  # One tagged line per counted blob: T for a path under tests/, C for any other; links, trees and submodules are not blobs of text.
+  local rev="$1" lst
+  # One line per counted blob, its object and its side: T for a path under tests/, C for any other; links, trees and submodules are not blobs of text.
   lst="$(git ls-tree -r -z "$rev" 2>/dev/null | tr '\0' '\n' | LC_ALL=C awk -F'\t' '
     { split($1, m, " "); p = substr($0, length($1) + 2)
-      if (m[2] == "blob" && m[1] != "120000" && p ~ /\.sh$/) print (index(p, "tests/") == 1 ? "T " : "C ") m[3] }')" || lst=""
-  nt="$(printf '%s\n' "$lst" | /usr/bin/grep -c '^T ')"
-  nc="$(printf '%s\n' "$lst" | /usr/bin/grep -c '^C ')"
+      if (m[2] == "blob" && m[1] != "120000" && p ~ /\.sh$/) print m[3] (index(p, "tests/") == 1 ? " T" : " C") }')" || lst=""
   if [ -z "$lst" ] && ! git rev-parse --verify -q "$rev^{tree}" >/dev/null 2>&1; then
     return 1
   fi
-  [ "$nc" -ne 0 ] || return 2
-  c="$({ printf '%s\n' "$lst" | sed -n 's/^T //p'; printf '%s\n' "$sentinel"; printf '%s\n' "$lst" | sed -n 's/^C //p'; } \
-    | git cat-file --batch 2>/dev/null | LC_ALL=C awk -v s="$sentinel missing" -v nt="$nt" -v nc="$nc" '
-      $0 == s && !cut { cut = NR; next }
-      END { if (!cut) exit 1; printf "%d %d\n", cut - 1 - 2 * nt, NR - cut - 2 * nc }')" || return 3
-  echo "$c"
+  printf '%s\n' "$lst" | /usr/bin/grep -q ' C$' || return 2
+  printf '%s\n' "$lst" | git cat-file --batch='%(objectsize) %(rest)' 2>/dev/null | LC_ALL=C awk '
+    left <= 0 { if ($2 != "T" && $2 != "C") { bad = 1; exit } left = $1 + 1; k = $2; next }
+    { left -= length($0) + 1; gsub(/[[:space:]]/, ""); n[k] += length($0) }
+    END { if (bad || left > 0) exit 1; printf "%d %d\n", n["T"], n["C"] }' || return 3
 }
-# ratio_check -> `test-ratio: <tests>/<code>` on a pass, with ` (base <tests>/<code>)` when BIONIC_CHECK_BASE names a
-# tree that can be read; one line and exit 1 when tests exceed code, one line and exit 2 when the head cannot be read or
-# holds no shell code outside tests/. A head over the cap is admitted when its test lines are at or under the base's:
-# the cap cannot be met in one landing by a repository that is already over it, and the only landing that must be
-# refused is the one that grows the tests. A base that cannot be read compares nothing, so the head alone is judged.
+# ratio_check -> `test-ratio: <tests>/<code> chars · limit <n> · room <n>` on a pass; the same line after
+# `release-check: ` and exit 1 when the tests pass the limit; one line and exit 2 when the head cannot be read or holds
+# no shell code outside tests/. The limit is 1.25 times the larger of the head's code and BIONIC_CHECK_BASE's, rounded
+# down, so code deleted since the base takes no room. A head over the limit is admitted when its tests are at or under
+# the base's: the cap cannot be met in one landing by a repository already over it, and the landing to refuse is the
+# one that grows the tests. A base that cannot be read compares nothing, so the head alone is judged.
 ratio_check() {
-  local t c rc t0 c0 base_note="" base="${BIONIC_CHECK_BASE:-}" bc
+  local t c rc t0="" c0=0 base="${BIONIC_CHECK_BASE:-}" bc lim reading
   c="$(ratio_count "$head")"; rc=$?
   case "$rc" in
     0) : ;;
@@ -283,13 +281,15 @@ ratio_check() {
   esac
   t="${c% *}"; c="${c#* }"
   if [ -n "$base" ] && bc="$(ratio_count "$base")"; then
-    t0="${bc% *}"; c0="${bc#* }"; base_note=" (base $t0/$c0)"
+    t0="${bc% *}"; c0="${bc#* }"
   fi
-  if [ "$t" -gt "$c" ] && ! { [ -n "$base_note" ] && [ "$t" -le "$t0" ]; }; then
-    echo "release-check: test-ratio $t/$c — tests exceed code at $head$base_note"
+  lim=$(( (c > c0 ? c : c0) * 5 / 4 ))
+  reading="test-ratio: $t/$c chars · limit $lim · room $(( lim - t ))"
+  if [ "$t" -gt "$lim" ] && ! { [ -n "$t0" ] && [ "$t" -le "$t0" ]; }; then
+    echo "release-check: $reading — tests pass 1.25 times the code at $head"
     return 1
   fi
-  echo "test-ratio: $t/$c$base_note"
+  echo "$reading"
 }
 # fold_rc <rc> -> a check's status read into the exit: 0 passes, 1 fails the release, anything else is a refusal.
 fold_rc() {

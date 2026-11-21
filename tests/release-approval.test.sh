@@ -945,7 +945,8 @@ section "§RATIO: the card prints the release check's test-ratio line once, amon
 RT_LIST="$TMPROOT/rt-names.list"; printf 'zq-ratio-entry-4417\n' > "$RT_LIST"
 RT_OUT="$( cd "$RFC" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_TREE BIONIC_CHECK_HEAD="$FC_R" bash "${BIONIC_SCRIPTS_DIR}/tests/lib/release-check.sh" "$RT_LIST" 2>&1 )"
 RT_LINE="$(printf '%s\n' "$RT_OUT" | /usr/bin/grep '^test-ratio: ')"
-expect_regex "RATIO-0 precondition: the real check, run at the fixture head, prints its ratio line" '^test-ratio: [0-9]+/[0-9]+$' "$RT_LINE"
+expect_regex "RATIO-0 precondition: the real check, run at the fixture head, prints its reading, limit and room" \
+  '^test-ratio: [0-9]+/[0-9]+ chars · limit [0-9]+ · room -?[0-9]+$' "$RT_LINE"
 rt_log() { printf 'head=%s rc=0\n\n%s\n' "$1" "$2" > "$FC_REC/release-check-$1.log"; }   # <head> <output>
 rt_plan() { fc_plan "$FC_GOOD
 $(fc_line check "$1" 2026-10-12T14:00:00Z "record/wave-x/release-check-$1.log")"; }   # <head the check ran at>
@@ -959,6 +960,10 @@ rt_log "$FC_R" "test-ratio: 7/9"
 fc_page
 expect_eq "RATIO-3 a planted number in the log moves the page's line: the page quotes the check and counts nothing" \
   "test-ratio: 7/9" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^test-ratio: ')"
+rt_log "$FC_R" "release-check: test-ratio: 70/9 chars · limit 11 · room -59 — tests pass 1.25 times the code at HEAD"
+fc_page
+expect_eq "RATIO-3b a refusal's line is read for the same reading, limit and room, and not its tail" \
+  "test-ratio: 70/9 chars · limit 11 · room -59" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^test-ratio: ')"
 rt_log "$FC_C" "test-ratio: 7/9"
 rt_plan "$FC_C"
 fc_page
