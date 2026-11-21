@@ -10,6 +10,7 @@
 #            a row's section is its judgment, and a row with none is marked absent in words; every verb the
 #            file names is listed; a section naming no verb, or typing a contract label, is refused with
 #            nothing written; a brief this verb did not render is never rewritten.
+#   §BAR     a suite promised over the landing bar leaves Lands-on, stays in Suites and is named; a sole suite stays.
 #   §NAMES   the dispatch wall: a dispatch that binds a plan row names its row's rendered brief file on the
 #            prompt's first line, or is refused with the render to run; the file's path and sum go on the
 #            roster row; a read-only dispatch that binds no row needs no file.
