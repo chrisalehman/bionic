@@ -55,13 +55,13 @@ refused "a retired type" settled row=T1
 refused "a type holding a space" "ready step" row=T1
 for t in ready candidate verdict published returned stalled standing admitted void run walk step \
   approval proof finding waiver decision order bind handoff dispatch tree born ask stop debt \
-  abandon cancel hand drop; do
+  abandon cancel hand drop ruling; do
   log_append "$t" k=v 2>/dev/null; rc=$?; n=$((${n:-0} + 1)); expect_eq "$t is accepted" 0 "$rc"
 done
-expect_eq "thirty types were driven" 30 "$n"
+expect_eq "thirty-one types were driven" 31 "$n"
 # shellcheck disable=SC2086
 set -- $LOG_TYPES
-expect_eq "the list is closed at thirty: the sealing adds no type" 30 "$#"
+expect_eq "the list is closed at thirty-one: the sealing adds no type" 31 "$#"
 
 section "SEAL"
 # A real repository: the plan in plans/e/, its log in record/w/, the seal in the repository's .git.

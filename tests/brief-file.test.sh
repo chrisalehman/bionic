@@ -10,9 +10,11 @@
 #            a row's section is its judgment, and a row with none is marked absent in words; every verb the
 #            file names is listed; a section naming no verb, or typing a contract label, is refused with
 #            nothing written; a brief this verb did not render is never rewritten.
+#   §BAR     a suite promised over the landing bar leaves Lands-on, stays in Suites and is named; a sole suite stays.
 #   §NAMES   the dispatch wall: a dispatch that binds a plan row names its row's rendered brief file on the
 #            prompt's first line, or is refused with the render to run; the file's path and sum go on the
 #            roster row; a read-only dispatch that binds no row needs no file.
+#   §SPELL   a brief rendered from a row whose Files is spelled from the docs root is admitted by the wall.
 #   §PROSE   with one brief file, prose in the prompt naming other suites changes neither the verdict nor
 #            the roster contract.
 #   §SUM     a file edited after its render, or marked before sums existed, is refused; a roster row that
@@ -115,6 +117,25 @@ poke "$BR" brief T1 w01-T2
 expect_eq "R10 a name another row's dispatch carries is refused (exit 1)" "1" "$RC"
 expect_true "R10b …and the row's own file stands" test -s "$BD/w01-T1.md"
 
+section "§BAR: a suite promised over the landing bar is left out of Lands-on, kept in Suites, and named (AC-23.1)"
+# The gate store is the prelude's fixture store; a cost line is keyed by the fixture repository's project.
+BPK="$(cd "$BR" && . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/gate.sh" 2>/dev/null && _gate_project)"
+bar_cost() { printf '%s:%s\n' "$2" "$(date +%s)" > "$BIONIC_GATE_DIR/cost/${BPK}%$1"; }
+bar_cost shared.test.sh 700; bar_cost a.test.sh 5
+expect_contains "B0 setup: the gate promises the fixture suite 700 s, read as the brief reads it" ":700" \
+  "$(bash -c '. "$1/payload/scripts/lib/gate.sh" && _gate_store && _gate_promise shared.test.sh "$2"' _ "$BIONIC_SCRIPTS_DIR" "$BR")"
+poke "$BR" brief T1 bar-T1
+expect_eq "B1 a row with one suite over the bar renders (exit 0)" "0" "$RC"
+expect_eq "B2 the suite is left out of the landing set, the one under the bar stays" "Lands-on: a.test.sh" "$(grep '^Lands-on:' "$BD/bar-T1.md")"
+expect_eq "B3 …and kept in the row's suites" "Suites: a.test.sh, shared.test.sh" "$(grep '^Suites:' "$BD/bar-T1.md")"
+expect_contains "B4 …and named on a line of the brief, with its promise and the bar" \
+  "shared.test.sh promises 700s, over the landing bar of 600s" "$(cat "$BD/bar-T1.md")"
+poke "$BR" brief T2 bar-T2
+expect_eq "B5 a row whose suites are all under the bar lands on them all (beside B2, the same reader)" "Lands-on: b.test.sh" "$(grep '^Lands-on:' "$BD/bar-T2.md")"
+expect_absent "B5b …and no line names a bar" "landing bar" "$(cat "$BD/bar-T2.md")"
+bar_cost b.test.sh 700; poke "$BR" brief T2 bar-T2
+expect_eq "B6 a row whose only suite is over the bar keeps it in Lands-on, which none cannot stand for" "Lands-on: b.test.sh" "$(grep '^Lands-on:' "$BD/bar-T2.md")"
+
 section "§NAMES: a dispatch that binds a plan row names its row's rendered brief file (AC-6.1)"
 # The real dispatch wall over a bound, approved, armed session; each drive starts on an empty roster.
 NR="$(make_repo wall-names)"; git -C "$NR" config user.name "Dana Fixture"; git -C "$NR" config user.email d@example.com
@@ -172,6 +193,15 @@ Expected artifact: .bionic/docs/record/wave-01-fixture/research-n.md"
 expect_eq "N4 a read-only dispatch that binds no row needs no brief file" "allow" "$(said_as allow)"
 expect_contains "N4b …its row is written (the same reader as N1b)" "|name=w01-research|" "|$WROW"
 expect_absent "N4c …and carries no brief path" "brief=" "$WROW"
+
+section "§SPELL: a brief rendered from a row whose files are spelled from the docs root is admitted (AC-16.2)"
+sed -i.bak 's#^\(| N1 .*\)$#\1\n| N2 | 4 | build | a record only | — | 30 | REQ-6 | record/wave-01-fixture/N2.md | — |#' "$NP"; printf '\n## N2 — a record only\n\nRulings: the record is prose.\n' >> "$NP"
+for sp in record/wave-01-fixture/N2.md .bionic/docs/record/wave-01-fixture/N2.md; do
+  sed -i.bak "s#^\(| N2 .*| REQ-6 | \)[^|]*|#\1$sp |#" "$NP"; poke "$NR" brief N2 w01-N2; NB2=".bionic/docs/record/wave-01-fixture/briefs/w01-N2.md"
+  expect_contains "SP setup: the brief says it lands on no suite ($sp)" "Lands-on: none" "$(cat "$NR/$NB2")"
+  wall w01-N2 bionic:implementor "$NB2"
+  expect_eq "SP the wall admits the tool's own brief for a row whose Files is $sp" "allow" "$(said_as allow)"
+done
 
 section "§PROSE: with one brief file, the prompt's prose changes neither the verdict nor the contract (AC-6.2)"
 wall w01-N1 bionic:implementor "$NB

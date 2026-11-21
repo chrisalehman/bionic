@@ -92,9 +92,9 @@ expect_eq "SHAPE-12 the page is written to the run's record, one file at the hea
 expect_eq "SHAPE-12b …opening on the page, byte for byte as printed" \
   "$FC_OUT" "$(head -n "$(printf '%s\n' "$FC_OUT" | wc -l | tr -d ' ')" "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null)"
 expect_eq "SHAPE-12c …its replay table one line per decision, in the page's order" \
-  "row:AC-1.2 approve:release approve:merge" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
+  "approve:release approve:merge row:AC-1.2" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "SHAPE-12d …each with its default, its other choice and the recommendation" \
-  "release-approval/v1|dec=1|key=row:AC-1.2|default=waive AC-1.2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(fc_table)"
+  "release-approval/v1|dec=3|key=row:AC-1.2|default=waive AC-1.2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(fc_table)"
 fc_card final
 expect_eq "SHAPE-13 card.sh final is gone: a usage error, nothing rendered" "64|" "$FC_RC|$FC_OUT"
 expect_contains "SHAPE-13b …naming final as no row kind" "unknown row kind 'final'" "$FC_ERR"
@@ -116,15 +116,63 @@ expect_eq "SHAPE-16b a reader-test record that passes flips its goal: 1 of 2 rea
 rm -f "$FC_REC/reader-test.md"
 
 # ============================================================
+section "§ORDER: the card draws its decisions heaviest first, the hardest to undo before the lightest, each with a recommendation (AC-26.3; D9)"
+# ============================================================
+# fails-when: the decisions come in the order they were gathered (waivers, rows, findings, approvals), so the release
+# approval is the card's last ask and a criterion's waiver its first; a finding or a row still names the number it had
+# before the sort; a reply by number reaches another decision than the page numbers.
+# The weight, heaviest first: the merge without a whole run, the release, the merge, any other approval, a finding, a
+# review's waiver, a criterion. The fixture is the unrun criterion beside the release and the merge, an open waiver of a review, and
+# a finding recommended against.
+fc_ordered() {  # -> each decision line's number and the word that names it, in the page's order, space-separated
+  fc_under Decisions | /usr/bin/grep -E '^[0-9]+\. ' \
+    | sed -E 's/^([0-9]+)\. (Release|Merge).*/\1:\2/; s/^([0-9]+)\. (The [a-z]+ review).*/\1:waiver/; s/^([0-9]+)\. (AC-[0-9.]+),.*/\1:\2/; s/^([0-9]+)\. a message could be clearer.*/\1:finding/' | paste -sd' ' -
+}
+fc_plan "$FC_GOOD" "" fc_owed_now
+fc_owe waive:adversarial
+fc_page
+expect_eq "ORDER-0 precondition: the card renders over four decisions" "0|4" "$FC_RC|$(fc_keys | wc -l | tr -d ' ')"
+expect_eq "ORDER-1 the replay table holds them heaviest first: the release, the merge, the waiver, the criterion" \
+  "approve:release approve:merge waive:adversarial row:AC-1.2" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "ORDER-1b …the page numbers them in the table's order" "1:Release 2:Merge 3:waiver 4:AC-1.2" "$(fc_ordered)"
+expect_eq "ORDER-1c …each line carries its recommendation and its default" "4" \
+  "$(fc_under Decisions | /usr/bin/grep -cE '^[0-9]+\. .*recommended: .*default: ')"
+fc_plan "$FC_GOOD" "" fc_owed_now
+fc_page --against "finding:$FC_FID"
+expect_eq "ORDER-2 a finding recommended against comes after the approvals and before the criterion" \
+  "approve:release approve:merge finding:$FC_FID row:AC-1.2" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "ORDER-2b …the finding's line under Findings names the number the page gives its decision, 3, not the 2 it was gathered at" "1" \
+  "$(fc_under Findings | /usr/bin/grep -c 'a message could be clearer (decision 3)$')"
+expect_contains "ORDER-2c …and the Bottom line names the criterion's number, 4, not the 1 it was gathered at" \
+  "AC-1.2 (decision 4)" "$(fc_under 'Bottom line' | fc_flat)"
+expect_eq "ORDER-2d …and every one of the four is drawn with a recommendation" "4" \
+  "$(fc_under Decisions | /usr/bin/grep -cE '^[0-9]+\. .*recommended: .*default: ')"
+fc_plan "$FC_GOOD" "" fc_owed_now
+fc_owe waive:adversarial
+fc_page --against "finding:$FC_FID"
+expect_eq "ORDER-2e all five kinds at one head: the approvals, the finding, the review's waiver, the criterion" \
+  "approve:release approve:merge finding:$FC_FID waive:adversarial row:AC-1.2" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
+# A reply by number reaches the decision the page numbers: 1 is the release, 2 the merge.
+fc_plan "$FC_GOOD" "" fc_owed_now
+fc_owe waive:adversarial
+fc_page
+FC_ORD_R='1 approve, 2 withhold, rest default'
+fc_typed "$FC_ORD_R"
+poke "$RFC" reply "$FC_ORD_R"
+expect_eq "ORDER-3 a reply by number applies the release as decision 1 and withholds the merge as decision 2 (exit 0)" \
+  "0|yes|" "$RC|$([ -n "$(fc_appr release)" ] && echo yes)|$(fc_appr merge)"
+fc_typed "$FC_WD" "$FC_WR"
+
+# ============================================================
 section "§TRIGGERS: a finding is a decision only on a criterion miss or a recommendation against the default (AC-13.2; D7)"
 # ============================================================
 # fails-when: the carried S3 is a decision; the criterion miss is not; a finding naming the missed criterion is not
 # shown awaiting that decision; a recommendation against the default does not make the finding a decision.
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_page
-expect_contains "TRIG-1 the criterion miss is a decision" "1. AC-1.2, not run on this release" "$(fc_under Decisions)"
+expect_contains "TRIG-1 the criterion miss is a decision" "3. AC-1.2, not run on this release" "$(fc_under Decisions)"
 expect_contains "TRIG-1b precondition: the S3 is on the page, under Findings" "  S3   a message could be clearer" "$(fc_under Findings)"
-expect_contains "TRIG-1c …and the miss is the replay table's first key" "dec=1|key=row:AC-1.2|" "$(fc_table)"
+expect_contains "TRIG-1c …and the miss is the replay table's last key, behind the two approvals" "dec=3|key=row:AC-1.2|" "$(fc_table)"
 expect_absent "TRIG-2 …and the carried S3 is no decision" "a message could be clearer" "$(fc_under Decisions)"
 expect_absent "TRIG-2b …and no key for it in the replay table" "finding:" "$(fc_table)"
 fc_plan "$FC_GOOD" "" fc_owed_now
@@ -474,8 +522,8 @@ fc_page
 expect_eq "AGREE-1 release-approval renders (exit 0)" "0" "$FC_RC"
 expect_eq "AGREE-2 the decisions are exactly the sources' items" "same" "$(fc_agree "$FC_REC/release-approval-$FC_H8.md")"
 expect_eq "AGREE-2b …one numbered line each" "4" "$(fc_under Decisions | /usr/bin/grep -cE '^[0-9]+\. ')"
-expect_eq "AGREE-2c …in the order: waivers, rows, findings, approvals" \
-  "waive:structure row:AC-1.2 approve:release approve:merge" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "AGREE-2c …in the order: approvals, findings, waivers, rows, the heaviest call first" \
+  "approve:release approve:merge waive:structure row:AC-1.2" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
 cp "$FC_REC/release-approval-$FC_H8.md" "$TMPROOT/fc-planted.md"
 printf 'release-approval/v1|dec=5|key=approve:ship|default=approve ship|other=-|pick=default|why=-\n' >> "$TMPROOT/fc-planted.md"
 expect_eq "AGREE-3 a planted extra decision goes red" "differs" "$(fc_agree "$TMPROOT/fc-planted.md")"
@@ -534,7 +582,7 @@ expect_eq "REG-6 the register holds four finding asks and the release approval, 
   "$(fc_uasks | wc -w | tr -d ' ')|$(fc_uasks | tr ' ' '\n' | /usr/bin/grep -v '^finding:')"
 expect_contains "REG-6b …and the card owes five decisions" "You owe 5 decisions" "$(fc_under 'Bottom line' | fc_flat)"
 expect_eq "REG-6c …numbering exactly the asks that wait on the person" "$(fc_uasks)" "$(fc_regkeys | LC_ALL=C sort | fc_flat)"
-expect_eq "REG-6d …each finding under Findings naming its decision" "4" "$(fc_under Findings | /usr/bin/grep -cE 'defect [1-4] \(decision [1-4]\)$')"
+expect_eq "REG-6d …each finding under Findings naming its decision" "4" "$(fc_under Findings | /usr/bin/grep -cE 'defect [1-4] \(decision [2-5]\)$')"
 expect_absent "REG-6e …and none of them an aside besides" "the person's: fix it" "$(fc_under 'Bottom line' | fc_flat)"
 fc_record adversarial adversarial piece "$FC_S3"
 
@@ -698,8 +746,8 @@ section "§CONFIRM: approve <AC> confirms a T4 row on the user's words, an appro
 # ============================================================
 # fails-when: no verb confirms a T4 row, the card's choices for a pending T4 row are waive and run, or a
 # reply naming either choice leaves the row unruled.
-FC_CR2='2 waive, rest default'
-fc_typed "$FC_WD" "$FC_WR" 'yes' "$FC_CR2"
+FC_CR2=''
+fc_typed "$FC_WD" "$FC_WR" 'yes'
 fc_t4 '—' pending
 cp "$PFC" "$TMPROOT/fc-before-cr"
 poke "$RFC" approve AC-1.3 'yes'
@@ -750,6 +798,8 @@ expect_contains "CONFIRM-7c …through the page's applied: path" "applied: row:A
 expect_eq "CONFIRM-7d …and the row stays discharged" "discharged" "$(fc_row AC-1.3)"
 fc_t4 '—' pending
 fc_page
+FC_CR2="$(fc_table | awk -F'|' '/\|key=row:AC-1\.3\|/ { sub("dec=", "", $2); print $2 }') waive, rest default"
+fc_typed "$FC_WD" "$FC_WR" 'yes' "$FC_CR2"
 poke "$RFC" reply "$FC_CR2"
 expect_eq "CONFIRM-8 reply '$FC_CR2' applies the other choice (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
@@ -883,7 +933,7 @@ settles: approve:merge-unproved" "$FC_RC|$FC_ERR|$FC_OUT"
 fc_page
 expect_eq "POST-2b release-approval renders at the fix's landing (exit 0, nothing on stderr, the page written)" \
   "0||release-approval-$FC_P8.md" "$FC_RC|$FC_ERR|$(fc_pages)"
-expect_eq "POST-2c …its decisions are the unrun row, the two approvals and the merge with no pass at the fix, no waiver of any question" "row:AC-1.2 approve:release approve:merge approve:merge-unproved" \
+expect_eq "POST-2c …its decisions are the merge with no pass at the fix, the two approvals and the unrun row, no waiver of any question" "approve:merge-unproved approve:release approve:merge row:AC-1.2" \
   "$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_P8.md" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }')"
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md "$FC_REC"/post-*.md

@@ -140,6 +140,24 @@ plan_read_table() {
     function row() { print line(); if (rn > nh) printf "#\tover\t%s\t%d\n", r[kc], rn }'"$_PLAN_READ_TABLE"
 }
 
+# plan_read_criterion_sums <plan> [eval] -> `<criterion><TAB><sum>` per criterion, file order, and its `Eval` cell as a
+# third field when a second argument is given. The sum is of the first `## Eval design` row naming it, its cells as the
+# table reader reads them, so a row reads as restated exactly when a cell's words change and never for its spacing: a
+# 32-bit string hash over bytes, the same on every awk. Only a criterion id of letters, digits, `.`, `_` and `-` is
+# summed, so a sum always fits a log field. 1 none, 2 no plan.
+plan_read_criterion_sums() {
+  [ -f "${1:-}" ] || return 2
+  plan_read_rows "$1" 'Eval design' criterion 2>/dev/null | LC_ALL=C awk -F'\t' -v ev="${2:-}" '
+    BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
+    { c = ""; e = ""
+      for (i = 1; i <= NF; i++) { k = index($i, "="); f = substr($i, 1, k - 1)
+        if (f == "criterion") c = substr($i, k + 1); else if (f == "eval") e = substr($i, k + 1) }
+      if (c !~ /^[A-Za-z0-9._-]+$/ || (c in seen)) next; seen[c] = 1
+      h = 5381; for (i = 1; i <= length($0); i++) h = (h * 33 + ord[substr($0, i, 1)]) % 4294967296
+      printf "%s\t%.0f%s\n", c, h, (ev != "" ? "\t" e : ""); n++ }
+    END { exit !n }'
+}
+
 # plan_read_criterion_task <plan> [<criterion>] -> `<criterion><TAB><value>` per criterion that names the task proving it,
 # file order: one task id, several joined by commas, or `9` alone, the close's step. The value is the criterion's cell
 # in the `Task` column of its `## Eval design` row (the first row naming it), a cell holding no letter or digit naming

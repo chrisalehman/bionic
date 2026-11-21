@@ -887,21 +887,28 @@ roster_ack_ledger() {  # <roster> -> the sweeper ledger beside it, or nothing
 # exists because a push is visible but not necessarily obeyed (record/wave-33-workhorse/
 # P1-additional-context.md), so "pushed" never means "read".
 #
-# ITS STATE IS THE ROSTER'S, as `ruling/v1` lines beside the `roster-state/v1` rows, append-only:
+# ITS STATE IS THE RUN'S, as `ruling` events in the run's log (lib/log.sh, the one appender), named by
+# the writer's row, append-only:
 #
-#     ruling/v1|id=<id>|writer=<name>|recorded=<epoch>|text=<one line>   the ruling (`rule`)
-#     ruling/v1|id=<id>|writer=<name>|pushed=<epoch>|call=<tool_use_id>  a push claimed (the hook)
-#     ruling/v1|id=<id>|writer=<name>|shown=<epoch>|by=<ack|commit|ready|deliver> read (the ack or a guard)
+#     ev=ruling|id=<id>|row=<row>|writer=<name>|recorded=<epoch>|text=<one line>   the ruling (`rule`)
+#     ev=ruling|id=<id>|row=<row>|writer=<name>|pushed=<epoch>|call=<tool_use_id>  a push claimed (the hook)
+#     ev=ruling|id=<id>|row=<row>|writer=<name>|shown=<epoch>|by=<ack|commit|ready|deliver> read
+#
+# The run is the plan the writer's roster row names, so every session whose roster holds that row,
+# the one that cleared and the one that adopted alike, reads the same rulings: a session is a reader
+# of the run, never the ruling's home. A ruling a roster held as a `ruling/v1` line, the same fields
+# with no row, as this library wrote one before, is still read off that roster, and `adopt` carries
+# a predecessor's into the run (`ruling_adopt`); no ruling is written to a roster again.
 #
 # `ruling_fold` is the one reader and the FIRST stamp of each kind wins, so two writers of one
 # stamp never disagree about it: the push claim is made by appending first and reading second,
-# which is what makes the push exactly-once across a writer's concurrent calls (a short line is
-# one atomic O_APPEND write). Every reader of `roster-state/` rows selects its rows by that prefix,
-# so these lines are invisible to them.
+# which is what makes the push exactly-once across a writer's concurrent calls (the appender's
+# line is one write(2)).
 #
 # THE PENDING FLAG (`ruling-pending-<sid>.state`, beside the roster) is the push hook's fast path:
-# present while some ruling of the session is PENDING, neither pushed nor shown, so a session with
-# none pays one file test per tool call. A shown ruling (acknowledged, or printed by a guard) is
+# present while some ruling the session's roster reads is PENDING, neither pushed nor shown, so a
+# session with none pays one file test per tool call. A ruling raises the flag of every roster that
+# holds its writer, since the writer's hooks may key either session of a clear. A shown ruling (acknowledged, or printed by a guard) is
 # read already and is never pushed (wave-33 T31: the walk's ruling acked before its push was pushed
 # anyway, and its flag held every call on the slow path). `ruling_record` raises the flag after its
 # append; `ruling_flag_settle` is the one place it comes down, run by the hook after its claims and
@@ -938,29 +945,66 @@ ruling_clean() {  # <text> -> the text as a ruling carries it
 # Appends a ruling for <writer> and prints its id; 1 and nothing written when the text is empty
 # once cleaned, the writer is no name, or the roster cannot be written. Whether the writer's row is
 # live is the caller's question (`session-poker.sh rule` asks `roster_open_names`).
-ruling_record() {  # <roster> <writer> <text> -> the id
-  local f="${1:-}" w="${2:-}" t now id flag
+ruling_record() {  # <roster> <writer> <text> [<key=value>...: what it grants] -> the id
+  local f="${1:-}" w="${2:-}" t now id r flag
   t="$(ruling_clean "${3-}")"
   [ -n "$t" ] || return 1
   case "$w" in ''|*'|'*|*[[:space:]]*) return 1 ;; esac
-  { [ -f "$f" ] && [ ! -L "$f" ] && [ -w "$f" ]; } || return 1
+  { [ -f "$f" ] && [ ! -L "$f" ]; } || return 1
   now="$(date +%s)"
   id="r${now}-$$"
-  printf 'ruling/v1|id=%s|writer=%s|recorded=%s|text=%s\n' "$id" "$w" "$now" "$t" >> "$f" || return 1
-  flag="$(ruling_pending_flag "$f")" && : >> "$flag" 2>/dev/null
+  _ruling_put "$f" "$w" "id=$id" "recorded=$now" "${@:4}" "text=$t" || return 1
+  for r in "${f%/*}"/roster-*.state; do
+    [ "$r" = "$f" ] || /usr/bin/grep '^roster-state/' "$r" 2>/dev/null | /usr/bin/grep -qF "|name=${w}|" || continue
+    flag="$(ruling_pending_flag "$r")" && : >> "$flag" 2>/dev/null
+  done
   printf '%s' "$id"
+}
+
+# THE RUN A RULING OF <writer> BELONGS TO: the plan, and the row, of the writer's last row on <roster>
+# that names a plan, else of the roster's last row that does, else the plan its session is bound to
+# (lib/run.sh `session_plan`). _RULING_PLAN is empty when none is found.
+_ruling_run() {  # <roster> <writer> -> _RULING_PLAN, _RULING_ROW
+  local f="$1" sid
+  _RULING_PLAN=""; _RULING_ROW=""
+  IFS="$RULING_US" read -r _RULING_PLAN _RULING_ROW <<RULING_RUN
+$(awk -v w="$2" -v us="$RULING_US" "$_ROSTER_OPEN_AWK"'
+    index($0, "roster-state/") != 1 { next }
+    { p = _roster_kv($0, "plan"); if (p == "" || p == "none") next; any = p }
+    _roster_kv($0, "name") == w { mine = p; if (_roster_kv($0, "row") != "") row = _roster_kv($0, "row") }
+    END { print (mine != "" ? mine : any) us row }' "$f" 2>/dev/null)
+RULING_RUN
+  [ -z "$_RULING_PLAN" ] || return 0
+  sid="${f##*/roster-}"; sid="${sid%.state}"
+  declare -F session_plan >/dev/null 2>&1 || . "$_RULING_LIB_DIR/run.sh" >/dev/null 2>&1
+  case "$f" in */.bionic/tmp/roster-?*.state) _RULING_PLAN="$(session_plan "${f%/.bionic/tmp/*}" "$sid" 2>/dev/null)" ;; esac
+}
+
+# One `ruling` event of <writer> in the run's log -> 0 written; 1 the writer belongs to no run, or the
+# appender refused or failed.
+_ruling_put() {  # <roster> <writer> id=<id> <key=value>...
+  local f="$1" w="$2"
+  shift 2
+  _ruling_run "$f" "$w"
+  [ -n "$_RULING_PLAN" ] || return 1
+  declare -F log_append >/dev/null 2>&1 || . "$_RULING_LIB_DIR/log.sh" >/dev/null 2>&1 || return 1
+  declare -F reader_log >/dev/null 2>&1 || . "$_RULING_LIB_DIR/reader.sh" >/dev/null 2>&1 || return 1
+  RUN_LOG="$(reader_log "$_RULING_PLAN" 2>/dev/null)" || return 1
+  RUN_LOG="$RUN_LOG" log_append ruling "$1" "row=$_RULING_ROW" "writer=$w" "${@:2}"
 }
 
 # Appends one stamp line for <id>: each <key=value> with any `|` folded to a space. A `shown=`
 # stamp settles the pending flag, so the ruling it marks read (by `ruling-ack` or a guard) holds no
 # writer's calls on the slow path.
 ruling_stamp() {  # <roster> <id> <writer> <key=value>...
-  local f="${1:-}" id="${2:-}" line kv
-  line="ruling/v1|id=${id}|writer=${3:-}"
+  local f="${1:-}" id="${2:-}" w="${3:-}" line kv
+  local -a kvs=()
+  line="ruling/v1|id=${id}|writer=${w}"
   shift 3
-  for kv in "$@"; do line="${line}|${kv//|/ }"; done
+  for kv in "$@"; do line="${line}|${kv//|/ }"; kvs+=("${kv//|/ }"); done
   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 1
-  printf '%s\n' "$line" >> "$f" || return 1
+  # A ruling a roster held, whose writer belongs to no run, is stamped where it is.
+  _ruling_put "$f" "$w" "id=$id" "${kvs[@]}" || { [ -z "$_RULING_PLAN" ] && printf '%s\n' "$line" >> "$f"; } || return 1
   case "$line" in *'|shown='*) ruling_flag_settle "$f"; ruling_page_close "$f" "$id" ;; esac
   return 0
 }
@@ -997,13 +1041,25 @@ ruling_flag_settle() {  # <roster>
 # THE ONE READER. One line per ruling, in the order recorded, its fields joined by RULING_US:
 #   <id> <writer> <recorded> <pushed> <call> <shown> <by> <text>
 # (an empty field is empty). <writer> keeps only that writer's. A stamp for an id no ruling line
-# carries is ignored; the first stamp of each kind is the one read.
+# carries is ignored; the first stamp of each kind is the one read. The roster's own lines come
+# first, then the rulings of each run its rows name (and its session's bound run), as the reader
+# holds them (lib/reader.sh `reader_facts`).
 ruling_fold() {  # <roster> [<writer>]
-  local f="${1:-}"
+  local f="${1:-}" p
   { [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ]; } || return 0
-  awk -F'|' -v want="${2:-}" -v us="$RULING_US" '
+  {
+    cat "$f"
+    _ruling_run "$f" ""
+    { awk -v us="$RULING_US" "$_ROSTER_OPEN_AWK"'
+        index($0, "roster-state/") == 1 { p = _roster_kv($0, "plan"); if (p != "" && p != "none") print p }' "$f"
+      printf '%s\n' "$_RULING_PLAN"; } | awk 'NF && !seen[$0]++' | while IFS= read -r p; do
+      declare -F reader_facts >/dev/null 2>&1 || . "$_RULING_LIB_DIR/reader.sh" >/dev/null 2>&1 || break
+      facts="$(reader_facts "$p" 2>/dev/null)" || continue
+      printf '%s\n' "$facts" | /usr/bin/grep '^run/v1|ev=ruling|'
+    done
+  } | awk -F'|' -v want="${2:-}" -v us="$RULING_US" '
     function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
-    index($0, "ruling/v1|") != 1 { next }
+    index($0, "ruling/v1|") != 1 && index($0, "run/v1|ev=ruling|") != 1 { next }
     { id = kv("id"); if (id == "") next }
     kv("recorded") != "" { if (!(id in W)) { W[id] = kv("writer"); R[id] = kv("recorded"); T[id] = kv("text"); order[++n] = id }; next }
     { p = kv("pushed"); if (p != "" && !(id in P)) { P[id] = p; C[id] = kv("call") }
@@ -1014,7 +1070,27 @@ ruling_fold() {  # <roster> [<writer>]
         if (want != "" && W[id] != want) continue
         print id us W[id] us R[id] us P[id] us C[id] us S[id] us B[id] us T[id]
       }
-    }' "$f" 2>/dev/null
+    }' 2>/dev/null
+}
+
+# A PREDECESSOR'S RULINGS COME ALONG (`adopt`): each `ruling/v1` line of <writer> on the roster a /clear
+# left is written into the writer's run as the event it would be today, so the adopting session reads,
+# pushes and guards it as one of its own; then the adopting roster's flag is settled. The fold reads a
+# line written twice as one.
+ruling_adopt() {  # <predecessor roster> <own roster> <writer>
+  local from="${1:-}" own="${2:-}" w="${3:-}" l id
+  local -a kvs
+  [ -n "$w" ] || return 0
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    id="${l#ruling/v1|id=}"; id="${id%%|*}"
+    l="${l#ruling/v1|id=*|writer=${w}}"; l="${l#|}"
+    kvs=(); IFS='|' read -r -a kvs <<< "$l"
+    _ruling_put "$own" "$w" "id=$id" "${kvs[@]}" || return 1
+  done <<RULING_ADOPT
+$(/usr/bin/grep -F "|writer=${w}|" "$from" 2>/dev/null | /usr/bin/grep '^ruling/v1|id=')
+RULING_ADOPT
+  ruling_flag_settle "$own"
 }
 
 # THE PLUGIN ROOT A RULING NAMES (wave-34 T4; burns debt ruling-plugin-root): the plugin that holds
