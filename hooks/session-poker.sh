@@ -764,11 +764,13 @@ $1"; shift ;;
   # OR THREE (wave-36 T8; D9): the finding, `fixed`, and the row that fixed it, `T<n>`; words or a why
   # after it are the usage error. Whether the plan's table carries the row is the verb's own refusal (1).
   # `carried` takes the same three: the finding stays open and closes when the named row lands. A move to defer
-  # takes a fifth, the deferral's one changelog sentence, a field of the move's event.
+  # takes a fifth, the deferral's one changelog sentence, a field of the move's event. `stated` takes the sentence alone:
+  # the orchestrator's, written before the release card, so it takes no words and moves nothing.
   finding-move)
-    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why, and for defer optionally its changelog sentence; or <record>#<n>, fixed, and the row that fixed it; or <record>#<n>, carried, and the row whose landing closes it."
+    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why, and for defer optionally its changelog sentence; or <record>#<n>, fixed, and the row that fixed it; or <record>#<n>, carried, and the row whose landing closes it; or <record>#<n>, stated, and its Known-limits sentence."
     FM_ROW=""; FM_SENT_RAW=""
     case "${2:-}" in
+      stated) [ $# -eq 3 ] && [ -n "${3//[[:space:]]/}" ] || usage "$FM_USAGE"; FM_SENT_RAW="$3"; set -- "$1" "$2" ;;
       defer|fix)
         { [ $# -eq 4 ] || { [ $# -eq 5 ] && [ "$2" = defer ] && [ -n "${5//[[:space:]]/}" ]; }; } \
           && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$FM_USAGE"

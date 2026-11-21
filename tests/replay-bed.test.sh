@@ -141,7 +141,14 @@ page() {  # <page file> -> its replay table as key=value: each decision by its k
   sed -n -e 's/^carried: \(.*\)/card.carried.\1=yes/p' -e 's/^release-approval\/v1|dec=[0-9]*|key=\([^|]*\)|/card.decision.\1=/p' "$1" 2>/dev/null; }
 born() { sed -n 's/^run\/v1|ev=born|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }  # stdin's events -> the rows born
 render() {  # <world> <plan> [arg…] -> the card rendered as the bound session, the page its record holds, as key=value;
-  # the log the render read is kept beside its output, so a later read stands at that log and not at one the render moved
+  # the log the render read is kept beside its output, so a later read stands at that log and not at one the render moved.
+  # A carry states its Known-limits sentence before the card now, and these runs stated theirs after it or never: each
+  # carry the card refuses on is given a stand-in first, the step the run takes today, which moves no decision.
+  while ( cd "$1" && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" release-approval --preview "$2" 2>&1 >/dev/null ) \
+      | sed -n 's/^REFUSED — \(.*\) is carried with no Known-limits sentence.*/\1/p' | grep -m1 . > "$1.gap"; do
+    ( cd "$1" && git config user.name fixture && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" finding-move "$(cat "$1.gap")" stated \
+      'A stand-in for the sentence this run stated after its card.' ) >/dev/null 2>&1 || break
+  done
   cp "${2%/plans/*}/record/$(basename "$2" .plan.md)/run.log" "$1.read"
   ( cd "$1" && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" release-approval "${@:3}" "$2" ) >"$1.out" 2>"$1.err"
   page "${2%/plans/*}/record/$(basename "$2" .plan.md)/$(basename "$1").md"
@@ -176,6 +183,8 @@ for x in "$X"/release-approval-*.facts; do
   [ "$n" != release-approval-fcbb975f ] || expect_eq "$n: AC-7.3, its cells set by hand and waived after the instant, reads pending" "state=pending" "$(ask "$p" cell AC-7.3)"
   [ "$n" != release-approval-31da41f7 ] || { PG="$G"; PD="$d"; PP="$p"; PH="$h"; PA="$at"; }
 done
+expect_eq "the two cards whose runs left a carry unstated at the instant were rendered after its stand-in, the other two with none" "2" \
+  "$(cat "$WORLD_ROOT"/pages/*/.bio*/docs/record/*/run.log | grep -c '|stated=A stand-in for the sentence this run stated after its card\.|')"
 
 section "CATCH"
 for m in 'replace:s/if \(\(id in live\) && fact\[id\] == body\) next/if (id in live) next/' \

@@ -1513,7 +1513,7 @@ BRF_EOF
   # `release-approval-<head8>.md` with its replay table, which `reply` reads:
   #
   #   release-approval/v1|plan=<plan>|head=<40-hex>|at=<ISO>|decisions=<n>
-  #   release-approval/v1|dec=<k>|key=<key>|default=<verb args…|->|other=<verb args…|->|pick=<default|other>|choices=<word>/<word>|why=<why|->
+  #   release-approval/v1|dec=<k>|key=<key>|default=<verb args…|->|other=<verb args…|->|pick=<default|other>|choices=<word>/<word>|why=<why|->[|stated=<sentence>]
   #
   # `choices=` holds the word a reply names each choice by, the default's then the other's: the first word of its label.
   #
@@ -1677,8 +1677,9 @@ RR_MATRIX
       printf '%s\n\n## Replay\n\n' "$1"
       printf 'release-approval/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "${RR_AT:-$(iso_now)}" "$RR_N"
       for ((i = 0; i < RR_N; i++)); do
-        printf 'release-approval/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|choices=%s/%s|why=%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
-          "${RR_DO[$i]}" "${RR_ELSE[$i]}" "${RR_PICK[$i]}" "$(rr_word "${RR_DLAB[$i]}")" "$(rr_word "${RR_OLAB[$i]}")" "${RR_WHYS[$i]}"
+        printf 'release-approval/v1|dec=%s|key=%s|default=%s|other=%s|pick=%s|choices=%s/%s|why=%s%s\n' "$((i + 1))" "${RR_KEY[$i]}" \
+          "${RR_DO[$i]}" "${RR_ELSE[$i]}" "${RR_PICK[$i]}" "$(rr_word "${RR_DLAB[$i]}")" "$(rr_word "${RR_OLAB[$i]}")" "${RR_WHYS[$i]}" \
+          "${RR_STATED[$i]:+|stated=${RR_STATED[$i]}}"
       done
       # THE CARRIES THE PAGE PUTS: every finding it shows deferred, so the reply that answers the page rules each.
       printf '%s' "$RR_CARRY" | while IFS= read -r i; do [ -z "$i" ] || printf 'carried: %s\n' "$i"; done
@@ -1688,7 +1689,7 @@ RR_MATRIX
   }
 
   poker_verb_release_approval() {
-    local nm line key reply ac tier st au ruled person why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again fo fw mk
+    local nm line key reply ac tier st au ruled person why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again fo fw fs mk
     if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_last_line >/dev/null 2>&1 || ! _proof_reader_load; then
       die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
@@ -1719,6 +1720,13 @@ RR_MATRIX
       if [ "$RR_PREVIEW" != yes ]; then printf '%s\n' "$RR_EARLY" >&2; exit 1; fi
     fi
     RR_SETTLE="$(printf '%s\n' "$RR_EOUT" | sed -n 's/^settles: //p')"
+    # A CARRY HOLDS ITS SENTENCE: every deferral the release entry's Known limits will list (`known_limits_part`, the
+    # renderer itself) states one before the card puts the approval, so the gap shows here and never after the reply.
+    if ! known_limits_part "$PV_PLAN" >/dev/null && [ -n "$KL_UNSTATED" ]; then
+      RR_GAP="REFUSED — $(clean "$KL_UNSTATED") is carried with no Known-limits sentence, and the release entry cannot list it: state it before the card, then render again; no page is recorded and no approval is put."
+      [ "$RR_PREVIEW" = yes ] || { die_run "$RR_GAP" "bash ${HOOK_DIR}/session-poker.sh finding-move $(clean "$KL_UNSTATED") stated '<its sentence>'"; exit 1; }
+      printf '%s\n' "$RR_GAP" >&2
+    fi
 
     # THE TITLE'S FACTS: the project, the release, the tasks landed. Every fact of the run is a reader answer over the
     # kept fold (lib/proof.sh `_proof_ask`), so the page says what the log holds at this instant, and the plan's rows
@@ -1732,7 +1740,7 @@ RR_MATRIX
     RR_TOTAL="${1:-0}"; RR_LANDED="${2:-0}"
 
     RR_N=0; RR_ASIDE=""; RR_FASKS=""
-    RR_KIND=(); RR_KEY=(); RR_DO=(); RR_ELSE=(); RR_WHYS=(); RR_SUBJ=(); RR_DLAB=(); RR_OLAB=(); RR_DPH=(); RR_OPH=(); RR_PICK=()
+    RR_KIND=(); RR_KEY=(); RR_DO=(); RR_ELSE=(); RR_WHYS=(); RR_SUBJ=(); RR_DLAB=(); RR_OLAB=(); RR_DPH=(); RR_OPH=(); RR_PICK=(); RR_STATED=()
 
     # WAIVERS: the run's open waive: asks (the reader's `asks`), then the ones the red check owes, each once; never the
     # regression. A waiver a close-out preflight or another session of the run raised is owed here as well. A gate's
@@ -1863,9 +1871,12 @@ RR_ROWS_EOF
         # A FINDING THE PERSON RULES IS A DECISION: open with no row answering it and no move of theirs, it is the ask
         # the disposition opens, so the page numbers it, the policy's fix first. An S1 is never carried: its other
         # choice holds it open. A waiver of its question on the page answers it, so it waits on that decision instead.
-        if [ "$sev" = S1 ]; then fo="-"; fw="hold"; else fo="finding-move $fid defer"; fw="carry"; fi
-        rr_add finding "finding:$fid" "finding-move $fid fix" "$fo" "the release approval card: fixed" "$sent (${q:-a review} #$num)" \
+        # Its carry is drawn with the sentence stated before the card, which the reply's move to defer carries.
+        fs=""
+        if [ "$sev" = S1 ]; then fo="-"; fw="hold"; else fo="finding-move $fid defer"; fw="carry"; fs="$(proof_finding_stated "$PV_PLAN" "$fid" 2>/dev/null)"; fi
+        rr_add finding "finding:$fid" "finding-move $fid fix" "$fo" "the release approval card: fixed" "$sent (${q:-a review} #$num)${fs:+; carried, it reads: $fs}" \
           "fix now, one row" "$fw" "fix ${q:-a} finding $num" "$fw ${q:-a} finding $num"
+        RR_STATED[RR_N - 1]="$fs"
         ! printf '%s' "$RR_AGAINST" | /usr/bin/grep -qxF -- "finding:$fid" || RR_PICK[RR_N - 1]=other
         grp=A; dec="$RR_N"
       elif printf '%s' "$RR_AGAINST" | /usr/bin/grep -qxF -- "finding:$fid" && ! rr_carried "$RR_DIR" "$fid"; then
@@ -2168,6 +2179,12 @@ RR_AGAINST_EOF
     return 0
   }
 
+  rp_side() {  # <table line> -> RP_N, its decision's number, and RP_S, the side the reply takes on it: default or other
+    RP_N="${1#*|dec=}"; RP_N="${RP_N%%|*}"
+    case "$RP_PICKS" in *" $RP_N="*) RP_S="${RP_PICKS#* "$RP_N"=}"; RP_S="${RP_S%% *}" ;; *) RP_S="$RP_REST" ;; esac
+    [ "$RP_S" != recommended ] || { RP_S="${1#*|pick=}"; RP_S="${RP_S%%|*}"; }
+  }
+
   # A DECISION APPLIED IS ITS ASK ANSWERED: whatever its verb closed, the ask the page numbered closes here, a finding's
   # under its register key, so the reply leaves open no ask the page numbered. One held back stays open.
   rp_close() {  # <decision key> -> always 0, prints nothing
@@ -2214,6 +2231,17 @@ RR_AGAINST_EOF
       'all recommended') RP_HOW=all-recommended; RP_REST=recommended; RP_PICKS=" " ;;
       *) RP_HOW=by-number; rp_items "$RP_NORM" || exit 1 ;;
     esac
+    # A CARRY THE REPLY TAKES HOLDS ITS SENTENCE: a move to defer with none on its line would leave the release entry's
+    # Known limits refusing after the approval, so the reply refuses it before it applies anything.
+    while IFS= read -r RP_L; do
+      case "$RP_L" in *'|other=finding-move '*' defer|'*) : ;; *) continue ;; esac
+      case "$RP_L" in *'|stated='?*) continue ;; esac
+      rp_side "$RP_L"; [ "$RP_S" = other ] || continue
+      RP_X="${RP_L#*|other=finding-move }"; RP_X="${RP_X%% *}"
+      die_run "REFUSED — the reply carries $(clean "$RP_X") (decision $RP_N), which states no Known-limits sentence: state it, render the card again and reply to that page; nothing is applied and the plan is unchanged." \
+        "bash ${HOOK_DIR}/session-poker.sh finding-move $(clean "$RP_X") stated '<its sentence>'"
+      exit 1
+    done <<< "$RP_TABLE"
     user_said "$RP_TEXT" "$PV_PLAN"; RP_SAID=$?
     if [ "$RP_SAID" -ne 0 ]; then
       said_refuse "$RP_SAID" "$(said_fold "$RP_TEXT")" "a reply to the release approval card"
@@ -2222,18 +2250,16 @@ RR_AGAINST_EOF
     RP_DONE=0; RP_HELD=0
     while IFS= read -r RP_L; do
       [ -n "$RP_L" ] || continue
-      RP_KEY=""; RP_DO=""; RP_ELSE=""; RP_PICK=default; RP_WHY=""
+      RP_KEY=""; RP_DO=""; RP_ELSE=""; RP_WHY=""; RP_ST=""
       IFS='|' read -r -a RP_F <<< "$RP_L"
       for RP_X in "${RP_F[@]}"; do
         case "$RP_X" in
           key=*) RP_KEY="${RP_X#key=}" ;; default=*) RP_DO="${RP_X#default=}" ;; other=*) RP_ELSE="${RP_X#other=}" ;;
-          pick=*) RP_PICK="${RP_X#pick=}" ;; why=*) RP_WHY="${RP_X#why=}" ;;
+          why=*) RP_WHY="${RP_X#why=}" ;; stated=*) RP_ST="${RP_X#stated=}" ;;
         esac
       done
       [ -n "$RP_KEY" ] || continue
-      RP_N="${RP_L#*|dec=}"; RP_N="${RP_N%%|*}"
-      case "$RP_PICKS" in *" $RP_N="*) RP_S="${RP_PICKS#* "$RP_N"=}"; RP_S="${RP_S%% *}" ;; *) RP_S="$RP_REST" ;; esac
-      [ "$RP_S" != recommended ] || RP_S="$RP_PICK"
+      rp_side "$RP_L"
       # A DECISION ALREADY REPLAYED FROM THIS PAGE is skipped: a reply that stopped on a refusal is finished by the same reply.
       RP_KEY="$RP_KEY" awk 'index($0, "applied: " ENVIRON["RP_KEY"] " ") == 1 || $0 == "withheld: " ENVIRON["RP_KEY"] { f = 1 }
         END { exit !f }' "$RP_CARD" 2>/dev/null && continue
@@ -2254,6 +2280,7 @@ RR_AGAINST_EOF
       read -r -a RP_ARGV <<< "$RP_CMD"
       RP_ARGV+=("$RP_TEXT")
       [ "$RP_WHY" = - ] || RP_ARGV+=("$RP_WHY")
+      case "$RP_CMD" in "finding-move "*" defer") [ -z "$RP_ST" ] || RP_ARGV+=("$RP_ST") ;; esac
       RP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" "${RP_ARGV[@]}" 2>&1 )"; RP_RC=$?
       [ -z "$RP_OUT" ] || printf '%s\n' "$RP_OUT"
       if [ "$RP_RC" -ne 0 ]; then
