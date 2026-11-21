@@ -342,14 +342,10 @@ co_ask() {  # <reader question's function> [args] -> its answer, over the kept f
   _proof_ask "$PLAN" "$q" "$PLAN" "$@"
 }
 co_facts() {  # <event type> [<field>] -> the standing facts of that type, or that field of each, in fact order; 2 when they cannot be read
-  local f
-  f="$(_proof_facts "$PLAN")" || return 2
-  printf '%s' "$f" | awk -F'|' -v t="$1" -v k="${2:-}" "$_READER_AWK"'ev() == t { if (k == "") print; else print line_kv(k) }'
+  _proof_facts_read "$PLAN" -F'|' -v t="$1" -v k="${2:-}" "$_READER_AWK"'ev() == t { if (k == "") print; else print line_kv(k) }'
 }
 co_step9_at() {  # -> the instant of the run's delivery, or nothing; 2 when the facts cannot be read
-  local f
-  f="$(_proof_facts "$PLAN")" || return 2
-  printf '%s' "$f" | awk -F'|' "$_READER_AWK"'ev() == "step" && line_kv("n") == "9" { t = line_kv("at") } END { print t }'
+  _proof_facts_read "$PLAN" -F'|' "$_READER_AWK"'ev() == "step" && line_kv("n") == "9" { t = line_kv("at") } END { print t }'
 }
 # A fold that failed reads as a run with no step, no debt and no deferral, and a reader inside a pipe or a $( ) cannot
 # stop this script: before the continuation is written the fold is taken in this shell and held, so the reads that

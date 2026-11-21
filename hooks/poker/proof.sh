@@ -180,8 +180,8 @@ walk_settle() {
   local plan="$1" ev="$2" ac v known facts walked named=" " left=""
   WALK_DONE=""; WALK_LEFT=""; WALK_WAVE=""; WALK_WHY=""
   _proof_reader_load && known="$(reader_criteria "$plan" 2>/dev/null)" || known=""
-  facts="$(_proof_facts "$(proof_run_plan "$plan")")" || { WALK_WHY="the run's facts cannot be read, so the standing walk cannot be judged"; return 1; }
-  walked="$(printf '%s\n' "$facts" | awk -F'|' "$(proof_fact_awk)"'ev() == "proof" { k = line_kv("kind"); e = line_kv("evidence"); a = line_kv("ac")
+  proof_facts_at "$(proof_run_plan "$plan")" || { WALK_WHY="the run's facts cannot be read, so the standing walk cannot be judged"; return 1; }
+  walked="$(_proof_facts_awk -F'|' "$(proof_fact_awk)"'ev() == "proof" { k = line_kv("kind"); e = line_kv("evidence"); a = line_kv("ac")
       if (k == "walk") w[e] = 1; else if (k == "" && a != "") by[a] = e }
     END { for (a in by) if (by[a] in w) print a }')"
   while IFS='	' read -r ac v; do
