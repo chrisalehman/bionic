@@ -16,11 +16,19 @@
 # the map reads a suite's own lines and does not follow this file, so POKER, S46_LIB and
 # S31_STOP_HOOK are assigned by each shard that needs them, before this file is sourced.
 
+# A helper is found beside this file, wherever the suite that sources it stands (a suite's own script may run from a
+# folder of its own and source this file by its path); one that does not load stops the suite.
+SP_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=/dev/null
-declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
+declare -F seal_fixture >/dev/null 2>&1 || { [ -r "$SP_HERE/lib/seal-fixture.sh" ] && . "$SP_HERE/lib/seal-fixture.sh"; } \
+  || { echo "session-poker.prelude.sh: cannot load $SP_HERE/lib/seal-fixture.sh" >&2; exit 1; }
+# The refusal on the channel it rides (tests/lib/duty-read.sh): block, duty, or nothing for a turn that ends.
+[ -r "$SP_HERE/lib/duty-read.sh" ] && . "$SP_HERE/lib/duty-read.sh" \
+  || { echo "session-poker.prelude.sh: cannot load $SP_HERE/lib/duty-read.sh" >&2; exit 1; }
 # Under TMPDIR by name: macOS's bare `mktemp -d` ignores TMPDIR, and a run given a temp folder of its own must find
 # every world this file builds inside it, and anything a world leaves behind there too.
-TMPROOT="$(sp_t="${TMPDIR:-/tmp}"; mktemp -d "${sp_t%/}/sp.XXXXXX")"
+TMPROOT="$(sp_t="${TMPDIR:-/tmp}"; mktemp -d "${sp_t%/}/sp.XXXXXX")" && [ -n "$TMPROOT" ] && [ -d "$TMPROOT" ] \
+  || { echo "session-poker.prelude.sh: no temporary folder under ${TMPDIR:-/tmp}" >&2; exit 1; }
 
 # THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
 # library through the shared loader idiom, whose candidates (2) and (3) read the CLI's
@@ -83,6 +91,10 @@ make_repo() {  # <label> -> repo path, in a session that has ENGAGED bionic
   local r="$TMPROOT/$1"
   mkdir -p "$r/.bionic/tmp"
   ( cd "$r" && git init -q . 2>/dev/null )
+  # No path is answered until git agrees the repository is the one just made: a caller writes its identity and its
+  # commits through it, and a directory inside another repository would hand them to that one.
+  [ -d "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$r" && pwd -P)" ] \
+    || { echo "make_repo: no repository of its own at '$r'" >&2; return 1; }
   engage "$r"
   printf '%s' "$r"
 }
@@ -546,8 +558,7 @@ EOF
 )"
   S31_RC=$?
 }
-# The refusal on the channel it rides (tests/lib/duty-read.sh): block, duty, or nothing for a turn that ends.
-. "${BASH_SOURCE[0]%/*}/lib/duty-read.sh"
+# duty_channel is tests/lib/duty-read.sh's, loaded at the top of this file.
 S31_D=""
 s31_decision() { duty_channel "$S31_OUT"; }
 s31_reason() { duty_reason "$S31_OUT" "$(duty_path "$S31_D" "$SID")"; }
@@ -680,7 +691,7 @@ S59_REL=".bionic/docs/record/wave-01-fixture"
 # S59W_A/B/C: §59's repository shape, one plan, the rows given in a reads table.
 s59_world() {
   local lab="$1" st="$2"; shift 2
-  R59W="$(make_repo "$lab")"; new_roster "$R59W"; ( cd "$R59W" && git commit -q --allow-empty -m init )
+  R59W="$(make_repo "$lab")" || return 1; new_roster "$R59W"; ( cd "$R59W" && git commit -q --allow-empty -m init )
   # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
   # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
   P59W="$(s34_page "$R59W" 4 "  worktree: .worktrees/01-fixture

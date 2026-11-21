@@ -464,7 +464,9 @@ prove_power() {
   local t26='<------------------------>'
   local tg people msg miss rc
   PW="$w/power.git"
-  mkdir -p "$w" && git init -q --bare --template= "$PW" >/dev/null 2>&1 \
+  # every object below is written through pg's `git -C "$PW"`, so the bare repository must be its own before the first
+  [ -n "$w" ] && mkdir -p "$w" && git init -q --bare --template= "$PW" >/dev/null 2>&1 \
+    && [ "$(git -C "$PW" rev-parse --absolute-git-dir 2>/dev/null)" = "$(cd "$PW" && pwd -P)" ] \
     || refuse "cannot build the power check under ${TMPDIR:-/tmp}"
   # the blobs: text in upper case, binary, a symlink target, and (range only) lower case
   empty="$(pg hash-object -w --stdin < /dev/null)" &&

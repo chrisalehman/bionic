@@ -70,6 +70,7 @@
 #                        remote-tracking ref alone.
 #   §LINT                tests/lib/lint.sh, the landing's run of §EXIT's, §BP's and §HEADER's programs over the files a
 #                        row changed, names each hit there by file and line, and a lowered ceiling at its own line.
+#   §SETUP               a shared setup that loads a helper on a line with no stop is refused by file and line.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
@@ -1791,5 +1792,58 @@ expect_eq "…a ceiling lowered under the count, told the ceiling alone changed,
 rm -f "$LT/tests/RUBRIC.md"
 expect_eq "LINT-3 a check that cannot run exits 2 naming what it lacks" "2|lint.sh: HEADER reads sections by tests/RUBRIC.md's command" \
   "$(printf '%s\n' tests/t.test.sh | bash "$TESTS_DIR/lib/lint.sh" "$LT" 2>"$TMP/lint3.err" >/dev/null; echo "$?|$(sed 's/, which.*//' "$TMP/lint3.err")")"
+
+
+# ============================================================
+section "SETUP — a shared setup that loads a helper on a line with no stop is refused by file and line"
+# ============================================================
+# A shared setup (tests/*.prelude.sh) that cannot load a helper goes on without its functions: a maker that is not
+# there leaves a fixture's path empty, and the next `git -C ""` acts on the repository the suite stands in. So every
+# load in a setup reads its own status: a `||` that exits or returns, a chain whose next command needs it, or an `if`
+# that tests it. A heredoc body is fixture text, and a load inside a quoted child script is that child's.
+# fails-when: a setup loads a helper on a line with no stop, and the sweep passes.
+SU="$TMP/setup"; mkdir -p "$SU"
+printf '%s\n' '#!/bin/bash' \
+  '. "$(dirname "${BASH_SOURCE[0]}")/lib/a.sh"' \
+  'declare -F f >/dev/null 2>&1 || . "$(dirname "$0")/lib/b.sh"' \
+  'mk() { ( cd "$1" || exit 1; . "$R/lib/c.sh"; c_make "$1" ); }' \
+  'source lib/d.sh 2>&1; echo after' > "$SU/bad.prelude.sh"
+printf '%s\n' '#!/bin/bash' \
+  '[ -r "$H/lib/a.sh" ] && . "$H/lib/a.sh" || { echo "x: cannot load $H/lib/a.sh" >&2; exit 1; }' \
+  'declare -F f >/dev/null 2>&1 || { [ -r "$H/lib/b.sh" ] && . "$H/lib/b.sh"; } || { echo "x: no b" >&2; exit 1; }' \
+  'chk() { . "$1/run.sh" && . "$1/proof.sh" || exit 99; }' \
+  'ask() { ( . "$R/lib/gate.sh" 2>/dev/null && gate_ask "$1" ); }' \
+  'if [ -r "$LINE" ] && . "$LINE" 2>/dev/null; then L=1; fi' \
+  'type -t g >/dev/null 2>&1 || . "$R/lib/g.sh" || return 1 2>/dev/null || exit 1' \
+  "kid() { bash -c '. \"\$1/run.sh\"; run_it' _ \"\$R\"; }" \
+  'find . -name x >/dev/null; git -C "$r" init -q .' \
+  '# . lib/commented.sh' \
+  "cat > \"\$p/s.sh\" <<'EOF'" '. lib/fixture-text.sh' 'EOF' > "$SU/good.prelude.sh"
+for f in "$SU"/*.prelude.sh; do expect_true "the planted ${f##*/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+# The hazard, measured: a bare load of a missing helper goes on to the next line; the stopped form ends there, in one line.
+printf '%s\n' '. "$(dirname "${BASH_SOURCE[0]}")/lib/a.sh"' 'echo went-on' > "$SU/run-bare.sh"
+printf '%s\n' '[ -r "$(dirname "${BASH_SOURCE[0]}")/lib/a.sh" ] && . "$(dirname "${BASH_SOURCE[0]}")/lib/a.sh" || { echo "x: cannot load lib/a.sh" >&2; exit 1; }' \
+  'echo went-on' > "$SU/run-stopped.sh"
+SU_OUT="$(/bin/bash "$SU/run-bare.sh" 2>/dev/null)"; SU_RC=$?
+expect_eq "mutant: a bare load of a missing helper, run under /bin/bash, goes on past it" "went-on|0" "$SU_OUT|$SU_RC"
+SU_OUT="$(/bin/bash "$SU/run-stopped.sh" 2>"$SU/stopped.err")"; SU_RC=$?
+expect_eq "control: the stopped load exits 1 before the next line, with one line naming the helper" "|1|x: cannot load lib/a.sh" \
+  "$SU_OUT|$SU_RC|$(paste -sd'#' "$SU/stopped.err")"
+expect_eq "SETUP-1 each load with no stop is refused by file and line: a bare load, the fallback of a test, a subshell that goes on, a load a ; drops" \
+  "$SU/bad.prelude.sh:2|$SU/bad.prelude.sh:3|$SU/bad.prelude.sh:4|$SU/bad.prelude.sh:5" \
+  "$(setup_refusals "$SU/bad.prelude.sh" | cut -f1 | paste -sd'|' -)"
+expect_eq "…and the same reader finds every load of the stopped setup, the tested and chained ones too: seven, none in the heredoc, the quoted child or the comment" "7" \
+  "$(setup_loads "$SU/good.prelude.sh" | wc -l | tr -d ' ')"
+expect_eq "control: stopped, chained and tested loads, a quoted child's load, a heredoc body and a comment are refused for nothing" "" \
+  "$(setup_refusals "$SU/good.prelude.sh")"
+SU_REAL="$(setup_loads "$TESTS_DIR"/*.prelude.sh | wc -l | tr -d ' ')"
+expect_true "the real sweep reads loads: ${SU_REAL} in the shared setups under tests/" [ "${SU_REAL:-0}" -gt 0 ]
+expect_eq "SETUP-2 every load in the real shared setups reads its own status: no refusal" "" "$(setup_refusals "$TESTS_DIR"/*.prelude.sh)"
+mkdir -p "$LT/tests" && cp "$SU/bad.prelude.sh" "$LT/tests/bad.prelude.sh" && cp "$SU/good.prelude.sh" "$LT/tests/good.prelude.sh"
+expect_eq "SETUP-3 the landing's run, told the bad setup, names its four loads as SETUP hits by line" \
+  "SETUP tests/bad.prelude.sh:2|SETUP tests/bad.prelude.sh:3|SETUP tests/bad.prelude.sh:4|SETUP tests/bad.prelude.sh:5" \
+  "$(lint_at "$LT" tests/bad.prelude.sh)"
+expect_eq "…told the stopped setup alone, none, and it exits 0" "|0" \
+  "$(printf '%s\n' tests/good.prelude.sh | bash "$TESTS_DIR/lib/lint.sh" "$LT" 2>&1; echo "|$?")"
 
 finish

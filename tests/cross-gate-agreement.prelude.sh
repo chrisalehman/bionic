@@ -50,12 +50,12 @@
 # subject and tests/refuse.test.sh's, while this file is about whether two hooks agree
 # about the world. `BIONIC_WALL_VERBOSE=1` is the knob that asks a wall for its facts.
 export BIONIC_WALL_VERBOSE=1
-. "$(dirname "$0")/lib/bound-marker.sh"
-. "$(dirname "$0")/lib/plan-fixture.sh"
-. "$(dirname "$0")/lib/live-answer.sh"
-. "$(dirname "$0")/lib/roster-row.sh"
-. "$(dirname "$0")/lib/swept-marker.sh"
-. "$(dirname "$0")/lib/duty-read.sh"
+# A helper is found beside this file, wherever the suite that sources it stands; one that does not load stops the suite.
+CG_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+for CG_HELPER in bound-marker plan-fixture live-answer roster-row swept-marker duty-read; do
+  [ -r "$CG_HERE/lib/$CG_HELPER.sh" ] && . "$CG_HERE/lib/$CG_HELPER.sh" \
+    || { echo "cross-gate-agreement.prelude.sh: cannot load $CG_HERE/lib/$CG_HELPER.sh" >&2; exit 1; }
+done
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
@@ -84,7 +84,10 @@ SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 PARTY_LG="${W1R_PARTY_LG:-$BIONIC_HOOKS_DIR/stop.sh}"
 PARTY_LG_SRC="${W1R_PARTY_LG_SRC:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
 
-SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-agreement.XXXXXX")" && pwd -P)"
+# `cd ""` succeeds where it stands, so a mktemp that failed would name the suite's own directory as the sandbox, and
+# the cleanup below would remove it: the sandbox is made, or the suite stops here.
+SANDBOX="$(d="$(mktemp -d "${TMPDIR:-/tmp}/w1r-agreement.XXXXXX")" && cd "$d" && pwd -P)" \
+  || { echo "cross-gate-agreement.prelude.sh: no sandbox under ${TMPDIR:-/tmp}" >&2; exit 1; }
 BG_PIDS=""
 cleanup() {
   local p
@@ -479,6 +482,10 @@ new_repo() {  # <name> -> path
   local r="$SANDBOX/fx/$1/repo"
   mkdir -p "$r/.bionic/tmp"
   git -C "$r" init -q 2>/dev/null
+  # Nothing is written until git agrees the repository is the one just made: a path that is no directory, or one
+  # inside another repository, would carry these markers to whatever repository answers for it.
+  [ -n "$1" ] && [ -d "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$r" && pwd -P)" ] \
+    || { echo "new_repo: no repository of its own at '$r'" >&2; return 1; }
   arm_patrol "$r" "$SID_A" "$SID_B" "$SID_LG"
   engage_sids "$r" "$SID_A" "$SID_B" "$SID_LG"
   printf '%s' "$r"
@@ -513,7 +520,7 @@ current-placeholder|no|-
 
 build_fixture() {  # <name> -> repo path
   local name="$1" repo
-  repo=$(new_repo "$name")
+  repo=$(new_repo "$name") || return 1
   case "$name" in
     baseline-active)
       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
@@ -659,7 +666,7 @@ build_fixture() {  # <name> -> repo path
 echo "building fixture repos..."
 while IFS='|' read -r name want cur; do
   [ -n "$name" ] || continue
-  build_fixture "$name" >/dev/null
+  build_fixture "$name" >/dev/null || { echo "cross-gate-agreement.prelude.sh: the $name fixture was not made" >&2; exit 1; }
 done <<EOF
 $(printf '%s' "$FIXTURES")
 EOF

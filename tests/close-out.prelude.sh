@@ -33,13 +33,19 @@
 # dry-run, and it is why the dry-run is not silently inert.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+# A helper is found beside this file, wherever the suite that sources it stands; one that does not load stops the suite.
+CO_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=/dev/null
-declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
+declare -F seal_fixture >/dev/null 2>&1 || { [ -r "$CO_HERE/lib/seal-fixture.sh" ] && . "$CO_HERE/lib/seal-fixture.sh"; } \
+  || { echo "close-out.prelude.sh: cannot load $CO_HERE/lib/seal-fixture.sh" >&2; exit 1; }
 SCRIPT="$REPO_ROOT/payload/scripts/close-out.sh"
 RUN_LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
-SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/close-out-test.XXXXXX")" && pwd -P)"
+# `cd ""` succeeds where it stands, so a mktemp that failed would name the suite's own directory as the sandbox, and
+# the cleanup below would remove it: the sandbox is made, or the suite stops here.
+SANDBOX="$(d="$(mktemp -d "${TMPDIR:-/tmp}/close-out-test.XXXXXX")" && cd "$d" && pwd -P)" \
+  || { echo "close-out.prelude.sh: no sandbox under ${TMPDIR:-/tmp}" >&2; exit 1; }
 # TS_LIVE_PIDS -> processes §tmp-spares spawns to stand in for a live neighbour session
 # (session-sweep.test.sh:79's trick: a real `kill -0`-able pid, never this shell's own).
 # The EXIT trap kills every one; nothing here waits on them.
@@ -94,6 +100,15 @@ in_fixture() {
   esac
   [ -d "$d" ] || { echo "${0##*/}: no fixture directory at $d" >&2; return 1; }
   cd "$d" || return 1
+}
+
+# fixture_own — 0 when the directory a subshell entered by in_fixture stands in is the top of a repository of its
+# own. `git init` that failed leaves the directory inside whatever repository holds the sandbox, if one does, and
+# every write after it would land there: a fixture writes nothing until git names this directory as its top.
+fixture_own() {
+  [ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ] && return 0
+  echo "${0##*/}: no repository of its own at $(pwd -P)" >&2
+  return 1
 }
 
 # fixture_git <dir> <git args...> — `git -C` with the same guard. `git -C ""` runs in the
@@ -242,6 +257,7 @@ mk_fixture() {
   (
     in_fixture "$p" || exit 1
     git init -q . >/dev/null 2>&1
+    fixture_own || exit 1
     git symbolic-ref HEAD refs/heads/main
     printf '.bionic/\n' > .gitignore
     printf 'seed\n' > file.txt
@@ -253,7 +269,7 @@ mk_fixture() {
     git branch wt/01-x
     git checkout -q main
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
-  )
+  ) || return 1
   co_page15 "$p"
   seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   plant_facts "$p"
@@ -442,12 +458,13 @@ PLAN_CENSUS
   (
     in_fixture "$p" || exit 1
     git init -q . >/dev/null 2>&1
+    fixture_own || exit 1
     git symbolic-ref HEAD refs/heads/main
     printf '.bionic/\n' > .gitignore
     printf 'seed\n' > file.txt
     git add -A >/dev/null 2>&1
     git commit -q -m "seed" >/dev/null 2>&1
-  )
+  ) || return 1
   co_page15 "$p"
   seal_fixture "$p/$PLAN_REL" "$p/$LOG_REL"
   printf '%s\n' "$p"
@@ -573,7 +590,7 @@ gate_rc() {
   local input
   case "$proj" in "$SANDBOX"/*) : ;; *) echo "gate_rc: refusing outside the sandbox: '$proj'" >&2; echo 9; return 0 ;; esac
   mkdir -p "$proj/.bionic/tmp"
-  ( in_fixture "$proj" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$proj" "$sid" "$proj/$PLAN_REL" ) \
+  ( in_fixture "$proj" || exit 1; . "$CO_HERE/lib/bound-marker.sh" || exit 1; bound_marker "$proj" "$sid" "$proj/$PLAN_REL" ) \
     || { echo "gate_rc: could not bind the marker in '$proj'" >&2; echo 9; return 0; }
   input=$(jq -n --arg c "git commit -m x" --arg cwd "$proj" --arg s "$sid" \
             '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",

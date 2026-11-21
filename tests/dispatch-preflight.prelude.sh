@@ -17,8 +17,11 @@
 # helpers and constant strings, each block moved whole from the section named above it,
 # with a pointer left where it was.
 
+# A helper is found beside this file, wherever the suite that sources it stands; one that does not load stops the suite.
+DP_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=/dev/null
-declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
+declare -F seal_fixture >/dev/null 2>&1 || { [ -r "$DP_HERE/lib/seal-fixture.sh" ] && . "$DP_HERE/lib/seal-fixture.sh"; } \
+  || { echo "dispatch-preflight.prelude.sh: cannot load $DP_HERE/lib/seal-fixture.sh" >&2; exit 1; }
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 # The rendered dispatch.md, whose fenced scaffold the suites read: the page the dispatch library's
@@ -37,7 +40,10 @@ scaffold_block() {
   ' "$1"
 }
 
-SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-test.XXXXXX")" && pwd)"
+# `cd ""` succeeds where it stands, so a mktemp that failed would name the suite's own directory as the sandbox, and
+# the cleanup below would remove it: the sandbox is made, or the suite stops here.
+SANDBOX="$(d="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-test.XXXXXX")" && cd "$d" && pwd)" \
+  || { echo "dispatch-preflight.prelude.sh: no sandbox under ${TMPDIR:-/tmp}" >&2; exit 1; }
 BG_PIDS=""
 cleanup() {
   local p
@@ -276,7 +282,8 @@ GATE_ENV=""
 # still reach the fail direction they pin.
 # THE COLUMN COUNTER, for the AC-E1.3 sweep in the driver below: the em dash is three
 # bytes and one column, so a byte count would pass a line that wraps.
-. "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh"
+[ -r "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh" ] && . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh" \
+  || { echo "dispatch-preflight.prelude.sh: cannot load ${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh" >&2; exit 1; }
 GATE_TIME=0
 run_gate() {  # <payload-json>
   local _sid _t0; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
@@ -445,6 +452,7 @@ MAKE_REPO_SEED="$SANDBOX/.make-repo-seed"
 make_repo_seed() {
   mkdir -p "$MAKE_REPO_SEED" \
     && git -C "$MAKE_REPO_SEED" init -q 2>/dev/null \
+    && [ "$(git -C "$MAKE_REPO_SEED" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$MAKE_REPO_SEED" && pwd -P)" ] \
     && git -C "$MAKE_REPO_SEED" config user.email t@example.com \
     && git -C "$MAKE_REPO_SEED" config user.name "T" \
     && echo seed > "$MAKE_REPO_SEED/README.md" \
@@ -463,13 +471,19 @@ watch_rested() {
 # make_repo <name> <active-wave:yes|no> -> echoes the repo path
 make_repo() {
   local name="$1" wave="$2"
-  local repo="$SANDBOX/$name/repo"
+  local repo="$SANDBOX/$name/repo" seeded=""
   mkdir -p "$repo"
   if [ ! -e "$repo/.git" ] && [ -f "$MAKE_REPO_SEED/.git/index" ] \
      && cp -R "$MAKE_REPO_SEED/." "$repo/" 2>/dev/null; then
-    :
+    seeded=1
   else
     git -C "$repo" init -q 2>/dev/null
+  fi
+  # Nothing is written until git agrees the repository is the one just made: a path that is no directory, or one
+  # inside another repository, would carry this identity and this commit to whatever repository answers for it.
+  [ -n "$name" ] && [ -d "$repo" ] && [ "$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$repo" && pwd -P)" ] \
+    || { echo "make_repo: no repository of its own at '$repo'" >&2; return 1; }
+  if [ -z "$seeded" ]; then
     git -C "$repo" config user.email t@example.com
     git -C "$repo" config user.name "T"
     echo seed > "$repo/README.md"
@@ -684,7 +698,7 @@ Suites: tests/run.sh'
 # impact command: the map is gone (wave-31 T2), and nothing the full-run wall reads is in config.
 pf_repo() {
   local repo s
-  repo=$(make_repo "$1" yes)
+  repo=$(make_repo "$1" yes) || return 1
   git -C "$repo" checkout -q -b wave/99-test 2>/dev/null
   mkdir -p "$repo/tests" "$repo/lib"
   for s in a b c d e; do printf '#!/bin/bash\n' > "$repo/tests/$s.test.sh"; done

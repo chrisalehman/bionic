@@ -393,7 +393,13 @@ _rh_tick_land() {
 # the bare repository, so no push is made to build it, and it never holds the working branch until something pushes it.
 rh_remote() {
   local b="${3:-main}"
-  git init --quiet --bare "$2" && git -C "$2" symbolic-ref HEAD "refs/heads/$b" \
+  # `git -C ""` acts where the caller stands: the project must be the top of its own repository and <dir> a bare one
+  # of its own before a ref or a remote is written to either.
+  [ -n "$1" ] && [ -d "$1" ] && [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$1" && pwd -P)" ] \
+    || { echo "rh_remote: '$1' is no repository of its own" >&2; return 1; }
+  [ -n "$2" ] && git init --quiet --bare "$2" \
+    && [ "$(git -C "$2" rev-parse --absolute-git-dir 2>/dev/null)" = "$(cd "$2" && pwd -P)" ] \
+    && git -C "$2" symbolic-ref HEAD "refs/heads/$b" \
     && git -C "$2" fetch --quiet "$1" "refs/heads/$b:refs/heads/$b" && git -C "$1" remote add origin "$2"
 }
 

@@ -109,9 +109,10 @@ _door_world() (
   mkdir -p "$dir" && root="$(cd "$dir" && pwd -P)" || exit 1
   _door_inside "$root" || { echo "$me: $root is outside WORLD_ROOT" >&2; exit 2; }
   [ -z "$(ls -A "$root")" ] || { echo "$me: $root is not empty" >&2; exit 2; }
-  git -C "$root" init --quiet && git -C "$root" symbolic-ref HEAD refs/heads/main || exit 1
+  git -C "$root" init --quiet || exit 1
   [ "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" = "$root" ] \
     || { echo "$me: git's toplevel is not $root — refusing" >&2; exit 1; }
+  git -C "$root" symbolic-ref HEAD refs/heads/main || exit 1
   # The repository's own identity: a hand landing records `by=` from it, so no person's name reaches the record.
   git -C "$root" config user.name door && git -C "$root" config user.email door@example.invalid \
     && git -C "$root" config commit.gpgsign false || exit 1

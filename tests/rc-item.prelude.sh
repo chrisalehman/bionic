@@ -68,7 +68,8 @@ REMOVE_SH="${REPO}/payload/scripts/remove.sh"
 # expect_same_bytes and expect_diff_bytes: defined in each part, above the source of this file (the framework
 # derives a suite's helper calls from the suite's own text, before this file is sourced).
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)" && [ -n "$TMP" ] && [ -d "$TMP" ] || { echo "rc-item.prelude.sh: no temporary folder" >&2; exit 1; }
+trap 'rm -rf "$TMP"' EXIT
 
 command -v zsh >/dev/null 2>&1 || { echo "${0##*/}: zsh is required — the readback arm runs the rc"; exit 1; }
 command -v jq  >/dev/null 2>&1 || { echo "${0##*/}: jq is required"; exit 1; }
