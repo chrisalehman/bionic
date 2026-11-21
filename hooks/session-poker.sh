@@ -298,7 +298,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
-  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>']   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session"
+  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] [--files+ <path>]... [--suites+ <suite>]...   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session; --files+ and --suites+ grant, widening the writer's row, and every later brief of its row carries the grant"
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> [--born …]   record the birth of row <id>, which an edit of the bound plan wrote first: the row is read back and judged as a row born mid-run, one born event is appended, and the plan is not written; a short row is refused with the lines it would accept; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite; task-add <id> --drop '<the person's words>' says a pending row's work is no longer owed: one drop event, the plan not written"
@@ -453,17 +453,24 @@ case "$VERB" in
   # takes the one id the push printed; `rulings` the writer whose rulings to read.
   # `--words '<the user's words>'` (wave-36 T9; D10) quotes what the person typed: held to lib/said.sh
   # `user_said` across the run's recorded sessions, and carried in the ruling as `words="…" session=<sid>`.
+  # `--files+ <path>` and `--suites+ <suite>`, each repeatable, are what the ruling grants: one event is both the
+  # ruling and the grant, and the writer's row is widened as `amend` widens it.
   rule)
-    RULE_WORDS=""
-    if [ $# -eq 4 ] && [ "$3" = --words ]; then
-      [ -n "${4//[[:space:]]/}" ] || usage "rule --words takes the user's words, quoted from a prompt they typed."
-      RULE_WORDS="$4"; set -- "$1" "$2"
+    RULE_WORDS=""; RULE_FILES=""; RULE_SUITES=""
+    if [ $# -lt 2 ] || [ -z "${1//[[:space:]]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "rule takes two arguments, the writer's roster name and the ruling's text, then optionally --words '<the user's words>', --files+ <path> and --suites+ <suite>."
     fi
-    if [ $# -ne 2 ] || [ -z "${1//[[:space:]]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "rule takes two arguments, the writer's roster name and the ruling's text, and optionally --words '<the user's words>'."
-    fi
-    RULE_WRITER="$1"
-    RULE_TEXT="$2"
+    RULE_WRITER="$1"; RULE_TEXT="$2"; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in --words|--files+|--suites+) ;; *) usage "unknown argument for rule: $1" ;; esac
+      { [ $# -ge 2 ] && [ -n "${2//[[:space:]]/}" ]; } || usage "rule $1 takes a value."
+      case "$1" in
+        --words) RULE_WORDS="$2" ;;
+        --files+) RULE_FILES="${RULE_FILES}$2"$'\n' ;;
+        --suites+) RULE_SUITES="${RULE_SUITES}$2"$'\n' ;;
+      esac
+      shift 2
+    done
     ;;
   ruling-ack)
     { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "ruling-ack takes exactly one argument: the ruling's id."

@@ -1892,8 +1892,10 @@ EOF
       # names it on the Lands-on its brief gave, and a runner could only fail to start it (two `none`s stall the
       # entry). Held by the candidate's base and not by the candidate, it is recorded once, `absent` with no log,
       # and counts as proved; nothing runs for it. A name the base lacks too still stalls (wave-34 T27).
+      # THE LANDING SAYS IT: the suite leaves the row's set here, with no command to take it out.
       if _line_removed "$root" "$cbase" "$cand" "$s"; then
-        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null; continue
+        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null
+        printf 'GONE %s %s — the row deletes the suite, so it leaves the set; nothing runs for it\n' "$row" "$s"; continue
       fi
       said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
       if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then

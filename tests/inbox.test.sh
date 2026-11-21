@@ -402,4 +402,32 @@ expect_eq "(y6) of the four rulings, the rosters carry only the one planted ther
   "$(cat "$W"/.bionic/tmp/roster-*.state | /usr/bin/grep -o -F -e "ruling/v1|id=r-legacy-1|" -e "id=$X_ID|" -e "id=$Y_ID|" -e "id=$Z_ID|")"
 expect_eq "(y6) …the run's log holds each" "3" "$(/usr/bin/grep -c -E "^run/v1\|ev=ruling\|id=($X_ID|$Y_ID|$Z_ID)\|row=T2\|writer=wx-T2\|recorded=" "$REC")"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "§GRANT: one rule call grants a file and a suite; a successor of the row is born holding both (AC-24.1, AC-24.2)"
+
+# fails-when: a second command is needed for the grant, or the successor's brief, the contract its row is born from, lacks either.
+# gx-T1 is row T1's writer with its row's contract: T1.txt, running and landing a.test.sh only.
+printf '%s|row=T1|lands_on=a.test.sh\n' "$(roster_row_fixture status=identified session="$WORLD_SID" name=gx-T1 agent_id=g00T1 \
+  plan="$W/.bionic/docs/plans/epic-x/wave-x.plan.md" files=T1.txt suites_allowed=a.test.sh suites_source=declared)" >> "$ROSTER"
+in_walls "$W" g00T1 'bash tests/b.test.sh'
+expect_eq "(gr0) control: gx-T1's run of b.test.sh, outside its suites, is refused (exit 2)" "2" "$IN_RC"
+GR_N="$(/usr/bin/grep -c . "$REC")"
+in_poker "$W" rule gx-T1 'take the parser and its suite' --files+ lib/x.sh --suites+ b.test.sh
+GR_ID="$(in_rid "$IN_OUT")"
+expect_eq "(gr1) AC-24.1 one rule call carrying a file and a suite is recorded (exit 0)" "0" "$IN_RC"
+expect_nonempty "(gr1) …with an id" "$GR_ID"
+expect_eq "(gr1) …and writes one event to the run: the ruling, holding the grant" "1 files=lib/x.sh|suites=b.test.sh" \
+  "$(( $(/usr/bin/grep -c . "$REC") - GR_N )) $(tail -1 "$REC" | sed -n "s/^run\/v1|ev=ruling|id=$GR_ID|row=T1|.*|\(files=[^|]*|suites=[^|]*\)|.*/\1/p")"
+in_walls "$W" g00T1 'bash tests/b.test.sh'
+expect_eq "(gr2) AC-24.1 the writer's next run of the granted suite is admitted (exit 0)" "0" "$IN_RC"
+GR_ROW="$(roster_row_for_id "$ROSTER" g00T1)"
+expect_eq "(gr3) AC-24.1 the row the walls read for the writer holds the granted file beside its own" "T1.txt,lib/x.sh" \
+  "$(printf '%s' "$GR_ROW" | tr '|' '\n' | sed -n 's/^files=//p')"
+. "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh"
+in_poker "$W" brief T1 gx-T1-r2
+GS_C="$(brief_contract "$(cat "$W/.bionic/docs/record/wave-x/briefs/gx-T1-r2.md" 2>/dev/null)")"
+expect_eq "(gs1) AC-24.2 the successor's brief renders (exit 0)" "0" "$IN_RC"
+expect_eq "(gs2) AC-24.2 the contract it is born with holds its row's file and the granted one" "T1.txt,lib/x.sh" "$(brief_field "$GS_C" files)"
+expect_eq "(gs3) AC-24.2 …and the granted suite, where the row's cell named none" "b.test.sh" "$(brief_field "$GS_C" suites)"
+
 finish
