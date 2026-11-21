@@ -717,8 +717,10 @@ WATCH_LIFE_MARGIN=600
 #
 # THE WOKEN KINDS ARE THE LINES THAT ASK FOR AN ACT, OF THE MODEL OR OF THE PERSON, AND NO OTHERS. In the order the
 # line leads with them, the person's first: GATE (a denied reserved request, put to the person), restart, GOAL,
-# DUPLICATE-SESSION and DUPLICATE-START, GONE? and GONE, NOTIFY, STANDDOWN, NOT-LANDED, FILL (IDLE rides it), and
-# RECONCILE. Advice (HELD, LEDGER, FINDING, SPLIT, RANGE), what the tick did itself (LANDED, regression-run, RUNNING),
+# DUPLICATE-SESSION and DUPLICATE-START, GONE? and GONE, NOTIFY, STANDDOWN, LOAD, NOT-LANDED, FILL (IDLE rides it), and
+# RECONCILE. A STANDDOWN for the load is LOAD: its row is pending and live, which hold refuses, so its act says the
+# load and offers no hold; the tick's band line alone does not make it a met stand-down. Advice (HELD, LEDGER,
+# FINDING, SPLIT, RANGE), what the tick did itself (LANDED, regression-run, RUNNING),
 # DISARM (the run is delivered, and nothing is owed for it) and the quiet lines (QUIET, WAITING, no FILL, the gate
 # share) wake nothing.
 #
@@ -795,6 +797,7 @@ watch_wake_line() {  # <tick print file> [<told file>]
       else if (index($0, "started without its checks") && why == "") why = "started without its checks"
       next
     }
+    $2 == "STANDDOWN" && $5 == "load" { add("LOAD", $3); ld = $6 " over " $8; sub(/;$/, "", ld); next }
     $2 == "STANDDOWN" { if (!dash($3)) add("STANDDOWN", $3); else mark("STANDDOWN"); next }
     $2 == "FILL" { if (!dash($3)) for (i = 3; i <= NF; i++) add("FILL", $i); else mark("FILL"); next }
     $2 == "IDLE" { mark("FILL"); next }
@@ -822,10 +825,12 @@ watch_wake_line() {  # <tick print file> [<told file>]
       act["GONE"] = "close its row with stop-orders.sh stopped"
       act["NOTIFY"] = (why == "" ? "needs a look" : why) ": ListAgents and message the agent"
       act["STANDDOWN"] = "met: TaskStop it, or keep it up with the hold verb"
+      act["LOAD"] = "load " ld "; its row is pending again: TaskStop it"
+      if ("LOAD" in seen && !("STANDDOWN" in subj)) delete seen["STANDDOWN"]
       act["NOT-LANDED"] = "its landing waits: read the refusal the tick prints and repair it"
       act["FILL"] = "ready with room: dispatch each row now"
       act["RECONCILE"] = "TaskList and bring the task list in line with the plan"
-      k = split("GATE restart GOAL DUPLICATE-SESSION DUPLICATE-START GONE? GONE NOTIFY STANDDOWN NOT-LANDED FILL RECONCILE", order, " ")
+      k = split("GATE restart GOAL DUPLICATE-SESSION DUPLICATE-START GONE? GONE NOTIFY STANDDOWN LOAD NOT-LANDED FILL RECONCILE", order, " ")
       lead = ""; tail = ""
       for (i = 1; i <= k; i++) {
         if (!(order[i] in seen)) continue

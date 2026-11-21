@@ -814,6 +814,10 @@ poker_verb_reviews_part() {
 # exit 2, to be run again. `none` and `nohome` are not compared, as the gate does not compare them. Unlike the gate,
 # which steps aside when the seal cannot be loaded, publish refuses then: no wall sees the push it makes.
 #
+# THE REQUEST IS TITLED AND WRITTEN: its title and its seven sections are `pr_title`'s and `pr_body`'s below, the
+# summary the orchestrator wrote checked against the facts before the push, and a refused summary exits 2 with nothing
+# pushed or opened.
+#
 # ONCE A HEAD. A request the log holds at this head, branch and base is published already: exit 0, no push, no call.
 # At a new head the branch is pushed and the request the log holds for the branch and base is kept, since a host's
 # request follows its branch: a new event at the new head, the same address, and no second create.
@@ -847,7 +851,7 @@ publish_seal_words() {
     printf '%s\n%s\n%s\n' "$_BF_PEND_FACT" "$BIONIC_WALL_OWED" "$_BF_PEND_DETAIL" )
 }
 poker_verb_publish() {
-  local wb base head ah pr pr_url="" pr_commit="" pr_branch="" pr_base="" rc out err url sw fact ask detail key title reply
+  local wb base head ah pr pr_url="" pr_commit="" pr_branch="" pr_base="" rc out err url sw fact ask detail key title reply body=""
   plan_verb_open publish
   if ! _line_load_proof || ! declare -F proof_approved_head >/dev/null 2>&1 || ! _proof_reader_load \
      || ! declare -F reader_q_pr >/dev/null 2>&1; then
@@ -922,6 +926,10 @@ poker_verb_publish() {
     say "publish — the pull request $pr_url already carries $wb at ${head:0:12} against $base; nothing was pushed or opened."
     exit 0
   fi
+  if [ -z "$pr_url" ] && ! body="$(pr_body "$PV_PLAN" "$(docs_root "$PV_REPO")")"; then
+    die "REFUSED — $body. Nothing was pushed and no pull request was opened; mend it, then run again: bash $HOOK_DIR/session-poker.sh publish"
+    exit 2
+  fi
   git -C "$PV_REPO" remote get-url origin >/dev/null 2>&1 \
     || publish_failed "$wb" "$head" "no remote named origin in $PV_REPO" "add the project's remote as origin"
   err="$(GIT_TERMINAL_PROMPT=0 git -C "$PV_REPO" push --quiet origin "$head:refs/heads/$wb" 2>&1 >/dev/null)" \
@@ -930,7 +938,7 @@ poker_verb_publish() {
   if [ -z "$url" ]; then
     command -v gh >/dev/null 2>&1 || publish_failed "$wb" "$head" "the pull request against $base" "gh, the host's command line tool, is not on the PATH"
     err="$(mktemp "${TMPDIR:-/tmp}/publish.XXXXXX")" || publish_failed "$wb" "$head" "the pull request against $base" "no temporary file for gh's errors"
-    out="$(cd "$PV_REPO" && GH_PROMPT_DISABLED=1 gh pr create --base "$base" --head "$wb" --fill < /dev/null 2> "$err")"; rc=$?
+    out="$(cd "$PV_REPO" && GH_PROMPT_DISABLED=1 gh pr create --base "$base" --head "$wb" --title "$(pr_title "$PV_PLAN" "$PV_REPO")" --body "$body" < /dev/null 2> "$err")"; rc=$?
     if [ "$rc" -ne 0 ]; then
       out="$(cat "$err")"; rm -f "$err"
       publish_failed "$wb" "$head" "the pull request against $base (gh exited $rc)" "$out"
@@ -949,6 +957,80 @@ poker_verb_publish() {
   else
     say "publish — $wb at ${head:0:12} pushed to origin; pull request $url opened against $base."
   fi
+  exit 0
+}
+
+# ---------------------------------------------------------------- the pull request's description
+#
+# FACTS PRINTED, SUMMARY WRITTEN. The request's body is seven sections in one order. Summary, What changed and Upgrade
+# notes are the orchestrator's words, written in `pr-summary.md` beside the run's log; Testing, Review, Known limits and
+# Decision records are the run's facts, printed by `pr-facts` from the reader and never typed:
+#   Testing           the newest whole regression's suites green of those it ran, each suite by its last verdict, and
+#                     the Eval design's criteria discharged of all (lib/reader.sh `reader_cells`)
+#   Review            each question's newest review proof or waiver
+#   Known limits      each open deferral's stated sentence, the release entry's own reading (`known_limits_part`)
+#   Decision records  each ADR whose `wave:` is the run's, the register's own reading (sitrep.sh `decisions_all`)
+# A count is written `<n> of <m>`, the one shape a summary's numbers are held to: publish refuses a summary stating a
+# count the facts do not, one with a written section missing or empty, and one with a heading of its own, before the
+# push. The title is `<project> <release>: <the plan's title>`, the project the root's name and the plan's title its
+# first heading, its run's name and any `<project> <release>: ` it opens with taken off.
+PR_WRITTEN='Summary|What changed|Upgrade notes'
+pr_facts() {  # <plan> <docs root> -> the four fact sections; rc 2, nothing printed, when the run's facts cannot be read
+  local plan="$1" vd cells rv kl slug adr rc t c
+  { _line_load_proof && _proof_reader_load; } >/dev/null 2>&1 || return 2
+  vd="$(reader_q_verdicts "$plan" regression)" && rv="$(reader_q_reviews "$plan")" && slug="$(proof_plan_slug "$plan")" \
+    || return 2
+  cells="$(reader_cells "$plan")"; rc=$?; [ "$rc" -le 1 ] || return 2
+  kl="$(known_limits_part "$plan"; rc=$?; [ "$rc" -ne 1 ] || printf -- '- %s, deferred, states no sentence.\n' "$KL_UNSTATED"; exit "$rc")"
+  [ "$?" -ne 2 ] || return 2
+  t="$(printf '%s\n' "$vd" | awk -F'|' "$_READER_AWK"'
+    { c = line_kv("commit"); if (c == "") next; if (c != h) { h = c; n = 0; split("", w) } s = line_kv("suite"); if (!(s in w)) n++; w[s] = line_kv("result") }
+    END { if (h == "") { print "- No whole regression is recorded."; exit } g = 0; for (s in w) if (w[s] == "green") g++
+          printf "- The whole regression at `%s`: %d of %d suites green.\n", substr(h, 1, 12), g, n }')"
+  [ -z "$cells" ] || t="$t"$'\n'"$(printf '%s\n' "$cells" | awk -F'\037' '{ n++; if ($2 == "discharged") d++ } END { printf "- %d of %d criteria discharged.", d, n }')"
+  rv="$(printf '%s\n' "$rv" | awk -F'|' "$_READER_AWK"'
+    { q = line_kv("question"); if (q == "") next; if (!(q in r)) o[++n] = q
+      r[q] = (ev() == "waiver") ? "waived" : line_kv("result") " by " line_kv("reader") ", " line_kv("evidence") }
+    END { if (!n) print "- No review is recorded."; for (i = 1; i <= n; i++) print "- " o[i] ": " r[o[i]] }')"
+  adr="$(decisions_all "$2" | awk -v s="$slug ADR-" 'index($0, s) == 1 { print "- " substr($0, length(s) - 3); f = 1 } END { if (!f) print "- None written." }')"
+  c="$(printf '%s\n' "$kl" | /usr/bin/grep '^- ')" || c="- None deferred."
+  printf '## Testing\n\n%s\n\n## Review\n\n%s\n\n## Known limits\n\n%s\n\n## Decision records\n\n%s\n' "$t" "$rv" "$c" "$adr"
+}
+# pr_body <plan> <docs root> -> the request's body: the summary's three written sections in their order, then the
+# facts; rc 1, printing only the fault, when the summary is refused or the facts cannot be read
+pr_body() {
+  local sum facts out c
+  sum="$(reader_log "$1" 2>/dev/null)" && sum="${sum%/*}/pr-summary.md" && facts="$(pr_facts "$1" "$2")" \
+    || { printf "the run's facts could not be read"; return 1; }
+  [ -f "$sum" ] || { printf 'there is no summary at %s: write its ## Summary, ## What changed and ## Upgrade notes, the facts read with pr-facts' "$sum"; return 1; }
+  out="$(awk -v parts="$PR_WRITTEN" '
+    BEGIN { n = split(parts, p, "|"); for (i = 1; i <= n; i++) want[p[i]] = 1 }
+    /^## / { h = substr($0, 4); if (!(h in want)) { bad = h; exit } cur = h; next }
+    cur != "" { t[cur] = t[cur] $0 "\n"; if ($0 ~ /[^[:space:]]/) full[cur] = 1 }
+    END { if (bad != "") { print "its heading ## " bad " is none of the three written sections"; exit 1 }
+          for (i = 1; i <= n; i++) if (!full[p[i]]) { print "its section ## " p[i] " is empty or missing"; exit 1 }
+          for (i = 1; i <= n; i++) { b = t[p[i]]; sub(/^\n+/, "", b); sub(/\n+$/, "", b); printf "## %s\n\n%s\n\n", p[i], b } }' "$sum")" \
+    || { printf 'the summary %s is refused: %s' "$sum" "$out"; return 1; }
+  c="$(comm -23 <(printf '%s\n' "$out" | /usr/bin/grep -oE '[0-9]+ of [0-9]+' | sort -u) \
+                <(printf '%s\n' "$facts" | /usr/bin/grep -oE '[0-9]+ of [0-9]+' | sort -u) | head -1)"
+  [ -z "$c" ] || { printf "the summary %s states '%s', a count the facts pr-facts prints do not state" "$sum" "$c"; return 1; }
+  printf '%s\n%s\n' "$out" "$facts"
+}
+pr_title() {  # <plan> <project root> -> `<project> <release>: <the plan's title>`
+  local proj="${2##*/}" ver slug t
+  ver="$(plan_frontmatter_get "$1" release)"; slug="$(proof_plan_slug "$1")"
+  t="$(awk 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { fm = 0; next } !fm && /^# / { print substr($0, 3); exit }' "$1")"
+  t="${t#"$slug — "}"; t="${t#"$proj${ver:+ $ver}: "}"
+  printf '%s%s: %s' "$proj" "${ver:+ $ver}" "${t:-$slug}"
+}
+poker_verb_pr_facts() {
+  local out
+  plan_verb_open pr-facts
+  if ! out="$(pr_facts "$PV_PLAN" "$(docs_root "$PV_REPO")")"; then
+    die "REFUSED — the run's facts, or the reader (lib/reader.sh) that reads them, could not be had from $BIONIC_LIB; nothing was printed. Run again: bash $HOOK_DIR/session-poker.sh pr-facts"
+    exit 2
+  fi
+  printf '%s\n' "$out"
   exit 0
 }
 
@@ -1090,11 +1172,7 @@ poker_verb_known_limits_part() {
       exit 2
     fi
     if [ -n "$arg" ]; then
-      case "$arg" in
-        /*) plan="$arg" ;;
-        *)  plan="$REPO_REAL/$arg"
-            [ -f "$plan" ] || plan="$(docs_root "$REPO_REAL")/$arg" ;;
-      esac
+      plan="$(docs_path "$REPO_REAL" "$arg")"
       if [ ! -f "$plan" ] || [ -L "$plan" ]; then
         die "REFUSED — no plan file at $arg; name the plan whose landings the release describes."
         exit 2

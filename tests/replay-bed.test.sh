@@ -141,7 +141,14 @@ page() {  # <page file> -> its replay table as key=value: each decision by its k
   sed -n -e 's/^carried: \(.*\)/card.carried.\1=yes/p' -e 's/^release-approval\/v1|dec=[0-9]*|key=\([^|]*\)|/card.decision.\1=/p' "$1" 2>/dev/null; }
 born() { sed -n 's/^run\/v1|ev=born|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }  # stdin's events -> the rows born
 render() {  # <world> <plan> [arg…] -> the card rendered as the bound session, the page its record holds, as key=value;
-  # the log the render read is kept beside its output, so a later read stands at that log and not at one the render moved
+  # the log the render read is kept beside its output, so a later read stands at that log and not at one the render moved.
+  # A carry states its Known-limits sentence before the card now, and these runs stated theirs after it or never: each
+  # carry the card refuses on is given a stand-in first, the step the run takes today, which moves no decision.
+  while ( cd "$1" && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" release-approval --preview "$2" 2>&1 >/dev/null ) \
+      | sed -n 's/^REFUSED — \(.*\) is carried with no Known-limits sentence.*/\1/p' | grep -m1 . > "$1.gap"; do
+    ( cd "$1" && git config user.name fixture && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" finding-move "$(cat "$1.gap")" stated \
+      'A stand-in for the sentence this run stated after its card.' ) >/dev/null 2>&1 || break
+  done
   cp "${2%/plans/*}/record/$(basename "$2" .plan.md)/run.log" "$1.read"
   ( cd "$1" && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" release-approval "${@:3}" "$2" ) >"$1.out" 2>"$1.err"
   page "${2%/plans/*}/record/$(basename "$2" .plan.md)/$(basename "$1").md"
@@ -176,6 +183,8 @@ for x in "$X"/release-approval-*.facts; do
   [ "$n" != release-approval-fcbb975f ] || expect_eq "$n: AC-7.3, its cells set by hand and waived after the instant, reads pending" "state=pending" "$(ask "$p" cell AC-7.3)"
   [ "$n" != release-approval-31da41f7 ] || { PG="$G"; PD="$d"; PP="$p"; PH="$h"; PA="$at"; }
 done
+expect_eq "the one card whose run left a carry unstated at the instant, f87acbfc's, was rendered after its stand-in, the other three with none" "1|1" \
+  "$(cat "$WORLD_ROOT"/pages/*/.bio*/docs/record/*/run.log | grep -c '|stated=A stand-in for the sentence')|$(cat "$WORLD_ROOT"/pages/*-f87acbfc/.bio*/docs/record/*/run.log | grep -c '|stated=A stand-in for the sentence')"
 
 section "CATCH"
 for m in 'replace:s/if \(\(id in live\) && fact\[id\] == body\) next/if (id in live) next/' \
@@ -189,7 +198,7 @@ done
 RD="$R/payload/scripts"
 
 section "COVER"
-QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready pr handoff sessions verdicts header row criterion cell"
+QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready pr judge handoff sessions verdicts header row criterion cell"
 expect_eq "the bed asks each question of the closed list, and the list has no other" "$(printf '%s\n' $QS | sort | tr '\n' ' ')" \
   "$(ask /dev/null - 2>&1 | awk 'NR > 1 { print $1 }' | sort | tr '\n' ' ')"
 for e in $WORLDS; do n=${e%%:*}; p=${e##*:}; h="$(sed -n 's/^proof\.\([0-9a-f]*\)\..*/\1/p' "$X/$n.facts" | head -1)"; r=""; c=0
@@ -210,7 +219,7 @@ for t in $TYPES; do
   grep -q "^run/v1|ev=$t|" "$A" && [ "$(grep -c "^run/v1|ev=$t|" "$A")" = "$(grep "^run/v1|ev=$t|" "$A" | grep -c '|fixture=hand-written|')" ] && only="$only $t"
 done
 expect_empty "every event type has a fixture line" "$none"
-expect_eq "the types no closed run holds a line of are the hand-written ones" " stalled admitted void decision debt abandon cancel" "$only"
+expect_eq "the types no closed run holds a line of are the hand-written ones" " stalled admitted void decision debt abandon cancel ruling" "$only"
 expect_eq "every hand-written line is marked, and one is a dispatch" "$(grep -c . "$X/hand-written.log") 1" \
   "$(grep -c '[| ]fixture=hand-written[| ]' "$X/hand-written.log") $(grep -c '^run/v1|ev=dispatch|' "$X/hand-written.log")"
 

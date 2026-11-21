@@ -782,8 +782,8 @@ co_matrix_settle() {  # -> CO_MX_LINES, one `matrix: <AC> <state>` line per crit
 }
 # THE SCORECARD, READ BEFORE THE WIPE. `landing-report --scorecard` prints four lines, each against its target (human
 # stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed, human-wait
-# minutes), then the fact sheet's pace, correctness and waste lines, byte for byte (hooks/session-poker.sh
-# `scorecard_report` owns the rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads
+# minutes), the asks put to the person and their minutes, then the fact sheet's pace, correctness and waste lines,
+# byte for byte (hooks/poker/sitrep.sh `scorecard_report` owns the rules). The agent minutes are read off the rosters, which act 3 wipes, so `run` reads
 # the lines before the wipe into CO_SC_LINES and the continuation's `## Scorecard` prints that one reading. Nothing
 # prints them on stdout: the close-out report shows its ten parts, and the lines live in the continuation. A report
 # that cannot be read is a sentence.
