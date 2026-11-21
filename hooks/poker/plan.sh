@@ -1111,10 +1111,11 @@ EOF
       ! poker_brief_none "$TA_LANDS" \
         || say "task-add — $TA_ID lands none — counts on the next green regression: no landing verdict will name it, so its findings are fixed once a green regression stands at a head past its landing (D9)."
     fi
-    # WHAT THE TURN NOW OWES, SAID AT THE ACT: the harness's task list lacks the row, and the entries after it are
-    # recreated to keep the order. The entry is named as the task list names it, by the row's title, and the line is
-    # the verb's last so the rule is read where it fires and no step text has to carry it.
-    say "task-add — owed: create the task-list entry $TA_STEP/$TA_ID: $(clean_whole "$(plan_task_title "$TA_CELL_TASK")"), and recreate the entries after it to keep the order."
+    # WHAT THE TURN NOW OWES, SAID AT THE ACT: the harness's task list lacks the row, and it owes that one entry, added
+    # at the end, since the list only appends and the entries after it stand as they are. The entry is named as the task
+    # list names it, by the row's title, and the line is the verb's last so the rule is read where it fires and no step
+    # text has to carry it. Under start, start says the line, after everything else it does.
+    [ -n "${ST_ID:-}" ] || say "task-add — owed: create the task-list entry $TA_STEP/$TA_ID: $(clean_whole "$(plan_task_title "$TA_CELL_TASK")") at the end of the list."
     exit 0
   }
 
@@ -1360,6 +1361,104 @@ BRF_EOF
     fi
     if [ -n "$BRF_JUDG" ]; then BRF_SAID="the plan's section for $BRF_ID"; else BRF_SAID="NONE — the plan has no words for $BRF_ID; write its section and render again"; fi
     say "brief — $BRF_ID: written to ${BRF_OUT#"$PV_REPO"/} for the dispatch named $BRF_NAME; the dispatch prompt's first line names that file. Its judgment: $BRF_SAID."
+    exit 0
+  }
+
+  # ONE VERB STARTS A ROW. The row's words are a person's and stand in the plan first; start takes every act after them
+  # that the tool can take, each in the order the next needs it: the birth, by task-add's own path, so a row it would
+  # refuse is refused in its words and nothing after runs; the brief, by brief's own render under the name; the tree, by
+  # spawn-worktree.sh create --for the name, which reads that brief, at the working head on wt/<wave n>-<id>. It then
+  # prints the Agent call whole, one JSON object the dispatch wall admits as printed, and last the one task-list entry
+  # the row owes. An act that stands is not taken again: a birth in the log is kept, and a tree the row recorded that is
+  # still a linked worktree is marked for the new name, as a re-dispatch keeps its tree. Each act runs in a subshell,
+  # because each verb ends by exiting. A row whose Files write no tracked path takes no tree.
+  poker_verb_start() {
+    plan_verb_open start
+    ST_AGAIN="bash ${HOOK_DIR}/session-poker.sh start $(clean "$ST_ID")${ST_NAME:+ $(clean "$ST_NAME")}"
+    if ! plan_verb_id_ok "$ST_ID" || ! ST_ROW="$(plan_read_row "$PV_PLAN" Tasks id "$ST_ID" 2>/dev/null)"; then
+      die "REFUSED — $PV_PLAN holds no row $(clean "$ST_ID") in its ## Tasks table: write the row, then run: $ST_AGAIN. Nothing was done."
+      exit 1
+    fi
+    st_cell() { printf '%s\n' "$ST_ROW" | sed -n "s/^$1=//p" | head -1; }
+    ST_KIND="$(st_cell kind)"; ST_TASK="$(st_cell task)"; ST_STEP="$(st_cell step)"; ST_FILES="$(st_cell files)"
+    ST_TITLE="$(clean_whole "$(plan_task_title "$ST_TASK")")"
+    # THE ROLE: the one --role names, else the row's agent cell, else the one the complexity tag of a build or a test row
+    # names, as the Step-3 card draws it (card.sh `_card_task_role`); a role nothing names is not guessed.
+    [ -n "$ST_ROLE" ] || { ST_ROLE="$(st_cell agent)"; ! poker_brief_none "$ST_ROLE" || ST_ROLE=""; }
+    ST_RE='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
+    if [ -z "$ST_ROLE" ] && { [ "$ST_KIND" = build ] || [ "$ST_KIND" = test ]; } && [[ "$ST_TASK" =~ $ST_RE ]]; then
+      case "${BASH_REMATCH[2]}" in complex) ST_ROLE=senior-implementor ;; standard) ST_ROLE=implementor ;; esac
+    fi
+    if [ -z "$ST_ROLE" ]; then
+      die "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. Name it: $ST_AGAIN --role bionic:<role>"
+      exit 1
+    fi
+    case "$ST_ROLE" in *:*) : ;; *) ST_ROLE="bionic:$ST_ROLE" ;; esac
+    [ -n "$ST_NAME" ] || ST_NAME="$(fill_name "$PV_REPO/.bionic/tmp/roster-$(session_id).state" "$ST_ID")"
+    if ! plan_verb_id_ok "$ST_NAME" || ! fill_row_launched "$ST_ID" "$ST_NAME"; then
+      die "REFUSED — '$(clean "$ST_NAME")' is not a name of row $ST_ID: the dispatch wall binds a name to the row it ends with (the id, or <prefix>-$ST_ID, with -r<n> for a re-dispatch). Nothing was done. Run: bash ${HOOK_DIR}/session-poker.sh start $ST_ID <prefix>-$ST_ID"
+      exit 1
+    fi
+
+    poker_fold_ask ST_ANS "start $ST_ID $ST_NAME" "$PV_PLAN" _reader_of born row "$ST_ID"
+    ST_BORN_NOW=""
+    if [ -z "$ST_ANS" ]; then
+      ( TA_ID="$ST_ID" TA_BORN="" TA_BORN_IDS="" TA_BORN_SUITE="" TA_DROP=""; poker_verb_task_add ) \
+        || { ST_RC=$?; die "start — $ST_ID stopped at its birth; no brief, tree or call was made."; exit "$ST_RC"; }
+      ST_BORN_NOW=1
+    else
+      say "start — $ST_ID is born already: its birth stands in the run's log."
+    fi
+    ( BRF_ID="$ST_ID" BRF_NAME="$ST_NAME"; poker_verb_brief ) \
+      || { ST_RC=$?; die "start — $ST_ID stopped at its brief; its birth stands, and no tree or call was made. When the brief renders, run: $ST_AGAIN"; exit "$ST_RC"; }
+
+    ST_SW="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
+    ST_TREE=""; ST_BRANCH=""; ST_BASE=""
+    if units_writes_head "$ST_FILES"; then
+      poker_fold_ask ST_ANS "start $ST_ID $ST_NAME" "$PV_PLAN" reader_q_status "$ST_ID"
+      st_fact() { printf '%s\n' "$ST_ANS" | sed -n "s/^$1=//p" | head -1; }
+      ST_TREE="$(st_fact tree)"
+      if [ -n "$ST_TREE" ] && [ -f "$ST_TREE/.git" ]; then
+        ST_BRANCH="$(st_fact branch)"; ST_BASE="$(st_fact base)"
+        ST_OK="$(cd "$PV_REPO" && bash "$ST_SW" mark "$ST_TREE" --for "$ST_NAME" 2>&1)"
+      else
+        ST_WB="$(plan_working_branch "$PV_PLAN")"
+        ST_BASE="$(git -C "$PV_REPO" rev-parse --verify -q "refs/heads/${ST_WB:-?}^{commit}" 2>/dev/null)" || ST_BASE=""
+        if [ -z "$ST_BASE" ]; then
+          die "REFUSED — the plan's working branch (${ST_WB:-none named}) has no head in $PV_REPO, so the tree has no base; the brief stands. Name the branch in the plan's working-branch:, then run: $ST_AGAIN"
+          exit 1
+        fi
+        ST_N="$(proof_plan_slug "$PV_PLAN")"; case "$ST_N" in wave-[0-9]*) ST_N="${ST_N#wave-}"; ST_N="${ST_N%%-*}" ;; esac
+        ST_BRANCH="wt/$ST_N-$ST_ID"
+        ST_OK="$(cd "$PV_REPO" && bash "$ST_SW" create "$ST_BASE" "$ST_BRANCH" --for "$ST_NAME" 2>&1)"
+        ST_TREE="$(printf '%s\n' "$ST_OK" | awk '/^spawn-worktree: OK / { for (i = 3; i <= NF; i++) if (index($i, "path=") == 1) { print substr($i, 6); exit } }')"
+      fi
+      case "$ST_OK" in
+        'spawn-worktree: OK '*) : ;;
+        *) die "REFUSED — spawn-worktree.sh made no tree for $ST_NAME: $(clean "$(printf '%s' "$ST_OK" | tail -n 1)"). Its birth and its brief stand. When the cause is gone, run: $ST_AGAIN"; exit 1 ;;
+      esac
+    fi
+
+    # THE CALL, WHOLE: the brief's path on the prompt's first line, as the dispatch wall reads a row's dispatch, then
+    # the facts the brief cannot hold, the tree and its branch and base, and where the project is.
+    ST_BRIEF="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")/briefs/$ST_NAME.md"; ST_BRIEF="${ST_BRIEF#"$PV_REPO"/}"
+    if [ -n "$ST_TREE" ]; then
+      ST_WHERE="Your tree is $ST_TREE, branch $ST_BRANCH, made from $ST_BASE. Write code only there, and open every command with \`cd $ST_TREE || exit 1\`."
+    else
+      ST_WHERE="This row writes no tracked path and has no tree; work from the project root."
+    fi
+    if ! ST_CALL="$(jq -cn --arg n "$ST_NAME" --arg r "$ST_ROLE" --arg d "$ST_ID: $ST_TITLE" \
+         --arg p "$ST_BRIEF"$'\n'"Read the brief first, whole: it is your contract."$'\n'"Project root $PV_REPO. $ST_WHERE" \
+         '{name: $n, subagent_type: $r, description: $d, prompt: $p, run_in_background: true}' 2>/dev/null)"; then
+      die "REFUSED — the call cannot be printed (no jq on PATH); the birth, the brief and the tree stand. Install jq, then run: $ST_AGAIN"
+      exit 2
+    fi
+    say "start — dispatch: $ST_CALL"
+    if [ -n "$ST_BORN_NOW" ]; then
+      say "start — owed: add the task-list entry $ST_STEP/$ST_ID: $ST_TITLE at the end of the list, and mark it in progress."
+    else
+      say "start — owed: mark the task-list entry $ST_STEP/$ST_ID: $ST_TITLE in progress."
+    fi
     exit 0
   }
 
