@@ -448,7 +448,7 @@ ll_redsuite "$RM1" T1 b
 ll_verb "$RM1" T1
 KM1="$(ll_field "$(ll_ev "$RM1" candidate)" commit)"
 expect_eq "(r6e) a row amended to a b, b red on the candidate: ready exits 1, RED naming b" \
-  "1 RED T1 b.test.sh $RM1/.bionic/docs/record/wave-x/line/T1-b-${KM1:0:12}.log" "$LL_RC $LL_OUT"
+  "1 RED T1 b.test.sh $RM1/.bionic/docs/record/wave-x/line/T1-b-${KM1:0:12}.log" "$LL_RC $(printf '%s\n' "$LL_OUT" | head -1)"
 expect_eq "(r6e) …proved on the amended set, both suites run" "a.test.sh,b.test.sh a.test.sh:green b.test.sh:red" \
   "$(ll_field "$(ll_ev "$RM1" ready)" suites) $(ll_verdicts "$RM1")"
 expect_eq "(r6e) …and nothing is published" "$HM1" "$(ll_head "$RM1")"
@@ -686,7 +686,8 @@ ll_verb "$RX" T1
 KX="$(ll_field "$(ll_ev "$RX" candidate)" commit)"
 LX="$RX/.bionic/docs/record/wave-x/line/T1-a-${KX:0:12}.log"
 expect_eq "(x1) a red candidate: ready exits 1" "1" "$LL_RC"
-expect_eq "(x1) …printing RED, the suite and the log's path" "RED T1 a.test.sh $LX" "$LL_OUT"
+expect_eq "(x1) …printing RED, the suite and the log's path, then the command that reads the log" \
+  "RED T1 a.test.sh $LX"$'\n'"run: tail -n 40 $LX" "$LL_OUT"
 expect_contains "(x1) …a log that holds the failing line" "FAIL: a planted red" "$(cat "$LX" 2>/dev/null)"
 expect_eq "(x1) the branch's head is unchanged" "$HX" "$(ll_head "$RX")"
 expect_regex "(x2) the verdict is red on the candidate" "\\|commit=${KX}\\|suite=a.test.sh\\|result=red\\|log=${LX}\\|" "$(ll_ev "$RX" verdict)"
@@ -697,7 +698,8 @@ printf 'one\n' > "$RC1/T1.txt"; git -C "$RC1" add T1.txt; git -C "$RC1" commit -
 HC1="$(ll_head "$RC1")"
 ll_verb "$RC1" T1
 expect_eq "(x4) a conflict with the accepted head returns the row (exit 1)" "1" "$LL_RC"
-expect_eq "(x4) …printing CONFLICT and the files" "CONFLICT T1 T1.txt" "$LL_OUT"
+expect_eq "(x4) …printing CONFLICT and the files, then the merge that settles it in the tree" \
+  "CONFLICT T1 T1.txt"$'\n'"run: git -C $RC1/.worktrees/T1 merge $HC1" "$LL_OUT"
 expect_regex "(x4) …returned why=conflict" "^run/v1\\|ev=returned\\|row=T1\\|why=conflict\\|detail=T1.txt\\|" "$(ll_ev "$RC1" returned)"
 expect_eq "(x4) …nothing published" "$HC1" "$(ll_head "$RC1")"
 # THE USER'S ORDER: while one stands the line starts no suite and returns the entry with the user's words; lifted, the same ready runs it.
