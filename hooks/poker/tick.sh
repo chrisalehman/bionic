@@ -3058,8 +3058,14 @@ EOF
   #
   # WHAT THE TOKEN COVERS, A SUPERSET OF WHAT THE TICK READS: the project's git (the head, every ref, the status and the
   # tracked diff), each file of its state directory two deep but the tick's and the watcher's own (the digest, the
-  # running record, the watch record, the close's account), and its config, each by name, size and mtime to the
-  # nanosecond where the platform has it. The docs root is read by mtime alone, as it is the one tree too large to list
+  # running record, the told file, the watch record, the close's account), and its config, each by name, size and mtime
+  # to the nanosecond where the platform has it. THE TICK'S OWN FILES ARE NAMED, NOT FOUND: a file the tick writes in its
+  # first pass over a fresh state folder is not a change from outside, but a write by the tick and one by anyone else
+  # look the same in a shared directory (same session, same mtime window), so no rule over the files tells them apart,
+  # and a pass that took the token after the tick would absorb an outside write made while the tick ran. The error is
+  # kept on the safe side: a tick file left off the list moves the token and costs one tick; an input left off a list of
+  # inputs would leave a stale look. The guard is the suite's fresh-folder case, which reads a quiet first pass and a
+  # second that runs no tick over a fixture whose tick writes the told file. The docs root is read by mtime alone, as it is the one tree too large to list
   # on every pass; its folders count, so a file removed or moved in is newer too. Doubt runs the tick: a look that
   # cannot be read, a root that moved, a plan gone or a docs root not found keeps nothing.
   _watch_look_stat() {  # <find arguments> -> `<name>|<size>|<mtime>` of each file found
@@ -3075,7 +3081,7 @@ EOF
       git -C "$root" status --porcelain 2>&1
       git -C "$root" diff --no-ext-diff --no-color HEAD 2>&1
       [ ! -d "$root/.bionic/tmp" ] || _watch_look_stat "$root/.bionic/tmp" -maxdepth 2 -type f \
-        ! -name 'tick-digest-*' ! -name 'tick-run-*' ! -name 'watch-*' ! -name 'close-*'
+        ! -name 'tick-digest-*' ! -name 'tick-run-*' ! -name 'line-told-*' ! -name 'watch-*' ! -name 'close-*'
       _watch_look_stat "$root/.bionic" -maxdepth 1 -type f -name config.yaml
     } | LC_ALL=C sort | cksum | awk '{ print $1 "-" $2 }'
   }
