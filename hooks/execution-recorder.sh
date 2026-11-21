@@ -501,12 +501,18 @@ dispatch_event() {  # <confirmed roster row> -> 0 always; appends the launch's d
   case "$brief" in /*) abs="$brief" ;; *) abs="$BIONIC_ROOT/$brief" ;; esac
   case "$abs" in */briefs/*.md) ;; *) return 0 ;; esac
   [ -d "${abs%/briefs/*}" ] || return 0
+  # The criteria are summed as the plan reads them now, so a landing of this row can tell a criterion restated
+  # since from one that still reads as its writer was given it (lib/line.sh `_line_stale`).
   # shellcheck source=/dev/null
   ( . "$BIONIC_LIB/log.sh" >/dev/null 2>&1 && . "$BIONIC_LIB/reader.sh" >/dev/null 2>&1 || exit 0
     RUN_LOG="$(reader_log_in "${abs%/briefs/*}")"; [ ! -L "$RUN_LOG" ] || exit 0
+    plan="$(line_field "$r" plan)"; case "$plan" in ''|/*) ;; *) plan="$BIONIC_ROOT/$plan" ;; esac; crit=""
+    if [ -f "$plan" ] && . "$BIONIC_LIB/plan-read.sh" >/dev/null 2>&1; then
+      crit="$(plan_read_criterion_sums "$plan" | awk -F'\t' '{ printf "%s%s:%s", (NR > 1 ? "," : ""), $1, $2 }')"
+    fi
     log_append dispatch "row=$row" "name=$(line_field "$r" name)" \
       "role=$(line_field "$r" subagent_type)" "session=$BIONIC_SID" "tool_use_id=$(line_field "$r" tool_use_id)" \
-      "brief=$brief" "sum=$(line_field "$r" brief_sum)" ) >/dev/null 2>&1
+      "brief=$brief" "sum=$(line_field "$r" brief_sum)" ${crit:+"criteria=$crit"} ) >/dev/null 2>&1
   return 0
 }
 

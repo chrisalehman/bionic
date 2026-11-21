@@ -8,6 +8,9 @@
 #   §OPEN     with the approval at the head, the remote holds the working head, the stand-in's log one create against
 #             the integration branch, the run's log the pull request; the local integration branch is unmoved; at that
 #             head again nothing is pushed or opened; at a new approved head the branch is pushed and the request kept.
+#   §BODY     the request opens titled `<project> <release>: <the plan's title>`, its body the summary's three
+#             written sections then the four `pr-facts` prints, each count the reader's; a summary with an empty
+#             section, or a count the facts do not state, is refused before the push.
 #   §FAIL     with the remote unreachable, and with the stand-in exiting 1, publish exits non-zero and prints the cause,
 #             an ask waits on the person, the log holds no pull request and the sitrep does not read delivered.
 #   §STATE    `reader <plan> pr` answers nothing before the publish and the request after it; the stand-in answers a
@@ -50,6 +53,10 @@ awk 'NR == 1 { print; print "integration-branch: main"; next } { print }' "$PRR_
 # The working branch carries one commit past main, the row's work, so a merge has something to merge.
 printf 'rehearsal_landed() { return 0; }\n' > "$PRR_BASE/payload/scripts/lib/said.sh" \
   && git -C "$PRR_BASE" add -A && git -C "$PRR_BASE" commit --quiet -m "the row's work"
+
+# The orchestrator's three written sections, as Step 8 has it write them before the publish.
+printf '## Summary\n\nThe fixture'"'"'s one change.\n\n## What changed\n\n- said.sh answers.\n\n## Upgrade notes\n\nNone.\n' \
+  > "$PRR_BASE/.bionic/docs/record/wave-x/pr-summary.md"
 
 # prr_case <name> -> a copy of the fixture under WORLD_ROOT/<name>, its bare remote at <name>.git and its host in
 # <name>-host; sets R (the copy), B (the bare remote), HD (the host's directory), P (the plan), L (the run's log)
@@ -200,6 +207,58 @@ expect_eq "OP-7 at a new approved head publish exits 0, the remote holds the new
   "0|$OP_H2|1" "$DOOR_RC|$(git -C "$B" rev-parse --verify -q "refs/heads/$DOOR_BRANCH")|$(prr_gh_log | /usr/bin/grep -c '^pr create ' | tr -d ' ')"
 expect_contains "OP-7b …and the run's log holds the request at the new head, the same address" \
   "|ev=published|part=pr|url=$PRR_URL1|branch=$DOOR_BRANCH|commit=$OP_H2|base=main|by=publish|at=" "$(tail -1 "$L")"
+
+# ============================================================
+section "§BODY: the request is titled and its body is seven headings, the facts printed and the summary checked (AC-20.1, AC-20.2)"
+# ============================================================
+# fails-when: the body is commit subjects, a heading is missing or out of order, the title is not the project, the
+# release and the plan's title, a count under Testing, Review, Known limits or Decision records differs from the
+# reader's, or a summary with an empty section or a count the facts do not state is opened.
+prr_put() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && . "$1/line.sh" && "${@:2}"' _ "$PRR_LIB" "$1" "$P" "${@:2}"; }   # <writer> <field>=<value>…
+prr_capture() {  # -> the stand-in keeps the title and the body its create is handed, in gh.title and gh.body
+  mv "$HD/bin/gh" "$HD/bin/gh.real" && printf '%s\n' '#!/bin/bash' 'me="$(cd "$(dirname "$0")" && pwd -P)"; a=("$@")' \
+    'for i in "${!a[@]}"; do case "${a[i]}" in --title) printf "%s\n" "${a[i+1]}" > "$me/gh.title" ;; --body) printf "%s\n" "${a[i+1]}" > "$me/gh.body" ;; esac; done' \
+    'exec "$me/gh.real" "$@"' > "$HD/bin/gh" && chmod +x "$HD/bin/gh"
+}
+bd_part() { awk -v h="## $1" '$0 == h { on = 1; next } /^## / { on = 0 } on && /^- /' "$HD/bin/gh.body"; }   # <heading> -> its bullets
+prr_case body; prr_capture
+BD_H="$(prr_head)"; prr_approve "$BD_H"
+for s in a b; do prr_put line_verdict_event row=regression "commit=$BD_H" "suite=$s.test.sh" result=green kind=regression; done
+prr_put line_verdict_event row=regression "commit=$BD_H" suite=c.test.sh result=red kind=regression
+prr_put proof_event kind=task "head=$BD_H" evidence=record/wave-x/T1.md ac=AC-1.1 rc=0
+prr_put proof_event kind=review "head=$BD_H" evidence=record/wave-x/critic.md question=adversarial reader=r result=pass scope=whole
+prr_put proof_finding_event ref=record/wave-x/critic.md#1 severity=S3 reach=on to=deferred title=t "stated=The cap is not measured."
+mkdir -p "$R/.bionic/docs/adrs/epic-x"
+printf -- '---\nwave: wave-x\nstatus: accepted\n---\n# ADR-001 — the run'"'"'s own\n' > "$R/.bionic/docs/adrs/epic-x/adr-001-own.md"
+printf -- '---\nwave: wave-y\nstatus: accepted\n---\n# ADR-002 — another run'"'"'s\n' > "$R/.bionic/docs/adrs/epic-x/adr-002-other.md"
+BD_G="$(bash "$PRR_READER" "$P" verdicts regression | /usr/bin/grep "|commit=$BD_H|" | /usr/bin/grep -c '|result=green|' | tr -d ' ')"
+BD_RV="$(bash "$PRR_READER" "$P" reviews | /usr/bin/grep -c . | tr -d ' ')"
+expect_eq "BD-0 precondition: the reader holds 2 green suites of the head's regression, one review and AC-1.1 discharged" \
+  "2|1|state=discharged" "$BD_G|$BD_RV|$(bash "$PRR_READER" "$P" cell AC-1.1 | head -1)"
+door_run "$R" bash "$DOOR_POKER" pr-facts; BD_FACTS="$DOOR_OUT"
+expect_eq "BD-1 pr-facts exits 0 and prints the four fact sections, in order" "0|Testing|Review|Known limits|Decision records" \
+  "$DOOR_RC|$(printf '%s\n' "$BD_FACTS" | sed -n 's/^## //p' | paste -sd'|' -)"
+prr_publish
+expect_eq "BD-2 publish exits 0, its request titled <project> <release>: <the plan's title>" \
+  "0|body $DOOR_VERSION: door fixture plan (tests/lib/door.sh)" "$DOOR_RC|$(cat "$HD/bin/gh.title" 2>/dev/null)"
+[ "$DOOR_RC" = 0 ] || printf '%s\n' "$DOOR_OUT" | tail -5 | sed 's/^/    | /'
+expect_eq "BD-3 …its body the seven headings in order, no commit subject in it, and its tail what pr-facts printed" \
+  "Summary|What changed|Upgrade notes|Testing|Review|Known limits|Decision records|0|yes" \
+  "$(sed -n 's/^## //p' "$HD/bin/gh.body" | paste -sd'|' -)|$(/usr/bin/grep -c "the row's work" "$HD/bin/gh.body" | tr -d ' ')|$([ -n "$BD_FACTS" ] && [ "$(sed -n '/^## Testing$/,$p' "$HD/bin/gh.body")" = "$BD_FACTS" ] && echo yes)"
+expect_eq "BD-4 …Testing names the reader's green suites of 3 and its criteria, Review its one review" \
+  "yes|yes|1" "$(bd_part Testing | /usr/bin/grep -q "$BD_G of 3 suites green" && echo yes)|$(bd_part Testing | /usr/bin/grep -q '1 of 1 criteria discharged' && echo yes)|$(bd_part Review | /usr/bin/grep -c 'adversarial: pass' | tr -d ' ')"
+expect_eq "BD-5 …Known limits the deferral's sentence, Decision records the run's one ADR and not another run's" \
+  "- The cap is not measured.|1|0" "$(bd_part 'Known limits')|$(bd_part 'Decision records' | /usr/bin/grep -c 'ADR-001' | tr -d ' ')|$(bd_part 'Decision records' | /usr/bin/grep -c 'ADR-002' | tr -d ' ')"
+# A count the facts do not state, then an empty section: each refused before the push, nothing opened.
+prr_case body-wrong; BW_S="$R/.bionic/docs/record/wave-x/pr-summary.md"; prr_approve "$(prr_head)"
+printf '## Summary\n\nAll 137 of 137 suites green.\n\n## What changed\n\n- x\n\n## Upgrade notes\n\nNone.\n' > "$BW_S"
+prr_publish
+expect_eq "BD-6 a summary stating a count the facts do not is refused, naming it: exit 2, no push, no create, no request" \
+  "2|yes|main||0" "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q '137 of 137' && echo yes)|$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
+printf '## Summary\n\nThe change.\n\n## What changed\n\n## Upgrade notes\n\nNone.\n' > "$BW_S"
+prr_publish
+expect_eq "BD-7 a summary with an empty section is refused, naming it: exit 2, no push, no create, no request" \
+  "2|yes|main||0" "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q 'What changed' && echo yes)|$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
 
 # ============================================================
 section "§FAIL: a failed push or request exits non-zero with the cause and leaves an ask for the person"
