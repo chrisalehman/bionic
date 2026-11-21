@@ -376,9 +376,9 @@ for sp in .bionic/docs/record/wave-01-fixture/a.md record/wave-01-fixture/a.md; 
 done
 expect_eq "a record not yet written, spelled from the docs root, is under it" "$W/y.md" "$(dp record/wave-01-fixture/y.md)"
 joins() { ( cd "$1" && /usr/bin/grep -rnE 'docs_root[^|;]*\)/\$\{?[A-Za-z_]*(ARG|arg)' hooks payload/scripts | /usr/bin/grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//' ); }
-expect_eq "no code but the carried line.sh joins the docs root to an operand for itself" "hooks/poker/line.sh" "$(joins "$S")"
+expect_eq "no code but root.sh's resolver joins the docs root to an operand for itself" "" "$(joins "$S")"
 printf '%s\n' 'p="$(docs_root "$r")/$arg"' > "$L/planted-join.sh"
-expect_eq "a join planted beside it is found by its file" "hooks/poker/line.sh payload/scripts/lib/planted-join.sh" "$(joins "$S")"; rm -f "$L/planted-join.sh"
+expect_eq "a join planted beside it is found by its file" "payload/scripts/lib/planted-join.sh" "$(joins "$S")"; rm -f "$L/planted-join.sh"
 B="$(git -C "$R" commit -q --allow-empty -m init && git -C "$R" rev-parse HEAD)"
 P="$(s42_plan "$R" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${B:0:8}

@@ -1090,11 +1090,7 @@ poker_verb_known_limits_part() {
       exit 2
     fi
     if [ -n "$arg" ]; then
-      case "$arg" in
-        /*) plan="$arg" ;;
-        *)  plan="$REPO_REAL/$arg"
-            [ -f "$plan" ] || plan="$(docs_root "$REPO_REAL")/$arg" ;;
-      esac
+      plan="$(docs_path "$REPO_REAL" "$arg")"
       if [ ! -f "$plan" ] || [ -L "$plan" ]; then
         die "REFUSED — no plan file at $arg; name the plan whose landings the release describes."
         exit 2
