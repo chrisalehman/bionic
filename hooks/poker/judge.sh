@@ -317,6 +317,35 @@ advance_judge() {
     exit 0
   }
 
+  # judge_gate_hold <step>... -> _WG_HELD, ONE GATE PASS FOR EVERY STEP ASKED: lib/walls.sh `wall_gate_judge_steps` over
+  # each step of <step>... the advance asks the gate about (current_admit: a move below 8 to a step the run is not at),
+  # when there are two or more, so each step's own ask (plan_verb_dry, through wall_gate_judge) is answered from the one
+  # pass: its reads made once, its step's checks run per step. It is asked as plan_verb_dry asks the gate, with the same
+  # marker and the same libraries loaded in a subshell. With fewer steps, or a pass that cannot be run, nothing is held and
+  # each step is asked alone. A shell variable of this process, never exported, so no environment hands the gate an answer.
+  judge_gate_hold() {
+    local n steps=""
+    unset _WG_HELD
+    for n in "$@"; do
+      case "$n" in 8|8a|8b) continue ;; esac
+      [ "$PV_CUR" != "$n" ] || continue
+      case " $steps " in *" $n "*) continue ;; esac
+      steps="$steps $n"
+    done
+    # shellcheck disable=SC2086  # the steps are words the case above kept, split on purpose
+    set -- $steps
+    [ "$#" -ge 2 ] || return 0
+    [ -f "$BIONIC_LIB/walls.sh" ] && [ -n "$PV_MARK" ] && command -v jq >/dev/null 2>&1 || return 0
+    mkdir -p "${PV_MARK%/*}" 2>/dev/null
+    printf 'plan=%s\nengaged_at=%s\n' "$PV_PLAN" "$(iso_now)" > "$PV_MARK"
+    _WG_HELD="$( for _pv_l in context.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh fold.sh walls.sh; do
+                   # shellcheck source=/dev/null
+                   . "$BIONIC_LIB/$_pv_l" >/dev/null 2>&1 || exit 2
+                 done
+                 wall_gate_judge_steps "$PV_REPO" "$PV_SID" "git commit -m current" "$@" 2>/dev/null )" || _WG_HELD=""
+    rm -f "$PV_MARK"
+  }
+
   # THE JUDGE ASKED DIRECTLY. `judge <N>…` asks advance_judge for each step in turn, in this one process, and closes each
   # step's answer with `judged <N> exit <rc>` on stdout, so a caller that asks several steps at once reads each answer
   # as that step's checked advance prints it. It appends nothing; it exits 0 when every step would advance, else the
@@ -332,6 +361,7 @@ advance_judge() {
     fi
     # The fold is taken here, once, so every step's ask in a subshell below inherits it.
     ! declare -F _proof_facts >/dev/null 2>&1 || _proof_facts "$PV_PLAN" >/dev/null 2>&1 || :
+    judge_gate_hold "$@"
     for n in "$@"; do
       advance_judge "$n"; rc=$?
       say "judged $n exit $rc"

@@ -15,7 +15,13 @@
 #   status  lib/reader.sh reader_q_status   one row's status asked
 #           lib/reader.sh reader_q_statuses every row's status, in one pass
 #   facts   lib/proof.sh facts_state        the run's facts answered at a head
-#   gate    lib/walls.sh dispatch           one pass of the evidence gate's judging arms
+#   gate    lib/walls.sh dispatch           one pass of the evidence gate's judging arms: one step's checks
+#   pass    lib/walls.sh wall_evidence_gate one pass of the evidence gate, its reads and every step it judges
+#           lib/walls.sh wall_gate_judge_steps  one pass for several steps, each step's checks run in it
+#   matrix  lib/walls.sh matrix_load        a load of the criteria's cells, tasks and rows
+#   owing   lib/walls.sh matrix_owing_step  one criterion's owing step asked
+#           lib/walls.sh matrix_owing_open  one criterion's openness asked
+#           lib/walls.sh matrix_owing_load  every criterion's owing step and openness, in one pass
 #
 # THE FIXTURE. One run, built at two sizes: SC_N rows and twice that, each size's every row but the last a landed
 # Step-4 build and the last the integrate row, open. The plan is a version-15 wave at double rigor with
@@ -44,7 +50,7 @@
 #
 # ANTI-VACUITY (.claude/rules/test-harness.md, "Anti-vacuity"). The count extractor is proved on real output first:
 # §REPORTS reads every kind as non-zero somewhere before any later row reads a ceiling through `sc_count`, and every
-# command's lines are read whole against the nine known shapes. §PRINT compares only prints it has shown are not
+# command's lines are read whole against the fifteen known shapes. §PRINT compares only prints it has shown are not
 # empty. RED: with the counter lines taken out of the libraries, §REPORTS is red and §FIXTURE and §PRINT stay
 # green.
 #
@@ -78,7 +84,7 @@ SC_NOW=1791324000     # 2026-10-06T22:00:00Z
 SC_AT=2026-10-06T12:00:00Z
 SC_N=5
 SC_CMDS="card check tick resume watch"
-SC_KINDS="log fold overlay parse table status facts gate"
+SC_KINDS="log fold overlay parse table status facts gate pass matrix owing"
 SC_OUT="$TMPROOT/out"; mkdir -p "$SC_OUT"
 
 # ---------- the run ----------
@@ -241,7 +247,7 @@ for SC_SIZE in n 2n; do
   done
   for SC_C in $SC_CMDS; do
     expect_regex "REP-2 ($SC_SIZE) $SC_C counts its reads, each line a known kind and its function" \
-      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|gate dispatch)( |$))+$' \
+      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load)( |$))+$' \
       "$(sort "$SC_OUT/$SC_SIZE.$SC_C.on.count" 2>/dev/null | uniq -c | awk '{ $1 = $1; print }' | paste -sd' ' -)"
   done
 done
@@ -321,9 +327,93 @@ for SC_SIZE in n 2n; do
   expect_eq "SJ-2 ($SC_SIZE) each of the $SC_ROWS rows: the one answer is its own status ask (rows that differ:${SJ_DIFF:- none})" \
     "$SC_ROWS" "$SJ_SAME"
 done
+section "§GATE: one gate pass a command, whatever steps it judges"
+# fails-when: the judge asked for several steps runs a whole gate pass for each, or the gate's matrix arm loads the
+# criteria twice in one step's checks, or asks a criterion's owing step and openness once a criterion; then the reads a
+# pass shares are made again for each step, and the asks of the matrix grow with the criteria.
+for SC_SIZE in n 2n; do
+  for SC_C in $SC_CMDS; do
+    expect_eq "GATE-1 ($SC_SIZE) $SC_C makes one gate pass" 1 "$(sc_count "$SC_SIZE" "$SC_C" pass)"
+  done
+  # The card's judge asks Steps 6, 7 and 8 and the gate judges the first two (Step 8 is the facts judge's alone), so its
+  # one pass runs two steps' checks; the check asks one step.
+  expect_eq "GATE-2 ($SC_SIZE) card runs the checks of each of its two gated steps once, in its one pass" "1 2" \
+    "$(sc_count "$SC_SIZE" card pass) $(sc_count "$SC_SIZE" card gate)"
+  expect_eq "GATE-3 ($SC_SIZE) check loads the matrix once and asks every criterion's owing step and openness in one pass" "1 1" \
+    "$(sc_count "$SC_SIZE" check matrix) $(sc_count "$SC_SIZE" check owing)"
+done
+
+# THE PASS JUDGES EACH STEP AS A PASS OF ITS OWN WOULD. The judge asked for Steps 6, 7 and 8 at once prints, step by
+# step, what it prints asked for each alone, and exits with the highest exit of the three; each from a copy of the
+# snapshot, counters off. The fixture's gate refuses both steps, each for a fact of its own (Step 6 a criterion's
+# evidence, Step 7 its document), so a step judged at the other's step reads back another refusal.
+# fails-when: a step of the one pass is judged at another step, or its refusal, its notes or its exit is not the one a
+# pass of its own gives.
+sg_judge() {  # <size> <tag> <steps…> -> $SC_OUT/<size>.judge-<tag>.{out,err,rc}, from a fresh copy of the snapshot
+  local size="$1" tag="$2" f; shift 2
+  f="$SC_OUT/$size.judge-$tag"
+  rm -rf "$TMPROOT/$size/live" && cp -Rp "$TMPROOT/$size/snap" "$TMPROOT/$size/live" || return 1
+  SC_W="$TMPROOT/$size/live"; SC_ROOT="$SC_W/proj"
+  sc_env "$POKER" judge "$@" > "$f.out" 2> "$f.err"; printf '%s\n' "$?" > "$f.rc"
+}
+for SC_SIZE in n 2n; do
+  sg_judge "$SC_SIZE" all 6 7 8
+  for SC_S in 6 7 8; do sg_judge "$SC_SIZE" "$SC_S" "$SC_S"; done
+  SG="$SC_OUT/$SC_SIZE.judge"
+  expect_contains "GATE-4 ($SC_SIZE) the pass refuses Step 6 for its criterion (the reader proved)" \
+    "missing: step 6 — matrix row 'AC-1.1' (T2) is missing evidence key 'evidence'" "$(cat "$SG-all.err")"
+  expect_contains "GATE-4 ($SC_SIZE) the pass refuses Step 7 for its document (the reader proved)" \
+    "owed at 15: Step 7's document" "$(cat "$SG-all.err")"
+  expect_eq "GATE-4 ($SC_SIZE) the steps' prints, asked at once, are each step's asked alone" \
+    "$(cat "$SG-6.out" "$SG-7.out" "$SG-8.out")" "$(cat "$SG-all.out")"
+  expect_eq "GATE-4 ($SC_SIZE) the steps' refusals, asked at once, are each step's asked alone" \
+    "$(cat "$SG-6.err" "$SG-7.err" "$SG-8.err")" "$(cat "$SG-all.err")"
+  expect_eq "GATE-4 ($SC_SIZE) the exit asked at once is the highest of the steps' alone" \
+    "$(sort -n "$SG-6.rc" "$SG-7.rc" "$SG-8.rc" | tail -1)" "$(cat "$SG-all.rc")"
+done
+
+# A HELD ANSWER IS THE PASS'S OWN. The gate serves a step from the judge's pass only when the pass set it in this
+# process; an answer, or a held prelude, handed down by the environment is refused. The check of Step 7 is run once
+# plain and once with both exported, the answer forged for exactly this ask (`exec` keeps the pid the session is named
+# for), admitting it.
+# fails-when: an exported variable is read as the pass's answer or prelude, so the forged run prints another verdict.
+sg_forged() {  # <size> <tag> [forge] -> $SC_OUT/<size>.check7-<tag>.{out,err,rc}
+  local size="$1" f="$SC_OUT/$1.check7-$2" forge="${3:-}"
+  rm -rf "$TMPROOT/$size/live" && cp -Rp "$TMPROOT/$size/snap" "$TMPROOT/$size/live" || return 1
+  SC_W="$TMPROOT/$size/live"; SC_ROOT="$SC_W/proj"
+  # shellcheck disable=SC2016  # the script is the child shell's, expanded there
+  ( cd "$SC_ROOT" && exec env PATH="$SC_W/bin:$PATH" HOME="$SC_W/home" TMPDIR="$SC_W/tmp" CLAUDE_CODE_SESSION_ID="$SID" \
+      BIONIC_NOW_EPOCH="$SC_NOW" SG_FORGE="$forge" bash -c '
+        if [ -n "$SG_FORGE" ]; then
+          export _WG_HELD="$(printf "\036%s\035%s\035%s\035%s\037%s\037" "$(pwd -P)" "planverb-$$" "git commit -m current" 7 0)"
+          export _EG_PRELUDE_HELD=1
+        fi
+        exec bash "$1" current 7 --check' _ "$POKER" ) > "$f.out" 2> "$f.err"
+  printf '%s\n' "$?" > "$f.rc"
+}
+sg_forged n plain; sg_forged n forged forge
+expect_contains "GATE-5 the plain check of Step 7 refuses (the reader proved)" "current 7 --check: would refuse" "$(cat "$SC_OUT/n.check7-plain.err")"
+expect_eq "GATE-5 an answer and a prelude handed down by the environment move no verdict" \
+  "$(cat "$SC_OUT/n.check7-plain.out" "$SC_OUT/n.check7-plain.err" "$SC_OUT/n.check7-plain.rc")" \
+  "$(cat "$SC_OUT/n.check7-forged.out" "$SC_OUT/n.check7-forged.err" "$SC_OUT/n.check7-forged.rc")"
+
+# THE PASS'S TIME (SPEED_COUNTS_TIMES=<file>): the judge of Steps 6 and 7 at 2n, counters off, three runs, each run's
+# real seconds a line. A record's figure, beside the counts; nothing here asserts a clock.
+if [ -n "${SPEED_COUNTS_TIMES:-}" ]; then
+  : > "$SPEED_COUNTS_TIMES"
+  for SC_I in 1 2 3; do
+    rm -rf "$TMPROOT/2n/live" && cp -Rp "$TMPROOT/2n/snap" "$TMPROOT/2n/live"
+    SC_W="$TMPROOT/2n/live"; SC_ROOT="$SC_W/proj"
+    SC_T0="$(perl -MTime::HiRes=time -e 'printf "%.3f", time')"
+    sc_env "$POKER" judge 6 7 >/dev/null 2>&1
+    printf '2n judge 6 7 run %s %s s\n' "$SC_I" "$(perl -MTime::HiRes=time -e "printf '%.2f', time - $SC_T0")" >> "$SPEED_COUNTS_TIMES"
+  done
+fi
+
 # The prints the five commands made, for a record to compare across two runs of the suite (SPEED_COUNTS_PRINTS=<dir>).
 [ -z "${SPEED_COUNTS_PRINTS:-}" ] || { mkdir -p "$SPEED_COUNTS_PRINTS"
-  for SC_SIZE in n 2n; do for SC_C in $SC_CMDS; do sc_print "$SC_SIZE" "$SC_C" on > "$SPEED_COUNTS_PRINTS/$SC_SIZE.$SC_C.txt"; done; done; }
+  for SC_SIZE in n 2n; do for SC_C in $SC_CMDS; do sc_print "$SC_SIZE" "$SC_C" on > "$SPEED_COUNTS_PRINTS/$SC_SIZE.$SC_C.txt"; done; done
+  cp "$SC_OUT"/*.judge-* "$SPEED_COUNTS_PRINTS/" 2>/dev/null; }
 
 section "§WATCH-ONE: with the request open and nothing the tick reads changed, the watcher's pass asks the host one question"
 # fails-when: a pass over an unchanged run, the request open, runs the tick again (a gate pass, a fold of the log, a
