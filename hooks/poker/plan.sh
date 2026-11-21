@@ -1947,8 +1947,10 @@ RR_AGAINST_EOF
     # knows the check it passed was changed in it.
     RR_CHG=""
     line="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
+    # A judge the person's word set (RB_WORD) is named on the Tests line beside the reading it gave, and whose word it was.
     if [ -n "$line" ] && release_base "$PV_PLAN" "$PV_REPO" "$RR_HEAD"; then
       RR_CHG="$(_wt_check_judge "$PV_REPO" "$RB_BASE" "$RR_HEAD")" || RR_CHG=""
+      [ -z "$RR_TR" ] || [ -z "$RB_WORD" ] || RR_TR="$RR_TR · judged by ${RB_BASE:0:8}, set by $RB_WORD"
     fi
 
     # THE PAGE IS card.sh's (`release`), the renderer every card is drawn by; a page it refuses is never written.
@@ -2245,6 +2247,44 @@ RP_TABLE
       exit 2
     fi
     say "order — ${line#order: }, in the run's log of $plan; the plan is unchanged."
+    exit 0
+  }
+
+  # THE PERSON'S WORD MOVES THE JUDGE. `check-from '<their words>' [<commit>]` names the commit whose copy of the
+  # release check judges every landing and the release check after it (lib/worktree.sh `release_base`), in place of
+  # the release base. It is one approval of key `judge`, read back by the reader's `judge`: the commit (`head=`, the
+  # working head unless one is given), who typed the words (`by=`, the git user, and `session=`) and the words. The
+  # words are held to lib/said.sh `user_said`, as `accept` holds them, so no agent moves the judge alone. A commit the
+  # working head does not hold is refused: the judge is a commit that already stands on the working branch, which no
+  # later landing can have written.
+  poker_verb_check_from() {
+    local head jc who rc
+    plan_verb_value_ok "$CF_WORDS" || { die "REFUSED — the words are one field of the run's log, and they carry a line break, a tab or a '|'; nothing was written."; exit 1; }
+    plan_verb_open check-from
+    declare -F proof_approval_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1; }
+    declare -F user_said >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/said.sh" ] && . "$BIONIC_LIB/said.sh"; }
+    if ! declare -F proof_approval_event >/dev/null 2>&1 || ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — lib/proof.sh or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written."
+      exit 2
+    fi
+    head="$(proof_branch_head "$PV_PLAN" "$PV_REPO" 2>/dev/null)" || head=""
+    jc="$head"; [ -z "$CF_AT" ] || jc="$(git -C "$PV_REPO" rev-parse --verify -q "${CF_AT}^{commit}" 2>/dev/null)" || jc=""
+    if [ -z "$head" ] || [ -z "$jc" ] || ! git -C "$PV_REPO" merge-base --is-ancestor "$jc" "$head" 2>/dev/null; then
+      die "REFUSED — ${CF_AT:-the working head} is no commit the working head ${head:-<none: the plan names no working-branch head>} holds, and the judge is a commit that stands on the working branch; nothing was written."
+      exit 1
+    fi
+    who="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
+    if [ -z "$who" ] || ! plan_verb_value_ok "$who"; then
+      die "REFUSED — the project has no usable git user name to record as the one whose word moved the judge; nothing was written. Fix: git config user.name '<name>'."
+      exit 1
+    fi
+    user_said "$CF_WORDS" "$PV_PLAN"; rc=$?
+    [ "$rc" -eq 0 ] || { said_refuse "$rc" "$(said_fold "$CF_WORDS")" "moving the judge"; exit 1; }
+    if ! proof_approval_event "$PV_PLAN" judge "by=$who" "head=$jc" "said=$(said_fold "$CF_WORDS")" "session=$SAID_SESSION"; then
+      die "REFUSED — the judge event could not be appended to the run's log of $PV_PLAN; the judge is unchanged. run again: session-poker.sh check-from '<their words>'"
+      exit 2
+    fi
+    say "check-from — the release check is judged by ${jc:0:12}'s copy from now on, on the word of $who in session $SAID_SESSION, appended to the run's log of $PV_PLAN."
     exit 0
   }
 

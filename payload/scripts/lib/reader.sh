@@ -504,6 +504,16 @@ reader_q_pr() {  # <plan> -> the newest request's fields as key=value lines, `ev
     END { if (l == "") exit 1; n = split(l, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|part)=/) print p[i] }'
 }
 
+# THE JUDGE THE PERSON NAMED is an approval of its own key, `key=judge`, written by `check-from` on words they typed: the
+# commit whose copy of the release check judges what lands after it (`head=`), and who typed them (`by=`, `said=`,
+# `session=`). The approval's identity is its key, so the newest word stands and replaces every earlier one.
+reader_question judge value reader_q_judge
+reader_q_judge() {  # <plan> -> the standing judge's fields as key=value lines, `ev=` and `key=` dropped; nothing, 1, for none
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+    ev() == "approval" && line_kv("key") == "judge" { l = $0 }
+    END { if (l == "") exit 1; n = split(l, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|key)=/) print p[i] }'
+}
+
 reader_question handoff value reader_q_handoff
 reader_q_handoff() {  # <plan> -> the latest handoff: path= and at=
   _reader_last "$1" handoff
