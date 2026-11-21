@@ -2200,19 +2200,24 @@ _line_load_plan_read() {
   declare -F plan_read_criterion_sums >/dev/null 2>&1
 }
 _line_stale() {  # <plan> <row> <root> <base> <candidate> -> `<criterion><TAB><what it deletes>` per criterion held; 0 none · 1 held · 2 unreadable
-  local plan="$1" row="$2" root="$3" base="$4" cand="$5" logd crit diff hits out="" k c p w
-  logd="$(line_lines "$(line_log "$plan")" | awk -F'|' -v r="row=$row" '
-    $2 == "ev=dispatch" { m = 0; s = ""; for (i = 3; i <= NF; i++) { if ($i == r) m = 1; if (index($i, "criteria=") == 1) s = substr($i, 10) }; if (m) rec = s }
-    $2 == "ev=waiver" { for (i = 3; i <= NF; i++) if (index($i, "ac=") == 1) print "X\t" substr($i, 4) }
-    END { print "R\t" rec }')"
-  case "$logd" in *"R	") return 0 ;; esac
+  # The run's facts are the reader's: the sums are the row's dispatch contract as `status` answers it, and a criterion
+  # is waived while a waiver is what discharges it (`reader_cells`, the cell question's one fold). The landing decides,
+  # so the facts are folded from the log, never served from the kept file.
+  local plan="$1" row="$2" root="$3" base="$4" cand="$5" _PROOF_FRESH=1 rec rc cells crit diff hits out="" k c p w
+  _line_load_proof || { printf 'proof-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
+  rec="$(_proof_ask "$plan" reader_q_status "$plan" "$row")"; rc=$?
+  case $rc in 0) ;; 1) return 0 ;; *) printf 'log-unreadable plan=%s\n' "$plan"; return 2 ;; esac
+  rec="$(printf '%s\n' "$rec" | sed -n 's/^criteria=//p')"
+  [ -n "$rec" ] || return 0
   _line_load_plan_read || { printf 'plan-read-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
   crit="$(plan_read_criterion_sums "$plan" eval)"
   case $? in 0) ;; 1) return 0 ;; *) printf 'plan-unreadable plan=%s\n' "$plan"; return 2 ;; esac
+  cells="$(_proof_ask "$plan" reader_cells "$plan")" || { printf 'log-unreadable plan=%s\n' "$plan"; return 2; }
   diff="$(git -C "$root" -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --no-renames \
     --src-prefix=a/ --dst-prefix=b/ "$base" "$cand" 2>&1)" \
     || { printf 'diff-unreadable base=%s candidate=%s — %s\n' "$base" "$cand" "$(printf '%s\n' "$diff" | head -1)"; return 2; }
-  hits="$({ printf '%s\n' "$logd"; printf '%s\n' "$crit" | sed 's/^/C	/'; printf 'D\n%s\n' "$diff"; } \
+  hits="$({ printf 'R\t%s\n' "$rec"; printf '%s\n' "$cells" | awk -F'\037' '$3 == "waiver" { print "X\t" $1 }'
+            printf '%s\n' "$crit" | sed 's/^/C	/'; printf 'D\n%s\n' "$diff"; } \
     | LC_ALL=C awk -F'\t' "$_LINE_CITES_AWK")"
   [ -n "$hits" ] || return 0
   while IFS=$'\t' read -r k c p w; do
