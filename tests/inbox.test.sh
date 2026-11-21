@@ -376,9 +376,13 @@ expect_eq "(x4) AC-12.1 the writer acknowledges it under the adopting session (e
 expect_regex "(x5) AC-12.1 the adopting session lists it, shown" "shown=[0-9]+ by=ack" "$(in_state "$W" wx-T2 "$X_ID")"
 expect_contains "(x5) …and lists the old roster's, unread" "unread" "$(in_state "$W" wx-T2 r-legacy-1)"
 
-in_poker "$W" rule wx-T2 'recorded after the clear'
+FLAG_A="$W/.bionic/tmp/ruling-pending-$SID_A.state"
+IN_SID="$SID_A"; in_push "$W" b00T2 toolu_y_0
+expect_false "(y0) a call under the old session's key settles its flag: nothing it reads is pending" test -e "$FLAG_A"
+IN_SID="$SID_B"; in_poker "$W" rule wx-T2 'recorded after the clear'
 Y_ID="$(in_rid "$IN_OUT")"
 expect_nonempty "(y0) the adopting session records a ruling for wx-T2" "$Y_ID"
+expect_true "(y0) …which raises the old session's flag too" test -e "$FLAG_A"
 IN_SID="$SID_A"
 in_push "$W" b00T2 toolu_y_1
 expect_contains "(y1) AC-12.2 it rides the writer's next tool result under the old session's key" "bionic ruling $Y_ID " "$(in_ctx "$IN_OUT")"
