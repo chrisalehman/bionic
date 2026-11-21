@@ -997,6 +997,11 @@ _wt_check_judge() {  # <repo dir> <base> <head> -> <path>[,<path>]
 # declared check is run as (`worktree_check_run`), so all of them name one commit. Its readers, lib/plan.sh
 # `plan_integration_branch` and lib/proof.sh `proof_plan_base`, are loaded on first use, so a caller that never asks
 # for the judge keeps its own load order.
+# THE PERSON'S WORD MOVES IT. The run's standing judge event (the reader's `judge`, written by `check-from` on words
+# the person typed) names a commit; read first, it is RB_BASE when that commit is a proper ancestor of <head>, and
+# RB_FROM then names it, the words and who typed them, RB_WORD the last two alone. The judge is still never a commit
+# the landing it judges wrote: the word was given at a head that landing's candidate only descends from. RB_RELEASE is
+# the release base the tags and base-sha give, whatever the judge is, for a reader that counts from the release.
 _wt_judge_load() {  # -> 0 once the plan's integration branch and base readers are defined
   local d
   declare -F plan_integration_branch >/dev/null 2>&1 && declare -F proof_plan_base >/dev/null 2>&1 && return 0
@@ -1010,9 +1015,10 @@ _wt_judge_load() {  # -> 0 once the plan's integration branch and base readers a
   declare -F plan_integration_branch >/dev/null 2>&1 && declare -F proof_plan_base >/dev/null 2>&1
 }
 release_base() {  # <plan> <checkout> <head>
-  local plan="$1" co="$2" head="$3" t tc tn best=""
-  RB_BASE=""; RB_FROM=""; RB_BS=""; RB_IB=""
+  local plan="$1" co="$2" head="$3" t tc tn best="" jw
+  RB_BASE=""; RB_FROM=""; RB_BS=""; RB_IB=""; RB_RELEASE=""; RB_WORD=""
   _wt_judge_load || return 1
+  jw="$(_wt_reader_load && reader_main "$plan" judge 2>/dev/null)" || jw=""
   RB_IB="$(plan_integration_branch "$plan")"
   if [ -n "$RB_IB" ]; then
     while IFS= read -r t; do
@@ -1033,6 +1039,13 @@ RB_TAGS
     [ -z "$RB_BS" ] || RB_BASE="$(git -C "$co" rev-parse --verify -q "$RB_BS^{commit}" 2>/dev/null)"
     RB_FROM="base-sha $RB_BS"
   fi
+  RB_RELEASE="$RB_BASE"
+  tc="$(printf '%s\n' "$jw" | sed -n 's/^head=//p')"
+  case "$tc" in *[!0-9a-f]*) tc="" ;; esac
+  if [ -n "$tc" ] && [ "$tc" != "$head" ] && git -C "$co" merge-base --is-ancestor "$tc" "$head" 2>/dev/null; then
+    RB_WORD="$(printf '%s\n' "$jw" | sed -n 's/^by=//p')'s word \"$(printf '%s\n' "$jw" | sed -n 's/^said=//p')\""
+    RB_BASE="$tc"; RB_FROM="the judge ${tc:0:12}, set by ${RB_WORD}"
+  fi
   [ -n "$RB_BASE" ]
 }
 
@@ -1045,18 +1058,21 @@ RB_TAGS
 # blanks with globbing off, an absolute word under <root> read as the same path inside that tree, so a declaration
 # that names the main checkout's file still runs the judge's. The tree holds no plan, so BIONIC_CHECK_PROJECT names
 # <root>, where the check reads the plan, the record and the renderer's plan; BIONIC_CHECK_BASE and _HEAD are the
-# range, BIONIC_CHECK_TREE <tree> (the tree itself when none is given), BIONIC_CHECK_BRANCH <branch> when given.
+# range, BIONIC_CHECK_TREE <tree> (the tree itself when none is given), BIONIC_CHECK_BRANCH <branch> when given, and
+# BIONIC_CHECK_RELEASE the release base `release_base` finds (RB_RELEASE) whatever the judge is, so a check that counts
+# from the release counts from the tag, never from a judge the person moved past it.
 # Sets WT_CHECK_CMD, WT_CHECK_OUT (stdout and stderr), WT_CHECK_RC, WT_CHECK_JUDGE, WT_CHECK_FROM, WT_CHECK_DIR (the
 # tree it ran in) and WT_CHECK_LEFT (`_wt_check_left` over that tree and <tree>, when <tree> is given).
 worktree_check_run() {  # <root> <plan> <judge> <base> <head> [<tree>] [<branch>] -> 0 ran · 1 none declared · 2 not run
-  local root="$1" plan="$2" judge="$3" base="$4" head="$5" tree="${6:-}" branch="${7:-}" lt rp
+  local root="$1" plan="$2" judge="$3" base="$4" head="$5" tree="${6:-}" branch="${7:-}" lt rp rel=""
   WT_CHECK_OUT=""; WT_CHECK_RC=0; WT_CHECK_JUDGE=""; WT_CHECK_FROM=""; WT_CHECK_DIR=""; WT_CHECK_LEFT=""
   WT_CHECK_CMD="$(config_value "$root" release-check "" 2>/dev/null)"
   [ -n "$WT_CHECK_CMD" ] || return 1
   if [ -n "$judge" ]; then
     WT_CHECK_FROM="named by the caller"
+    ! release_base "$plan" "$root" "$head" || rel="$RB_RELEASE"
   elif release_base "$plan" "$root" "$head"; then
-    judge="$RB_BASE"; WT_CHECK_FROM="$RB_FROM"
+    judge="$RB_BASE"; WT_CHECK_FROM="$RB_FROM"; rel="$RB_RELEASE"
   else
     judge="$base"; WT_CHECK_FROM="the range's base: the plan names no tag and no base-sha"
   fi
@@ -1080,6 +1096,7 @@ worktree_check_run() {  # <root> <plan> <judge> <base> <head> [<tree>] [<branch>
       set -- "$@" "$w"
     done
     export BIONIC_CHECK_PROJECT="$root" BIONIC_CHECK_BASE="$base" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="${tree:-$lt}"
+    [ -z "$rel" ] || export BIONIC_CHECK_RELEASE="$rel"
     [ -z "$branch" ] || export BIONIC_CHECK_BRANCH="$branch"
     exec "$@" </dev/null 2>&1)"; WT_CHECK_RC=$?
   [ -z "$tree" ] || WT_CHECK_LEFT="$(_wt_check_left "$lt" "$WT_CHECK_JUDGE" "$tree")"
@@ -1102,7 +1119,7 @@ _wt_release_check() {  # <root> <plan> <base> <head> <writer tree> <branch> <ont
   left="$WT_CHECK_LEFT"; judged="judged-by=${WT_CHECK_JUDGE:0:12}"
   if [ "$WT_CHECK_RC" -ne 0 ]; then
     [ -z "$WT_CHECK_OUT" ] || printf '%s\n' "$WT_CHECK_OUT" >&2
-    _wt_refuse "check-failed why=release-check rc=${WT_CHECK_RC} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} ${judged} — the project's declared release-check (${WT_CHECK_CMD}), run as the release base ${WT_CHECK_JUDGE:0:12} holds it (${WT_CHECK_FROM}), fails over this landing's range${left:+ and left changes, named before judged-by}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
+    _wt_refuse "check-failed why=release-check rc=${WT_CHECK_RC} branch=${branch} base=${onto_head} head=${head}${left:+ ${left}} ${judged} — the project's declared release-check (${WT_CHECK_CMD}), run as the judge ${WT_CHECK_JUDGE:0:12} holds it (${WT_CHECK_FROM}), fails over this landing's range${left:+ and left changes, named before judged-by}; fix what it names on ${branch}${left:+, put back what it changed}, re-run its suites, land again"; return 2
   fi
   if [ -n "$left" ]; then
     # WHAT THE CHECK LEFT: the judge's tree off the judge or changed, or the piece's checkout changed. A check that

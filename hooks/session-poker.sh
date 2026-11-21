@@ -26,6 +26,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order event with the words in the bound run's log (record/orders.log with no run bound)
 #     bash <plugin-root>/hooks/session-poker.sh accept '<their words>' | abandon '<their words>'   the person's word on a run changed around the tool: sealed again as it stands, or ended (writes the run's log and its seal)
+#     bash <plugin-root>/hooks/session-poker.sh check-from '<their words>' [<commit>]   the person's word that the commit judges the release check from now on (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh waive <question|all|AC-id> '<reply>'   the user's waiver of a review question, all three, or a criterion (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh regression-run   run the project's regression (its regression-command:, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add regression (writes a log under record/, never the plan)
@@ -309,6 +310,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>' ['<why>']   record the user's approval <name> as one approval in the run's log: a name a row reads, plan at Step 3, or a T4 criterion the user confirms on words they typed"
   die "  bash ${HOOK_DIR}/session-poker.sh accept '<their words>'   the person's word that the run, changed around the tool, is theirs as it stands: one approval line naming the words and the change, then the run sealed again"
   die "  bash ${HOOK_DIR}/session-poker.sh abandon '<their words>'   the person's word that the bound run ends: one abandon line naming the words, and its seal removed"
+  die "  bash ${HOOK_DIR}/session-poker.sh check-from '<their words>' [<commit>]   the person's word that the commit, the working head unless named, judges every landing and release check after it: one approval of key judge in the run's log, naming the words and who typed them"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh publish   the bound run's pull request, on the release approval at the working head and nothing else: the working branch pushed to origin and the request opened against the integration branch through gh, recorded as a published event of part pr; at a head already published it does nothing, at a new head it pushes and keeps the request; a failed push or request exits 4 with the cause and opens an ask for the user"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
@@ -665,6 +667,11 @@ case "$VERB" in
   accept|abandon)
     [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ] || usage "$VERB takes one argument: the person's words, quoted, as they typed them."
     SW_WORDS="$1"
+    ;;
+  # THE PERSON'S WORD MOVES THE JUDGE: their words as typed, then optionally the commit, the working head when none.
+  check-from)
+    [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "${1//[[:space:]]/}" ] || usage "check-from takes the person's words, quoted, as they typed them, and optionally a commit the working head holds."
+    CF_WORDS="$1"; CF_AT="${2:-}"
     ;;
   # THE USER'S ORDER. One operand: the user's words, which must hold something once blanks are gone,
   # or the word lift, which ends the open order.
@@ -2442,6 +2449,7 @@ case "$VERB" in
   release-approval) poker_verb_release_approval "$@" ;;
   approve) poker_verb_approve "$@" ;;
   accept) poker_verb_accept ;;
+  check-from) poker_verb_check_from ;;
   abandon) poker_verb_abandon ;;
   order) poker_verb_order "$@" ;;
   proof-add) poker_verb_proof_add "$@" ;;

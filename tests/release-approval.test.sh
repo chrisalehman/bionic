@@ -1279,4 +1279,22 @@ expect_eq "GR-3 with the Requirement cells written (three) the same plan renders
   "$RC|$FC_GR_N|$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_under Goals | sed 's/^[^ ]* //' | paste -sd'|' -)"
 rm -f "$FC_GR_REQ"
 
+# ============================================================
+section "§JUDGE: the card's Tests line names the judge and whose word set it"
+# ============================================================
+# A judge event at C, the person's word that C's copy of the check judges what lands after it. fails-when: the line
+# names no judge, or not whose word set it.
+printf 'release-check: bash tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
+rt_log "$FC_R" "test-ratio: 1/2"
+rt_plan "$FC_R"
+fc_page
+expect_eq "JW-0 with no word the line is the check's alone" "test-ratio: 1/2" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^test-ratio: ')"
+fc_plan "$FC_GOOD
+$(fc_line check "$FC_R" 2026-10-12T14:00:00Z "record/wave-x/release-check-$FC_R.log")
+run/v1|ev=approval|key=judge|by=Dana Fixture|head=$FC_C|said=the new check judges from here|session=$SID|at=2026-10-12T13:30:00Z"
+fc_page
+expect_contains "JW-1 with one, the Tests line names the judge and whose word set it" \
+  "· judged by ${FC_C:0:8}, set by Dana Fixture's word \"the new check judges from here\"" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^test-ratio: ')"
+rm -f "$RFC/.bionic/config.yaml" "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
+
 finish
