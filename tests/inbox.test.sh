@@ -354,7 +354,7 @@ expect_eq "(rt3) ready's refusal names the same root" "$RT_WANT" "$(in_root "$G_
 # ─────────────────────────────────────────────────────────────────────────────
 section "§CLEAR: a ruling crosses a /clear in both orders, and one a roster held still reaches its writer (AC-12.1, AC-12.2)"
 
-# The clear is the fleet's: a new session bound to the same plan runs the real `adopt`, which carries wx-T2's row to
+# The clear is the fleet's: a new session bound to the same plan runs the real `adopt`, which carries the writer's row to
 # its own roster under the same agent id. A ruling the old roster held as a line, as the writer before this change
 # kept it, is planted there first. Whichever session the writer's hooks key is driven: the old one (A) and the
 # adopting one (B).
