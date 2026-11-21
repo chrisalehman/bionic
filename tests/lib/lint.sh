@@ -412,7 +412,7 @@ body_keys() {
 # header_refusals <tests dir> -> one line per suite whose header lists a section its body lacks, or whose body has a
 # section its header does not list, naming the suite and both differences. A header that lists none makes no claim.
 header_refusals() {
-  local f s calls hdr bdy only_h only_b out
+  local f s calls only_h only_b out
   calls="$(census_calls "$1")"
   for f in "$1"/*.test.sh; do
     [ -f "$f" ] || continue
