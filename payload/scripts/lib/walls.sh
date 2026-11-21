@@ -4154,6 +4154,7 @@ validate_merge_target() {
 INTEGRATE_STEP=8
 
 dispatch() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'gate dispatch\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
   # that reaches this dispatcher (guarded internally; no-op otherwise).
   validate_dispatch_ledger
