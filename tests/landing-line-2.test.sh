@@ -287,6 +287,8 @@ expect_contains "(ct3-pre) T2's red fails at the head too: published" "LANDED T2
 expect_contains "(ct3) AC-5.1 the standing red's cause reads only the runs it can place: code, no run named" \
   "|cause=code|against=-|" "$(ll_ev "$RT" standing)"
 expect_absent "(ct3b) …and no STANDING report" "STANDING " "$LL_OUT"
+# The landing removed T2's tree; the rows below need a writer's tree at that path, so its branch is checked out there again.
+git -C "$RT" worktree add -q "$RT/.worktrees/T2" wt/T2
 # The positive on the same extractor, same world: the shim handed no --unplaced stamps where it stands,
 # the main checkout (now at the landed head), and that run is a green record there (the wrap 1.17.0 sent).
 printf '#!/bin/bash\necho "PASS: a ran dirty"\necho; echo "a.test.sh: 1/1 passed, 0 failed  sections=1 setup=0"\n' > "$RT/.worktrees/T2/tests/a.test.sh"
