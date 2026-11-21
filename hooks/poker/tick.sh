@@ -3111,7 +3111,8 @@ EOF
   # nothing. The merge's one reader is asked with its fetch (lib/line.sh `line_merge_seen --fetch`), which also keeps the
   # person's ask on a request closed unmerged; anything but merged is no act: an open request, a closed one (its ask is
   # open now, and the next pass rests on it), and a read that failed, which the next pass reads again. Merged, and with no
-  # row of the run out (`watch_rows_out`), the run is closed by close-out's own `run`, which reads the merge again and lands the integrate row at it, and close-out's
+  # row of the run out (`watch_rows_out`), the run is closed by close-out's own `run`, which reads the merge again and
+  # lands the integrate row at it, and close-out's
   # account is kept at .bionic/tmp/close-<session, first 8>.out for the woken turn, whose acts it names.
   # A CLOSE THAT HOLDS IS TOLD ONCE: the account's first line is the hold's key (the merge, the exit, the refusal's last
   # line), and a pass that meets the same hold again stays quiet, so a hold nobody has mended starts no turn after each

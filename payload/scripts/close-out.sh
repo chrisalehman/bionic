@@ -2373,7 +2373,8 @@ do_check() {
 
 do_run() {
   # NOTHING IS TOUCHED UNTIL ALL TEN OF THESE PASS, in this order: the step `run` closes, nobody out on a row of the
-  # run (co_rows_out), the deploy the plan owes (co_deploy_judge), the presence check (a `| wave |` table, a release with no `|`), every debt line the
+  # run (co_rows_out), the deploy the plan owes (co_deploy_judge), the presence check (a `| wave |` table, a release
+  # with no `|`), every debt line the
   # continuation carries parsing (co_debt_refusal), this session bound to the plan when it has rows the merge lands
   # (co_lands_refusal), the merge verdict (act 1 is a readback and touches nothing), the branch census, the facts the
   # run owes (`facts_judge`), and the gate's answer about the plan `run` will write. Any refusal leaves every branch,

@@ -387,8 +387,8 @@ expect_eq "LANDS-10 a close-out refused after act 3 (the continuation could not 
   "2|yes|yes" \
   "$CO_RC|$(contains "$CO_OUT" "could not append the deferrals")|$(tmp_file_exists "$PLC" engaged "$LA_SID")"
 chmod 644 "$PLC/$CONT_REL"
-# REQ-8 (AC-8.3): the close typed by hand with a writer live on the close row refuses, and lands nothing. The writer is a
-# roster row of this session dispatched for T4 under this plan, launched a minute ago, as the dispatch wall writes it.
+# The close typed by hand lands no row a writer holds: with a writer live on the close row it refuses, and lands
+# nothing, because a row landed mid-work reads finished while its writer still writes it. The writer is a roster row of this session dispatched for T4 under this plan, launched a minute ago, as the dispatch wall writes it.
 # fails-when: a landing is written for that row.
 lands_writer() {  # <project> <sid> <row> -> a live writer for <row> on <sid>'s roster, under the project's plan
   roster_row_fixture session="$2" name="w-$3" row="$3" agent_id="a$3-live" plan="$1/$PLAN_REL" duration="4 hours" \
@@ -407,7 +407,7 @@ expect_contains "LANDS-11c …nothing was done" "nothing was done" "$CO_OUT"
 : > "$PLO/.bionic/tmp/roster-$LA_SID.state"
 run_close_as "$LA_SID" "$PLO" run
 expect_eq "LANDS-11d …and with the writer gone, run lands both rows" "0|landed|landed" "$CO_RC|$(lands_state "$PLO" T3)|$(lands_state "$PLO" T4)"
-# REQ-8: the continuation has one writer. A close row that was dispatched and whose Files name the continuation owns
+# The continuation has one writer. A close row that was dispatched and whose Files name the continuation owns
 # it, so the close writes none of it; the writer's file stands byte for byte.
 # fails-when: the close appends to the continuation the close row's writer wrote.
 PLW="$(mk_fixture lands-writes)"; advance_to "$PLW" 8; lands_rows "$PLW"
