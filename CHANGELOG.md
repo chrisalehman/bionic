@@ -316,10 +316,10 @@ evict a live run's fold and cost the next commit wall about 3 seconds more.
 
 ### The landing numbers
 
-`landing-report --rows` at 79b043e74f312ebbee15aff75e5d4a9e118c9763 on 2026-11-20T20:06:42Z:
+`landing-report --rows` at 75643b7526e84830b9853d6d5f79053db011bd4c on 2026-11-21T05:29:20Z:
 
 ```
-landings: queue=57 hand=0 git=0 · ready-to-landed median=6.7m p75=15.6m max=151.0m · runs: green=147 red=2 none=0 discarded=2 red-then-green=0 run=822 reused=0 absent=0 · waited median=136s · killed=0
+landings: queue=58 hand=0 git=0 · ready-to-landed median=6.6m p75=14.6m max=151.0m · runs: green=148 red=2 none=0 discarded=2 red-then-green=0 run=824 reused=0 absent=0 · waited median=130s · killed=0
 T3 queue ready=2026-11-19T03:25:23Z landed=2026-11-19T03:25:41Z minutes=0.3 runs=1 waited=8s wait=0.1 prove=0.2 rework=0.0 width=2
   run-seal.test.sh green promised=8s actual=10s ratio=1.25
 T35 queue ready=2026-11-19T03:35:15Z landed=2026-11-19T03:37:26Z minutes=2.2 runs=2 waited=8s wait=0.1 prove=2.0 rework=0.0 width=2
@@ -528,6 +528,8 @@ T71 queue ready=2026-11-20T10:13:10Z landed=2026-11-20T10:16:13Z minutes=3.0 run
   run-seal.test.sh green promised=165s actual=162s ratio=0.98
 T70 queue ready=2026-11-20T10:28:39Z landed=2026-11-20T10:31:05Z minutes=2.4 runs=1 waited=20s wait=0.3 prove=0.4 rework=1.7 width=2
   runner-roster.test.sh green promised=21s actual=23s ratio=1.10
+T50 queue ready=2026-11-20T20:19:44Z landed=2026-11-20T20:21:11Z minutes=1.4 runs=1 waited=15s wait=0.2 prove=1.2 rework=0.0 width=2
+  release-check.test.sh green promised=60s actual=71s ratio=1.18
 ```
 
 ## 2.0.0 — 2026-11-16

@@ -49,6 +49,9 @@
 #                   and moved lines, cut from the closed plan as finding events into tests/fixtures/release-check/: a
 #                   deferral the person later moved to fixed is not held, every other deferred sentence stands under
 #                   Known limits and the check passes; with its Known limits removed it fails one line for each.
+#   §JUDGE          the person's word moves the judge: `check-from` refuses words no prompt holds and a commit the
+#                   working head does not hold; on their words a later landing that rewrites the check is run by the
+#                   judge's copy, and its line names the judge, the words and who typed them.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -782,5 +785,36 @@ run_check "$R"
 expect_status "(n4) the same entry with its Known limits removed: the check fails" 1 "$RC"
 expect_eq "(n4) …one line for each deferred sentence" "$REL_N" "$(lines_of "$OUT")"
 expect_contains "(n4) …naming a finding" "omit the deferred sentence of record/" "$OUT"
+
+section "§JUDGE — the person's typed word moves the judge: a later landing is run by that commit's copy and names the word"
+
+# The release approval card's world: a run bound to this session, typed prompts in its transcript, its base-sha the
+# release base. The check is declared as ck.sh, which the base does not hold; the judge J commits a copy that says so
+# and fails, and a piece on J rewrites it to pass. The door's run of the check is driven as `line_publish` drives it.
+. "$(dirname "$0")/release-approval.prelude.sh"
+trap 'cleanup; rm -rf "$TMP"' EXIT
+fc_plan "$FC_GOOD"
+printf 'release-check: bash ck.sh\n' > "$RFC/.bionic/config.yaml"
+JG_J="$(cd "$RFC" && printf 'echo judge-copy; exit 1\n' > ck.sh && git add ck.sh && git commit -qm 'the new check' && git rev-parse HEAD)"
+git -C "$RFC" worktree add -q -b piece "$TMPROOT/jg-piece" "$JG_J" && printf 'exit 0\n' > "$TMPROOT/jg-piece/ck.sh"
+JG_P="$(cd "$TMPROOT/jg-piece" && git commit -qam 'the piece rewrites the check' && git rev-parse HEAD)"
+jg_land() { ( cd "$RFC" && . "$FC_LIB/worktree.sh" && _wt_release_check "$RFC" "$PFC" "$JG_J" "$JG_P" "$TMPROOT/jg-piece" piece wave/01-fixture 2>&1 ); }
+jg_events() { /usr/bin/grep -c '^run/v1|ev=approval|key=judge|' "$FC_REC/run.log"; }
+JG_W='the new check judges from here'
+fc_typed "$JG_W"
+JG_OUT="$(jg_land)"
+expect_contains "(jg0) with no word the landing is refused as the base-sha's copy holds it" "(base-sha $FC_B)" "$JG_OUT"
+expect_absent "(jg0b) …which is not the judge's copy" "judge-copy" "$JG_OUT"
+poke "$RFC" check-from 'words nobody typed here'
+expect_eq "(jg1) check-from on words no prompt holds is refused, and writes no judge event" "1|0" "$RC|$(jg_events)"
+poke "$RFC" check-from "$JG_W" "$JG_P"
+expect_eq "(jg2) …and at a commit the working head does not hold" "1|0" "$RC|$(jg_events)"
+poke "$RFC" check-from "$JG_W"
+expect_eq "(jg3) on the person's words it writes one judge event at the working head, naming who typed them" "0|1" \
+  "$RC|$(/usr/bin/grep -c "^run/v1|ev=approval|key=judge|by=Dana Fixture|head=$JG_J|said=$JG_W|session=$SID|" "$FC_REC/run.log")"
+JG_OUT="$(jg_land)"
+expect_contains "(jg4) a later landing that rewrites the check is run by the judge's copy, not its own" "judge-copy" "$JG_OUT"
+expect_contains "(jg5) …and its line names the judge, the word and whose it was" \
+  "(the judge ${JG_J:0:12}, set by Dana Fixture's word \"$JG_W\")" "$JG_OUT"
 
 finish
