@@ -115,6 +115,25 @@ poke "$BR" brief T1 w01-T2
 expect_eq "R10 a name another row's dispatch carries is refused (exit 1)" "1" "$RC"
 expect_true "R10b …and the row's own file stands" test -s "$BD/w01-T1.md"
 
+section "§BAR: a suite promised over the landing bar is left out of Lands-on, kept in Suites, and named (AC-23.1)"
+# The gate store is the prelude's fixture store; a cost line is keyed by the fixture repository's project.
+BPK="$(cd "$BR" && . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/gate.sh" 2>/dev/null && _gate_project)"
+bar_cost() { printf '%s:%s\n' "$2" "$(date +%s)" > "$BIONIC_GATE_DIR/cost/${BPK}%$1"; }
+bar_cost shared.test.sh 700; bar_cost a.test.sh 5
+expect_contains "B0 setup: the gate promises the fixture suite 700 s, read as the brief reads it" ":700" \
+  "$(bash -c '. "$1/payload/scripts/lib/gate.sh" && _gate_store && _gate_promise shared.test.sh "$2"' _ "$BIONIC_SCRIPTS_DIR" "$BR")"
+poke "$BR" brief T1 bar-T1
+expect_eq "B1 a row with one suite over the bar renders (exit 0)" "0" "$RC"
+expect_eq "B2 the suite is left out of the landing set, the one under the bar stays" "Lands-on: a.test.sh" "$(grep '^Lands-on:' "$BD/bar-T1.md")"
+expect_eq "B3 …and kept in the row's suites" "Suites: a.test.sh, shared.test.sh" "$(grep '^Suites:' "$BD/bar-T1.md")"
+expect_contains "B4 …and named on a line of the brief, with its promise and the bar" \
+  "shared.test.sh promises 700s, over the landing bar of 600s" "$(cat "$BD/bar-T1.md")"
+poke "$BR" brief T2 bar-T2
+expect_eq "B5 a row whose suites are all under the bar lands on them all (beside B2, the same reader)" "Lands-on: b.test.sh" "$(grep '^Lands-on:' "$BD/bar-T2.md")"
+expect_absent "B5b …and no line names a bar" "landing bar" "$(cat "$BD/bar-T2.md")"
+bar_cost b.test.sh 700; poke "$BR" brief T2 bar-T2
+expect_eq "B6 a row whose only suite is over the bar keeps it in Lands-on, which none cannot stand for" "Lands-on: b.test.sh" "$(grep '^Lands-on:' "$BD/bar-T2.md")"
+
 section "§NAMES: a dispatch that binds a plan row names its row's rendered brief file (AC-6.1)"
 # The real dispatch wall over a bound, approved, armed session; each drive starts on an empty roster.
 NR="$(make_repo wall-names)"; git -C "$NR" config user.name "Dana Fixture"; git -C "$NR" config user.email d@example.com
