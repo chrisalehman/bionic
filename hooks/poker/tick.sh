@@ -1018,14 +1018,12 @@ tick_watch_facts() {  # <file>
       units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' 'NF { print $1 "|" $10 }'
       printf 'ready=%s\n' "$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
     }
-    # THE TASK LIST IS REBUILT AT PLAN APPROVAL (wave-27 T13; D20; steps/3.md). No hook reads a
-    # task list, so this line is all the rule has (advice: no wall reads it since wave-31 T32): it is also owed when the
-    # plan's `current:` was 3 at the last digest and is 4 now, or its row count has grown, and
-    # it is owed on a QUIET tick too (a plan at approval has nothing open yet).
-    # WHICH MOVE IT WAS (wave-27 T37; review pass 8 F2) is TICK_RECONCILE, `step4` or `grew`: the
-    # RECONCILE line says it and names the rebuild, and the digest keeps it as `reconcile=` (read by
-    # no wall since wave-31 T32; D6: the line is advice). A move into Step 4 is named first when
-    # the table also grew: the rebuild it asks for covers the new rows.
+    # THE TASK LIST IS BUILT AT PLAN APPROVAL (steps/3.md) AND ONLY APPENDED TO AFTER. This line is
+    # advice, no wall reads it: it is owed when the plan's `current:` was 3 at the last digest and is
+    # 4 now, or its row count has grown, and on a QUIET tick too (a plan at approval has nothing open
+    # yet). WHICH MOVE IT WAS is TICK_RECONCILE, `step4` or `grew`: the RECONCILE line says it, and the
+    # digest keeps it as `reconcile=`. A move into Step 4 is named first when the table also grew: the
+    # entries it asks for cover the new rows.
     TICK_RECONCILE=""
     tick_plan_moved() {  # -> 0 when the digest's last reading of the plan is behind this one
       local pc pr
@@ -1036,6 +1034,17 @@ tick_watch_facts() {  # <file>
       case "$pr" in ''|*[!0-9]*) return 1 ;; esac
       [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ] || return 1
       TICK_RECONCILE=grew
+    }
+    # THE LIST ONLY APPENDS: a row added after the last tick owes its own entry at the end, and the rows past
+    # the count the digest holds are the rows added, since task-add writes at the end of the table. The tick
+    # reads the plan and its digest and never the platform's list.
+    tick_grown_entries() {
+      local n id step task e="" k=0
+      n=$(( TICK_PLAN_ROWS - $(tick_digest_field "$TICK_DIGEST_FILE" plan_rows) ))
+      while IFS=$'\t' read -r id step _ task _; do
+        e="${e:+$e; }$step/$id: $(clean_whole "$(plan_task_title "$task")")"; k=$((k + 1))
+      done <<< "$(units_rows "$SCHED_PLAN" 2>/dev/null | tail -n "$n")"
+      say "RECONCILE — the ## Tasks table grew since the last tick: add the task-list $([ "$k" -gt 1 ] && echo entries || echo entry) $e at the end of the list"
     }
     tick_conclude() {  # <decision before the gate>
       local cur="" prev=""
@@ -1116,8 +1125,8 @@ tick_watch_facts() {  # <file>
       if tick_plan_moved; then
         TICK_DUTY=owed
         case "$TICK_RECONCILE" in
-          step4) say "RECONCILE — the plan moved from approval into Step 4 since the last tick: TaskList, and rebuild the task list in execution order (delete every pending entry and recreate them)" ;;
-          *)     say "RECONCILE — the ## Tasks table grew since the last tick: TaskList, and rebuild the task list in execution order (delete the pending entries after the new row and recreate them)" ;;
+          step4) say "RECONCILE — the plan moved from approval into Step 4 since the last tick: TaskList, and add an entry for each row the list lacks" ;;
+          *)     tick_grown_entries ;;
         esac
       elif [ "$TICK_DECIDED" != QUIET ] && [ "$TICK_CHANGE" != "$(tick_digest_field "$TICK_DIGEST_FILE" change)" ]; then
         TICK_DUTY=owed

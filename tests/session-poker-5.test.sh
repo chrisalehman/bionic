@@ -906,4 +906,23 @@ expect_eq "START-3c …and it owes no new entry: the one it has goes in progress
   "poker: start — owed: mark the task-list entry 4/T7: Start the row in progress." "$(printf '%s\n' "$OUT" | tail -1)"
 POKE_BOUND="$SR_BOUND_WAS"
 
+# ============================================================
+section "§GREW: the tick's line for a grown plan names the entry the new row owes, at the end of the list, and no other (REQ-18 AC-18.1)"
+# ============================================================
+# The task list only appends, so the one thing a row born after the last tick leaves owed is its own entry. The tick
+# reads the plan and its digest, never the platform's list: the rows past the count its digest holds are the new ones.
+# FIXTURE FIDELITY: §START's plan and run, a roster for its session; the first tick fixes the digest, the new row is
+# task-add's own, and the second tick is the real tick over the grown table.
+# fails-when: the line asks for a delete or a recreate, names a row the digest already held, or names no entry.
+GR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=120
+new_roster "$RSR"; forget_digest "$RSR"; poke "$RSR" tick
+ta_add "$RSR" T8 4 build 'Add the row. It is born mid-run.' bionic:implementor '—' 30 REQ-1 lib/g.sh
+expect_eq "GREW-0 precondition: task-add of the new row exits 0" "0" "$RC"
+poke "$RSR" tick
+GR_LINE="$(printf '%s\n' "$OUT" | /usr/bin/grep 'poker: RECONCILE' || :)"
+expect_eq "GREW-1 the tick over the grown plan says one RECONCILE line, naming the new row's entry and no other" \
+  "poker: RECONCILE — the ## Tasks table grew since the last tick: add the task-list entry 4/T8: Add the row at the end of the list" "$GR_LINE"
+expect_eq "GREW-1b …and it asks for no delete and no recreate" "0" "$(printf '%s\n' "$GR_LINE" | /usr/bin/grep -c 'delete\|recreate\|rebuild')"
+POKE_BOUND="$GR_BOUND_WAS"
+
 finish

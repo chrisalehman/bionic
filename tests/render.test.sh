@@ -421,4 +421,15 @@ for _w_f in skills/canonical-sdlc/steps/8.md agents-src/templates/skills/canonic
   expect_contains "20d $_w_f lists the classes as the library does" "$W_CLS" "$(cat "$REPO/$_w_f")"
 done
 
+section "21 — the method's pages: the task list only appends, and no page says a hook cannot read it (REQ-18 AC-18.2)"
+# A row born mid-run owes one entry at the end of the list, so no page tells a reader to recreate entries to keep an order.
+# fails-when: a page or its source carries the sentence, the order rule or the recreate instruction.
+TL_ALL="$(cd "$REPO" && cat skills/canonical-sdlc/steps/0.md skills/canonical-sdlc/steps/3.md agents-src/templates/skills/canonical-sdlc/steps/0.md.tmpl agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl)"
+expect_contains "21a the pages are read, and Step 3 says a row born later owes one entry at the end of the list" "owes one entry, added at the end of the list" "$TL_ALL"
+expect_eq "21b …none says a hook cannot read a task list, asks for the entries to be recreated, or gives the order rule" "0" \
+  "$(printf '%s\n' "$TL_ALL" | grep -ciE 'no hook can read a task list|recreate the later|chronological order of execution')"
+TL_BAD="$TMPROOT/tasklist-old.md"
+printf 'No hook can read a task list, so recreate the later entries.\n' > "$TL_BAD"
+expect_eq "21c the same grep over the old sentence finds it, so 21b is not blind" "1" "$(grep -ciE 'no hook can read a task list|recreate the later|chronological order of execution' "$TL_BAD")"
+
 finish
