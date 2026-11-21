@@ -1651,6 +1651,8 @@ _line_review_born() {  # <plan>
 }
 # A LANDING NEVER WAITS IN SILENCE (wave-38 T31; D21, D22; A-orch-43): every WAITING line is followed by
 # `waiting: <reason>`, what held the row when its time ran out. The WAITING line itself is unchanged.
+# THE LAST LINE OF A RETURN IS `run: <command>`: the one a person pastes to go on.
+_line_run() { printf 'run: %s\n' "$1"; }
 _line_waiting() {  # <row> <the same command> [<reason>]
   printf 'WAITING %s — run again: %s\n' "$1" "$2"
   printf 'waiting: %s\n' "${3:-the time in --within ${_LINE_WITHIN:-} ran out}"
@@ -1836,7 +1838,7 @@ EOF
            continue ;;
         1) if [ "$base" = "$head" ]; then
              line_returned_event "$plan" "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
-             printf 'CONFLICT %s %s\n' "$row" "${c:-?}"; return 1
+             printf 'CONFLICT %s %s\n' "$row" "${c:-?}"; _line_run "git -C $(_wt_shquote "$wt") merge $base"; return 1
            fi
            waitbase="$base"; continue ;;
         *) _wt_refuse "landing-tree-unpointable tree=${_LINE_LT} base=${base}"; return 2 ;;
@@ -1863,7 +1865,7 @@ EOF
         0) linted="$cand" ;;
         1) line_returned_event "$plan" "row=${row}" why=lint "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
            printf '%s\n' "$c" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
-           return 1 ;;
+           _line_run "$again"; return 1 ;;
         *) _wt_refuse "lint-unreadable row=${row} — ${c:-the lint printed nothing}"; return 2 ;;
       esac
     fi
@@ -1871,7 +1873,7 @@ EOF
     # criterion's eval cites, while the criterion reads as at the row's dispatch and is not waived, returns the row.
     if [ "$cited" != "$cand" ]; then
       _line_stale_say "$plan" "$row" "$root" "$cbase" "$cand"
-      case $? in 0) cited="$cand" ;; 1) return 1 ;; *) return 2 ;; esac
+      case $? in 0) cited="$cand" ;; 1) _line_run "$again"; return 1 ;; *) return 2 ;; esac
     fi
     # 3. THE PROOF, A DRAIN (wave-37 T1; D3, AC-1.1; wave-38 T6, D21): each named suite not yet green on this
     # candidate, as many runners at once as the gate answers: before the pass's first runner, and again as
@@ -1909,7 +1911,7 @@ EOF
     # user's words and nothing ran; once the user lifts the order, the writer says ready again.
     if [ "$_LINE_DN" -gt 0 ] && c="$(_line_order "$root")"; then
       line_returned_event "$plan" "row=${row}" why=order "detail=${c%%$'\n'*}" >/dev/null
-      printf 'ORDER %s %s\n' "$row" "${c#*$'\n'}"; return 1
+      printf 'ORDER %s %s\n' "$row" "${c#*$'\n'}"; _line_run "$again"; return 1
     fi
     if [ "$_LINE_DN" -gt 0 ]; then
       [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
@@ -1952,7 +1954,7 @@ EOF
           _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
         *) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
            line_returned_event "$plan" "row=${row}" why=red "detail=${c}" >/dev/null
-           printf 'RED %s %s %s\n' "$row" "$s" "$c"; return 1 ;;
+           printf 'RED %s %s %s\n' "$row" "$s" "$c"; _line_run "tail -n 40 $(_wt_shquote "$c")"; return 1 ;;
       esac
     done
     # 4. THE PUBLISH, once first in line on the accepted head (line_publish asks both again, locked).
