@@ -1715,7 +1715,7 @@ _PROOF_FACTS_KEY=""; _PROOF_FACTS_LOG=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _
 _PROOF_FACTS_KEEP=16
 
 _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one `run/v1` line each, in fact order; exit 2 with one line on stderr when the fold fails
-  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got evs rest rc=0 IFS=$' \t\n'
+  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" held tmp got evs rc=0 IFS=$' \t\n'
   local -a deps
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf '_proof_facts: lib/reader.sh cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
@@ -1736,24 +1736,26 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
   key="$plan $stamp facts+findings+inherited"
   if [ "$_PROOF_FACTS_KEY" = "$key" ] && { [ -z "${_PROOF_FRESH:-}" ] || [ -n "$_PROOF_FACTS_LOG" ]; }; then _proof_facts_out; return; fi
+  # THE COMMAND'S OWN FOLD (`_proof_held_dir`): one this process tree folded from the log under this key is served to
+  # every caller, deciders among them, and the kept file is neither read nor needed while the command lasts.
+  held=""
+  if [ -n "$stamp" ] && _proof_held_dir; then
+    held="$_PROOF_HELD_DIR/fold-$(printf '%s' "$plan" | cksum | tr -c '0-9\n' '-')"
+    if [ -f "$held" ] && got="$(cat "$held" 2>/dev/null)" && [ "${got%%$'\n'*}" = "$key" ] && _proof_kept_split "$got"; then
+      _PROOF_FACTS_LOG=1; _PROOF_FACTS_KEY="$key"; _proof_facts_out; return
+    fi
+  fi
   cdir="${TMPDIR:-/tmp}/bionic-facts-$(id -u 2>/dev/null)"
   [ -d "$cdir" ] || mkdir -p -m 700 "$cdir" 2>/dev/null
   if [ -n "$stamp" ] && [ -z "${_PROOF_FRESH:-}" ] && [ -O "$cdir" ] && [ -n "$(find "$cdir" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ]; then
     cache="$cdir/$(printf '%s' "$plan" | cksum | tr -c '0-9\n' '-')"
   fi
   # The kept file is read once, key and body together: another process prunes the directory, and a file gone between
-  # two reads would be an empty body under a good key.
-  if [ -n "$cache" ] && [ -f "$cache" ] && got="$(cat "$cache" 2>/dev/null)" && [ "${got%%$'\n'*}" = "$key" ] \
-     && [ -n "$(printf '%s\n' "$got" | awk '$0 == "\036" { print 1; exit }')" ]; then
+  # two reads would be an empty body under a good key. Inside a held command it is not read: the command folds once,
+  # and what it holds must be the log's for the deciders it serves.
+  if [ -z "$held" ] && [ -n "$cache" ] && [ -f "$cache" ] && got="$(cat "$cache" 2>/dev/null)" && [ "${got%%$'\n'*}" = "$key" ] \
+     && _proof_kept_split "$got"; then
     _PROOF_FACTS_LOG=""
-    # Split by awk, not by a pattern in the shell: bash 3.2 matches `${v#*x}` over a long value in quadratic time.
-    _PROOF_FACTS="$(printf '%s\n' "$got" | awk 'NR == 1 { next } $0 == "\036" { exit } { print }')"
-    # The findings and the inherited proofs are short, so one pass takes both and the shell splits them.
-    rest="$(printf '%s\n' "$got" | awk 'f { print } $0 == "\036" { f = 1 }')"
-    _PROOF_FINDINGS="${rest%%$'\036'*}"; _PROOF_FINDINGS="${_PROOF_FINDINGS%$'\n'}"
-    case "$rest" in *$'\036'*) _PROOF_INHERITED="${rest#*$'\036'}"; _PROOF_INHERITED="${_PROOF_INHERITED#$'\n'}" ;; *) _PROOF_INHERITED="" ;; esac
-    [ -z "$_PROOF_FINDINGS" ] || _PROOF_FINDINGS="$_PROOF_FINDINGS"$'\n'
-    [ -z "$_PROOF_INHERITED" ] || _PROOF_INHERITED="$_PROOF_INHERITED"$'\n'
   else
     # A plan the reader cannot join to a record has no log, and so no event.
     evs=""; _PROOF_FACTS_LOG=1
@@ -1784,22 +1786,97 @@ PROOF_EVENTS
   fi
   [ -z "$_PROOF_FACTS" ] || _PROOF_FACTS="$_PROOF_FACTS"$'\n'
   _PROOF_FACTS_KEY="${stamp:+$key}"
+  if [ -n "$held" ] && [ -n "$_PROOF_FACTS_LOG" ] && tmp="$(mktemp "$held.XXXXXX" 2>/dev/null)"; then
+    _proof_kept_write "$key" > "$tmp" && mv -f "$tmp" "$held" 2>/dev/null || rm -f "$tmp"
+  fi
   if [ -n "$cache" ] && tmp="$(mktemp "$cdir/.facts.XXXXXX" 2>/dev/null)"; then
-    { printf '%s\n' "$key"; printf '%s' "$_PROOF_FACTS"; printf '\036\n%s' "$_PROOF_FINDINGS"; printf '\036\n%s' "$_PROOF_INHERITED"; } > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
+    _proof_kept_write "$key" > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
     _proof_keep_sweep "$cdir" "$_PROOF_FACTS_KEEP"
   fi
   _proof_facts_out
 }
 
+# The kept file's layout, shared by the kept file and the command's held fold: the key, the facts, then the finding
+# events and the inherited proofs, each part after a line of one \036.
+_proof_kept_write() {  # <key> -> the layout of the fold this shell holds
+  printf '%s\n' "$1"; printf '%s' "$_PROOF_FACTS"; printf '\036\n%s' "$_PROOF_FINDINGS"; printf '\036\n%s' "$_PROOF_INHERITED"
+}
+_proof_kept_split() {  # <the layout, key line first> -> 0 with _PROOF_FACTS, _PROOF_FINDINGS and _PROOF_INHERITED set; 1, none set, when it is not whole
+  local rest
+  [ -n "$(printf '%s\n' "$1" | awk '$0 == "\036" { print 1; exit }')" ] || return 1
+  # Split by awk, not by a pattern in the shell: bash 3.2 matches `${v#*x}` over a long value in quadratic time.
+  _PROOF_FACTS="$(printf '%s\n' "$1" | awk 'NR == 1 { next } $0 == "\036" { exit } { print }')"
+  # The findings and the inherited proofs are short, so one pass takes both and the shell splits them.
+  rest="$(printf '%s\n' "$1" | awk 'f { print } $0 == "\036" { f = 1 }')"
+  _PROOF_FINDINGS="${rest%%$'\036'*}"; _PROOF_FINDINGS="${_PROOF_FINDINGS%$'\n'}"
+  case "$rest" in *$'\036'*) _PROOF_INHERITED="${rest#*$'\036'}"; _PROOF_INHERITED="${_PROOF_INHERITED#$'\n'}" ;; *) _PROOF_INHERITED="" ;; esac
+  [ -z "$_PROOF_FACTS" ] || _PROOF_FACTS="$_PROOF_FACTS"$'\n'
+  [ -z "$_PROOF_FINDINGS" ] || _PROOF_FINDINGS="$_PROOF_FINDINGS"$'\n'
+  [ -z "$_PROOF_INHERITED" ] || _PROOF_INHERITED="$_PROOF_INHERITED"$'\n'
+}
+
+# ---------- ONE COMMAND'S HOLD ----------
+#
+# One command a person waits on is one process tree, and in it the run's log is folded once. The command's first process
+# makes a directory and names it in BIONIC_HELD for every process it starts (hooks/session-poker.sh), and removes it
+# when the command ends. What is held there is keyed whole on its first line, by the plan, the `cksum` of the plan, the
+# log and the reader's libraries, and the overlay it carries, never by a file's times; a fold is written there only
+# when it was folded from the log, so a decider served from it reads the log's facts. A directory is trusted only while
+# the process that made it lives (its pid is in its name), and only when this user owns it and no one else can write
+# it, so a directory an earlier command left holds nothing for a later one.
+_PROOF_HELD_DIR=""; _PROOF_HELD_SEEN="-"
+_proof_held_dir() {  # -> 0 with _PROOF_HELD_DIR set when this command holds its reads; 1 when it does not
+  if [ "$_PROOF_HELD_SEEN" = "${BIONIC_HELD:-}" ]; then [ -n "$_PROOF_HELD_DIR" ] && [ -d "$_PROOF_HELD_DIR" ]; return; fi
+  _PROOF_HELD_SEEN="${BIONIC_HELD:-}"; _PROOF_HELD_DIR=""
+  local d="${BIONIC_HELD:-}" pid
+  [ -n "$d" ] && [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] || return 1
+  pid="${d##*/bionic-held-}"; pid="${pid%%.*}"
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  [ -n "$(find "$d" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ] || return 1
+  _PROOF_HELD_DIR="$d"
+}
+# proof_hold_begin -> 0, BIONIC_HELD exported, when this process opens a held command: a directory of its own under
+# $TMPDIR, named by its pid; 1, nothing exported, when one already holds for this command or none can be made. The
+# caller that opened it removes it (`proof_hold_end`) when its command ends.
+proof_hold_begin() {
+  local d
+  ! _proof_held_dir || return 1
+  d="$(mktemp -d "${TMPDIR:-/tmp}/bionic-held-$$.XXXXXX" 2>/dev/null)" || return 1
+  chmod 700 "$d" 2>/dev/null || { rm -rf "$d"; return 1; }
+  BIONIC_HELD="$d"; export BIONIC_HELD
+}
+proof_hold_end() {  # -> the directory proof_hold_begin opened removed, and nothing held any more
+  case "${BIONIC_HELD:-}" in */bionic-held-"$$".*) rm -rf "$BIONIC_HELD" ;; esac
+  unset BIONIC_HELD; _PROOF_HELD_DIR=""; _PROOF_HELD_SEEN="-"
+}
+
 # _proof_facts_out -> the kept facts, a pending proof (`proof_pending`) folded in after them: the facts re-folded with it
-# answer as the fold of every event and it would, the standing facts being each identity's last. Nothing is kept.
+# answer as the fold of every event and it would, the standing facts being each identity's last. Outside a held command
+# nothing is kept. Inside one (`_proof_held_dir`) the overlay is folded once per fold and pending lines: this shell
+# keeps it for its subshells, and the command's directory for its other processes, under the fold's key, whether that
+# fold was read from the log, and the pending lines, whole.
+_PROOF_OUT_KEY=""; _PROOF_OUT=""
 _proof_facts_out() {
-  local f p
+  local f p k="" o="" got tmp
   ! _proof_dry_refused || return 2
   p="${_PROOF_PENDING:-}"; [ -z "$_PROOF_DRY" ] || p="${p:+$p$'\n'}$_PROOF_DRY"
   [ -n "$p" ] || { printf '%s' "$_PROOF_FACTS"; return 0; }
+  if [ -n "$_PROOF_FACTS_KEY" ] && _proof_held_dir; then
+    k="$_PROOF_FACTS_KEY log=${_PROOF_FACTS_LOG:-0}"$'\n'"$p"$'\n'$'\035'
+    [ "$_PROOF_OUT_KEY" != "$k" ] || { printf '%s' "$_PROOF_OUT"; return 0; }
+    o="$_PROOF_HELD_DIR/out-$(printf '%s' "$k" | cksum | tr -c '0-9\n' '-')"
+    if [ -f "$o" ] && got="$(cat "$o"; printf x)" && [ "${got:0:${#k}}" = "$k" ]; then
+      got="${got%x}"; _PROOF_OUT_KEY="$k"; _PROOF_OUT="${got:${#k}+1}"; printf '%s' "$_PROOF_OUT"; return 0
+    fi
+  fi
   f="$( set -o pipefail; reader_events() { printf '%s%s\n' "$_PROOF_FACTS" "$p"; }; reader_facts - )" || return 2
-  [ -z "$f" ] || printf '%s\n' "$f"
+  [ -z "$f" ] || f="$f"$'\n'
+  if [ -n "$k" ]; then
+    _PROOF_OUT_KEY="$k"; _PROOF_OUT="$f"
+    tmp="$(mktemp "$o.XXXXXX" 2>/dev/null)" && { { printf '%s\n' "$k"; printf '%s' "$f"; } > "$tmp" && mv -f "$tmp" "$o" 2>/dev/null || rm -f "$tmp"; }
+  fi
+  printf '%s' "$f"
 }
 
 # _proof_findings_load <plan> -> 0 with _PROOF_FINDINGS set in the calling shell to every finding event of the plan's
@@ -1895,6 +1972,32 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   if [ -n "$stamp" ] && [ -n "$_PROOF_PLACE_LIBS" ] && [ -n "$_PROOF_PLACE_DIR" ] && [ -z "$_PROOF_DRY" ] && [ -z "${_PROOF_FRESH:-}" ]; then
     held="${plan//[^A-Za-z0-9._-]/%}"; [ "${#held}" -le 200 ] || { held="$(cksum <<< "$plan")"; held="${held%% *}"; }
     held="$_PROOF_PLACE_DIR/$held"
+  fi
+  # INSIDE A HELD COMMAND the place is read from the command's one fold, the pending step laid over it as the
+  # facts' overlay lays it (`_proof_facts_out`), and never from the held file: the fold is the log's, so it serves a
+  # decider and a reader alike. A pending proof is no place's, so it is left out. The answer is kept in this shell's
+  # memory for the asks after it, and the held file is written over when it holds another key, as a fold here writes
+  # it, so the hooks after this command read the place this command read.
+  if [ -n "$stamp" ] && _proof_held_dir; then
+    if [ "$_PROOF_PLACE_MEMO_KEY" = "$key|$_PROOF_DRY|held" ]; then
+      _proof_place_split "$_PROOF_PLACE_MEMO"; printf '%s\n' "$_PROOF_PLACE"; return 0
+    fi
+    # Folded in this shell first, so the ask below and every later one here is served without a read.
+    _PROOF_PENDING="" _proof_facts "$plan" >/dev/null || rc=$?
+    [ "$rc" -ne 0 ] || got="$( set -o pipefail; f="$(_PROOF_PENDING="" _proof_facts "$plan")" || exit 2
+      reader_facts() { printf '%s' "$f"; }
+      reader_q_step "$plan" || exit; if reader_q_approved "$plan" step3; then echo approved=1; else [ "$?" -eq 1 ] || exit; echo approved=0; fi
+      reader_q_order "$plan" | sed 's/^/order./' || exit; reader_q_sessions "$plan" | sed 's/^/sessions./' )" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      printf 'proof_step_held: lib/reader.sh exited %s reading the place of %s; nothing is kept\n' "$rc" "$plan" >&2; return 2
+    fi
+    _PROOF_PLACE_MEMO_KEY="$key|$_PROOF_DRY|held"; _PROOF_PLACE_MEMO="$got"
+    if [ -n "$held" ] && { [ ! -f "$held" ] || { k=""; IFS= read -r k < "$held"; [ "$k" != "$key" ]; }; } \
+       && tmp="$(mktemp "$_PROOF_PLACE_DIR/.held.XXXXXX" 2>/dev/null)"; then
+      printf '%s\n%s\n' "$key" "$got" > "$tmp" && mv -f "$tmp" "$held" 2>/dev/null || rm -f "$tmp"
+      _proof_keep_sweep "$_PROOF_PLACE_DIR" "$_PROOF_STEP_KEEP"
+    fi
+    _proof_place_split "$got"; printf '%s\n' "$_PROOF_PLACE"; return 0
   fi
   if [ -n "${_PROOF_FRESH:-}" ] && [ -n "$stamp" ] && [ "$_PROOF_PLACE_MEMO_KEY" = "$key|$_PROOF_DRY" ]; then
     _proof_place_split "$_PROOF_PLACE_MEMO"; printf '%s\n' "$_PROOF_PLACE"; return 0
@@ -2827,8 +2930,56 @@ proof_debts_open() {
 # final, and a `check:` line in a plan is not read.
 # IT READS GIT, so a verb, the tick and close-out call it, never a wall: a wall is handed its answer
 # (the freeze, .claude/rules/hook-authoring.md).
+# ONE ANSWER A HEAD, A COMMAND (`_proof_held_dir`): inside a held command the judge's answer at a head is computed once
+# and served to every later ask of the same plan at the same commit, over the same fold and the same pending lines: in
+# this shell, and through the command's directory in its subshells and other processes. Its print, its words on stderr
+# and its exit are served as they were made. The key names the head as the commit it resolves to, so a branch that
+# moves is a new key; and the fold it names is the log's, so a decider is never served an answer made of the kept file.
+# Outside a held command it is computed at every ask, as before.
+_FS_HELD_KEY=""; _FS_HELD=""
 facts_state() {
+  local _fs_k="" _fs_f="" _fs_got="" _fs_tmp _fs_e
+  if _proof_held_dir && _facts_state_key "${1:-}" "${2:-}"; then
+    _fs_k="$_FS_KEY"
+    if [ "$_FS_HELD_KEY" = "$_fs_k" ]; then _fs_got="$_FS_HELD"
+    else
+      _fs_f="$_PROOF_HELD_DIR/facts-$(printf '%s' "$_fs_k" | cksum | tr -c '0-9\n' '-')"
+      if [ -f "$_fs_f" ] && _fs_got="$(cat "$_fs_f"; printf x)" && [ "${_fs_got:0:${#_fs_k}}" = "$_fs_k" ]; then
+        _fs_got="${_fs_got%x}"; _fs_got="${_fs_got:${#_fs_k}}"; _FS_HELD_KEY="$_fs_k"; _FS_HELD="$_fs_got"
+      else _fs_got=""; fi
+    fi
+    if [ -n "$_fs_got" ]; then _facts_state_replay "$_fs_got"; return; fi
+  fi
   [ -z "${BIONIC_COUNT:-}" ] || printf 'facts facts_state\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  [ -n "$_fs_k" ] || { _facts_state_judge "$@"; return; }
+  _fs_e="$(mktemp "$_fs_f.e.XXXXXX" 2>/dev/null)" || { _facts_state_judge "$@"; return; }
+  # The print is taken whole, its last newline too, by the mark after it; the exit rides after the mark.
+  _fs_got="$(_facts_state_judge "$@" 2>"$_fs_e"; printf '\036%s' "$?")"
+  _fs_got="${_fs_got##*$'\036'}"$'\n'"${_fs_got%$'\036'*}"$'\036'"$(cat "$_fs_e"; printf x)"; _fs_got="${_fs_got%x}"
+  rm -f "$_fs_e"
+  _FS_HELD_KEY="$_fs_k"; _FS_HELD="$_fs_got"
+  _fs_tmp="$(mktemp "$_fs_f.XXXXXX" 2>/dev/null)" \
+    && { { printf '%s' "$_fs_k"; printf '%s' "$_fs_got"; } > "$_fs_tmp" && mv -f "$_fs_tmp" "$_fs_f" 2>/dev/null || rm -f "$_fs_tmp"; }
+  _facts_state_replay "$_fs_got"
+}
+# _facts_state_key <plan> <head> -> 0 with _FS_KEY the held answer's key, the plan's fold taken in this shell; 1 when
+# the plan, its tree or the head cannot be read, or the fold is not the log's, and the judge is then asked unheld.
+_facts_state_key() {
+  local tree c
+  _FS_KEY=""
+  [ -f "$1" ] && [ -n "$2" ] && _proof_reader_load || return 1
+  tree="$(git -C "$(dirname "$1")" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$tree" ] || return 1
+  c="$(git -C "$tree" rev-parse --verify -q "$2^{commit}" 2>/dev/null)" && [ -n "$c" ] || return 1
+  _proof_facts "$1" >/dev/null 2>&1 && [ -n "$_PROOF_FACTS_KEY" ] && [ -n "$_PROOF_FACTS_LOG" ] || return 1
+  _FS_KEY="facts_state $1 at=$c lib=$_READER_LIB_DIR fold=$_PROOF_FACTS_KEY"$'\n'"${_PROOF_PENDING:-}"$'\n'"$_PROOF_DRY"$'\n'$'\035'$'\n'
+}
+_facts_state_replay() {  # <exit, a newline, the print, \036, the words on stderr> -> each given back, the exit last
+  local rc="${1%%$'\n'*}" rest="${1#*$'\n'}"
+  printf '%s' "${rest%%$'\036'*}"
+  rest="${rest#*$'\036'}"; [ -z "$rest" ] || printf '%s' "$rest" >&2
+  return "$rc"
+}
+_facts_state_judge() {
   local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot="" pfx chains fact kind q role scope st rc=0
   local x pt pr ph pe wt wr we wh cb ws fixed="" born="" chk="" walked="|"
   [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }

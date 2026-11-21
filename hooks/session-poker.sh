@@ -2429,6 +2429,7 @@ poker_part_missing() {  # <part> -> exits as loader_fail_open does, naming the p
 { [ -r "$HOOK_DIR/poker/proof.sh" ] && . "$HOOK_DIR/poker/proof.sh"; } || poker_part_missing proof
 { [ -r "$HOOK_DIR/poker/judge.sh" ] && . "$HOOK_DIR/poker/judge.sh"; } || poker_part_missing judge
 
+poker_dispatch() {  # <verb's args> -> the part verb named by VERB
 case "$VERB" in
   adopt) poker_verb_adopt "$@" ;;
   sweep) poker_verb_sweep "$@" ;;
@@ -2467,3 +2468,28 @@ case "$VERB" in
   stop-run) poker_verb_stop_run "$@" ;;
   tick) if [ "${1:-}" = --watch ]; then poker_verb_watch_pass; else poker_verb_tick "$@"; fi ;;
 esac
+}
+
+# ONE COMMAND, ONE FOLD (lib/proof.sh `proof_hold_begin`). The first poker of a command opens the command's hold, and
+# every process it starts, a child poker or the card among them, is served the one fold of the run's log and the one
+# answer of its facts at a head; the hold is removed when the command ends, so no later command reads what this one
+# held. The verb runs in a subshell, so its own exit traps stand and the hold is removed after them, however the verb
+# ends. A poker started inside a held command, the judge the card asks, holds nothing of its own. The verbs that judge
+# or read the run's facts fold the bound run first, in the verb's own shell, so every subshell they start inherits it.
+POKER_HOLD_PRIMED="current judge release-approval tick resume sitrep"
+poker_hold_prime() {  # -> the bound run's facts folded in this shell, for the verbs that read them; nothing otherwise
+  local run
+  case " $POKER_HOLD_PRIMED " in *" $VERB "*) ;; *) return 0 ;; esac
+  declare -F _proof_facts >/dev/null 2>&1 || return 0
+  run="$(session_run "$(project_root "$PWD")" "${CLAUDE_CODE_SESSION_ID:-}" 2>/dev/null)" || return 0
+  case "$run" in 'bound-open '*) [ ! -f "${run#bound-open }" ] || _proof_facts "${run#bound-open }" >/dev/null 2>&1 ;; esac
+  return 0
+}
+if declare -F proof_hold_begin >/dev/null 2>&1 && proof_hold_begin; then
+  ( poker_hold_prime; poker_dispatch "$@" )
+  POKER_HOLD_RC=$?
+  proof_hold_end
+  exit "$POKER_HOLD_RC"
+fi
+poker_hold_prime
+poker_dispatch "$@"
