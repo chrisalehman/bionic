@@ -42,8 +42,9 @@ set +x +v
 #
 #   5. the cap on tests: the non-whitespace characters of the tracked `*.sh` files under tests/ against those
 #      everywhere else, in the tree at BIONIC_CHECK_HEAD, never the working files, so joining lines changes no reading.
-#      Tests may be 1.25 times the code, the code counted as the larger of the head's and BIONIC_CHECK_BASE's, so code
-#      deleted since the base takes no room. A pass prints `test-ratio: <tests>/<code> chars · limit <n> · room <n>`,
+#      Tests may be 1.25 times the code, the code counted as the largest of the head's, BIONIC_CHECK_BASE's and
+#      BIONIC_CHECK_RELEASE's (the last release, which the runner exports), so code deleted since the base takes no
+#      room. A pass prints `test-ratio: <tests>/<code> chars · limit <n> · room <n>`,
 #      the line the release approval page and the situation report read; a head past the limit prints the same line
 #      after `release-check: ` and exits 1. A head with no shell file outside tests/ has nothing to count against: ONE
 #      line and exit 2, never a pass. A head over the limit is admitted when its tests are at or under the base's. A
@@ -266,12 +267,14 @@ ratio_count() {
 }
 # ratio_check -> `test-ratio: <tests>/<code> chars · limit <n> · room <n>` on a pass; the same line after
 # `release-check: ` and exit 1 when the tests pass the limit; one line and exit 2 when the head cannot be read or holds
-# no shell code outside tests/. The limit is 1.25 times the larger of the head's code and BIONIC_CHECK_BASE's, rounded
-# down, so code deleted since the base takes no room. A head over the limit is admitted when its tests are at or under
+# no shell code outside tests/. The limit is 1.25 times the largest of the head's code, BIONIC_CHECK_BASE's and, when it
+# names a commit, BIONIC_CHECK_RELEASE's, rounded down, so code deleted since the base takes no room. A landing's base
+# is the target's head before it, so the release's count is what keeps a deletion landed earlier in the release from
+# lowering the limit at the landing after. A head over the limit is admitted when its tests are at or under
 # the base's: the cap cannot be met in one landing by a repository already over it, and the landing to refuse is the
 # one that grows the tests. A base that cannot be read compares nothing, so the head alone is judged.
 ratio_check() {
-  local t c rc t0="" c0=0 base="${BIONIC_CHECK_BASE:-}" bc lim reading
+  local t c rc t0="" c0=0 base="${BIONIC_CHECK_BASE:-}" rel="${BIONIC_CHECK_RELEASE:-}" bc lim reading
   c="$(ratio_count "$head")"; rc=$?
   case "$rc" in
     0) : ;;
@@ -282,6 +285,9 @@ ratio_check() {
   t="${c% *}"; c="${c#* }"
   if [ -n "$base" ] && bc="$(ratio_count "$base")"; then
     t0="${bc% *}"; c0="${bc#* }"
+  fi
+  if [ -n "$rel" ] && bc="$(ratio_count "$rel")" && [ "${bc#* }" -gt "$c0" ]; then
+    c0="${bc#* }"
   fi
   lim=$(( (c > c0 ? c : c0) * 5 / 4 ))
   reading="test-ratio: $t/$c chars · limit $lim · room $(( lim - t ))"
