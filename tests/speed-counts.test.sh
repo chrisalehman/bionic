@@ -13,6 +13,7 @@
 #   parse   lib/plan-read.sh _plan_read_lines  a parse of the plan
 #   table   lib/units.sh _units_read        a read of the plan's Tasks table (a memo's answer is no read)
 #   status  lib/reader.sh reader_q_status   one row's status asked
+#           lib/reader.sh reader_q_statuses every row's status, in one pass
 #   facts   lib/proof.sh facts_state        the run's facts answered at a head
 #   gate    lib/walls.sh dispatch           one pass of the evidence gate's judging arms
 #
@@ -43,8 +44,8 @@
 #
 # ANTI-VACUITY (.claude/rules/test-harness.md, "Anti-vacuity"). The count extractor is proved on real output first:
 # §REPORTS reads every kind as non-zero somewhere before any later row reads a ceiling through `sc_count`, and every
-# command's lines are read whole against the eight known shapes. §PRINT compares only prints it has shown are not
-# empty. RED: with the seven counter lines taken out of the libraries, §REPORTS is red and §FIXTURE and §PRINT stay
+# command's lines are read whole against the nine known shapes. §PRINT compares only prints it has shown are not
+# empty. RED: with the counter lines taken out of the libraries, §REPORTS is red and §FIXTURE and §PRINT stay
 # green.
 #
 # Usage: bash tests/speed-counts.test.sh   (SPEED_COUNTS_TABLE=<file> also writes the counts' table there)
@@ -240,7 +241,7 @@ for SC_SIZE in n 2n; do
   done
   for SC_C in $SC_CMDS; do
     expect_regex "REP-2 ($SC_SIZE) $SC_C counts its reads, each line a known kind and its function" \
-      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|facts facts_state|gate dispatch)( |$))+$' \
+      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|gate dispatch)( |$))+$' \
       "$(sort "$SC_OUT/$SC_SIZE.$SC_C.on.count" 2>/dev/null | uniq -c | awk '{ $1 = $1; print }' | paste -sd' ' -)"
   done
 done
@@ -274,6 +275,55 @@ for SC_C in $SC_CMDS; do
     expect_eq "SCALE-1 $SC_C counts the same $SC_K at n rows and 2n" "$(sc_count n "$SC_C" "$SC_K")" "$(sc_count 2n "$SC_C" "$SC_K")"
   done
 done
+
+section "§ONCE-status: the ledger makes one status pass, at either size"
+# fails-when: the ledger asks a row's status once a row again, so a pass costs as many asks as the plan has rows.
+# A ledger pass is one per gate pass, and the tick reads one more of its own (its LEDGER), as do resume and the watcher's
+# pass, which run a tick: so the check counts one, the card at most two, and the three tick commands at most three.
+for SC_SIZE in n 2n; do
+  expect_eq "ONCE-status-1 ($SC_SIZE) check: its one gate pass makes one status pass" 1 "$(sc_count "$SC_SIZE" check status)"
+  expect_regex "ONCE-status-2 ($SC_SIZE) card: one status pass for each of its two gate passes at most" '^[12]$' \
+    "$(sc_count "$SC_SIZE" card status)"
+  for SC_C in tick resume watch; do
+    expect_regex "ONCE-status-3 ($SC_SIZE) $SC_C: one status pass for each of its gate passes and its own ledger at most" '^[123]$' \
+      "$(sc_count "$SC_SIZE" "$SC_C" status)"
+  done
+done
+
+section "§SCALE-status: a plan of 2n rows asks the statuses as often as one of n"
+# fails-when: a status is asked, or the plan parsed for one, once per row, so the 2n run counts more than the n run.
+for SC_C in $SC_CMDS; do
+  for SC_K in status parse; do
+    expect_eq "SCALE-status $SC_C counts its $SC_K the same at n and 2n" "$(sc_count n "$SC_C" "$SC_K")" "$(sc_count 2n "$SC_C" "$SC_K")"
+  done
+done
+
+section "§STATUS-JOIN: the one pass answers every row as its own status ask, over each size's run"
+# fails-when: the one answer gives some Tasks row of the suite's run another state, dispatch field, tree or commit
+# than the per-row ask gives it. Read over a copy of each size's snapshot, so nothing a command left is read.
+# sj_block <answer> <row> -> the row's lines of the one answer, `state=pending` when it opens no block for the row
+sj_block() {
+  printf '%s\n' "$1" | awk -v r="$2" 'index($0, "row=") == 1 { on = ($0 == "row=" r); seen = seen || on; next } on { print }
+    END { if (!seen) print "state=pending" }'
+}
+for SC_SIZE in n 2n; do
+  SJ="$TMPROOT/$SC_SIZE/join"; rm -rf "$SJ" && cp -Rp "$TMPROOT/$SC_SIZE/snap" "$SJ"
+  SJ_PLAN="$SJ/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
+  sj_ask() { ( cd "$SJ/proj" && env TMPDIR="$SJ/tmp" HOME="$SJ/home" bash "$SC_LIB/../reader.sh" "$SJ_PLAN" "$@" ); }
+  SJ_ALL="$(sj_ask statuses)"; SC_ROWS="$(sc_rows "$SC_SIZE")"
+  expect_contains "SJ-1 ($SC_SIZE) the one answer reads the open integrate row as dispatched (the block reader proved)" \
+    "state=dispatched" "$(sj_block "$SJ_ALL" "T$SC_ROWS")"
+  SJ_DIFF=""; SJ_SAME=0; i=1
+  while [ "$i" -le "$SC_ROWS" ]; do
+    if [ "$(sj_ask status "T$i")" = "$(sj_block "$SJ_ALL" "T$i")" ]; then SJ_SAME=$((SJ_SAME + 1)); else SJ_DIFF="$SJ_DIFF T$i"; fi
+    i=$((i + 1))
+  done
+  expect_eq "SJ-2 ($SC_SIZE) each of the $SC_ROWS rows: the one answer is its own status ask (rows that differ:${SJ_DIFF:- none})" \
+    "$SC_ROWS" "$SJ_SAME"
+done
+# The prints the five commands made, for a record to compare across two runs of the suite (SPEED_COUNTS_PRINTS=<dir>).
+[ -z "${SPEED_COUNTS_PRINTS:-}" ] || { mkdir -p "$SPEED_COUNTS_PRINTS"
+  for SC_SIZE in n 2n; do for SC_C in $SC_CMDS; do sc_print "$SC_SIZE" "$SC_C" on > "$SPEED_COUNTS_PRINTS/$SC_SIZE.$SC_C.txt"; done; done; }
 
 section "§PRINT: counting changes no print"
 # fails-when: a counter writes to the command's stdout or stderr, or moves its exit, so the print with BIONIC_COUNT
