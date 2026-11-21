@@ -1317,6 +1317,9 @@ ADOPT_READERS
                 # `roster_open_names` predicate (an ack later than the row's launch), not a
                 # `met[]` filter, so only a still-open history is ever offered to copy.
                 adopt_copy_marker "$ADOPT_RF" "$ADOPT_OWN_ROSTER" "$(clean "$RNAME")"
+                # A RULING THE PREDECESSOR'S ROSTER HELD goes into the writer's run, where this session reads it.
+                ruling_adopt "$ADOPT_RF" "$ADOPT_OWN_ROSTER" "$(clean "$RNAME")" \
+                  || die "WARN — a ruling for $RNAME on $ADOPT_RF could not be written to its run."
               else
                 die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
               fi
@@ -2152,8 +2155,8 @@ EOF
   }
 
   # A RULING FOR A LIVE WRITER (wave-33 T10; REQ-1 AC-1.1 to AC-1.4, D1). The orchestrator's binding
-  # instruction to one writer while it works: a `ruling/v1` line on this session's roster (lib/roster.sh
-  # `ruling_record`, which owns the state and its one reader). hooks/ruling-push.sh carries it on the
+  # instruction to one writer while it works: a `ruling` event of the writer's run, named by its row
+  # (lib/roster.sh `ruling_record`, which owns the state and its one reader). hooks/ruling-push.sh carries it on the
   # writer's next tool result; the writer's commit and `ready` refuse while it is unread. `rulings` reads
   # the state; `ruling-ack` is the writer's own acknowledgement, from its tree (the session key is the
   # orchestrator's in a teammate's shell, so it finds the same roster).
@@ -2210,7 +2213,7 @@ EOF
         fi
         RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT")" || RULE_ID=""
         if [ -z "$RULE_ID" ]; then
-          die "REFUSED — could not write the ruling to $ROSTER_FILE."
+          die "REFUSED — could not write the ruling to the run $RULE_WRITER's row names, or this session is bound to."
           exit 2
         fi
         say "ruling $RULE_ID recorded for $RULE_WRITER — its next tool result carries it, and its commit and ready are refused until it is shown; read it with: rulings $RULE_WRITER"
@@ -2242,7 +2245,7 @@ EOF
           [ -z "$RS_S" ] || RS_STATE="shown=$RS_S by=${RS_B:-?}"
           say "ruling $RS_ID $RS_W recorded=$RS_REC${RS_P:+ pushed=$RS_P} $RS_STATE — $RS_T"
         done <<< "$(ruling_fold "$ROSTER_FILE" "$RULE_WRITER")"
-        [ "$RS_ANY" = yes ] || say "no ruling for $RULE_WRITER on this session's roster"
+        [ "$RS_ANY" = yes ] || say "no ruling for $RULE_WRITER in this session's runs"
         exit 0 ;;
     esac
   }

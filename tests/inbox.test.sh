@@ -68,6 +68,8 @@ world_clock 1000
 world_cost a.test.sh 5 0.5 5; world_cost b.test.sh 5 0.5 5
 
 # ---------------------------------------------------------------------------- helpers
+# The session every helper below speaks as: the world's, until §CLEAR clears it.
+IN_SID="$WORLD_SID"
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # A world whose plan the commit gate admits (tests/lib/world.sh's, as `ll_world` of tests/landing-line.prelude.sh takes it),
@@ -97,18 +99,18 @@ in_roster() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "$WORLD_SID"; }
 # The orchestrator's verbs, from the world's root -> IN_OUT (both streams), IN_RC.
 in_poker() {  # <root> <verb> [args...]
   local r="$1"; shift
-  IN_OUT="$( cd "$r" && bash "$POKER" "$@" 2>&1 )"; IN_RC=$?
+  IN_OUT="$( cd "$r" && CLAUDE_CODE_SESSION_ID="$IN_SID" bash "$POKER" "$@" 2>&1 )"; IN_RC=$?
 }
 # The id a `rule` call printed (`poker: ruling <id> recorded for <writer> …`).
 in_rid() { printf '%s\n' "$1" | sed -n 's/^poker: ruling \([^ ]*\) recorded for .*/\1/p' | head -1; }
 # One line of `rulings <writer>` for <id>.
 in_state() {  # <root> <writer> <id>
-  ( cd "$1" && bash "$POKER" rulings "$2" 2>&1 ) | /usr/bin/grep -F "ruling $3 " | head -1
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID="$IN_SID" bash "$POKER" rulings "$2" 2>&1 ) | /usr/bin/grep -F "ruling $3 " | head -1
 }
 
 # The PostToolUse payload of one tool call -> its stdout. agent_id `-` is the orchestrator's own call.
 in_payload() {  # <root> <agent_id|-> <tool_use_id>
-  jq -nc --arg s "$WORLD_SID" --arg c "$1" --arg a "$2" --arg u "$3" \
+  jq -nc --arg s "$IN_SID" --arg c "$1" --arg a "$2" --arg u "$3" \
     '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse", tool_name:"Read",
       tool_input:{file_path:"/dev/null"}, tool_response:{}, tool_use_id:$u}
      + (if $a == "-" then {} else {agent_id:$a, agent_type:"bionic:implementor"} end)'
@@ -118,14 +120,14 @@ in_payload() {  # <root> <agent_id|-> <tool_use_id>
 in_push() {  # <root> <agent_id|-> <tool_use_id> -> IN_OUT (stdout), IN_RC
   local p
   p="$(in_payload "$1" "$2" "$3")"
-  IN_OUT="$( env CLAUDE_PROJECT_DIR="$1" bash "$PUSH" 2>/dev/null <<< "$p" )"; IN_RC=$?
+  IN_OUT="$( env CLAUDE_PROJECT_DIR="$1" CLAUDE_CODE_SESSION_ID="$IN_SID" bash "$PUSH" 2>/dev/null <<< "$p" )"; IN_RC=$?
 }
 in_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
 
 # The PreToolUse|Bash walls on <command> from <agent_id> -> IN_OUT (both streams), IN_RC.
 in_walls() {  # <root> <agent_id> <command>
   local p
-  p="$(jq -nc --arg s "$WORLD_SID" --arg c "$1" --arg a "$2" --arg k "$3" \
+  p="$(jq -nc --arg s "$IN_SID" --arg c "$1" --arg a "$2" --arg k "$3" \
     '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
       tool_input:{command:$k}, tool_use_id:"toolu_inbox_walls", agent_id:$a, agent_type:"bionic:implementor"}')"
   IN_OUT="$( printf '%s' "$p" | env CLAUDE_PROJECT_DIR="" bash "$WALLS" 2>&1 )"; IN_RC=$?
@@ -133,7 +135,7 @@ in_walls() {  # <root> <agent_id> <command>
 
 # `ready` from a row's own tree -> IN_OUT (both streams), IN_RC.
 in_ready() {  # <root> <row>
-  IN_OUT="$( cd "$1/.worktrees/$2" && bash "$SPAWN" ready 2>&1 )"; IN_RC=$?
+  IN_OUT="$( cd "$1/.worktrees/$2" && CLAUDE_CODE_SESSION_ID="$IN_SID" bash "$SPAWN" ready 2>&1 )"; IN_RC=$?
 }
 
 W="$(in_world)"
@@ -200,8 +202,10 @@ expect_eq "(s3) the writer acknowledges from its own tree (exit 0)" "0" "$S_ACK_
 S_LINE2="$(in_state "$W" wx-T2 "$S_ID")"
 expect_regex "(s3) …rulings reads shown=<epoch>" "shown=[0-9]+" "$S_LINE2"
 expect_absent "(s3) …and no longer unread" "unread" "$S_LINE2"
-expect_true "(s4) the delivery is on the writer's roster, as ruling/v1 lines" \
-  /usr/bin/grep -q "^ruling/v1|id=${S_ID}|" "$ROSTER"
+REC="$W/.bionic/docs/record/wave-x/run.log"
+expect_eq "(s4) the ruling, its push and its showing are events of the run, named by row" "3" \
+  "$(/usr/bin/grep -c "^run/v1|ev=ruling|id=${S_ID}|row=T2|writer=wx-T2|" "$REC")"
+expect_false "(s4) …and no roster carries it" /usr/bin/grep -q "id=${S_ID}|" "$ROSTER"
 in_poker "$W" ruling-ack r-no-such-ruling
 expect_eq "(s5) ruling-ack of an id no ruling carries is refused (exit 2)" "2" "$IN_RC"
 
@@ -225,8 +229,8 @@ in_poker "$W" rule wx-T3 'too late for this one'
 expect_eq "(c2) a ruling for a closed row is refused (exit 2)" "2" "$IN_RC"
 expect_contains "(c2) …naming the row" "wx-T3" "$IN_OUT"
 expect_contains "(c2) …and why" "closed" "$IN_OUT"
-expect_true "(c2) the roster holds ruling lines for the live writer" /usr/bin/grep -q "|writer=wx-T1|" "$ROSTER"
-expect_false "(c2) …and none for the closed row" /usr/bin/grep -q "|writer=wx-T3|" "$ROSTER"
+expect_true "(c2) the run holds ruling events for the live writer" /usr/bin/grep -q "^run/v1|ev=ruling|.*|writer=wx-T1|" "$REC"
+expect_false "(c2) …and none for the closed row" /usr/bin/grep -q "^run/v1|ev=ruling|.*|writer=wx-T3|" "$REC"
 in_poker "$W" rule wx-T9 'nobody'
 expect_eq "(c3) a ruling for a name no row carries is refused (exit 2)" "2" "$IN_RC"
 expect_contains "(c3) …naming it" "wx-T9" "$IN_OUT"
@@ -290,7 +294,6 @@ expect_eq "(g5) the same commit once shown passes (exit 0)" "0" "$IN_RC"
 in_poker "$W" rule wx-T1 'land only after the rename'
 R_ID="$(in_rid "$IN_OUT")"
 expect_nonempty "(g6) a ruling for wx-T1 is recorded" "$R_ID"
-REC="$W/.bionic/docs/record/wave-x/run.log"
 in_ready "$W" T1
 G_OUT6="$IN_OUT"
 expect_eq "(g6) wx-T1's ready with the ruling unread is refused (exit 2)" "2" "$IN_RC"
@@ -347,5 +350,56 @@ expect_nonempty "(rt0) precondition: the push's ruling names a root" "$(in_root 
 expect_eq "(rt1) the push names the plugin that holds lib/roster.sh" "$RT_WANT" "$(in_root "$P_CTX1")"
 expect_eq "(rt2) the commit wall's refusal names the same root" "$RT_WANT" "$(in_root "$G_OUT1")"
 expect_eq "(rt3) ready's refusal names the same root" "$RT_WANT" "$(in_root "$G_OUT6")"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "§CLEAR: a ruling crosses a /clear in both orders, and one a roster held still reaches its writer (AC-12.1, AC-12.2)"
+
+# The clear is the fleet's: a new session bound to the same plan runs the real `adopt`, which carries the writer's row to
+# its own roster under the same agent id. A ruling the old roster held as a line, as the writer before this change
+# kept it, is planted there first. Whichever session the writer's hooks key is driven: the old one (A) and the
+# adopting one (B).
+. "${BIONIC_SCRIPTS_DIR}/tests/lib/bound-marker.sh"
+in_poker "$W" rule wx-T2 'carried across the clear'
+X_ID="$(in_rid "$IN_OUT")"
+expect_nonempty "(x0) the cleared session records a ruling for wx-T2" "$X_ID"
+printf 'ruling/v1|id=r-legacy-1|writer=wx-T2|recorded=1|text=a ruling the roster held\n' >> "$ROSTER"
+SID_A="$WORLD_SID" SID_B="22222222-3333-4444-8555-666666666666"
+bound_marker "$W" "$SID_B" "$W/.bionic/docs/plans/epic-x/wave-x.plan.md"
+IN_SID="$SID_B"; in_poker "$W" adopt
+expect_contains "(x1) the adopting session adopts wx-T2" "wx-T2 (implementor) from session $SID_A" "$IN_OUT"
+in_push "$W" a00T2 toolu_x_1
+X_CTX="$(in_ctx "$IN_OUT")"
+expect_contains "(x2) AC-12.1 the adopted writer's next tool result carries the ruling made before the clear" "bionic ruling $X_ID " "$X_CTX"
+expect_contains "(x3) …and the one the old roster held" "bionic ruling r-legacy-1 " "$X_CTX"
+( cd "$W/.worktrees/T2" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$POKER" ruling-ack "$X_ID" ) >/dev/null 2>&1
+expect_eq "(x4) AC-12.1 the writer acknowledges it under the adopting session (exit 0)" "0" "$?"
+expect_regex "(x5) AC-12.1 the adopting session lists it, shown" "shown=[0-9]+ by=ack" "$(in_state "$W" wx-T2 "$X_ID")"
+expect_contains "(x5) …and lists the old roster's, unread" "unread" "$(in_state "$W" wx-T2 r-legacy-1)"
+
+FLAG_A="$W/.bionic/tmp/ruling-pending-$SID_A.state"
+IN_SID="$SID_A"; in_push "$W" b00T2 toolu_y_0
+expect_false "(y0) a call under the old session's key settles its flag: nothing it reads is pending" test -e "$FLAG_A"
+IN_SID="$SID_B"; in_poker "$W" rule wx-T2 'recorded after the clear'
+Y_ID="$(in_rid "$IN_OUT")"
+expect_nonempty "(y0) the adopting session records a ruling for wx-T2" "$Y_ID"
+expect_true "(y0) …which raises the old session's flag too" test -e "$FLAG_A"
+IN_SID="$SID_A"
+in_push "$W" b00T2 toolu_y_1
+expect_contains "(y1) AC-12.2 it rides the writer's next tool result under the old session's key" "bionic ruling $Y_ID " "$(in_ctx "$IN_OUT")"
+in_walls "$W" b00T2 'git commit -m "T2: work"'
+expect_eq "(y2) AC-12.2 the writer's commit with it pushed and not shown is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(y2) …carrying it" "ruling-ack $Y_ID" "$IN_OUT"
+in_walls "$W" b00T2 'git commit -m "T2: work"'
+expect_eq "(y3) …and passes once shown (exit 0)" "0" "$IN_RC"
+IN_SID="$SID_B"; in_poker "$W" rule wx-T2 'land after the clear'
+Z_ID="$(in_rid "$IN_OUT")"; IN_SID="$SID_A"
+in_ready "$W" T2
+expect_eq "(y4) AC-12.2 the writer's ready with the adopting session's ruling unread is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(y4) …carrying it" "bionic ruling $Z_ID " "$IN_OUT"
+in_ready "$W" T2
+expect_contains "(y5) …and lands once shown" "LANDED T2 " "$IN_OUT"
+expect_eq "(y6) of the four rulings, the rosters carry only the one planted there" "ruling/v1|id=r-legacy-1|" \
+  "$(cat "$W"/.bionic/tmp/roster-*.state | /usr/bin/grep -o -F -e "ruling/v1|id=r-legacy-1|" -e "id=$X_ID|" -e "id=$Y_ID|" -e "id=$Z_ID|")"
+expect_eq "(y6) …the run's log holds each" "3" "$(/usr/bin/grep -c -E "^run/v1\|ev=ruling\|id=($X_ID|$Y_ID|$Z_ID)\|row=T2\|writer=wx-T2\|recorded=" "$REC")"
 
 finish
