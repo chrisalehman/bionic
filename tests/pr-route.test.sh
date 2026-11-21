@@ -22,6 +22,8 @@
 #             fetch once the request is closed unmerged and the person's ask is open.
 #   §MERGE    the pass that sees the merge closes the run: the integrate row lands at the merge, the run reads delivered,
 #             and a close that holds wakes once.
+#   §MERGE-OUT with the merge seen and the close row's writer live, the pass runs no close and wakes once naming the
+#             row out; the writer gone, the next pass closes the run and leaves the writer's continuation as written.
 #   §WALL     publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
 #   §STRAY    the whole run a world's tick started detached is ended before the worlds go: none is alive at the end.
 #
@@ -540,6 +542,47 @@ expect_eq "MG-6b …nothing landed, the run still at step 8, close-out's refusal
   "$(prr_landed)|$(prr_log_step)|$(prr_close_out | /usr/bin/grep -q 'close-out refused' && echo yes)"
 prr_pass
 expect_eq "MG-7 …the next pass over the same hold is quiet: the hold was told once" "$PRR_QUIET|" "$PASS_RC|$PASS_OUT"
+
+# ============================================================
+section "§MERGE-OUT: with the merge seen and a close row's writer live, the pass runs no close and says once which rows are out (AC-8.1, AC-8.2)"
+# ============================================================
+# fails-when: the pass that sees the merge runs the close while the close row's writer is live (the integrate row lands,
+# the run reads delivered, or close-out's account is written); that pass wakes nobody, or its wake names no row; the
+# next pass over the same facts wakes again; or, the writer gone, the close writes into the continuation the close
+# row's writer wrote.
+# FIXTURE FIDELITY: §MERGE's world, its plan gaining the close row a planner writes (T4, step 9, its Files the
+# continuation), dispatched as the run's log records a dispatch, and its writer a row of this session's roster under
+# this plan, launched a minute ago with four hours to run, as the dispatch wall writes it.
+prr_watch_world mergeout
+awk '{ print } /^\| T3 \|/ { print "| T4 | 9 | close | the close | T3 | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — |" }' "$P" > "$P.n" \
+  && mv "$P.n" "$P"
+printf 'run/v1|ev=dispatch|row=T4|name=w-T4|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$L"
+seal_fixture "$P" "$L"
+MO_AT="$(t=$(( $(date +%s) - 60 )); date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ)"
+roster_row_fixture session="$WORLD_SID" name=w-T4 row=T4 agent_id=aw-T4-1111111111111111 launched_at="$MO_AT" duration="4 hours" \
+  plan="$P" deliverable="$R/.bionic/docs/record/wave-x/T4.md" >> "$R/.bionic/tmp/roster-$WORLD_SID.state"
+prr_pass
+expect_eq "MO-0 precondition: the request open and the writer out, the pass quiet, nothing landed" "$PRR_QUIET|0" "$PASS_RC|$(prr_landed)"
+prr_gh pr merge 1 --squash
+prr_pass
+expect_eq "MO-1 AC-8.1 merged with the close row's writer live: the pass runs no close — nothing landed, the run at step 8, no word of close-out in its account" \
+  "0|n=8 state=open|no" "$(prr_landed)|$(prr_log_step)|$(prr_close_out | /usr/bin/grep -qE '^merge: |close-out refused' && echo yes || echo no)"
+expect_eq "MO-2 AC-8.2 …that pass wakes, with one line naming the row out" "$PRR_WAKE|1|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | awk 'END { print NR }')|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - rows out: T4[;: ]' && echo yes)"
+expect_eq "MO-2b …within the line's ceiling" "yes" "$([ "${#PASS_OUT}" -le "$PRR_LINE_MAX" ] && echo yes)"
+expect_eq "MO-2c …and the account the pass keeps names the row and its writer" "yes|yes" \
+  "$(prr_close_out | /usr/bin/grep -q '^rows out: T4 ' && echo yes)|$(prr_close_out | /usr/bin/grep -q '^  T4: w-T4 open on roster ' && echo yes)"
+prr_pass
+expect_eq "MO-3 …the next pass over the same facts is quiet, and still lands nothing" "$PRR_QUIET||0" "$PASS_RC|$PASS_OUT|$(prr_landed)"
+# The writer writes the continuation and leaves: the next pass closes the run, and the close writes none of that file.
+printf '# continuation — the close row'"'"'s\n' > "$R/.bionic/docs/record/wave-x/continuation.md"
+MO_CK="$(cksum < "$R/.bionic/docs/record/wave-x/continuation.md")"
+: > "$R/.bionic/tmp/roster-$WORLD_SID.state"
+prr_pass
+expect_eq "MO-4 the writer gone: the next pass closes the run, the integrate row landed and the run delivered" "$PRR_WAKE|1|n=9 state=delivered" \
+  "$PASS_RC|$(prr_landed)|$(prr_log_step)"
+expect_eq "MO-5 …and the continuation the close row's writer wrote stands as written" "$MO_CK" \
+  "$(cksum < "$R/.bionic/docs/record/wave-x/continuation.md")"
 
 # ============================================================
 section "§MERGE-LOOK: a pass over an unchanged run with the request open asks the host alone, and the merge is still read (AC-5.2)"
