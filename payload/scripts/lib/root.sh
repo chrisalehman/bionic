@@ -359,6 +359,24 @@ git_linked_dir() {
 }
 
 # ─── THE AUDIT STREAM: where a project's findings land, and who writes one ───
+# docs_heads -> the directories a path is spelled from when it is written from the docs root.
+docs_heads() { printf '%s\n' record specs adrs plans; }
+
+# docs_path <root> <path> -> <path> made absolute, the one reader of a path spelled from the project root or the docs
+# root. Absolute stays. A relative path is the project root's when that file is there, else the docs root's when
+# it is there, else by its spelling: the docs root's when it starts with a docs head, the project root's when not.
+docs_path() {
+  local root="$1" p="${2#./}" d h
+  case "$p" in '') return 1 ;; /*) printf '%s\n' "$p"; return 0 ;; esac
+  declare -F docs_root >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/roots.sh" >/dev/null 2>&1
+  d="$(docs_root "$root")"
+  if [ ! -e "$root/$p" ]; then
+    [ -e "$d/$p" ] && { printf '%s/%s\n' "$d" "$p"; return 0; }
+    for h in $(docs_heads); do case "$p" in "$h"/*) printf '%s/%s\n' "$d" "$p"; return 0 ;; esac; done
+  fi
+  printf '%s/%s\n' "$root" "$p"
+}
+
 #
 # ONE DEFINITION EACH, HERE, SINCE epic-23 wave-12-fixit-171 (REQ-8, spec D6). `audit_path`
 # had three copies — payload/scripts/lib/walls.sh, payload/scripts/lib/stop.sh and

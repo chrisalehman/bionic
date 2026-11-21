@@ -787,7 +787,7 @@ PF_EVIDS_LIST
       esac
       PF_OWN=""
       while IFS= read -r _pf_c; do
-        case "$_pf_c" in '') continue ;; /*) _pf_p="$_pf_c" ;; *) _pf_p="$PV_REPO/${_pf_c#./}" ;; esac
+        [ -n "$_pf_c" ] || continue; _pf_p="$(docs_path "$PV_REPO" "$_pf_c")"
         [ -f "$_pf_p" ] || continue
         if [ "$(cd "$(dirname "$_pf_p")" 2>/dev/null && pwd -P)/$(basename "$_pf_p")" = "$PF_REAL" ]; then PF_OWN=1; break; fi
       done <<PF_OWN_LIST
@@ -813,7 +813,7 @@ PF_OWN_LIST
         _pf_rs="${_pf_rf##*/roster-}"; _pf_rs="${_pf_rs%.state}"
         _pf_open=" $(roster_open_names "$_pf_rf" "${_pf_rf%/*}/sweeper-${_pf_rs}.state" 2>/dev/null | tr '\n' ' ')"
         while IFS=$'\037' read -r _pf_on _pf_ot _pf_c; do
-          case "$_pf_c" in '') continue ;; /*) _pf_p="$_pf_c" ;; *) _pf_p="$PV_REPO/${_pf_c#./}" ;; esac
+          [ -n "$_pf_c" ] || continue; _pf_p="$(docs_path "$PV_REPO" "$_pf_c")"
           [ -f "$_pf_p" ] || continue
           if [ "$(cd "$(dirname "$_pf_p")" 2>/dev/null && pwd -P)/$(basename "$_pf_p")" = "$PF_REAL" ]; then
             PF_OTHER="$_pf_on (${_pf_ot:-no subagent_type})"; break
@@ -1256,6 +1256,21 @@ FM_FINDING
     if [ -z "$FM_WHO" ]; then
       die "REFUSED — no git user.name is set for $PV_REPO, and a move records who made it; set it, then move again. The plan is unchanged."
       exit 1
+    fi
+    # A SENTENCE MOVES NOTHING: it is the orchestrator's, given before the release card, so it asks for no words. Its
+    # event restates where the finding stands (its newest `to=`, which the reader's standing fact keeps): none, the
+    # registration's deferral or a person's defer. A finding moved to fix or to a row is no carry, and is refused.
+    if [ "$FM_TO" = stated ]; then
+      _proof_findings_load "$PV_PLAN" || { die "REFUSED — the run's facts could not be read; nothing is written. Run again: bash ${HOOK_DIR}/session-poker.sh finding-move with the same sentence"; exit 2; }
+      FM_STAND="$(printf '%s\n' "$_PROOF_FINDINGS" | awk -v id="$FM_ID" "$(proof_bind_awk)"'proof_bound($0) == id { t = proof_fkv($0, "to") } END { print t }')"
+      case "$FM_STAND" in
+        ''|deferred|defer) : ;;
+        *) die "REFUSED — $(clean "$FM_ID") stands moved to $FM_STAND, and a Known-limits sentence is a carried finding's; nothing is written."; exit 1 ;;
+      esac
+      proof_finding_event "$PV_PLAN" "ref=$FM_ID" ${FM_STAND:+"to=$FM_STAND"} "stated=$(deferral_escape "$FM_SENT")" "by=$FM_WHO" \
+        || { die "REFUSED — the sentence of $(clean "$FM_ID") could not be written to the run's log of $PV_PLAN; nothing is written."; exit 2; }
+      say "finding-move — $(clean "$FM_ID") states its Known-limits sentence, by $(clean "$FM_WHO"); it stands where it stood${FM_STAND:+ ($FM_STAND)}, and the release card draws it."
+      exit 0
     fi
     if [ -z "$FM_ROW" ]; then
       user_said "$FM_RAW" "$PV_PLAN"; FM_SAID=$?
@@ -1821,11 +1836,7 @@ DSP_READINGS
     fi
     DEBT_PLAN=""
     if [ -n "$DEBT_PLAN_ARG" ]; then
-      case "$DEBT_PLAN_ARG" in
-        /*) DEBT_PLAN="$DEBT_PLAN_ARG" ;;
-        *)  DEBT_PLAN="$REPO_REAL/$DEBT_PLAN_ARG"
-            [ -f "$DEBT_PLAN" ] || DEBT_PLAN="$(docs_root "$REPO_REAL")/$DEBT_PLAN_ARG" ;;
-      esac
+      DEBT_PLAN="$(docs_path "$REPO_REAL" "$DEBT_PLAN_ARG")"
       if [ ! -f "$DEBT_PLAN" ] || [ -L "$DEBT_PLAN" ]; then
         die "REFUSED — no plan file at $DEBT_PLAN_ARG; name the plan whose debt ledger this is."
         exit 2

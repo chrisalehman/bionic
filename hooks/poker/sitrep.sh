@@ -313,6 +313,15 @@ decisions_rounds() {  # <ledger> -> `D<n><TAB><rounds><TAB><ruled|withdrawn|open
     END { for (i = 1; i <= n; i++) printf "%s\t%d\t%s\n", o[i], r[o[i]], st[o[i]] }'
 }
 
+# sitrep_put_holds <ledger> -> `D<n><TAB><rows, space-separated>` per decision whose newest put names the rows it holds
+# (`decisions put D<n> '<title>' <row>…`), read from the run's rounds; a newer put naming none holds none.
+sitrep_put_holds() {
+  _sitrep_ledger_facts "$1" | awk -F'|' '
+    { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); f[substr($i, 1, e - 1)] = substr($i, e + 1) } }
+    f["ev"] == "decision" && f["verb"] == "put" { if (!(f["d"] in h)) o[++n] = f["d"]; h[f["d"]] = f["holds"] }
+    END { for (i = 1; i <= n; i++) if (h[o[i]] != "") printf "%s\t%s\n", o[i], h[o[i]] }'
+}
+
 # THE OPEN DECISIONS, ONE READER FOR THE SHEET AND THE RECAP. Both carry every decision put to the user and not yet
 # ruled, and both read them here, so the two cannot disagree on what is open.
 # pages_open <plan> <ledger> -> `D<TAB>D<n><TAB><title><TAB><wait line><TAB><put clock>` per open decision, in order of
@@ -423,10 +432,10 @@ sitrep_close_weights() {
 # one reader of what waits on a decision, so the line and the fact sheet cannot disagree. A task on the longest open
 # chain, the release or the merge moves the predicted close an hour; a task off the chain starts an hour later while the
 # close holds. The line says nothing moves only when nothing waits.
-decision_wait() {  # <plan> <D<n>> [<root>] -> one sentence
+decision_wait() {  # <plan> <D<n>> [<root>] [<rows the put names>] -> one sentence
   local rows waits chain cids
   rows="$(units_rows "$1" 2>/dev/null)"
-  waits="$(decision_waiters "$1" "$2" "${3:-}")"
+  waits="$(decision_waiters "$@")"
   if [ -z "$rows" ] && [ -z "$waits" ]; then printf 'Answered now or in an hour, no task moves: the plan has no task yet.\n'; return 0; fi
   chain="$(sitrep_chain "$1" "$rows")"; cids="${chain%%$'\t'*}"
   printf '%s\n' "$waits" | awk -v c=",$cids," '
@@ -459,14 +468,21 @@ sitrep_approval_rows() {
 }
 
 # WHAT WAITS ON A DECISION, the one reader the wait line and the fact sheet share. Three things wait on D<n>: every task
-# not landed or dropped that waits on it as an approval, `approval:D<n>`, whatever its state (`sitrep_approval_waits`);
+# not landed or dropped that waits on it as an approval, `approval:D<n>`, whatever its state (`sitrep_approval_waits`),
+# or that its newest put names as held (`sitrep_put_holds`; with <rows>, the put being made names those instead);
 # the release, while the
 # newest release approval page puts D<n> as one of its decisions; and the merge, while a held merge on the run's register
 # names D<n> as a whole word (the third decision is not the thirtieth) in its reason or its line.
-decision_waiters() {  # <plan> <D<n>> [<root>] -> one line per waiter: a task id, in the plan's order, then `release`, then `merge`
-  local root dir page
-  sitrep_approval_rows "$1" "$(units_rows "$1" 2>/dev/null)" "$2"
+decision_waiters() {  # <plan> <D<n>> [<root>] [<rows>] -> one line per waiter: task ids, then `release`, then `merge`
+  local root dir page rows held
+  rows="$(units_rows "$1" 2>/dev/null)"
   root="${3:-}"; [ -n "$root" ] || root="$(project_root "${1%/*}" 2>/dev/null)"
+  if [ $# -ge 4 ]; then held="$4"
+  elif [ -n "$root" ] && declare -F proof_plan_slug >/dev/null 2>&1; then held="$(sitrep_put_holds "$(docs_root "$root")/record/$(proof_plan_slug "$1")/design-ledger.md" | awk -F'\t' -v d="$2" '$1 == d { print $2 }')"
+  fi
+  { sitrep_approval_rows "$1" "$rows" "$2"
+    printf '%s\n' "$rows" | awk -F'\t' -v h=" ${held:-} " '{ s = tolower($10); gsub(/[ \t]/, "", s) } s != "landed" && s != "dropped" && index(h, " " $1 " ") { print $1 }'
+  } | awk 'NF && !s[$0]++'
   [ -n "$root" ] || return 0
   if declare -F docs_root >/dev/null 2>&1 && declare -F proof_plan_slug >/dev/null 2>&1; then
     dir="$(docs_root "$root")/record/$(proof_plan_slug "$1")"
@@ -523,12 +539,13 @@ decisions_all() {
 # ---------------------------------------------------------------- the run's scorecard
 #
 # THE SCORECARD (wave-38 T15; D26 "a release's efficiency claim is a printed scorecard; human time is always its own
-# line"). `landing-report --scorecard [<plan>]` prints exactly four lines, each measured value beside its target,
+# line"). `landing-report --scorecard [<plan>]` prints four lines, each measured value beside its target, and the asks put to you,
 #
 #   human stops (autonomous half): <n> · target 1
 #   agent minutes after the final reply: <n> · target 0
 #   widest landing ready→landed: <row> <m> min · target < <LINE_LANDING_BAR, the landing bar: 15>
 #   human-wait minutes: <n> · no target (the user's)
+#   asks put to you: <n> · <m> min
 #
 # then the sheet's pace, correctness and waste at close, `pace: …`, `correctness: …` and `waste: …`, each said from the
 # sheet's measurements, read through `sitrep_gather` (computed there, once). Every number is read from the record,
@@ -548,9 +565,14 @@ decisions_all() {
 #   human-wait      the same rounds: each closed round's `at=` less its `opened=`, an open one's now less its
 #                   `opened=`, summed and rounded to whole minutes. unverified when the stops are, or a closed round
 #                   counted holds no `opened=` to time it by.
+#   asks put to you the rounds put to the person after the plan's approval and the minutes they waited, the spans
+#                   joined so asks open at once count their overlap once: the stops' rounds, each put at its opening,
+#                   and a waiver's from the release approval page that put it (`sitrep_card_puts`), none when no page
+#                   did while it stood open, since the tool opened it and work closes most. One run read the same way
+#                   as another: `<n> · <m> min`, the minutes unverified as the wait's are.
 # READ-ONLY. The rosters live in .bionic/tmp, which close-out's act 3 wipes, so close-out reads this before the wipe.
-scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
-  local plan="$1" root="$2" start reg rounds stops="unverified" wait="unverified" merge_at agent="unverified" widest
+scorecard_report() {  # <plan> <project root> -> the eight lines; rc 0
+  local plan="$1" root="$2" start reg rounds stops="unverified" wait="unverified" merge_at agent="unverified" widest asks="unverified"
   start="$(sitrep_approved_at "$plan")"
   reg="$(reader_ask_rounds "$plan" 2>/dev/null)" || reg=""
   if [ -n "$start" ] && [ -n "$reg" ]; then
@@ -563,6 +585,20 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
       o > s { c++; if (e >= o) t += e - o; else untimed = 1 }
       END { printf "%d\t%s\n", c, untimed ? "unverified" : sprintf("%d", t / 60 + 0.5) }')"
     stops="${rounds%%	*}"; wait="${rounds#*	}"
+    asks="$( { sitrep_card_puts "$plan" "$root" | awk -F'\t' '{ print "P\t" $1 "\t" $2 }'
+        owed_rounds 'approve:step[0-9]+|approve:release|decide:D[0-9]+|waive:.+' "$plan" "$root" | awk '{ print "R\t" $0 }'
+      } | awk -F'\t' -v s="$start" -v now="$(sitrep_now)" "$_PATROL_ISO_AWK"'
+      function norm(x) { if (length(x) == 17 && substr(x, 17, 1) == "Z") return substr(x, 1, 16) ":00Z"; return x }
+      function ep(x) { return (x == "" || x == "-") ? -1 : iso2epoch(norm(x)) }
+      $1 == "P" { x = ep($3); if (x >= 0 && (!($2 in pt) || x < pt[$2])) pt[$2] = x; next }
+      { k = $2; o = ep($5); e = ($4 == "open") ? now + 0 : ep($6) }
+      index(k, "waive:") == 1 { if (!(k in pt) || pt[k] >= e) next; if (pt[k] > o) o = pt[k] }
+      o < 0 { if (e > s) { c++; untimed = 1 } next }
+      o > s { c++; if (e < o) untimed = 1; else { n++; bs[n] = o; be[n] = e } }
+      END {
+        for (i = 2; i <= n; i++) { x = bs[i]; y = be[i]; for (j = i - 1; j >= 1 && bs[j] > x; j--) { bs[j + 1] = bs[j]; be[j + 1] = be[j] } bs[j + 1] = x; be[j + 1] = y }
+        ce = -1; for (i = 1; i <= n; i++) { if (bs[i] > ce) { t += be[i] - bs[i]; ce = be[i] } else if (be[i] > ce) { t += be[i] - ce; ce = be[i] } }
+        printf "%d · %s\n", c, untimed ? "unverified" : sprintf("%d min", t / 60 + 0.5) }')"
   fi
   # the merge's approval, where the agent minutes after the final reply start
   merge_at="$(sitrep_approved_at "$plan" merge)"
@@ -579,6 +615,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
   printf 'agent minutes after the final reply: %s · target 0\n' "$agent"
   printf 'widest landing ready→landed: %s · target < %s\n' "${widest:-unverified}" "$(b="$(sitrep_bar)"; printf '%s' "${b:-unverified}")"
   printf "human-wait minutes: %s · no target (the user's)\n" "${wait:-unverified}"
+  printf 'asks put to you: %s\n' "${asks:-unverified}"
   printf 'pace: %s\ncorrectness: %s\nwaste: %s\n' "${SG_PACE:-unverified}" "${SG_CORRECT:-unverified}" "${SG_WASTE:-unverified}"
   return 0
 }
@@ -922,7 +959,10 @@ sitrep_record_spans() {
 # finding, carry, matrix row or held merge in a plan with an integrate row (what each holds while open, `sitrep_holds`).
 # An ask no record can start counts no minute, and the minutes are printed `partial` with how many asks went untimed.
 # Only the minutes an ask waits on the user count (lib/owed.sh `ask_waits_on`, open or closed): one answered so that it
-# waits on an event counts to its answer, and one that never waits on the user (a carry, a delivery) counts none.
+# waits on an event counts to its answer, and one that never waits on the user (a carry, a delivery) counts none. ONLY
+# A PUT ASK IS YOURS: a waiver is opened by the tool when a review fails, and work closes most of them without the person
+# hearing of them, so it counts from the instant a release approval page puts it to the person (`sitrep_card_puts`), and
+# not at all when none did while it stood open. A closed decision also held a task when its newest put named the task.
 sitrep_waiting() {
   local plan="$1" root="$2" rows="$3" now="$4" asks="$5" reg="" led out m k spans waits
   reg="$(reader_ask_rounds "$plan" 2>/dev/null)" || reg=""
@@ -938,6 +978,8 @@ sitrep_waiting() {
         if (k == "integrate") print "I"
         print "U\t" $1 }'
       sitrep_approval_waits "$plan" | awk -F'\t' '{ print "V\t" $1 "\t" $2 }'
+      sitrep_put_holds "$led" | awk -F'\t' '{ n = split($2, r, " "); for (i = 1; i <= n; i++) print "V\t" r[i] "\t" $1 }'
+      sitrep_card_puts "$plan" "$root" | awk -F'\t' '{ print "P\t" $1 "\t" $2 }'
       sitrep_ledger_times "$led" | awk -F'\t' '{ print "D\tdecide:" $1 "\t" $2 "\t" $3 }'
       printf '%s\n' "$spans" | awk -F'\t' 'NF { print "S\t" $1 "\t" $2 "\t" $3 }'
       printf '%s\n' "$waits" | awk 'NF'
@@ -963,6 +1005,7 @@ sitrep_waiting() {
       $1 == "D" { put[$2] = $3; rul[$2] = $4; want($2); next }
       $1 == "R" { rs[$2] = $3; ra[$2] = $4; ro[$2] = $5; rn[$2] = $6; want($2); next }
       $1 == "S" { sp[$2] = $3; se[$2] = $4; next }
+      $1 == "P" { x = ep($3); if (x >= 0 && (!($2 in pt) || x < pt[$2])) pt[$2] = x; next }
       END {
         for (i = 1; i <= nk; i++) {
           k = ord[i]; if (!held(k)) continue
@@ -976,6 +1019,7 @@ sitrep_waiting() {
           else if ((k in rul) && rul[k] != "-") e = rul[k] + 0
           # an ask waiting on an event waited on the user only until its answer, and never without one
           if ((k in wt) && wt[k] != "user") { x = (k in rn) ? ep(rn[k]) : -1; if (x < 0) continue; if (x < e) e = x }
+          if (index(k, "waive:") == 1) { if (!(k in pt) || pt[k] >= e) continue; if (pt[k] > s) s = pt[k] }
           if (s < 0) { lost++; continue }
           if (e <= s) continue
           n++; bs[n] = s; be[n] = e; bk[n] = k
@@ -1003,6 +1047,22 @@ SITREP_WAITING
     # shellcheck disable=SC2086
     printf '%s: %s\n' "$m" "$(sitrep_list 99 $k)"
   fi
+}
+
+# sitrep_card_puts <plan> <root> -> `<key><TAB><ISO>` per ask a release approval page of the run puts as one of its
+# decisions, at the page's writing, every page: the card is the tool's one surface that puts an ask it opened itself,
+# a waiver among them, to the person.
+sitrep_card_puts() {
+  local dir f
+  dir="$(docs_root "$2")/record/$(proof_plan_slug "$1")"
+  set --
+  for f in "$dir"/release-approval-*.md "$dir/$RR_OLD_VERB"-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && set -- "$@" "$f"; done
+  [ $# -gt 0 ] || return 0
+  awk -v old="$RR_OLD_VERB/v1|" '
+    FNR == 1 { at = "" }
+    index($0, "release-approval/v1|plan=") == 1 || index($0, old "plan=") == 1 { at = $0; sub(/^.*\|at=/, "", at); sub(/\|.*$/, "", at) }
+    (index($0, "release-approval/v1|dec=") == 1 || index($0, old "dec=") == 1) && at != "" {
+      k = $0; sub(/^.*\|key=/, "", k); sub(/\|.*$/, "", k); print k "\t" at }' "$@" 2>/dev/null
 }
 
 # sitrep_bar -> the landing bar in minutes, lib/line.sh's LINE_LANDING_BAR, the one constant the scorecard's target
@@ -2102,11 +2162,7 @@ sitrep_tick_line() {
     fi
     LR_PLAN=""
     if [ -n "$LR_ARG" ]; then
-      case "$LR_ARG" in
-        /*) LR_PLAN="$LR_ARG" ;;
-        *)  LR_PLAN="$REPO_REAL/$LR_ARG"
-            [ -f "$LR_PLAN" ] || LR_PLAN="$(docs_root "$REPO_REAL")/$LR_ARG" ;;
-      esac
+      LR_PLAN="$(docs_path "$REPO_REAL" "$LR_ARG")"
       if [ ! -f "$LR_PLAN" ] || [ -L "$LR_PLAN" ]; then
         die "REFUSED — no plan file at $LR_ARG; name the plan whose landings to report."
         exit 2
@@ -2177,19 +2233,26 @@ sitrep_tick_line() {
     die "REFUSED — the run's log cannot take this round (no record for the plan, or a value holding a |); nothing is written."
     return 1
   }
-  # THE PUT. A decision put during a run is one round before it is shown, by orchestrator, with its title and its wait
-  # line. It prints the round the put opens and the wait line, which ends the decision's Significance as printed.
-  # REFUSED (1), nothing written: a number that is not D<n>, a title that is empty or more than one line.
-  decisions_put() {  # <plan> <ledger> <D<n>> <title>
-    local plan="$1" led="$2" d="$3" title="$4" wait r
+  # THE PUT. A decision put during a run is one round before it is shown, by orchestrator, with its title, the rows it
+  # holds and its wait line. The rows are the put's to name, because a row the decision holds need not read
+  # approval:D<n>: a sealed plan cannot gain that read, and the wait line would say nothing waits while rows do. It
+  # prints the round the put opens and the wait line, which ends the decision's Significance as printed.
+  # REFUSED (1), nothing written: a number that is not D<n>, a title that is empty or more than one line, a row the
+  # plan does not have.
+  decisions_put() {  # <plan> <ledger> <D<n>> <title> [<rows, space-separated>]
+    local plan="$1" led="$2" d="$3" title="$4" holds="${5:-}" wait r ids h
     case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
     if [ -z "$d" ]; then
       die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
       exit 1
     fi
     case "$title" in ''|*$'\n'*) die "REFUSED — the title is one line saying what is decided; nothing is written."; exit 1 ;; esac
-    wait="$(decision_wait "$plan" "$d" "$REPO_REAL")"
-    decisions_append "$plan" "d=$d" verb=put by=orchestrator "title=$title" ${wait:+"wait=$wait"} || exit 1
+    ids=" $(units_rows "$plan" 2>/dev/null | cut -f1 | tr '\n' ' ') "
+    for h in $holds; do
+      case "$ids" in *" $h "*) ;; *) die "REFUSED — the plan has no row '$(clean "$h")' for $d to hold; nothing is written."; exit 1 ;; esac
+    done
+    wait="$(decision_wait "$plan" "$d" "$REPO_REAL" "$holds")"
+    decisions_append "$plan" "d=$d" verb=put by=orchestrator "title=$title" ${wait:+"wait=$wait"} ${holds:+"holds=$holds"} || exit 1
     # THE PUT IS AN ASK ON THE RUN'S REGISTER, in the words the pages owe it in (`pages_owed`), so a decision put and
     # not yet ruled is owed wherever the register is read; the ruling closes it (`decisions_settle`).
     if declare -F owed_open >/dev/null 2>&1; then
@@ -2205,9 +2268,12 @@ sitrep_tick_line() {
   # release approval card (whose reply runs `approve`), it is this one function, so a decision ruled anywhere has its
   # round and its closed ask. It writes the ruled round (`decisions_append`), the title the newest put's and none when
   # the decision was never put; then it settles the register against the rounds, which closes `decide:D<n>`. A double
-  # quote in the reply is written as a single one. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
-  # this run, a reply under three words only in a prompt typed after the orchestrator's own put of this decision (the mark
-  # `decisions put D<n> `, its newest round: a digit typed for another decision is not this one's). Found, the user's
+  # quote in the reply is written as a single one. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh
+  # `user_said` in the prompts the user typed in this run, a reply under three words only in a prompt typed after the
+  # instant its window opens: the log's stamp on the newest put of this decision, so a digit typed for another decision
+  # is not this one's. When no other decision stood open at that put, the window opens at the register's line before
+  # it instead, for a put recorded beside its ruling records a reply already typed, and nothing else was asked that the
+  # reply could answer. A decision never put opens its window at the ruling itself. Found, the user's
   # words: who is the project's git user name. Not found, or found too short to be a quote,
   # the words are the orchestrator's relaying a decision it was ordered to make: who is `orchestrator`, the way a ruling
   # written by hand has always read, so the record never says a person decided what they did not. Unable to look (no jq,
@@ -2217,7 +2283,7 @@ sitrep_tick_line() {
   # words no usable git user name); 3 refused, nothing written, the decision's last round already closed by a ruling or a
   # withdrawal.
   decisions_rule() {  # <plan> <root> <D<n>> <reply>
-    local plan="$1" root="$2" d="$3" reply="$4" led who title st sq said raw
+    local plan="$1" root="$2" d="$3" reply="$4" led who title st sq said raw after
     case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
     if [ -z "$d" ]; then
       die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
@@ -2239,7 +2305,13 @@ sitrep_tick_line() {
       die "REFUSED — who said the reply is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
       return 1
     fi
-    user_said "$raw" "$plan" "decisions put $d "; said=$?
+    after="$(_sitrep_ledger_facts "$led" | awk -F'|' -v d="$d" '
+      { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); f[substr($i, 1, e - 1)] = substr($i, e + 1) } }
+      f["ev"] != "decision" { next }
+      f["d"] == d && f["verb"] == "put" { for (k in st) if (k != d && st[k] == "put") prev = ""; m = (prev == "") ? f["at"] : prev }
+      { st[f["d"]] = f["verb"]; prev = f["at"] }
+      END { print m }')"
+    user_said "$raw" "$plan" "${after:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; said=$?
     case "$said" in
       0)
         who="$(git -C "$root" config user.name 2>/dev/null)"
@@ -2299,7 +2371,7 @@ sitrep_tick_line() {
     fi
     DC_LEDGER="$DC_DOCS/record/$(proof_plan_slug "$DC_PLAN")/design-ledger.md"
     decisions_settle "$DC_PLAN" "$DC_LEDGER"
-    [ -z "${DC_PUT:-}" ] || decisions_put "$DC_PLAN" "$DC_LEDGER" "$DC_PUT" "${DC_TITLE:-}"
+    [ -z "${DC_PUT:-}" ] || decisions_put "$DC_PLAN" "$DC_LEDGER" "$DC_PUT" "${DC_TITLE:-}" "${DC_HOLDS:-}"
     if [ -n "${DC_RULE:-}" ]; then
       decisions_rule "$DC_PLAN" "$REPO_REAL" "$DC_RULE" "${DC_REPLY:-}" && exit 0
       exit 1
@@ -2335,11 +2407,7 @@ sitrep_tick_line() {
       exit 2
     fi
     RS_DOCS="$(docs_root "$REPO_REAL")"
-    case "$RS_ARG" in
-      /*) RS_FILE="$RS_ARG" ;;
-      *)  RS_FILE="$REPO_REAL/${RS_ARG#./}"
-          [ -f "$RS_FILE" ] || { [ -f "$RS_DOCS/$RS_ARG" ] && RS_FILE="$RS_DOCS/$RS_ARG"; } ;;
-    esac
+    RS_FILE="$(docs_path "$REPO_REAL" "$RS_ARG")"
     RS_SHOWN="$(printf '%s' "${RS_ARG:0:160}" | tr -d '[:cntrl:]')"
     if [ ! -f "$RS_FILE" ] || [ -L "$RS_FILE" ]; then
       die "REFUSED — no handoff file at '$RS_SHOWN'; write one with: bash ${HOOK_DIR}/session-poker.sh handoff, and resume from the path its last line names. Nothing was bound."
@@ -2572,11 +2640,7 @@ sitrep_tick_line() {
     fi
     SR_PLAN=""
     if [ -n "$SR_ARG" ]; then
-      case "$SR_ARG" in
-        /*) SR_PLAN="$SR_ARG" ;;
-        *)  SR_PLAN="$REPO_REAL/$SR_ARG"
-            [ -f "$SR_PLAN" ] || SR_PLAN="$(docs_root "$REPO_REAL")/$SR_ARG" ;;
-      esac
+      SR_PLAN="$(docs_path "$REPO_REAL" "$SR_ARG")"
       if [ ! -f "$SR_PLAN" ] || [ -L "$SR_PLAN" ]; then
         die "REFUSED — no plan file at $SR_ARG; name the plan whose situation to report."
         exit 2
