@@ -1329,6 +1329,11 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
              _wt_refuse "lint branch=${branch} — a comment the row adds cites the run; say the reason without it, land again"; rc=2; break ;;
           *) _wt_refuse "lint-unreadable row=${row} — ${lo:-the lint printed nothing}"; rc=2; break ;;
         esac
+        _line_stale_say "$plan" "$row" "$root" "$base" "$c"; lc=$?
+        if [ "$lc" != 0 ]; then
+          [ "$lc" != 1 ] || _wt_refuse "stale branch=${branch} — the row deletes what the eval of a criterion cites; restate the criterion or have it waived, land again"
+          rc=2; break
+        fi
         line_candidate_event "$plan" "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
         lb="$base"
       fi
@@ -1777,7 +1782,7 @@ _line_lease_end() {  # <the carrier's exit status>
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again> [resumed]
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
-  local c rc s said anchored="" linted=""
+  local c rc s said anchored="" linted="" cited=""
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   _LINE_KEY="$(_line_landing_key "$root" "$plan" "$row")"   # the key every runner of this landing asks under (D21)
   _LINE_JT=""   # the red judge's tree, taken on first use (`_line_red_owner`), freed the same way
@@ -1861,6 +1866,12 @@ EOF
            return 1 ;;
         *) _wt_refuse "lint-unreadable row=${row} — ${c:-the lint printed nothing}"; return 2 ;;
       esac
+    fi
+    # 3c. WHAT AN EVAL CITES, once per candidate and before any suite: a candidate that deletes a section or words a
+    # criterion's eval cites, while the criterion reads as at the row's dispatch and is not waived, returns the row.
+    if [ "$cited" != "$cand" ]; then
+      _line_stale_say "$plan" "$row" "$root" "$cbase" "$cand"
+      case $? in 0) cited="$cand" ;; 1) return 1 ;; *) return 2 ;; esac
     fi
     # 3. THE PROOF, A DRAIN (wave-37 T1; D3, AC-1.1; wave-38 T6, D21): each named suite not yet green on this
     # candidate, as many runners at once as the gate answers: before the pass's first runner, and again as
@@ -2139,6 +2150,102 @@ _line_comment_lint() {  # <root> <base> <candidate> -> `<file>:<line> <shapes>` 
   [ -n "$hits" ] || return 0
   printf '%s\n' "$hits"
   return 1
+}
+
+# A LANDING THAT REMOVES WHAT AN EVAL CITES. An eval names its proof in two shapes a landing can match: a section, the
+# `§NAME` after the suite it names (`x.test.sh §NAME`), and words it quotes, in backticks or in double quotes. A
+# backtick span that names a suite or a section is the command around them, not words. Free prose is never read, so a
+# criterion written in it holds nothing here. The row's dispatch recorded each criterion's sum
+# (lib/plan-read.sh `plan_read_criterion_sums`); a criterion still at that sum, and not waived, holds the row when its
+# candidate deletes what it cites: the section's line from its suite, or the words from every tracked file. A criterion
+# restated since the dispatch, or waived, holds nothing; a row whose last dispatch recorded no sums is not read, since
+# nothing says what its writer was given. The awk reads, in order: `R` the recorded sums, `X` each waived criterion,
+# `C` each criterion as the plan reads it now, then `D` and the diff, and prints each cite a removed line touches.
+_LINE_CITES_AWK='
+  function sect(s, nm,   p, c, L) { L = length("§")
+    while ((p = index(s, "§" nm)) > 0) { c = substr(s, p + L + length(nm), 1); if (c !~ /[A-Za-z0-9_-]/) return 1; s = substr(s, p + L) }
+    return 0 }
+  function cite(t, c, su, w,   k) { k = t SUBSEP c SUBSEP su SUBSEP w; if (k in had) return; had[k] = 1
+    nk++; ct[nk] = t; cc[nk] = c; cs[nk] = su; cw[nk] = w }
+  function cites(c, e,   n, seg, i, t, j, nt, tok, p, rest, su, w, L) { L = length("§"); su = ""
+    n = split(e, seg, "`")
+    for (i = 1; i <= n; i++) { t = seg[i]
+      if (i % 2 == 0 && t !~ /[.]test[.]sh/ && !index(t, "§")) { w = t; gsub(/^[ ]+|[ ]+$/, "", w); if (w != "") cite("W", c, "", w); continue }
+      if (i % 2 == 1) { rest = t; while (match(rest, /"[^"]+"/)) { cite("W", c, "", substr(rest, RSTART + 1, RLENGTH - 2)); rest = substr(rest, RSTART + RLENGTH) } }
+      nt = split(t, tok, /[ ]+/)
+      for (j = 1; j <= nt; j++) { rest = tok[j]
+        if (match(rest, /[A-Za-z0-9_\/.-]*[.]test[.]sh/)) su = substr(rest, RSTART, RLENGTH)
+        while ((p = index(rest, "§")) > 0) { rest = substr(rest, p + L); if (su != "" && match(rest, /^[A-Za-z0-9_-]+/)) cite("S", c, su, substr(rest, 1, RLENGTH)) } } } }
+  !part && $1 == "R" { n = split($2, a, ","); for (i = 1; i <= n; i++) { p = index(a[i], ":"); was[substr(a[i], 1, p - 1)] = substr(a[i], p + 1) }; next }
+  !part && $1 == "X" { off[$2] = 1; next }
+  !part && $1 == "C" { if (($2 in was) && was[$2] == $3 && !($2 in off)) cites($2, $4); next }
+  !part && $0 == "D" { part = 1; next }
+  !part { next }
+  /^diff --git / { hdr = 1; f = ""; next }
+  hdr && /^--- a\// { f = substr($0, 7); next }
+  hdr && /^[+][+][+] b\// { f = substr($0, 7); next }
+  /^@@/ { hdr = 0; next }
+  hdr || !/^-/ { next }
+  { s = substr($0, 2)
+    for (k = 1; k <= nk; k++) if (!(k in hit)) {
+      if (ct[k] == "S" && (f == cs[k] || f == "tests/" cs[k]) && sect(s, cw[k])) hit[k] = f
+      else if (ct[k] == "W" && index(s, cw[k])) hit[k] = "-" } }
+  END { for (k = 1; k <= nk; k++) if (k in hit) printf "%s\t%s\t%s\t%s\n", ct[k], cc[k], hit[k], cw[k] }'
+_line_load_plan_read() {
+  declare -F plan_read_criterion_sums >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$_LINE_LIB_DIR/plan-read.sh" ] && . "$_LINE_LIB_DIR/plan-read.sh" 2>/dev/null
+  declare -F plan_read_criterion_sums >/dev/null 2>&1
+}
+_line_stale() {  # <plan> <row> <root> <base> <candidate> -> `<criterion><TAB><what it deletes>` per criterion held; 0 none · 1 held · 2 unreadable
+  local plan="$1" row="$2" root="$3" base="$4" cand="$5" logd crit diff hits out="" k c p w
+  logd="$(line_lines "$(line_log "$plan")" | awk -F'|' -v r="row=$row" '
+    $2 == "ev=dispatch" { m = 0; s = ""; for (i = 3; i <= NF; i++) { if ($i == r) m = 1; if (index($i, "criteria=") == 1) s = substr($i, 10) }; if (m) rec = s }
+    $2 == "ev=waiver" { for (i = 3; i <= NF; i++) if (index($i, "ac=") == 1) print "X\t" substr($i, 4) }
+    END { print "R\t" rec }')"
+  case "$logd" in *"R	") return 0 ;; esac
+  _line_load_plan_read || { printf 'plan-read-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
+  crit="$(plan_read_criterion_sums "$plan" eval)"
+  case $? in 0) ;; 1) return 0 ;; *) printf 'plan-unreadable plan=%s\n' "$plan"; return 2 ;; esac
+  diff="$(git -C "$root" -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --no-renames \
+    --src-prefix=a/ --dst-prefix=b/ "$base" "$cand" 2>&1)" \
+    || { printf 'diff-unreadable base=%s candidate=%s — %s\n' "$base" "$cand" "$(printf '%s\n' "$diff" | head -1)"; return 2; }
+  hits="$({ printf '%s\n' "$logd"; printf '%s\n' "$crit" | sed 's/^/C	/'; printf 'D\n%s\n' "$diff"; } \
+    | LC_ALL=C awk -F'\t' "$_LINE_CITES_AWK")"
+  [ -n "$hits" ] || return 0
+  while IFS=$'\t' read -r k c p w; do
+    if [ "$k" = S ]; then
+      ! git -C "$root" cat-file -e "$cand:$p" 2>/dev/null \
+        || ! git -C "$root" show "$cand:$p" | LC_ALL=C grep -Eq "§${w}([^A-Za-z0-9_-]|\$)" || continue
+      out="${out}${c}	§${w} of ${p}
+"
+    else
+      git -C "$root" grep -qF -e "$w" "$cand" -- 2>/dev/null
+      case $? in 0) continue ;; 1) ;; *) printf 'grep-unreadable candidate=%s\n' "$cand"; return 2 ;; esac
+      out="${out}${c}	the words \"${w}\"
+"
+    fi
+  done <<EOF
+$hits
+EOF
+  [ -n "$out" ] || return 0
+  printf '%s' "$out" | awk -F'\t' '!($1 in w) { o[++n] = $1 } { w[$1] = ($1 in w) ? w[$1] "; " $2 : $2 } END { for (i = 1; i <= n; i++) print o[i] "\t" w[o[i]] }'
+  return 1
+}
+# The landing's answer to `_line_stale`: the row returned, `why=stale` and one STALE line per criterion it deletes the
+# cite of, or refused when the check could not read what it needs.
+_line_stale_say() {  # <plan> <row> <root> <base> <candidate> -> 0 nothing held · 1 returned · 2 refused
+  local out
+  out="$(_line_stale "$@")"
+  case $? in
+    0) return 0 ;;
+    1) line_returned_event "$1" "row=$2" why=stale "detail=$(printf '%s\n' "$out" | head -1 | tr '|\t' '/ ')" >/dev/null
+       printf '%s\n' "$out" | while IFS=$'\t' read -r c w; do
+         printf 'STALE %s %s — the row deletes %s, which the eval of %s cites; restate its row in the Eval design of the plan, or have it waived, then land again\n' "$2" "$c" "$w" "$c"
+       done
+       return 1 ;;
+    *) _wt_refuse "stale-unreadable row=$2 — ${out:-the check printed nothing}"; return 2 ;;
+  esac
 }
 
 # is keyed by the commit's tree, `tree:<id>` (anchors.sh's key for a set it cannot derive), unless it names a suite
