@@ -1264,6 +1264,25 @@ EOF
     fi
     [ -n "$BRF_SUITES" ] || BRF_SUITES="${BRF_SUITE_SLOT:-none}"
 
+    # THE LANDING BAR: a suite the gate promises over LINE_SUITE_BAR is refused by the landing as too long, so it is left
+    # out of Lands-on here, stays in Suites (the writer runs it in the tree) and is named. When it would leave the set
+    # empty it stays: `none` is refused for a row that writes code, and the landing says the rest.
+    BRF_BAR=""
+    if declare -F _gate_promise >/dev/null && _gate_store >/dev/null 2>&1; then
+      BRF_KEPT=""
+      while IFS= read -r BRF_E; do
+        BRF_E="${BRF_E#"${BRF_E%%[![:space:]]*}"}"; [ -n "$BRF_E" ] || continue
+        BRF_P="$(_gate_promise "$(_line_gate_key "$BRF_E")" "$PV_REPO" 2>/dev/null)"; BRF_P="${BRF_P##*:}"
+        case "$BRF_P" in ''|*[!0-9]*) BRF_P=0 ;; esac
+        if [ "$BRF_P" -gt "$LINE_SUITE_BAR" ]; then
+          BRF_BAR="${BRF_BAR:+$BRF_BAR }$BRF_E promises ${BRF_P}s, over the landing bar of ${LINE_SUITE_BAR}s, so it is left out of Lands-on and stays in Suites to run in your tree."
+        else BRF_KEPT="${BRF_KEPT:+$BRF_KEPT, }$BRF_E"; fi
+      done <<BRF_EOF
+$(printf '%s\n' "$BRF_LANDS" | tr ',' '\n')
+BRF_EOF
+      if [ -z "$BRF_KEPT" ]; then BRF_BAR=""; else BRF_LANDS="$BRF_KEPT"; fi
+    fi
+
     # WHAT A RULING GRANTED THE ROW rides every later brief of it, so a successor is born holding its predecessor's
     # grants; Lands-on stays the row's, as a grant widens a running set and not the landing's.
     poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" poker_fold_all
@@ -1344,6 +1363,7 @@ BRF_EOF
       printf 'Row %s: kind %s, step %s, serves %s, waits on %s, status %s.\n' "$BRF_ID" "$BRF_KIND" "$BRF_STEP" "$BRF_SERVES" "${BRF_DEPS:-—}" "${BRF_STATUS:-pending}"
       printf 'Working head: %s\n' "$BRF_HEAD"
       [ -z "$BRF_RANGE" ] || printf '%s\n' "$BRF_RANGE"
+      [ -z "$BRF_BAR" ] || printf 'Landing bar: %s\n' "$BRF_BAR"
       printf 'Plan: %s\n\n## Judgment\n\n' "$(clean "${PV_PLAN#"$PV_REPO"/}")"
       if [ -n "$BRF_JUDG" ]; then
         printf '%s\n' "$BRF_JUDG"
