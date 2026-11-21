@@ -2211,12 +2211,30 @@ EOF
           fi
           RULE_TEXT="$RULE_TEXT words=\"$(said_fold "$RULE_WORDS" | tr '"' "'")\" session=$SAID_SESSION"
         fi
-        RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT")" || RULE_ID=""
+        # A GRANT IS THE RULING'S OWN WIDENING: the writer's row is widened first, by `amend` itself, so every check it
+        # makes is made, and nothing is written when it refuses; then the one event, the ruling, carries what it
+        # granted, where every later brief of the row reads it (`poker_brief_grants`), and says so to the writer.
+        RULE_GRANT=()
+        if [ -n "$RULE_FILES$RULE_SUITES" ]; then
+          RULE_AM="$(AMEND_NAME="$RULE_WRITER" AMEND_FILES="$RULE_FILES" AMEND_SUITES="$RULE_SUITES" AMEND_NARROW="" \
+            AMEND_RUNS="" AMEND_BY="" AMEND_RULED=1 AMEND_REASON="granted by ruling: $(ruling_clean "$RULE_TEXT")" \
+            poker_verb_amend 2>&1)"; RULE_AM_RC=$?
+          case "$RULE_AM_RC:$RULE_AM" in
+            0:*"amended — "*) : ;;
+            *) die "REFUSED — the grant could not widen $RULE_WRITER's row, so neither it nor the ruling is written:"
+               printf '%s\n' "${RULE_AM:-(amend said nothing)}" >&2
+               exit 2 ;;
+          esac
+          RULE_GF="$(printf '%s' "$RULE_FILES" | awk 'NF' | paste -sd, -)"; RULE_GS="$(printf '%s' "$RULE_SUITES" | awk 'NF' | paste -sd, -)"
+          RULE_GRANT=(${RULE_GF:+"files=$RULE_GF"} ${RULE_GS:+"suites=$RULE_GS"})
+          RULE_TEXT="$RULE_TEXT — granted:${RULE_GF:+ files $RULE_GF}${RULE_GS:+ suites $RULE_GS}"
+        fi
+        RULE_ID="$(ruling_record "$ROSTER_FILE" "$RULE_WRITER" "$RULE_TEXT" ${RULE_GRANT[@]+"${RULE_GRANT[@]}"})" || RULE_ID=""
         if [ -z "$RULE_ID" ]; then
           die "REFUSED — could not write the ruling to the run $RULE_WRITER's row names, or this session is bound to."
           exit 2
         fi
-        say "ruling $RULE_ID recorded for $RULE_WRITER — its next tool result carries it, and its commit and ready are refused until it is shown; read it with: rulings $RULE_WRITER"
+        say "ruling $RULE_ID recorded for $RULE_WRITER${RULE_GRANT[0]+, its row widened by the grant} — its next tool result carries it, and its commit and ready are refused until it is shown; read it with: rulings $RULE_WRITER"
         exit 0 ;;
       ruling-ack)
         RA_LINE="$(ruling_fold "$ROSTER_FILE" | awk -F"$RULING_US" -v id="$RULING_ID" '$1 == id { print; exit }')"

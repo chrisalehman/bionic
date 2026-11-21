@@ -2021,6 +2021,13 @@ EOF
                 say "held ${SD_NAME} since ${SD_HELD%% *} — ${SD_HELD_REST% fp=*}"
                 continue
               fi
+              # A WRITER IS DONE WHEN ITS ROW HAS LANDED. Its record is the first thing it writes, so MET alone
+              # finds it mid-work, before `ready`; such a row is named nothing and ordered nothing. A read-only
+              # role has no landing, and its record is its whole work.
+              if ! role_is_readonly "$(line_field "$SD_ROW" subagent_type)" \
+                && ! roster_landed "$ROSTER_FILE" "$SD_NAME" >/dev/null 2>&1; then
+                continue
+              fi
               say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written), or keep it up with: bash ${POKER_WORD} hold ${SD_NAME} ${HOLD_REASON_SLOT}"
               SD_ORDER_NAMES="${SD_ORDER_NAMES}${SD_ORDER_NAMES:+ }${SD_NAME}"
               ;;
