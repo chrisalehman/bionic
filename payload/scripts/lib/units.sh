@@ -2420,9 +2420,11 @@ units_run_rosters() {
 #
 # A ROW'S LANDING AND LAUNCH ARE THE READER'S: a landed row stands when the reader's status answers landed, and a
 # launched row with no roster to judge stands when the reader holds its dispatch under a name. An answer other than
-# the one asked is the `evidence` finding.
+# the one asked is the `evidence` finding. Every row asked is answered by ONE pass of the reader over the facts this call
+# holds (lib/reader.sh `reader_q_statuses`), joined here against the rows this call already read, never by an ask a row,
+# so a pass costs the same at any number of rows. A reader that cannot answer answers no row, so each asked row is a finding.
 _units_ledger() {
-  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" rows useroster=0 own="" run="" rf first=1 out line found=0
+  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" rows useroster=0 own="" run="" rf first=1 out line found=0 sts=""
   rows="$(units_rows "$plan")" || return 0
   [ -n "$rows" ] || return 0
   while IFS= read -r rf; do
@@ -2480,30 +2482,28 @@ UNITS_RUN
         } else printf "ask dispatched %s\n", id[i]
       }
     }')"
+  case "$out" in
+    'ask '*|*$'\n''ask '*)
+      if _units_lib reader.sh reader_q_statuses; then
+        sts="$(if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then reader_facts() { printf '%s' "$_UNITS_FACTS"; }; fi
+          reader_q_statuses "$(_units_origin "$plan")" 2>/dev/null)" || sts=""
+      fi
+      # The join: each row's first line is its state, and a dispatch is under a name when a `name=` line is not empty.
+      out="$({ printf '%s\n' "$sts"; printf '\034\n'; printf '%s\n' "$out"; } | awk '
+        $0 == "\034" { part = 1; next }
+        !part && index($0, "row=") == 1 { r = substr($0, 5); first = 1; next }
+        !part { if (first) st[r] = substr($0, 7); else if ($0 ~ /^name=./) named[r] = 1; first = 0; next }
+        $1 == "ask" && $2 == "landed" { if (st[$3] != "landed") print "evidence " $3; next }
+        $1 == "ask" { if (st[$3] != "dispatched" || !($3 in named)) print "evidence " $3; next }
+        { print }')" ;;
+  esac
   while IFS= read -r line; do
-    case "$line" in
-      '') continue ;;
-      'ask '*) _units_asked "$plan" "${line##* }" "$(line="${line#ask }"; printf '%s' "${line%% *}")" && continue
-               line="evidence ${line##* }" ;;
-    esac
+    [ -n "$line" ] || continue
     printf '%s\n' "$line"; found=1
   done <<UNITS_FOUND
 $out
 UNITS_FOUND
   return "$found"
-}
-
-# _units_asked <plan> <row> <landed|dispatched> -> 0 when the reader's status of <row> answers it so, a dispatch under a
-# name, over the facts this call holds; 1 for any other answer and when the reader cannot answer.
-_units_asked() {
-  local a
-  _units_lib reader.sh reader_q_status || return 1
-  a="$(if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then reader_facts() { printf '%s' "$_UNITS_FACTS"; }; fi
-    reader_q_status "$(_units_origin "$1")" "$2" 2>/dev/null)" || return 1
-  case "$3" in
-    landed) [ "${a%%$'\n'*}" = state=landed ] ;;
-    *) [ "${a%%$'\n'*}" = state=dispatched ] && case "$a" in *$'\n'name=?*) : ;; *) false ;; esac ;;
-  esac
 }
 
 # _units_files_tokens <Files cell> -> one entry per line, as the readiness program reads a Files cell: comma-split,

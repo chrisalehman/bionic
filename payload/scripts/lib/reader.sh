@@ -463,22 +463,42 @@ reader_q_hands() {  # <plan> -> each act taken by hand: a hand event, or a landi
     ev() == "hand" || ev() == "published" && line_kv("kind") == "hand"'
 }
 
+# A ROW'S STATUS IS PRINTED HERE, by one function both questions below call over the row fold, so the one pass over
+# every row and the ask of one row cannot answer a row two ways. state is the latest of dispatched, candidate, ready,
+# returned, stalled and landed, pending when the log holds none; a dropped row is dropped whatever else stands of it.
+_READER_STATUS_AWK='
+function row_status(r,   s, n, p, i) {
+  s = dropped(r) ? "dropped" : _row_state[r]
+  print "state=" (s == "" ? "pending" : s)
+  n = split(_row_dispatch[r], p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
+  $0 = _row_tree[r]; if (line_kv("path") != "") { print "tree=" line_kv("path"); print "branch=" line_kv("branch"); print "base=" line_kv("base") }
+  if (_row_commit[r] != "") print "commit=" _row_commit[r]
+}
+'
+
 reader_question status value reader_q_status
 reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch contract, its tree and its landing commit
   [ -z "${BIONIC_COUNT:-}" ] || printf 'status reader_q_status\n' 2>/dev/null >>"$BIONIC_COUNT" || :
-  # state is the latest of dispatched, candidate, ready, returned, stalled and landed; pending when the
-  # log holds none. A row the plan's Tasks table lacks has no status, so a wrong id never reads as pending.
-  # The state is the one row fold's (`_READER_ROW_AWK`). A dropped row is dropped whatever else stands of it.
+  # A row the plan's Tasks table lacks has no status, so a wrong id never reads as pending.
   _reader_needs status '<row>' "${2:-}" || return 2
   plan_read_row "$1" Tasks id "$2" >/dev/null || return 1
-  reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
-    END {
-      s = dropped(r) ? "dropped" : _row_state[r]
-      print "state=" (s == "" ? "pending" : s)
-      n = split(_row_dispatch[r], p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
-      $0 = _row_tree[r]; if (line_kv("path") != "") { print "tree=" line_kv("path"); print "branch=" line_kv("branch"); print "base=" line_kv("base") }
-      if (_row_commit[r] != "") print "commit=" _row_commit[r]
-    }'
+  reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK$_READER_STATUS_AWK"'
+    END { row_status(r) }'
+}
+
+# EVERY ROW'S STATUS IN ONE PASS, for a caller that asks of many rows: one fold read and one awk, where an ask a row
+# reads the fold and parses the plan once a row. It answers from the facts alone and reads no table: each row a fact
+# names opens with `row=<id>`, in the order the facts first name it, and its lines follow as `status` prints them. The
+# caller joins it against the Tasks rows it already holds: a row of the table no fact names is pending, and a row
+# named here that the table lacks has no status.
+reader_question statuses value reader_q_statuses
+reader_q_statuses() {  # <plan> -> per row the facts name: row=<id>, then the row's status lines; 2 when the facts cannot be read
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'status reader_q_statuses\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  local f
+  f="$(reader_facts "$1")" || return 2
+  [ -n "$f" ] || return 0
+  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK$_READER_STATUS_AWK"'
+    END { for (i = 1; i <= _rows; i++) { print "row=" _row_order[i]; row_status(_row_order[i]) } }'
 }
 
 reader_question ready yes reader_q_ready
