@@ -1700,7 +1700,7 @@ if [ "$DP_LANDS_ON" = none ] && [ -n "$C_FILES" ] && declare -F prose_path >/dev
   _ln_list="$(prose_list "$BIONIC_ROOT" 2>/dev/null)"
   for _ln_p in ${C_FILES//,/ }; do
     case "$_ln_p" in none|—) continue ;; esac
-    prose_path "$_ln_p" "$_ln_list" && continue
+    _ln_q="$(docs_path "$BIONIC_ROOT" "$_ln_p")"; prose_path "${_ln_q#"$BIONIC_ROOT"/}" "$_ln_list" && continue
     # The line holds 100 columns: the fixed words and the fix leave the path 23, the whole sentence rides in the detail.
     dispatch_finding lands-none "$_ln_p" "$_lo_reason" "$C_FILES"
     break

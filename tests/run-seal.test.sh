@@ -43,6 +43,8 @@
 #   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
 #             and one line names the word and the change.
 #   §ABANDON  abandon is taken only on words a session typed, and on them it ends the run.
+#   §HELD     a living command's held fold, a planted step in it too, is what its processes are served; once the
+#             command ends its directory is gone, and a copy under a dead pid serves a decider nothing.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.
