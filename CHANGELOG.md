@@ -161,6 +161,17 @@ first suite without starting it, so its time runs to the point where the suites 
 the print of the run it is set beside. The only differences are clock times, a copy's path, one load reading on the
 tick's gate line, and, in the close's check, the installed version and the head of the shipped row.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at b8732178 by T39, 2026-11-22T13:14:51Z (`critic-adversarial.md`)
+- structure review, whole: flag at b8732178 by T39, 2026-11-22T13:14:59Z (`critic-structure.md`)
+- evidence review, whole: flag at b8732178 by T38, 2026-11-22T13:15:16Z (`auditor-evidence.md`)
+- adversarial review, piece: flag at 6d523e84 by T39-r2, 2026-11-22T15:04:16Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 6d523e84 by T39-r2, 2026-11-22T15:04:30Z (`critic-structure-2.md`)
+- evidence review, piece: pass at 6d523e84 by T38-r2, 2026-11-22T16:12:44Z (`auditor-evidence-2.md`)
+
 ### Known limits
 
 Stated first because they are what this release leaves on purpose.
