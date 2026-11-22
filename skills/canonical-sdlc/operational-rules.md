@@ -136,7 +136,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 
 ## Close-out report (Step 9)
 
-SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-src/blocks/terminal-disposition.md`; this is the authoring detail per part, and the report's bound.
+`steps/9.md` carries the terminal-disposition rule, rendered from `agents-src/blocks/terminal-disposition.md`; this is the authoring detail per part, and the report's bound.
 
 **The report is one turn**: the close-out message itself, sent once at Step 9, never a file the user has to open. A close-out that spans turns or defers its verdict to a linked artifact is the ceremony the rule forbids.
 

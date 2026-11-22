@@ -375,4 +375,33 @@ expect_eq "GN2 the planted copy of the set is refused at both plants" "2" "$(gon
 expect_empty "GN3 the shipped set names neither (the same search over the files the copy was made from)" "$(gone_hits "$REPO")"
 expect_eq "GN4 the planted Step-5 block is found, and the shipped set names none" "1|" "$(gone_hits "$TMP/gone" 'step-5 block' | /usr/bin/grep -c PLANT-3)|$(gone_hits "$REPO" 'step-5 block')"
 
+# ── §PAGES ───────────────────────────────────────────────────────────────────
+section "§PAGES: the rendered pages teach the verbs a run uses today"
+
+# Each row reads a page as shipped. A page that names a verb only on a page nothing loads, or in a retired form, is a
+# page a run cannot learn the verb from, so the sentence is read where the run loads it. An absence is read beside the
+# presence of the line it is read from, so a renamed line cannot pass it.
+# fails-when: the dispatch page or the Step 4 page does not name `session-poker.sh start`; the dispatch page does not
+# name `check-from`, or does not say the rule verb grants files and suites; none of the Step 6, 7 and 8 pages says a
+# carried finding's sentence is stated before the release card; the rules page does not name steps/9.md, or still sends
+# the reader to SKILL.md for the terminal-disposition rule; the scaffold's Row: comment names a push; the opening line
+# spells the rigor as required.
+PG_DIR="$REPO/skills/canonical-sdlc"
+pg_has() { /usr/bin/grep -c -F -- "$2" "$PG_DIR/$1" || true; }
+expect_nonempty "PG0 the pages are read: dispatch.md, steps/4.md, steps/6.md, steps/7.md, steps/8.md, SKILL.md and operational-rules.md exist" "$(for f in dispatch.md steps/4.md steps/6.md steps/7.md steps/8.md SKILL.md operational-rules.md; do [ -s "$PG_DIR/$f" ] && printf y; done | /usr/bin/grep -x yyyyyyy)"
+expect_ne "PG1 the dispatch page names session-poker.sh start" "0" "$(pg_has dispatch.md 'session-poker.sh start')"
+expect_ne "PG1b the Step 4 page names session-poker.sh start" "0" "$(pg_has steps/4.md 'session-poker.sh start')"
+expect_ne "PG2 the dispatch page names check-from" "0" "$(pg_has dispatch.md 'check-from')"
+expect_ne "PG2b the dispatch page says the rule verb grants files and suites (session-poker.sh rule … --files+ … --suites+ on one line)" "0" "$(/usr/bin/grep -c -E 'session-poker\.sh rule .*--files\+.*--suites\+' "$PG_DIR/dispatch.md" || true)"
+expect_ne "PG3 one of the Step 6, 7 and 8 pages says a carried finding's sentence is stated before the release card (finding-move … stated)" "0" "$(/usr/bin/grep -c -E 'finding-move <record>#<n> stated' "$PG_DIR/steps/6.md" "$PG_DIR/steps/7.md" "$PG_DIR/steps/8.md" | awk -F: '{s+=$2} END{print s+0}')"
+expect_ne "PG4 the rules page names steps/9.md" "0" "$(pg_has operational-rules.md 'steps/9.md')"
+expect_eq "PG4b …and the page it names holds the terminal-disposition rule (the control for the absence below)" "1" "$(/usr/bin/grep -c -F 'TERMINAL-DISPOSITION-BEGIN' "$REPO/skills/canonical-sdlc/steps/9.md" | awk '{print ($1>0)}')"
+expect_eq "PG4c …and the rules page no longer says SKILL.md §Step 9 carries it" "0" "$(pg_has operational-rules.md 'SKILL.md §Step 9 carries')"
+PG_ROW="$(/usr/bin/grep -E -- '^Row: <id>' "$PG_DIR/dispatch.md" | head -1)"
+expect_nonempty "PG5 the scaffold's Row: line is read from the dispatch page" "$PG_ROW"
+expect_eq "PG5b …and it names no push or pull request" "0" "$(printf '%s\n' "$PG_ROW" | /usr/bin/grep -c -E 'push|gh pr create' || true)"
+PG_OPEN="$(/usr/bin/grep -F -- 'card.sh opening' "$PG_DIR/SKILL.md" | head -1)"
+expect_nonempty "PG6 the opening line is read from SKILL.md" "$PG_OPEN"
+expect_eq "PG6b …and it spells the rigor as optional, never as required" "1|0" "$(printf '%s\n' "$PG_OPEN" | /usr/bin/grep -c -F 'card.sh opening [<rigor>' || true)|$(printf '%s\n' "$PG_OPEN" | /usr/bin/grep -c -F 'card.sh opening <rigor>' || true)"
+
 finish

@@ -47,7 +47,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 ## Load-time announcement
 
-First user-facing action: run `bash <plugin-root>/scripts/card.sh opening <rigor> [<intent> <scale>]` with the triple you know, and show its print first, unaltered: the version line, the engaged line (`build · double rigor · wave`), the rigor line.
+First user-facing action: run `bash <plugin-root>/scripts/card.sh opening [<rigor> [<intent> <scale>]]` with as much of the triple as you know, and show its print first, unaltered: the version line, the engaged line (`build · double rigor · wave`), the rigor line.
 
 Triple not yet declared → say so and list the axes. Invoked as `help` → render the axis tables and stop.
 
@@ -179,7 +179,7 @@ Files: <every path the task may create or edit>  # a reviewer lists its records 
 Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reviewer dealt evidence names 1 to 3 runs across both labels
 Re-executes: `<cmd>`
 Questions: <q>[, <q>]  # reviewer roles only
-Row: <id>  # the plan row a writer runs; the integrate row runs reviews-part <id>, push, gh pr create
+Row: <id>  # the plan row a writer runs; the integrate row runs reviews-part <id>
 Lands-on: <suite>[, <suite>] | none <reason>  # what ready proves, within Suites:
 Lands-red: <suite> until <ext:slug | approval:name>  # optional
 Red-evidence: <path under record/>  # with Lands-red:
