@@ -880,6 +880,33 @@ RL="$(ll_world)"; ll_launch "$RL" T1 '`bash%20c.test.sh`'; ( cd "$RL" && world_c
 expect_eq "(tl1) a command promising 700 s: refused, exit 1, nothing entered the line" "1 too-long 0" "$LL_RC $(printf '%s\n' "$LL_OUT" | awk '/^too-long /{ print $1 }') $(ll_ev "$RL" ready | awk 'END { print NR }')"
 
 # ---------------------------------------------------------------------------
+section "§BAR-LOAD: the bar is judged at a quiet load, so the verdict is the same at any load now"
+#
+# The promise is scaled by the load at the moment of asking; the bar's verdict is not. Three kept lines, `<seconds>:<epoch>:<load>`.
+# 400, 400 and 700 under load 1, 1 and 4 promise 400 at a quiet load and 700 (the largest kept) at load 5, so a bar read
+# at the load now would refuse it only on a busy machine. 1000 under load 1 three times is over the bar at every load.
+bl_cost() {  # <key> <seconds:load>... -> the key's cost file, three loaded lines
+  local k="$1" f pk; shift
+  pk="$( cd "$RL" && . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null && _gate_project )"; f="$BIONIC_GATE_DIR/cost/${pk}%${k}"; : > "$f"
+  for s in "$@"; do printf '%s:%s:%s\n' "${s%%:*}" "$(date +%s)" "${s##*:}" >> "$f"; done
+}
+bl_ask() {  # <busy now> <entry> -> what `_line_too_long` and `_line_bar_seconds` print, one line each
+  ( cd "$WORLD_ROOT" && BIONIC_PROBE_BUSY_CORES="$1" . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null \
+      && . "$REPO/payload/scripts/lib/line.sh" 2>/dev/null && _gate_store >/dev/null 2>&1 \
+      && { _line_too_long "$2" "$RL" "$RL" "" ""; echo "bar=$(_line_bar_seconds "$(_line_gate_key "$2")" "$RL")"; } )
+}
+bl_cost "bash c.test.sh" 400:1 400:1 700:4
+expect_eq "(bl1) a promise of 700 s at load 5 is not over the bar: judged quiet, it is 400 s" "bar=400" "$(bl_ask 5 '`bash%20c.test.sh`')"
+expect_eq "(bl2) …and at load 0 the same, nothing refused" "bar=400" "$(bl_ask 0 '`bash%20c.test.sh`')"
+bl_cost "bash c.test.sh" 1000:1 1000:1 1000:1
+expect_eq "(bl3) a suite over the bar at a quiet load is refused at load 5" "too-long \`bash%20c.test.sh\` 1000s — split it|bar=1000" \
+  "$(bl_ask 5 '`bash%20c.test.sh`' | paste -sd'|' -)"
+expect_eq "(bl4) …and at load 0, the same line" "too-long \`bash%20c.test.sh\` 1000s — split it|bar=1000" \
+  "$(bl_ask 0 '`bash%20c.test.sh`' | paste -sd'|' -)"
+expect_contains "(bl5) the brief's bar reads the same quiet seconds, not the gate's promise at the load now" \
+  '_line_bar_seconds "$(_line_gate_key "$BRF_E")"' "$(cat "$REPO/hooks/poker/plan.sh")"
+
+# ---------------------------------------------------------------------------
 section "§GUARD (ready half): a row that commits .bionic is refused before any landing tree (AC-14.1)"
 RU="$(ll_rworld)"; HU="$(ll_head "$RU")"
 git -C "$RU/.worktrees/T1" add -f .bionic && git -C "$RU/.worktrees/T1" commit -qm "T1: the link, committed"

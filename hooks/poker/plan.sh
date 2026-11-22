@@ -1268,11 +1268,11 @@ EOF
     # out of Lands-on here, stays in Suites (the writer runs it in the tree) and is named. When it would leave the set
     # empty it stays: `none` is refused for a row that writes code, and the landing says the rest.
     BRF_BAR=""
-    if declare -F _gate_promise >/dev/null && _gate_store >/dev/null 2>&1; then
+    if declare -F _line_bar_seconds >/dev/null && _gate_store >/dev/null 2>&1; then
       BRF_KEPT=""
       while IFS= read -r BRF_E; do
         BRF_E="${BRF_E#"${BRF_E%%[![:space:]]*}"}"; [ -n "$BRF_E" ] || continue
-        BRF_P="$(_gate_promise "$(_line_gate_key "$BRF_E")" "$PV_REPO" 2>/dev/null)"; BRF_P="${BRF_P##*:}"
+        BRF_P="$(_line_bar_seconds "$(_line_gate_key "$BRF_E")" "$PV_REPO")"
         case "$BRF_P" in ''|*[!0-9]*) BRF_P=0 ;; esac
         if [ "$BRF_P" -gt "$LINE_SUITE_BAR" ]; then
           BRF_BAR="${BRF_BAR:+$BRF_BAR }$BRF_E promises ${BRF_P}s, over the landing bar of ${LINE_SUITE_BAR}s, so it is left out of Lands-on and stays in Suites to run in your tree."

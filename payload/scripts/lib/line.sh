@@ -92,6 +92,11 @@ LINE_PROMISED=-; LINE_ACTUAL=-   # the last run's promised and actual seconds (w
 # THE SUITE BAR (wave-39 T6; D1; spec §3 "the two bars"): ten minutes of the gate's promise (`_gate_seconds`).
 # Defined here and nowhere else; `ready` refuses a Lands-on suite promising more (`_line_too_long`, wave-39 T39).
 LINE_SUITE_BAR=600
+# THE LOAD THE BAR IS JUDGED AT: none. The gate scales a promise by the load at the moment of asking, so the same suite
+# passed the bar on a quiet machine and failed it on a busy one, and the landing and the brief could differ at one
+# instant. The bar asks the promise at this load (a load below one counts as one), so its verdict is the same at any load.
+# The gate's own waits keep the scaling by the load now; only the bar's verdict is fixed.
+LINE_BAR_LOAD=0
 # THE LANDING BAR (wave-39 T9; D12, D25; AC-5.1, AC-5.2): fifteen minutes ready→landed. The sitrep's schedule
 # line prints the run's median ready→landed against it, and the scorecard's widest landing names it as its
 # target; both read it through session-poker.sh `sitrep_bar`, and nothing else defines it.
@@ -1807,7 +1812,13 @@ _line_promise_total() {  # <suites, comma-joined | none> <tree> <root> <accepted
   printf '%s\n' "$t"
 }
 
-# THE SUITE BAR, HELD: each Lands-on entry the row's candidate will hold whose `_gate_promise` is over LINE_SUITE_BAR,
+# The seconds the bar judges <gate key> by, in <tree>'s project: the gate's promise asked at LINE_BAR_LOAD. The one reader
+# of the bar's number, for the landing's `_line_too_long` and the brief's bar step alike.
+_line_bar_seconds() {  # <gate key> <tree> -> whole seconds
+  _gate_seconds "$1" "$(_gate_project "${2:-}")" "$LINE_BAR_LOAD" 2>/dev/null
+}
+
+# THE SUITE BAR, HELD: each Lands-on entry the row's candidate will hold whose `_line_bar_seconds` is over LINE_SUITE_BAR,
 # one `too-long <entry> <s>s — split it` line; nothing when none is. The candidate is not built yet, so whether it
 # holds a suite is read as its merge will (`_line_merge_holds`). A suite it will not hold is not judged: one the row
 # removed is recorded absent by the carrier, so a split row naming its old whole still lands, and a name no tree
@@ -1821,7 +1832,7 @@ _line_too_long() {  # <suites, comma-joined | none> <tree> <root> <accepted head
   for s in $(printf '%s\n' "$1" | tr ',' ' '); do
     [ "$s" != none ] || continue
     bionic_lands_cmd "$s" >/dev/null || _line_merge_holds "$3" "$mb" "${4:-}" "${5:-}" "$s" || continue
-    p="$(_gate_promise "$(_line_gate_key "$s")" "${2:-}" 2>/dev/null)"; p="${p##*:}"
+    p="$(_line_bar_seconds "$(_line_gate_key "$s")" "${2:-}")"
     case "$p" in ''|*[!0-9]*) continue ;; esac
     [ "$p" -gt "$LINE_SUITE_BAR" ] && printf 'too-long %s %ss — split it\n' "$s" "$p"
   done
