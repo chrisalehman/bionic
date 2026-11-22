@@ -662,7 +662,7 @@ scorecard_report() {  # <plan> <project root> -> the eight lines; rc 0
 #   clock.now · clock.approved · clock.forecast · clock.elapsed · clock.elapsed-share
 #   work.planned · work.added · work.dropped · work.landed · work.left · work.width · work.task-time
 #   pace.time-used · pace.work-landed · close.chain · close.predicted · close.unscaled · close.waits-on-you
-#   tests.suites-run · tests.suites-total · tests.whole-run · reviews · findings.open
+#   tests.suites-run · tests.suites-total · tests.whole-run · tests.cap · reviews · findings.open
 #   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
 #   run.so-far: <n> acts taken by hand · <m> open asks      the release card's line too (`sitrep_so_far`)
 #   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
@@ -1569,7 +1569,7 @@ SITREP_SIT
   SG_SO_FAR="$(sitrep_so_far "$plan")"
 
   # ---- correctness and waste
-  local k rv q sc res at ev nf passed=0 failed=0 neither=0 running=0 jhead jv jrc open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
+  local k rv q sc res at ev nf passed=0 failed=0 neither=0 running=0 jhead jv jrc open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu ch cr
   rv="$(sitrep_reviews "$plan" "$root")"
   SG_REVIEWS=""
   # THE COUNT IS THE JUDGE'S, marked as the release card's Reviews lines are: each question the rigor deals, by
@@ -1635,6 +1635,11 @@ SITREP_RUNNING
     SG_T_WHOLE="$(proof_whole_text "$plan" "$root" 2>/dev/null)"
     case "$SG_T_WHOLE" in none) SG_T_WHOLE="not run yet" ;; '') SG_T_WHOLE="unverified" ;; esac
   fi
+  # THE CAP ON TESTS is the newest release check's own reading, quoted by the one reader the release card's Tests line
+  # uses (`sitrep_test_ratio`), so the sheet and the card state the same numbers from the same log and this counts nothing.
+  read -r ch cr <<< "$(sitrep_test_ratio "$plan" "$root")"
+  if [ -n "${cr:-}" ]; then SG_T_CAP="$cr at ${ch:0:8}"
+  else SG_T_CAP="not measured: no release check has run, or its log holds no count"; fi
   idle_min="$(sitrep_idle_minutes "$plan")"
   # the landing report's run counts; a run killed at the gate (rc over 128) is a discarded run
   case "$lr1" in
@@ -1733,6 +1738,7 @@ sitrep_sheet() {
   sitrep_m tests.suites-run "$SG_T_RUN" "the suites run this wave, each by its last run" "count run: count green, count red" "source: the landing record's verdicts"
   sitrep_m tests.suites-total "$SG_T_TOTAL" "the suites in the project" "count" "source: the project's tests/*.test.sh, every suite tests/run.sh runs"
   sitrep_m tests.whole-run "$SG_T_WHOLE" "the whole regression" "not run (and why), or green or red at a commit" "source: the plan's regression: and its proof"
+  sitrep_m tests.cap "$SG_T_CAP" "the cap on tests as the release check printed it, and the head it ran at" "characters of tests over characters of code, the limit, the room left" "source: the log of the newest release check, as the release card's Tests line quotes it"
   sitrep_m reviews "$SG_T_REVIEWS" "${SG_T_REVIEWS_WHAT:-the reviews, each question and scope once by its latest result}" "${SG_T_REVIEWS_UNIT:-count passed, failed, running}" "source: the review proofs and the review tasks in flight"
   sitrep_m findings.open "$SG_T_FINDINGS" "the review findings not yet closed" "count" "source: the review records"
   sitrep_m waste.dropped "$SG_W_DROPPED" "the tasks dropped, as work.dropped" "count, sized minutes" "source: the rows with status dropped"
