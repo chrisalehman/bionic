@@ -830,6 +830,10 @@ worktree_check_run() {  # <root> <plan> <judge> <base> <head> [<tree>] [<branch>
       esac
       set -- "$@" "$w"
     done
+    # The hold holds the reads of the one command that opened it (lib/proof.sh), never the project: the check runs the
+    # code of the judge, and a hold handed to it would fold its facts with the reader of the head being judged.
+    # No quote mark in a comment here: bash 3.2 reads one inside a command substitution as a quote opened.
+    unset BIONIC_HELD
     export BIONIC_CHECK_PROJECT="$root" BIONIC_CHECK_BASE="$base" BIONIC_CHECK_HEAD="$head" BIONIC_CHECK_TREE="${tree:-$lt}"
     [ -z "$rel" ] || export BIONIC_CHECK_RELEASE="$rel"
     [ -z "$branch" ] || export BIONIC_CHECK_BRANCH="$branch"
