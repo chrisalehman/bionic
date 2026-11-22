@@ -35,6 +35,10 @@
 #   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
 #   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
 #   §DEPS-15   a row at 15 waits by its deps and kind alone: no step hold; a questions tag judged
+#   §POINT-NONE  a plan with no point, or a task cell that only resembles the mark, reads the order, the waits and the
+#              whole run's open-row refusal as before
+#   §POINT-MARK  a test row marked ` · point` waits on its deps alone and is never the regression row; the validator
+#              admits the mark on a test row at step 5 or earlier only
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
@@ -1063,6 +1067,49 @@ cv() { ( export UNITS_READINGS_STATE="$1"; call units_waiting "$CV" 7 | awk -F'\
 CV_A="$(cv covered)"; printf 'run/v1|ev=proof|kind=review|head=%s|question=adversarial|result=pass|scope=piece|at=2026-10-20T00:00:05Z\n' "$(printf 'a%.0s' {1..40})" >> "$SANDBOX/cover/record/cv/run.log"
 expect_eq "COVER-1 a dep on a review row is met by cover: unregistered it waits though the judge reads covered; registered it waits while a question is uncovered and no longer once covered" \
   "1|1|0" "$CV_A|$(cv 'review adversarial critic piece uncovered')|$(cv covered)"
+
+# Both point sections share one page at 15 and its run's log, the plan's approval and T1's landing in it. pt writes the
+# nine cells from <id step kind task deps files>…; pw prints one row's waits as `<kind line's reads>|<rows it waits on>`.
+PT="$SANDBOX/docs/plans/e/pt.plan.md"; PT_LOG="$SANDBOX/docs/record/pt/run.log"; mkdir -p "${PT%/*}" "${PT_LOG%/*}"
+pt() { printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' > "$PT"; printf '| %s | %s | %s | %s | %s | 30m | R | %s | — |\n' "$@" >> "$PT"; }
+pw() { call plan_read_waits "$PT" "$1" | awk -F'\t' '$2 == "kind" { k = $4 } $2 == "row" { r = r (r == "" ? "" : " ") $3 } END { printf "%s|%s", k, r }'; }
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$PT_LOG"
+PT_TAIL=(T4 6 review rev — record/pt/T4.md T5 7 doc rel — CHANGELOG.md T6 8 integrate merge — record/pt/T6.md)
+
+section "§POINT-NONE — a plan with no point reads the order and the waits it read at 2.2.0, and the whole run's open-row refusal holds until its last build row lands"
+# fails-when: a task cell that only resembles the mark is read as one, so the regression row stops waiting on a code row,
+# the order names another row, or the refusal of regression-run (rule 2, `units_floor_holds`) clears while a build row is
+# open. The plain page and the lookalike page differ only in their task cells; every reader must answer them alike.
+pt T1 4 build b1 — a.sh T2 4 build b2 — b.sh T3 5 test reg — record/pt/T3.md "${PT_TAIL[@]}"
+PN_W="$(call plan_read_waits "$PT")"; PN_A="$(pw T3)|$(call units_order "$PT")|$(call units_floor_holds "$PT" "" | cut -f1 | paste -sd' ' -)|$(call units_validate "$PT"; printf '%s' "$CALL_RC")"
+pt T1 4 build 'b1 · pointer' — a.sh T2 4 build 'b2 · point: none' — b.sh T3 5 test 'reg · points · born: regression' — record/pt/T3.md "${PT_TAIL[@]}"
+expect_true "PN-0 precondition: the reader reads the plain page (a T3 kind line and its rows)" test -n "$PN_W"
+expect_eq "PN-1 no point: the regression row T3 waits on both build rows by head; the order names it; rule 2 holds T2, the open build row; the page validates" \
+  "approval:plan,head|T1 T2|T3|T2|0" "$PN_A"
+expect_eq "PN-2 a task cell that only resembles the mark (· pointer, · point: none, · points) is no mark: every reader answers as on the plain page" \
+  "$PN_W|$PN_A" "$(call plan_read_waits "$PT")|$(pw T3)|$(call units_order "$PT")|$(call units_floor_holds "$PT" "" | cut -f1 | paste -sd' ' -)|$(call units_validate "$PT"; printf '%s' "$CALL_RC")"
+printf 'run/v1|ev=published|row=T2|commit=c2|by=w|at=2026-11-01T00:00:04Z\n' >> "$PT_LOG"
+expect_eq "PN-3 …and once the last build row T2 lands, rule 2 holds nothing, so the whole run is no longer refused for an open row" \
+  "|0" "$(call units_floor_holds "$PT" "")|$(call_rc units_floor_holds "$PT" "")"
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$PT_LOG"
+
+section "§POINT-MARK — a test row whose task cell carries \` · point\` is a whole-run point: it waits on its deps alone, is never the regression row, and is admitted on a test row at step 5 or earlier only"
+# fails-when: the point still waits on every code row (so a row that names it in its deps closes a cycle), the release
+# order takes it for the regression row, or the validator admits the mark where no point can stand.
+pt T1 4 build b1 — a.sh T2 4 build b2 — b.sh T3 4 test 'the whole run after T1 · point' T1 record/pt/T3.md T7 4 build b3 T3 c.sh T8 5 test reg — record/pt/T8.md "${PT_TAIL[@]}"
+expect_eq "PM-1 the point T3 waits on the plan's approval and T1, the row its deps name, and on no other code row" \
+  "approval:plan,T1|T1" "$(pw T3)"
+expect_eq "PM-2 the regression row T8 still waits on every code row by head, the point not among them (its Files are its record)" \
+  "approval:plan,head|T1 T2 T7" "$(pw T8)"
+expect_eq "PM-3 the order's regression row is T8, never the point ahead of it; the page validates though T7 waits on the point" \
+  "T8||0" "$(call units_order "$PT")|$(call units_validate "$PT"; printf '|%s' "$CALL_RC")"
+pt T1 4 build b1 — a.sh T3 4 test 'the whole run after T1 · point · born: regression' T1 record/pt/T3.md "${PT_TAIL[@]}"
+expect_eq "PM-4 a mark followed by another tag is still the mark; with the point the only test row there is no regression row (rc 1)" \
+  "approval:plan,T1|T1||1" "$(pw T3)|$(call units_order "$PT")|$(call_rc units_order "$PT")"
+pt T1 4 build 'b1 · point' — a.sh T3 6 test 'the floor · point' T1 record/pt/T3.md "${PT_TAIL[@]}"
+expect_eq "PM-5 the mark on a build row, or on a test row past step 5, is refused naming the row (rc 1)" \
+  "T1: task marks a whole-run point; only a test row is a point T3: task marks a whole-run point at step 6; a point stands among the build, at step 5 or earlier|1" \
+  "$(call units_validate "$PT" | paste -sd' ' -)|$(call_rc units_validate "$PT")"
 section "§HELD — inside a held command the table's answer and the status pass are kept for the command, keyed by what they read"
 # fails-when: a read inside a held command is not served the command's one read (the count grows), or a plan edited or a
 # fact of a row set during the command is served the answer kept before it (a stale read), or anything is kept outside a

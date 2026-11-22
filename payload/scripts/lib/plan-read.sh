@@ -258,7 +258,7 @@ plan_read_waits() {
           if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
           sub(/!$/, "", e); nfe[i]++; fe[i, nfe[i]] = e; if (in_docs(e)) docs[i] = 1
         }
-        r = kdef(knd[i], stp[i])
+        r = kdef(knd[i], stp[i], tsk[i])
         # A REVIEW ROW READS THE QUESTIONS ITS TASK CELL DECLARES: its live read is `live:head:<q>[+<q>]`, the token the
         # scheduler judges per question, in place of the bare default; a row with no tag keeps it.
         if (knd[i] == "review" && (q = index(tsk[i], " · questions: "))) {
