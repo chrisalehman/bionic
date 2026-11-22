@@ -539,6 +539,7 @@ wt_import_fn() {  # <name> -> the function, defined here, read out of the landin
   [ -n "$body" ] || { echo "wt_import_fn: no $1 in landing-line.prelude.sh" >&2; return 1; }
   eval "$body"
 }
+LL_HERE="$(cd "$(dirname "$0")" && pwd -P)"   # the prelude sets it at its top and its builders read it; the suite reads the builders, not the top
 for f in ll_world ll_launch ll_carrier_env; do wt_import_fn "$f" || no "($f is read out of landing-line.prelude.sh)" "absent"; done
 ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }; ll_log() { printf '%s/.bionic/docs/record/wave-x/run.log' "$1"; }
 ll_carrier_env
