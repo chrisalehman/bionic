@@ -2156,7 +2156,7 @@ up_import() {  # <name> <file> -> the function, defined here, read out of <file>
   eval "$body"
 }
 UP_MISSING=""
-for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to; do
+for _f in in_fixture fixture_own fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to; do
   up_import "$_f" "$(dirname "$0")/close-out.prelude.sh" || UP_MISSING="$UP_MISSING $_f"
 done
 for _f in pah_world pah_poke pah_card_state; do up_import "$_f" "$(dirname "$0")/proof-at-head.test.sh" || UP_MISSING="$UP_MISSING $_f"; done
