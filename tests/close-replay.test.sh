@@ -9,8 +9,9 @@
 #   §CLOSE    the replay reaches delivered: through the verbs alone, close-out counting no hand-hold
 #   §WINDOW   after the close, the hand-holds window ends at the delivery's instant, and a decline after the card counts
 #   §SR       a second review naming the fix row's site is written fixed by its landing, no finding-move after it
-#   §PR       the integrate row's pull request is the publish verb's, through a stand-in gh and a bare remote; no
-#             command of the run is a typed push or create
+#   §PR       the integrate row's pull request is the publish verb's, through a stand-in gh and a bare remote, its body
+#             the summary written beside the run's log and the facts pr-facts prints; no command of the run is a typed
+#             push or create
 #   §ENTRY    the release entry names the review the run failed and fixed; the record names each commit after the fix
 #   §REAL     the sandbox's own real check ran, every hand write is of a kind a run writes, and the log is UTF-8
 #   §LIVE     the plan's live criterion names the close row in its Task column, passes every advance past the Verify
@@ -95,7 +96,7 @@ cr_marks() { cr_part | awk -v t="# ${1}: " 'index($0, t) == 1 { print substr($0,
 # The verbs the replay runs (rehearsal.sh `_rh_replay`), each named `<tool> <verb>`: the tool the command runs and
 # the first bare word of its arguments. A log missing any of them is a replay that did not run that verb, whatever its
 # length. A refusal's follow is not listed: the replay meets one only when a verb refuses.
-CR_VERBS='stop-orders.sh stopped|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|session-poker.sh publish|gh pr merge|close-out.sh run'
+CR_VERBS='stop-orders.sh stopped|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|session-poker.sh pr-facts|session-poker.sh publish|gh pr merge|close-out.sh run'
 # The kinds of hand write the replay makes: the fix writer's launch, its code and report, the user's typed reply.
 CR_HANDS='launch code record typed'
 # cr_names -> for each `$ ` command line on stdin, `<rc>|<tool> <words>`: the tool is the first word naming a script
@@ -313,8 +314,9 @@ fi
 section "§PR: the integrate row's pull request is published by the verb, through a stand-in gh and a bare remote"
 # ============================================================
 # fails-when: the replay never reaches the publish, another gh is on its PATH, the stand-in's log does not hold one
-# request against main from the working branch, the remote does not hold the head the run's log names, the person's merge
-# leaves main without the reviews part, or a command of the run is a typed push or a typed create.
+# request against main from the working branch, the remote does not hold the head the run's log names, the request's
+# body lacks the summary written beside the run's log or the facts pr-facts printed, the person's merge leaves main
+# without the reviews part, or a command of the run is a typed push or a typed create.
 if [ -n "$(cr_rc 'the integrate row publishes the pull request')" ]; then
   PR_EV="$(cr_lines | /usr/bin/grep '|ev=published|part=pr|' | tail -1)"
   PR_HEAD="$(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/$DOOR_BRANCH")"
@@ -329,6 +331,12 @@ if [ -n "$(cr_rc 'the integrate row publishes the pull request')" ]; then
     "$(cr_field "$PR_EV" url)|$(cr_field "$PR_EV" branch)|$(cr_field "$PR_EV" base)|$(cr_field "$PR_EV" by)|$(cr_field "$PR_EV" commit)|$(git -C "$CR_DIR/remote.git" rev-parse --verify -q "refs/heads/$DOOR_BRANCH")|$(cr_field "$(cr_part_event)" commit)"
   expect_eq "PR-5 the person's merge through it leaves main a merge commit of the reviews part's commit, whose parent is the head the release check held" "0|yes|yes" \
     "$(cr_rc 'the person merges the pull request' | tail -1)|$([ "$(cr_field "$(cr_part_event)" commit)" = "$(git -C "$CR_ROOT" rev-parse --verify -q 'refs/heads/main^2' 2>/dev/null)" ] && echo yes)|$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -q "^proved: kind=check head=$(git -C "$CR_ROOT" rev-parse --verify -q 'refs/heads/main^2^1' 2>/dev/null) " && echo yes)"
+  # The stand-in logs each call's words whole, so the create's line holds the body it was handed. Each line read is
+  # proved non-empty first: an empty one would match any log.
+  PR_SUM="$(awk 'p && /[^[:space:]]/ { print; exit } $0 == "## Summary" { p = 1 }' "$CR_REC/pr-summary.md" 2>/dev/null)"
+  PR_FACT="$(cr_out "the integrate row reads the pull request's facts" | awk 'p && /^- / { print; exit } $0 == "## Testing" { p = 1 }')"
+  expect_eq "PR-7 the request's body holds the summary the orchestrator wrote beside the run's log and the facts pr-facts printed" "yes|yes" \
+    "$([ -n "$PR_SUM" ] && /usr/bin/grep -qF -- "$PR_SUM" "$CR_DIR/bin/gh.log" 2>/dev/null && echo yes)|$([ -n "$PR_FACT" ] && /usr/bin/grep -qF -- "$PR_FACT" "$CR_DIR/bin/gh.log" 2>/dev/null && echo yes)"
   PR_CMDS="$(/usr/bin/grep '^\$ ' "$CR_LOG" 2>/dev/null)"
   expect_eq "PR-6 the run's commands, read whole, hold the publish and the person's merge" "1|1" \
     "$(printf '%s\n' "$PR_CMDS" | /usr/bin/grep -c 'session-poker\.sh publish$')|$(printf '%s\n' "$PR_CMDS" | /usr/bin/grep -c ' gh pr merge ')"
