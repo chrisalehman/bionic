@@ -55,9 +55,39 @@ set +x +v
 # that is not a file, and a pair that cannot be read (no release heading, no `.version`, a path
 # the head does not hold) are each ONE line and a non-zero exit (2 for a refusal).
 #
+# COUNT MODE: `release-check.sh --count <rev>` prints `<tests> <code>`, the two numbers check 5 reads, for the tree at
+# <rev>, and stops before any check runs. It exits with the count's own status: 1 for a name that is no tree, 2 for a tree
+# with no shell file outside tests/, 3 for blobs that cannot be read; no revision named is a refusal, 2.
+#
 # bash 3.2 (ADR-001). Not part of the shipped plugin.
 unset BASH_ENV ENV
 set -u -o pipefail
+
+# ratio_count <rev> -> `<tests> <code>`, the non-whitespace characters of the shell files of the tree at <rev>, on
+# stdout, status 0; status 1 when the tree cannot be read, 2 when it holds no shell file outside tests/, 3 when its
+# blobs cannot be read. Characters, not lines, so joining lines changes no reading. Every blob rides one
+# `git cat-file --batch` whose header is its size and its side; the size says where its content ends, so no line of
+# content is ever read as a header. LC_ALL=C counts bytes, so a file that is not valid text is still read whole.
+ratio_count() {
+  local rev="$1" lst
+  # One line per counted blob, its object and its side: T for a path under tests/, C for any other; links, trees and submodules are not blobs of text.
+  lst="$(git ls-tree -r -z "$rev" 2>/dev/null | tr '\0' '\n' | LC_ALL=C awk -F'\t' '
+    { split($1, m, " "); p = substr($0, length($1) + 2)
+      if (m[2] == "blob" && m[1] != "120000" && p ~ /\.sh$/) print m[3] (index(p, "tests/") == 1 ? " T" : " C") }')" || lst=""
+  if [ -z "$lst" ] && ! git rev-parse --verify -q "$rev^{tree}" >/dev/null 2>&1; then
+    return 1
+  fi
+  case "$lst" in *' C'|*' C'$'\n'*) ;; *) return 2 ;; esac
+  printf '%s\n' "$lst" | git cat-file --batch='%(objectsize) %(rest)' 2>/dev/null | LC_ALL=C awk '
+    left <= 0 { if ($2 != "T" && $2 != "C") { bad = 1; next } left = $1 + 1; k = $2; next }
+    { left -= length($0) + 1; gsub(/[[:space:]]/, ""); n[k] += length($0) }
+    END { if (bad || left > 0) exit 1; printf "%d %d\n", n["T"], n["C"] }' || return 3
+}
+
+if [ "${1:-}" = --count ]; then
+  [ -n "${2:-}" ] || { echo "release-check: refused — usage: release-check.sh --count <rev>" >&2; exit 2; }
+  ratio_count "$2"; exit $?
+fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)" || exit 2
 refusals=0
@@ -244,26 +274,6 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
       if (r != "" && c != "") print r "|" c }')
   [ "$bad" -ne 0 ] || echo "landing-numbers: $ver agrees with the landing report at $h12"
   return "$bad"
-}
-# ratio_count <rev> -> `<tests> <code>`, the non-whitespace characters of the shell files of the tree at <rev>, on
-# stdout, status 0; status 1 when the tree cannot be read, 2 when it holds no shell file outside tests/, 3 when its
-# blobs cannot be read. Characters, not lines, so joining lines changes no reading. Every blob rides one
-# `git cat-file --batch` whose header is its size and its side; the size says where its content ends, so no line of
-# content is ever read as a header. LC_ALL=C counts bytes, so a file that is not valid text is still read whole.
-ratio_count() {
-  local rev="$1" lst
-  # One line per counted blob, its object and its side: T for a path under tests/, C for any other; links, trees and submodules are not blobs of text.
-  lst="$(git ls-tree -r -z "$rev" 2>/dev/null | tr '\0' '\n' | LC_ALL=C awk -F'\t' '
-    { split($1, m, " "); p = substr($0, length($1) + 2)
-      if (m[2] == "blob" && m[1] != "120000" && p ~ /\.sh$/) print m[3] (index(p, "tests/") == 1 ? " T" : " C") }')" || lst=""
-  if [ -z "$lst" ] && ! git rev-parse --verify -q "$rev^{tree}" >/dev/null 2>&1; then
-    return 1
-  fi
-  case "$lst" in *' C'|*' C'$'\n'*) ;; *) return 2 ;; esac
-  printf '%s\n' "$lst" | git cat-file --batch='%(objectsize) %(rest)' 2>/dev/null | LC_ALL=C awk '
-    left <= 0 { if ($2 != "T" && $2 != "C") { bad = 1; next } left = $1 + 1; k = $2; next }
-    { left -= length($0) + 1; gsub(/[[:space:]]/, ""); n[k] += length($0) }
-    END { if (bad || left > 0) exit 1; printf "%d %d\n", n["T"], n["C"] }' || return 3
 }
 # ratio_check -> `test-ratio: <tests>/<code> chars · limit <n> · room <n>` on a pass; the same line after
 # `release-check: ` and exit 1 when the tests pass the limit; one line and exit 2 when the head cannot be read or holds

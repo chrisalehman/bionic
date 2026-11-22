@@ -531,6 +531,22 @@ run_check "$R"
 expect_eq "(J-3) the head's tree is read, never the working files: an untracked test file and edited code change nothing" \
   "$J_SPLIT" "$(ratio_line)"
 
+# (J-5) the count mode prints the two numbers the cap reads and stops: no list path, no scan, no pair.
+R="$TMP/join-split"
+run_check "$R" --count HEAD
+expect_eq "(J-5) --count HEAD prints the tests and the code the J-1 line reads, and nothing else" "16 40" "$OUT"
+expect_status "(J-5b) …and exits 0" 0 "$RC"
+# (J-6) it reads the committed tree, as the cap does: files in the working directory change nothing.
+fx_lines 900 > "$R/tests/untracked.test.sh"; fx_lines 1 > "$R/code.sh"
+run_check "$R" --count HEAD
+expect_eq "(J-6) an untracked test file and edited code change nothing" "16 40" "$OUT"
+# (J-7) a name that is no revision exits 1 and prints nothing on stdout.
+J7_OUT="$(cd "$R" && bash "$CHECK" --count no-such-rev 2>/dev/null)"; J7_RC=$?
+expect_status "(J-7) a name that is not a revision: exit 1" 1 "$J7_RC"
+expect_eq "(J-7b) …and nothing on stdout" "" "$J7_OUT"
+J7_OUT="$(cd "$R" && bash "$CHECK" --count 2>/dev/null)"; J7_RC=$?
+expect_status "(J-7c) no revision named: refused, exit 2" 2 "$J7_RC"
+
 # (J-4) a link is no blob of text, so a directory reached through one counts once, by its real files.
 R="$TMP/ratio-link"; fx_repo "$R" 2.3.4 2.3.4
 mkdir -p "$R/lib" "$R/tests" && fx_lines 20 > "$R/lib/x.sh" && fx_lines 5 > "$R/tests/t.test.sh"
