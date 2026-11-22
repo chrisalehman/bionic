@@ -2022,7 +2022,10 @@ EOF
       if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
         said="$(printf '%s\n' "$said" | awk 'NF { l[++n] = $0 } END { print l[n - 1] "," l[n] }')"
         line_event "$plan" stalled "row=${row}" "logs=${said}" >/dev/null
-        printf 'STALLED %s %s\n' "$row" "$said"; return 70
+        # NAME WHAT WAS READ FOR: a none is a log with no end line as often as a run that did not start, and a writer
+        # who is told only the logs cannot tell which. The shape is the one `_line_verdict` matches, for the suite
+        # that lacks it.
+        printf 'STALLED %s %s — neither log holds the end line ready reads: "%s: <p>/<t> passed, <f> failed"\n' "$row" "$said" "$s"; return 70
       fi
       _line_drain_add "$s"
     done

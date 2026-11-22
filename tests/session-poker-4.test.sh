@@ -1530,6 +1530,16 @@ s42_snap "$RWK" "$PWK"; wk_add walk-nohead
 s42_unchanged "WK-12 a head: line naming no commit of the working branch" 1 "$PWK"
 expect_contains "WK-12b …named in the refusal" "head: 0123456789012345678901234567890123456789" "$OUT"
 
+section "§HAND-HOLDS: the report of a run with no delivery says the run's log holds none yet (AC-27.1)"
+# The end of the window is the delivery, and the delivery is read from the run's log (its Step 9 event), never from a
+# line of the plan. The walk's run has no Step 9 event, so its report runs the window to now and says where it looked.
+poke "$RWK" landing-report --hand-holds
+expect_contains "HH-1 AC-27.1 the run has no delivery: the report's window line says the run's log holds none yet" \
+  "until now: the run's log holds no delivery yet" "$OUT"
+expect_eq "HH-2 …on the window line, after the start it read, and nowhere says the plan names a delivered time" "1|0" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^hand-holds window: since .* · until now: the run.s log holds no delivery yet$')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'the plan names no delivered')"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+
 POKE_BOUND="$WK_BOUND_WAS"
 
 section "§BORN-RED: a floor-born marker is admitted on the red verdict a whole run recorded, and the refusal names the log to record"
