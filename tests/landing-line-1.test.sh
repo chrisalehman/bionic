@@ -891,7 +891,7 @@ bl_cost() {  # <key> <seconds:load>... -> the key's cost file, three loaded line
   for s in "$@"; do printf '%s:%s:%s\n' "${s%%:*}" "$(date +%s)" "${s##*:}" >> "$f"; done
 }
 bl_ask() {  # <busy now> <entry> -> what `_line_too_long` and `_line_bar_seconds` print, one line each
-  ( cd "$WORLD_ROOT" && BIONIC_PROBE_BUSY_CORES="$1" . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null \
+  ( cd "$WORLD_ROOT" && export BIONIC_PROBE_BUSY_CORES="$1" && . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null \
       && . "$REPO/payload/scripts/lib/line.sh" 2>/dev/null && _gate_store >/dev/null 2>&1 \
       && { _line_too_long "$2" "$RL" "$RL" "" ""; echo "bar=$(_line_bar_seconds "$(_line_gate_key "$2")" "$RL")"; } )
 }
