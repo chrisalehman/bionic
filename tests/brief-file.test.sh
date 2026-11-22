@@ -135,6 +135,28 @@ expect_eq "B5 a row whose suites are all under the bar lands on them all (beside
 expect_absent "B5b …and no line names a bar" "landing bar" "$(cat "$BD/bar-T2.md")"
 bar_cost b.test.sh 700; poke "$BR" brief T2 bar-T2
 expect_eq "B6 a row whose only suite is over the bar keeps it in Lands-on, which none cannot stand for" "Lands-on: b.test.sh" "$(grep '^Lands-on:' "$BD/bar-T2.md")"
+# THE BAR IS JUDGED QUIET: the same kept lines print the same verdict at a busy load and at a quiet one. 400, 400 and 700
+# seconds under load 1, 1 and 4 promise 400 at a quiet load and 700 (the largest kept) at load 5; three 1000s under load 1
+# are over the bar at every load.
+bar_loaded() {  # <suite> <seconds:load>... -> the suite's three kept lines, each with its load
+  local f="$BIONIC_GATE_DIR/cost/${BPK}%$1" l; shift; : > "$f"
+  for l in "$@"; do printf '%s:%s:%s\n' "${l%%:*}" "$(date +%s)" "${l##*:}" >> "$f"; done
+}
+bar_at() {  # <busy now> <name> -> the brief of T1 rendered under that load
+  BIONIC_PROBE_BUSY_CORES="$1" poke "$BR" brief T1 "$2"
+}
+bar_loaded shared.test.sh 400:1 400:1 700:4; bar_loaded a.test.sh 5:1 5:1 5:1
+bar_at 5 bar-busyq-T1; bar_at 0 bar-calmq-T1
+expect_eq "B7 a suite whose kept lines promise 700 s at load 5 stays in Lands-on at load 5: the bar asks it quiet, 400 s" \
+  "Lands-on: a.test.sh, shared.test.sh" "$(grep '^Lands-on:' "$BD/bar-busyq-T1.md")"
+expect_eq "B7b …and at load 0 the brief is the same" "Lands-on: a.test.sh, shared.test.sh" "$(grep '^Lands-on:' "$BD/bar-calmq-T1.md")"
+expect_absent "B7c …and no line names a bar at either load" "landing bar" "$(cat "$BD/bar-busyq-T1.md" "$BD/bar-calmq-T1.md")"
+bar_loaded shared.test.sh 1000:1 1000:1 1000:1
+bar_at 5 bar-busyo-T1; bar_at 0 bar-calmo-T1
+expect_eq "B8 a suite over the bar at a quiet load is left out at load 5" "Lands-on: a.test.sh" "$(grep '^Lands-on:' "$BD/bar-busyo-T1.md")"
+expect_eq "B8b …and at load 0, the same" "Lands-on: a.test.sh" "$(grep '^Lands-on:' "$BD/bar-calmo-T1.md")"
+expect_contains "B8c …named with its promise at load 5" "shared.test.sh promises 1000s, over the landing bar of 600s" "$(cat "$BD/bar-busyo-T1.md")"
+expect_contains "B8d …and at load 0 the same line" "shared.test.sh promises 1000s, over the landing bar of 600s" "$(cat "$BD/bar-calmo-T1.md")"
 
 section "§NAMES: a dispatch that binds a plan row names its row's rendered brief file (AC-6.1)"
 # The real dispatch wall over a bound, approved, armed session; each drive starts on an empty roster.
