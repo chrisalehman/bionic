@@ -620,6 +620,12 @@ section "§MERGE-OUT: with the merge seen and a close row's writer live, the pas
 # FIXTURE FIDELITY: §MERGE's world, its plan gaining the close row a planner writes (T4, step 9, its Files the
 # continuation), dispatched as the run's log records a dispatch, and its writer a row of this session's roster under
 # this plan, launched a minute ago with four hours to run, as the dispatch wall writes it.
+# Every pass here reads a machine with room. The tick reads the machine's load, and with the five-minute load over the
+# gate's share it stands the newest live writer down for the load and takes its launch back: the pass then wakes on the
+# load, and the close, with the row's dispatch taken back, writes into the continuation. A whole run loads the machine
+# that far, so the real one would decide what this section checks.
+MO_ROOM=(BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=16384 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_FREE_PCT=70 BIONIC_PROBE_FREE_MB=11468
+  BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_SWAP_PCT=0)
 prr_watch_world mergeout
 awk '{ print } /^\| T3 \|/ { print "| T4 | 9 | close | the close | T3 | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — |" }' "$P" > "$P.n" \
   && mv "$P.n" "$P"
@@ -628,10 +634,10 @@ seal_fixture "$P" "$L"
 MO_AT="$(t=$(( $(date +%s) - 60 )); date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ)"
 roster_row_fixture session="$WORLD_SID" name=w-T4 row=T4 agent_id=aw-T4-1111111111111111 launched_at="$MO_AT" duration="4 hours" \
   plan="$P" deliverable="$R/.bionic/docs/record/wave-x/T4.md" >> "$R/.bionic/tmp/roster-$WORLD_SID.state"
-prr_pass
+prr_pass "${MO_ROOM[@]}"
 expect_eq "MO-0 precondition: the request open and the writer out, the pass quiet, nothing landed" "$PRR_QUIET|0" "$PASS_RC|$(prr_landed)"
 prr_gh pr merge 1 --squash
-prr_pass
+prr_pass "${MO_ROOM[@]}"
 expect_eq "MO-1 AC-8.1 merged with the close row's writer live: the pass runs no close — nothing landed, the run at step 8, no word of close-out in its account" \
   "0|n=8 state=open|no" "$(prr_landed)|$(prr_log_step)|$(prr_close_out | /usr/bin/grep -qE '^merge: |close-out refused' && echo yes || echo no)"
 expect_eq "MO-2 AC-8.2 …that pass wakes, with one line naming the row out" "$PRR_WAKE|1|yes" \
@@ -639,13 +645,13 @@ expect_eq "MO-2 AC-8.2 …that pass wakes, with one line naming the row out" "$P
 expect_eq "MO-2b …within the line's ceiling" "yes" "$([ "${#PASS_OUT}" -le "$PRR_LINE_MAX" ] && echo yes)"
 expect_eq "MO-2c …and the account the pass keeps names the row and its writer" "yes|yes" \
   "$(prr_close_out | /usr/bin/grep -q '^rows out: T4 ' && echo yes)|$(prr_close_out | /usr/bin/grep -q '^  T4: w-T4 open on roster ' && echo yes)"
-prr_pass
+prr_pass "${MO_ROOM[@]}"
 expect_eq "MO-3 …the next pass over the same facts is quiet, and still lands nothing" "$PRR_QUIET||0" "$PASS_RC|$PASS_OUT|$(prr_landed)"
 # The writer writes the continuation and leaves: the next pass closes the run, and the close writes none of that file.
 printf '# continuation — the close row'"'"'s\n' > "$R/.bionic/docs/record/wave-x/continuation.md"
 MO_CK="$(cksum < "$R/.bionic/docs/record/wave-x/continuation.md")"
 : > "$R/.bionic/tmp/roster-$WORLD_SID.state"
-prr_pass
+prr_pass "${MO_ROOM[@]}"
 expect_eq "MO-4 the writer gone: the next pass closes the run, the integrate row landed and the run delivered" "$PRR_WAKE|1|n=9 state=delivered" \
   "$PASS_RC|$(prr_landed)|$(prr_log_step)"
 expect_eq "MO-5 …and the continuation the close row's writer wrote stands as written" "$MO_CK" \
