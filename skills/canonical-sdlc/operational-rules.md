@@ -95,8 +95,6 @@ A design is several *views* of one change, and a design goes wrong less by a wro
 - **structured models** — when topology is the hard part: the moment "who calls whom, in what order, across which process boundary" takes a paragraph, it wants a picture.
 - **full Technical Design Document** — at momentous or cross-system scope, with readers who will never open the spec.
 
-The rungs compose: structured models most often live inside a `## Design` section or a standalone doc.
-
 **Derivation produces a suggested default, never a selection.** Scale gives the starting rung —
 task to paragraph, wave to `## Design` section — and three signals move it up: a design several
 waves will implement (standalone doc), topology prose would flatten (add structured models), a
@@ -138,7 +136,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 
 ## Close-out report (Step 9)
 
-SKILL.md §Step 9 carries the terminal-disposition rule; this is the authoring detail per part, and the report's bound.
+SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-src/blocks/terminal-disposition.md`; this is the authoring detail per part, and the report's bound.
 
 **The report is one turn**: the close-out message itself, sent once at Step 9, never a file the user has to open. A close-out that spans turns or defers its verdict to a linked artifact is the ceremony the rule forbids.
 
