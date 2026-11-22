@@ -6,7 +6,7 @@ updated: 2026-10-10
 
 # canonical-sdlc operational rules
 
-The detail SKILL.md and `steps/*.md` compress, each section cited from the step that needs it.
+The detail SKILL.md and `steps/*.md` compress.
 
 ## Artifact paths and frontmatter
 
@@ -31,7 +31,7 @@ The detail SKILL.md and `steps/*.md` compress, each section cited from the step 
 
 ### The `## Tasks` table
 
-A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch works from: nine cells a row, all a person's; the write hook refuses any other cell.
+A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch works from: nine cells a row, all a person's; the write hook refuses any other cell. `session-poker.sh start <id>` records a written row's birth, renders its brief, makes its tree and prints the dispatch call whole.
 
 ```
 | id | step | kind | task | deps | size | serves | Files | artifact |
@@ -56,7 +56,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 | approval | `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim: one approval event, at the working head for a named one. `approve step0`, `step1`, `step2` and `plan` are Steps 0 to 3's, each once |
 | proof | `session-poker.sh proof-add <kind> <evidence>`: one proof event, `kind=<regression\|review\|task\|walk>`, `head=` and `evidence=<path under record/>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
 | review | `proof-add review <record> --question <q> --reader <name>` adds `question=`, `reader=`, `result=<pass\|flag\|fail>` and `scope=<piece\|whole>`; the reviewer's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
-| declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and a `kind=check` proof (`result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged |
+| declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and a `kind=check` proof (`result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged. `session-poker.sh check-from '<their words>' [<commit>]` records the person's typed word that the commit, the working head unless named, judges every landing and release check after it |
 | declared regression | `regression-command:` (run by `regression-run`) in `.bionic/config.yaml`, its record `steps/5.md`'s; with neither, the regression is `tests/run.sh`'s whole run |
 | landing | `ready` and the hand landing (`spawn-worktree.sh land <tree> --by-hand --reason '<why>'`) append one event per act to the run's log, never rewritten; a row's landing is the `commit=` of its last `published` event. An unwritable log refuses `why=proofs-unwritable` |
 | declared debt | a brief's one `Lands-red: <name>.test.sh until <ext:slug\|approval:name>` with `Red-evidence: <path under record/>`, recorded by the dispatch wall alone (`amend` cannot add them). `land` accepts that one suite red, every other suite green, when the evidence holds `head: <40-hex>` naming the head landed, and appends an `admitted` event (its row, suite and token) to the run's log. It stays open until a regression or task proof shows the suite green after the red landing (and after the named approval, for `approval:`); `current 8`, close-out, the integrate row and, from Step 6, the commit gate refuse while it is open |
@@ -70,9 +70,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 
 ## Design section authoring (the Step-2 back-half)
 
-SKILL.md carries the contract — the five parts, the three-way rule, the scale line, the
-mandatory Design Interview, and the provenance chain each design decision sits in. This is how
-to author one that earns its keep.
+SKILL.md carries the contract; this is how to author one that earns its keep.
 
 ### The view menu
 
@@ -128,7 +126,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 
 ### The Eval design table
 
-`## Eval design` sits beside `## Design` in a wave-or-epic spec, one row per acceptance criterion; SKILL.md carries its contract. How to fill one in:
+`## Eval design` sits beside `## Design` in a wave-or-epic spec; SKILL.md carries its contract. How to fill one in:
 
 - **Approach is one line, and it is a design decision.** "Grep the rendered file for the six column headers" is an approach; "test it" is not. It names the seam the eval reaches through, which is why the table is authored at Step 2, once the architecture has decided what is observable.
 - **Eval type is the ladder in words** — static · unit · hermetic · live · human, T0–T4 — because the Step-2 card counts types per requirement and `T0 T0 T2` tells a reader nothing to push back on.
@@ -140,7 +138,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 
 ## Close-out report (Step 9)
 
-SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-src/blocks/terminal-disposition.md`; this is the authoring detail per part, and the bound that keeps the report from growing back into ceremony.
+SKILL.md §Step 9 carries the terminal-disposition rule; this is the authoring detail per part, and the report's bound.
 
 **The report is one turn**: the close-out message itself, sent once at Step 9, never a file the user has to open. A close-out that spans turns or defers its verdict to a linked artifact is the ceremony the rule forbids.
 
