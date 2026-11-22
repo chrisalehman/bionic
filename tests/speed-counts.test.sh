@@ -618,6 +618,23 @@ expect_eq "DRV-0 in a held command an answer asked twice is computed once, the s
   "some|same|same|2 2 2" "$(dv_probe held) $(dv_n held k) $(dv_n held)"
 expect_eq "DRV-0 …outside a held command each of the three asks computes and nothing is kept" "some|same|same|0 3 3" \
   "$(dv_probe plain) $(dv_n plain -) $(dv_n plain)"
+# Two answers kept by sibling subshells of one shell are kept apart and each served back its own: a subshell shares
+# its parent's $$, and under bash 3.2 the children of a subshell that has drawn $RANDOM each draw the same next value,
+# so a kept answer named by those two alone is written over by the next answer a sibling keeps, and its key is then
+# served that one. The asks run in such a subshell, as the card's merge ask runs its judge and its whole-pass line.
+dv_siblings() {  # -> `<first>|<second>|<first again>|<second again>|<answers kept>` from one held shell
+  ( cd "$DV_DIR/proj" && env TMPDIR="$DV_DIR/tmp" HOME="$DV_DIR/home" bash -c '
+      . "$1/proof.sh" && _proof_reader_load || exit 2
+      proof_hold_begin && _proof_derive_ready "$2" || exit 2
+      dv_say() { printf "%s\n" "$1"; }
+      ( : "$RANDOM"
+        a="$(_proof_derive dv_sib k1 dv_say one)"; b="$(_proof_derive dv_sib k2 dv_say two)"
+        c="$(_proof_derive dv_sib k1 dv_say one)"; d="$(_proof_derive dv_sib k2 dv_say two)"
+        echo "$a|$b|$c|$d|$(ls "$BIONIC_HELD" | grep -c "^derive-dv_sib\.")" )
+      proof_hold_end' _ "$SC_LIB" "$DV_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )
+}
+expect_eq "DRV-4 two answers kept by sibling subshells are kept apart, and each key is served its own answer" \
+  "one|two|one|two|2" "$(dv_siblings)"
 # sc_derive_most <count file> -> the most computes of one answer under one key, then how many computes in all
 sc_derive_most() { awk '$1 == "derive" { n[$2 " " $3]++; t++ } END { for (k in n) if (n[k] > m) m = n[k]; print m + 0, t + 0 }' "$1" 2>/dev/null || echo "- -"; }
 for SC_SIZE in n 2n f; do
