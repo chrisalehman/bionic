@@ -241,7 +241,7 @@ sr_tasks_f() { sr_lines task | while IFS= read -r l; do sr_f "$l" "$1"; done; } 
 # sr_keys -> the sheet's keys in order, a run of one key printed once
 sr_keys() { printf '%s\n' "$OUT" | tail -n +2 | awk -F': ' '$1 != p { print $1; p = $1 }' | sr_join; }
 SR_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
-SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|clock.now|clock.approved|clock.forecast|clock.elapsed|clock.elapsed-share|work.planned|work.added|work.dropped|work.landed|work.left|work.width|work.task-time|pace.time-used|pace.work-landed|close.chain|close.predicted|close.unscaled|close.waits-on-you|tests.suites-run|tests.suites-total|tests.whole-run|reviews|findings.open|waste.dropped|waste.runs-discarded|waste.ready-unstarted|waste.waiting-on-you|run.so-far|goal|ask|review"
+SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|clock.now|clock.approved|clock.forecast|clock.elapsed|clock.elapsed-share|work.planned|work.added|work.dropped|work.landed|work.left|work.width|work.task-time|pace.time-used|pace.work-landed|close.chain|close.predicted|close.unscaled|close.waits-on-you|tests.suites-run|tests.suites-total|tests.whole-run|tests.cap|reviews|findings.open|waste.dropped|waste.runs-discarded|waste.ready-unstarted|waste.waiting-on-you|run.so-far|goal|ask|review"
 # sr_m <key> -> the measurement alone, the value before its ` — `; sr_d <key> -> what follows it
 sr_m() { sr_val "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, 1, i - 1) : $0) }'; }
 sr_d() { sr_val "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, i + 5) : "") }'; }
@@ -1529,6 +1529,53 @@ expect_eq "GA6 …and the release card's rows carry the same counts under the sa
   "$(printf '%s\n' "$SR_GC_CARD_OUT" | sed -n 's/^[^ ]* Identity — //p')|$(printf '%s\n' "$SR_GC_CARD_OUT" | sed -n 's/^[^ ]* Cleanup — //p')"
 expect_eq "GA7 the on-course theme is not a goal reached: the card counts none of the three" "Goals — 0 of 3 reached" \
   "$(printf '%s\n' "$SR_GC_CARD_OUT" | /usr/bin/grep '^Goals')"
+
+# ============================================================
+section "§CAP-LINE: the sheet carries the release check's reading of the cap on tests, the numbers the release card's Tests line prints from the same log"
+# ============================================================
+# The cap's reading is the release check's own line, `test-ratio: <tests>/<code> chars · limit <n> · room <n>`, read
+# from the log of the plan's newest check proof by the one reader (`sitrep_test_ratio`). fails-when: the sheet holds no
+# line for it, holds numbers the release card does not print from the same log, keeps the old numbers when the log
+# moves, counts a tree itself instead of quoting the log, or states a number when no check has run. The card is the
+# release-approval verb's own, rendered with --preview, which writes nothing; the sheet is the sitrep verb's.
+SR_CAP_LOG_NOTE="tests pass 1.25 times the code at HEAD"
+sr_cap_world() {  # <label> -> a plan whose working branch is committed, SR_CAP_H the head the check will name
+  SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)" sr_world "$1" "6 6 12 12"
+  sr_bind
+  git -C "$SR_REPO" branch -f wave/02-fx HEAD >/dev/null 2>&1
+  SR_CAP_H="$(git -C "$SR_REPO" rev-parse HEAD)"
+}
+sr_cap_check() {  # <log text> -> a release-check proof at SR_CAP_H whose log holds that text
+  printf 'head=%s rc=0\n\n%s\n' "$SR_CAP_H" "$1" > "$SR_DIR/release-check-$SR_CAP_H.log"
+  sr_ev "ev=proof|kind=check|head=$SR_CAP_H|evidence=record/wave-02-fx/release-check-$SR_CAP_H.log|at=2026-10-06T20:00:00Z"
+}
+sr_cap_sheet() { sr_m tests.cap | sed 's/ at [0-9a-f]\{8\}$//'; }   # -> the reading on OUT's sheet, its head left off (sr_run runs in this shell, never in a substitution)
+sr_cap_card() { sr_poke release-approval --preview "$SR_PLAN" 2>&1 | sed -n 's/^test-ratio: //p'; }   # -> the card's reading
+sr_cap_world cap
+sr_run "$SR_PLAN"; SR_CAP_NONE_SHEET="$(sr_cap_sheet)"
+SR_CAP_NONE_CARD="$(sr_cap_card)"
+SR_CAP_NONE_SAYS=no; [ "${SR_CAP_NONE_SHEET#not measured: }" = "$SR_CAP_NONE_SHEET" ] || SR_CAP_NONE_SAYS=yes
+expect_eq "CAP-0 with no check run, the sheet says the cap is not measured in its own words and the card prints no reading" \
+  "yes|" "$SR_CAP_NONE_SAYS|$SR_CAP_NONE_CARD"
+sr_cap_check "test-ratio: 16/40 chars · limit 50 · room 34 — $SR_CAP_LOG_NOTE"
+sr_run "$SR_PLAN"; SR_CAP_SHEET="$(sr_cap_sheet)"
+SR_CAP_CARD="$(sr_cap_card)"
+expect_eq "CAP-1 precondition: the card prints the log's reading, so the comparison below reads a number from each side" \
+  "16/40 chars · limit 50 · room 34" "$SR_CAP_CARD"
+expect_eq "CAP-2 the sheet's reading, limit and room are the ones the release card prints from the same log" "$SR_CAP_CARD" "$SR_CAP_SHEET"
+expect_eq "CAP-3 the sheet holds the one line, naming what it measures, its unit and its source, and states the head the check ran at" \
+  "1|yes|yes|yes|yes" \
+  "$(sr_lines tests.cap | /usr/bin/grep -c .)|$(sr_d tests.cap | /usr/bin/grep -q 'cap on tests' && echo yes)|$(sr_d tests.cap | /usr/bin/grep -q ' · unit: ' && echo yes)|$(sr_d tests.cap | /usr/bin/grep -q ' · source: ' && echo yes)|$(sr_m tests.cap | /usr/bin/grep -q " at ${SR_CAP_H:0:8}\$" && echo yes)"
+expect_eq "CAP-4 …and it moved off the not-measured line the same world read before the check ran" "no" \
+  "$([ "$SR_CAP_SHEET" = "$SR_CAP_NONE_SHEET" ] && echo yes || echo no)"
+sr_cap_check "release-check: test-ratio: 70/9 chars · limit 11 · room -59 — $SR_CAP_LOG_NOTE"
+sr_run "$SR_PLAN"; SR_CAP_SHEET2="$(sr_cap_sheet)"; SR_CAP_CARD2="$(sr_cap_card)"
+expect_eq "CAP-5 a refusal's line moves the sheet and the card together, each reading the numbers and not the tail" \
+  "70/9 chars · limit 11 · room -59|70/9 chars · limit 11 · room -59" "$SR_CAP_SHEET2|$SR_CAP_CARD2"
+sr_cap_check "test-ratio: 7/9"
+sr_run "$SR_PLAN"; SR_CAP_SHEET3="$(sr_cap_sheet)"; SR_CAP_CARD3="$(sr_cap_card)"
+expect_eq "CAP-6 a log from before the cap counted characters holds the two counts alone, and both surfaces read them" \
+  "7/9|7/9" "$SR_CAP_SHEET3|$SR_CAP_CARD3"
 
 # ============================================================
 section "§GOAL-MISS: the first landing that misses a goal makes the tick open decide:goal:<theme> on the run's register, once; it is an ask on the sheet until the goal reads met"
