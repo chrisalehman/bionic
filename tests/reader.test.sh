@@ -729,7 +729,7 @@ HP="$HS/docs/plans/epic-x/held-stop.plan.md"; HL="$HS/docs/record/held-stop/run.
 printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# held\n' > "$HP"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:01:00Z\n' > "$HL"
 hs_ask() { TMPDIR="$HT" bash -c '. "$1/lib/proof.sh" && proof_step_held "$2" | sed -n "s/^n=//p"' _ "${READER%/*}" "$HP" 2>/dev/null; }
 hs_file() { ls -d "$HT"/bionic-place-*/[!.]* 2>/dev/null | head -1; }
-hs_plant() { local f; f="$(hs_file)"; awk '$0 == "n=4" || $0 == "n=5" { $0 = "n=7" } { print }' "$f" > "$f.t" && mv "$f.t" "$f"; }
+hs_plant() { local f; f="$(hs_file)"; [ -n "$f" ] || return 1; awk '$0 == "n=4" || $0 == "n=5" { $0 = "n=7" } { print }' "$f" > "$f.t" && mv "$f.t" "$f"; }
 hs_stop() { RUN_LOG="$HL" bash -c '. "$1/lib/log.sh" && log_append stop session=s1 turn="$2" current=4 state=ok ceiling= width=4 open=0 free=4 ready= launched= declined= missed=0 idle= room=4' _ "${READER%/*}" "$1"; }
 expect_eq "HS0 meta: the place is folded from the log and held in a file" "4|n=4" "$(hs_ask)|$(/usr/bin/grep -x 'n=4' "$(hs_file)" 2>/dev/null)"
 hs_plant; hs_stop t1

@@ -1426,6 +1426,7 @@ run-seal.test.sh | §HELD | keep | payload/scripts/lib/proof.sh _proof_held_dir:
 
 run.test.sh | §ORDER | keep | tests/run.sh: the check that asks the gate for the bound run's open order deleted, so a suite starts with an order standing (O2, O3, O6); lib/gate.sh gate_order_plan reading the plan's text, so an order the log alone holds starts it (O6); hooks/poker/plan.sh poker_verb_order writing the plan, so its sum moves (O1, O4) | none (searched 'order lift' and 'ev=order' in tests/; landing-line-1.test.sh drives the landing door's order, not the runner's)
 run.test.sh | §FORK | keep | tests/run.sh _verdict: the refusal arm deleted, so a failed suite whose output holds the shell's refusal of a process reads FAIL and the door exits 1, not 75 (F1) | none (searched 'temporarily unavailable' and 'fork:' in tests/)
+run.test.sh | §HELD | keep | tests/run.sh: BIONIC_HELD dropped from the --serial exec's scrub (H2), or payload/scripts/lib/suite.sh _bionic_suite_env's unset that the door's --one worker runs through (H1), so a suite started from inside a held command reads and writes that command's hold | none for --serial (searched 'BIONIC_HELD' and '--serial' in tests/); landing-line-2.test.sh §SIGNALS sig3, sig9, sig10 pin the primitive and the --one worker alone; run-seal and speed-counts drive the hold itself, not the scrub
 
 ## runner-roster.test.sh
 

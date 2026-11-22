@@ -217,10 +217,10 @@ if [ "${1:-}" = "--one" ]; then
     exit 0
   fi
   _one_start="$(date +%s)"
-  # THE SCRUB: this worker keeps BIONIC_GATE_DIR for its own ask and end above and below,
-  # but the SUITE PROCESS runs without it or CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT: through the first a suite
-  # read the run's store, through the others (a run a hook started carries them) a fixture's hooks judged the session's
-  # project. A suite that wants one sets it in its own fixture. The --serial path below scrubs at its own exec the same way.
+  # THE SCRUB: this worker keeps BIONIC_GATE_DIR for its own ask and end, but the SUITE PROCESS runs without it,
+  # CLAUDE_PROJECT_DIR, CLAUDE_PLUGIN_ROOT or BIONIC_HELD: through the first a suite read the run's store, through the roots
+  # (a run a hook started carries them) a fixture's hooks judged the session's project, through the hold (a run a held
+  # command started carries it, lib/proof.sh) its reads were the command's. A suite that wants one sets it; --serial too.
   # THE PLUGIN'S PRIMITIVE (wave-33 T2; D3): when the plugin library is in this tree, the suite runs
   # through lib/suite.sh `bionic_suite_exec`, the one way a landing starts a suite too: the scrub, the
   # admission handed down, stdin closed. The queued string is a roster line's own words, `bash
@@ -234,7 +234,7 @@ if [ "${1:-}" = "--one" ]; then
     # (`bash tests/foo.test.sh`), written in this file — never outside input.
     [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
     # shellcheck disable=SC2086
-    env -u BIONIC_GATE_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_ROOT $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+    env -u BIONIC_GATE_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_ROOT -u BIONIC_HELD $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
   fi
   _one_rc=$?
   _gate_end_for "$_one_rc"
@@ -871,7 +871,7 @@ run() {  # run <label> <cmd...>   — gating
     ( _gate_ask_for work "$label" \
         || { printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"; exit 75; }
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
-      env -u BIONIC_GATE_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_ROOT "$@" >"$TMP/${label}.out" 2>&1   # the scrub: the ask above keeps the store, the suite does not, nor the roots
+      env -u BIONIC_GATE_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_ROOT -u BIONIC_HELD "$@" >"$TMP/${label}.out" 2>&1   # the scrub: the ask above keeps the store, the suite does not, nor the roots, nor a held command's hold
       _sr=$?
       _gate_end_for "$_sr"
       exit "$_sr" )
