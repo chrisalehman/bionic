@@ -33,6 +33,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# A fixture maker here that cannot make its fixture stops the suite that asked for it (tests/lib/maker-stop.sh).
+. "$(dirname "$0")/lib/maker-stop.sh" || exit 1
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 CARD_SH="${REPO}/payload/scripts/card.sh"
