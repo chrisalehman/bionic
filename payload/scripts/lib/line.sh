@@ -358,6 +358,9 @@ _line_merge_ask() {  # <plan> <root> <mode> <working branch> <open|close> [<addr
 # it stands; a log that is a link is read as absent, as the readers that guard the record against a link always read it.
 line_lines() {  # <run log> -> the log's lines; rc 0 when it does not stand, else cat's
   line_held "$1" || return 0
+  # A whole read of the log, counted as lib/reader.sh `reader_events` counts its own (tests/speed-counts.test.sh), so
+  # the ceiling on a command's reads of the log holds this one too.
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'log line_lines\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   cat "$1"
 }
 line_held() {  # <run log> -> 0 when the log stands

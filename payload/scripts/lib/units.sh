@@ -263,6 +263,9 @@ _units_live() {
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
   _units_facts_at "$plan" || return 2
+  _proof_derive _units_live "$plan" _units_live_made
+}
+_units_live_made() {
   _proof_facts_awk -F'|' "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
     END { for (i = 1; i <= _rows; i++) { r = _row_order[i]; s = dropped(r) ? "dropped" : _row_held[r]; $0 = _row_tree_held[r]
       if (s != "" || $0 != "") printf "%s\t%s\t%s\t%s\t%s\n", r, s, _row_name[r], line_kv("path"), substr(line_kv("base"), 1, 8) } }'
@@ -278,8 +281,10 @@ _units_proofs() {
     printf '%s' "$_UNITS_MEMO_PROOFS"; return "$_UNITS_MEMO_PROOFS_RC"
   fi
   _units_lib proof.sh proof_fact_lines || return 0
-  _units_facts_at "$(_units_origin "${1:-}")" || return 2
-  _proof_facts_proofs
+  local o
+  o="$(_units_origin "${1:-}")"
+  _units_facts_at "$o" || return 2
+  _proof_derive _units_proofs "$o" _proof_facts_proofs
 }
 
 # _units_fold <plan> -> 0 with the fold's answer for <plan>'s run held (its plan in _UNITS_FACTS_PLAN): inside a held
@@ -396,6 +401,9 @@ _units_born_facts() {
   plan="$(_units_origin "${1:-}")"
   [ -f "$plan" ] && _units_lib proof.sh _proof_facts || return 0
   _proof_fields && _units_facts_at "$plan" || return 2
+  _proof_derive _units_born_facts "$plan" _units_born_made
+}
+_units_born_made() {
   _proof_facts_awk -F'|' "$_LINE_FIELDS_AWK"'
     line_ev() == "born" && line_kv("row") != "" && line_kv("reason") != "" && !seen[line_kv("row")]++ {
       printf "%s\t%s\t%s\t%s\n", line_kv("row"), line_kv("reason"), line_kv("finding"), line_kv("promoted") }'
@@ -2798,6 +2806,17 @@ UNITS_BORN_COUNTED
 #   finding; exit 1 when the plan cannot be read. Readers: lib/proof.sh `proof_fixed` (the judge's fixed findings) and the poker's
 #   `finding_disposition` (the fix row of each finding).
 units_born_findings() {
+  local k="" c
+  # The answer reads the plan's table, so its key holds the plan's cksum now: a verb may write the plan between two sums
+  # of the log. A verb's copy is computed at every ask; the plan's own answer is kept.
+  case "${1:-}" in ''|*.plan.md.*) ;; *)
+    ! declare -F _proof_derive_ready >/dev/null 2>&1 || ! _proof_derive_ready "$1" \
+      || ! c="$(cksum < "$1" 2>/dev/null)" || k="$1"$'\035'"plan=$c" ;;
+  esac
+  if declare -F _proof_derive >/dev/null 2>&1; then _proof_derive units_born_findings "$k" _units_born_findings_made "$@"
+  else _units_born_findings_made "$@"; fi
+}
+_units_born_findings_made() {
   local out
   out="$(_units_born_rows "${1:-}" 10)" || return 1
   [ -z "$out" ] || printf '%s\n' "$out" | awk -F'\t' "$_UNITS_REVIEW_AWK"'
