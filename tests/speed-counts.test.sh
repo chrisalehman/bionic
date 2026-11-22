@@ -8,6 +8,7 @@
 # does nothing else. The kinds:
 #
 #   log     lib/reader.sh reader_events     a whole read of the run's log
+#           lib/line.sh line_lines          a whole read of the log as the landing record, raw
 #   fold    lib/reader.sh reader_facts      a fold of the log into facts
 #   overlay lib/reader.sh reader_facts -    pending lines laid over facts already folded (a judgment's pending step)
 #   parse   lib/plan-read.sh _plan_read_lines  a parse of the plan
@@ -29,6 +30,8 @@
 #   sum     lib/proof.sh _proof_facts, proof_step_held  a checksum of the run's log taken for a key
 #   append  lib/log.sh _log_put         a line the command appended to a run's log
 #   judge   lib/proof.sh _proof_facts   a judgment's entry: a decider's first ask under its own `_PROOF_FRESH=1`
+#   derive  lib/proof.sh _proof_derive  an answer derived from the facts computed, not served: its line is
+#                                       `derive <answer> <key>`, the key `-` where nothing is kept
 #
 # THE FIXTURE. One run, built at two sizes: SC_N rows and twice that, each size's every row but the last a landed
 # Step-4 build and the last the integrate row, open. The plan is a version-15 wave at double rigor with
@@ -58,7 +61,7 @@
 #
 # ANTI-VACUITY (.claude/rules/test-harness.md, "Anti-vacuity"). The count extractor is proved on real output first:
 # §REPORTS reads every kind as non-zero somewhere before any later row reads a ceiling through `sc_count`, and every
-# command's lines are read whole against the sixteen known shapes. §PRINT compares only prints it has shown are not
+# command's lines are read whole against the known shapes. §PRINT compares only prints it has shown are not
 # empty. RED: with the counter lines taken out of the libraries, §REPORTS is red and §FIXTURE and §PRINT stay
 # green.
 #
@@ -92,7 +95,7 @@ SC_NOW=1791324000     # 2026-10-06T22:00:00Z
 SC_AT=2026-10-06T12:00:00Z
 SC_N=5
 SC_CMDS="card check tick resume watch wall"
-SC_KINDS="log fold overlay parse table status facts held gate pass matrix owing send sum append judge"
+SC_KINDS="log fold overlay parse table status facts held gate pass matrix owing send sum append judge derive"
 WALLS="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 SC_OUT="$TMPROOT/out"; mkdir -p "$SC_OUT"
 
@@ -269,7 +272,7 @@ for SC_SIZE in n 2n; do
   done
   for SC_C in $SC_CMDS; do
     expect_regex "REP-2 ($SC_SIZE) $SC_C counts its reads, each line a known kind and its function" \
-      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|held _proof_facts|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load|send (_proof_facts|proof_held_facts|_units_facts_of|reader_main)|sum (_proof_facts|proof_step_held)|append _log_put|judge _proof_facts)( |$))+$' \
+      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|held _proof_facts|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load|send (_proof_facts|proof_held_facts|_units_facts_of|reader_main)|sum (_proof_facts|proof_step_held)|append _log_put|judge _proof_facts|log line_lines|derive [A-Za-z_]+ [^ ]+)( |$))+$' \
       "$(sort "$SC_OUT/$SC_SIZE.$SC_C.on.count" 2>/dev/null | uniq -c | awk '{ $1 = $1; print }' | paste -sd' ' -)"
   done
 done
@@ -545,6 +548,11 @@ sc_card_records() {  # <record dir> -> the adversarial whole reading's findings,
   printf '%s\n' 'reviewed: main..wave/02-fx' 'findings: 2' \
     'finding: 1 S3 off - the card reads its rows twice' 'finding: 2 S4 off - the card names a row once' \
     'debt: duplicate card-rows-read lib/t1.sh:1' > "$1/adversarial-whole.md"
+  # T1 was born of the first finding and landed green, so the judge reads that finding fixed: its fixed findings, the
+  # born landings and the release heads are derived over the landing record, and the record is read whole for them.
+  printf 'run/v1|ev=born|row=T1|reason=review S3 off|finding=record/wave-02-fx/adversarial-whole.md#1|at=2026-10-05T00:00:00Z\n' >> "$1/run.log"
+  printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=t1.test.sh|result=green|log=/fixture/T1.log|at=2026-10-05T00:01:00Z\n' \
+    "$(git -C "$1" rev-parse HEAD)" >> "$1/run.log"
 }
 SC_WORLD_RECORDS=sc_card_records; export SC_WORLD_RECORDS
 if sc_world f "$SC_N" > "$TMPROOT/f.world.out" 2>&1; then SC_CF=built; else SC_CF=""; cat "$TMPROOT/f.world.out"; fi
@@ -581,6 +589,70 @@ done
 expect_eq "CARD-6 the findings' debt verb, asked in the card, reads the held fold no more than a card with no debt line" \
   "$(sc_count n card held)" "$(sc_count f card held)"
 [ -z "${SPEED_COUNTS_PRINTS:-}" ] || { mkdir -p "$SPEED_COUNTS_PRINTS"; sc_print f card on > "$SPEED_COUNTS_PRINTS/f.card.txt"; }
+section "§DERIVE: an answer derived from the facts is computed once for its key in a command"
+# fails-when: a derived answer (the row states, the proofs, the born rows, the fixed findings, the proved release heads,
+# the born landings, the floor judge or the whole pass's line at a head) is computed again in a command for a key it was
+# already computed for, in the command's first process or any it starts; or a held answer is served after the facts it
+# was computed from moved; or anything is kept outside a held command.
+# The counter is proved first, on a copy of the n snapshot: in one held shell an answer asked twice is computed once and
+# answers the same, and asked again after an append through the log's one writer it is computed again; outside a hold
+# each ask computes and nothing is kept.
+DV_DIR="$TMPROOT/n/derive"; rm -rf "$DV_DIR" && cp -Rp "$TMPROOT/n/snap" "$DV_DIR"
+dv_probe() {  # <held|plain> -> the probe's print; its counts in $DV_DIR/<mode>.count
+  : > "$DV_DIR/$1.count"
+  ( cd "$DV_DIR/proj" && env TMPDIR="$DV_DIR/tmp" HOME="$DV_DIR/home" BIONIC_COUNT="$DV_DIR/$1.count" bash -c '
+      . "$1/proof.sh" && . "$1/log.sh" && _proof_reader_load || exit 2
+      [ "$3" = plain ] || proof_hold_begin || exit 2
+      a="$(proof_lines "$2")"; b="$(proof_lines "$2")"
+      RUN_LOG="$(reader_log "$2")" LOG_AT=2026-10-06T12:30:00Z log_append handoff path=probe-derive >/dev/null 2>&1 || exit 3
+      c="$(proof_lines "$2")"
+      echo "$([ -n "$a" ] && echo some)|$([ "$a" = "$b" ] && echo same)|$([ "$a" = "$c" ] && echo same)|$(ls "${BIONIC_HELD:-/nonexistent}" 2>/dev/null | grep -c "^derive-proof_lines\.")"
+      [ "$3" = plain ] || proof_hold_end' _ "$SC_LIB" "$DV_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" "$1" 2>&1 )
+}
+dv_n() { awk -v m="${2:-}" '$1 == "derive" && $2 == "proof_lines" && (m == "" || ($3 == "-") == (m == "-")) { n++ } END { print n + 0 }' "$DV_DIR/$1.count"; }   # <mode> [-|k] -> its computes
+expect_eq "DRV-0 in a held command an answer asked twice is computed once, the same answer; after an append it is computed again (the counter proved)" \
+  "some|same|same|2 2 2" "$(dv_probe held) $(dv_n held k) $(dv_n held)"
+expect_eq "DRV-0 …outside a held command each of the three asks computes and nothing is kept" "some|same|same|0 3 3" \
+  "$(dv_probe plain) $(dv_n plain -) $(dv_n plain)"
+# sc_derive_most <count file> -> the most computes of one answer under one key, then how many computes in all
+sc_derive_most() { awk '$1 == "derive" { n[$2 " " $3]++; t++ } END { for (k in n) if (n[k] > m) m = n[k]; print m + 0, t + 0 }' "$1" 2>/dev/null || echo "- -"; }
+for SC_SIZE in n 2n f; do
+  for SC_C in $SC_CMDS; do
+    [ -f "$SC_OUT/$SC_SIZE.$SC_C.on.count" ] || continue
+    SC_D="$(sc_derive_most "$SC_OUT/$SC_SIZE.$SC_C.on.count")"
+    expect_eq "DRV-1 ($SC_SIZE) $SC_C computes each derived answer at most once for its key (${SC_D#* } computes)" 1 \
+      "$([ "${SC_D%% *}" -le 1 ] && [ "${SC_D#* }" -ge 1 ] && echo 1 || echo 0)"
+  done
+done
+for SC_C in $SC_CMDS; do
+  expect_eq "DRV-2 $SC_C computes as many derived answers at n rows as at 2n" "$(sc_count n "$SC_C" derive)" "$(sc_count 2n "$SC_C" derive)"
+done
+# sc_raw <size> <command> -> the command's raw reads of the log, as the landing record
+sc_raw() { awk '$0 == "log line_lines" { n++ } END { print n + 0 }' "$SC_OUT/$1.$2.on.count" 2>/dev/null || echo 0; }
+# The run with a fixed finding is the one whose card reaches the fixed findings' raw read of the record, so a read
+# planted there is read by a ceiling below.
+expect_eq "DRV-3 the card over the run with a fixed finding computes its fixed findings, and reads the record raw more than the card with none" \
+  "yes yes" "$([ "$(awk '$1 == "derive" && $2 == "proof_fixed" { n++ } END { print n + 0 }' "$SC_OUT/f.card.on.count")" -ge 1 ] && echo yes) $([ "$(sc_raw f card)" -gt "$(sc_raw n card)" ] && echo yes)"
+
+section "§LOG: a command reads the run's log whole no more often than its ceiling"
+# fails-when: a reader in any of the commands reads the run's log whole once more, through the reader (`reader_events`)
+# or raw as the landing record (`line_lines`), in its first process or any it starts. Each ceiling is the command's
+# count over this fixture, the same at n rows and 2n (§SCALE); a row that removes reads lowers it, and one that adds a
+# read raises it in this table, by name.
+SC_LOG_MOST="card=9 check=2 tick=15 resume=21 watch=18 wall=2"
+SC_LOG_MOST_FCARD=13
+expect_eq "LOG-0 a raw read of the log is counted: the card counts both readers (the counter proved)" "yes yes" \
+  "$([ "$(sc_count n card log)" -gt "$(sc_raw n card)" ] && echo yes) $([ "$(sc_raw n card)" -ge 1 ] && echo yes)"
+for SC_SIZE in n 2n; do
+  for SC_C in $SC_CMDS; do
+    SC_M="${SC_LOG_MOST#*"$SC_C="}"; SC_M="${SC_M%% *}"; SC_L="$(sc_count "$SC_SIZE" "$SC_C" log)"
+    expect_eq "LOG-1 ($SC_SIZE) $SC_C reads the log whole at most $SC_M times ($SC_L)" 1 "$([ "$SC_L" -le "$SC_M" ] && echo 1 || echo 0)"
+  done
+done
+SC_L="$(sc_count f card log)"
+expect_eq "LOG-1 (f) the card over the run with a fixed finding reads the log whole at most $SC_LOG_MOST_FCARD times ($SC_L)" 1 \
+  "$([ "$SC_L" -le "$SC_LOG_MOST_FCARD" ] && echo 1 || echo 0)"
+
 section "§READ-ONCE: the tick, resume and the watcher's pass each fold the log once, read the table once and pass the statuses once"
 # fails-when: a reader of the tick or of resume folds the run's log for itself (the sheet's ledger reader, a recap read),
 # or a process the command starts (the judge the card asks, the tick resume runs) reads the plan's table or passes every
