@@ -178,6 +178,9 @@ New in this release.
 - A close row whose Files name the continuation owns all of it: the close appends none of its sections there.
 - No row pins any one of the card's guards against a failed fold alone; the proof suite's row goes red only when all are
   gone.
+- A writer that has written its record and committed but has not landed is named by no line of the tick, so the orchestrator finds it only by reading the list of agents.
+- When the load on the machine stands down the writer of a close row, the close may write the continuation itself and add to what that writer left.
+- The whole run the tick starts by itself inherits the facts the tick holds for its own pass, in a folder the tick removes when the pass ends; no failure from it has been seen.
 
 ## 2.1.0 — 2026-11-19
 

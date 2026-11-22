@@ -1729,6 +1729,7 @@ _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
 
 # The files a fold depends on: the reader's libraries, then the run's log, and no other file of its record.
 _PROOF_FACTS_LIBS="reader.sh plan-read.sh log.sh line.sh"
+_PROOF_FACTS_LAYOUT="facts+findings+inherited"   # the kept fold's layout, named last in every key
 _PROOF_FACTS_KEY=""; _PROOF_FACTS_LOG=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""; _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""; _PROOF_HELD_FACTS=""
 # The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
 # key anyone who reads the repository can compute. So it is read and written only in a directory this user owns
@@ -1767,7 +1768,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   _proof_count_fresh; _proof_count sum _proof_facts
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
-  key="$plan $stamp facts+findings+inherited"
+  key="$plan $stamp $_PROOF_FACTS_LAYOUT"
   if [ "$_PROOF_FACTS_KEY" = "$key" ] && { [ -z "${_PROOF_FRESH:-}" ] || [ -n "$_PROOF_FACTS_LOG" ]; }; then _proof_facts_out; return; fi
   cdir="${TMPDIR:-/tmp}/bionic-facts-$(id -u 2>/dev/null)"
   [ -d "$cdir" ] || mkdir -p -m 700 "$cdir" 2>/dev/null
@@ -1837,7 +1838,10 @@ _proof_facts_held() {  # <plan> -> 0 with _PROOF_HELD_FOLD its fold's file (empt
   if [ "${#id}" -gt 200 ]; then id="$(cksum <<< "$plan")"; id="${id%% *}"; fi
   if [ "${_PROOF_FRESH:-}" != 1 ] && [ -f "$d/key-$id" ] && IFS= read -r k < "$d/key-$id" && [ -n "$k" ]; then
     if [ "$k" = "$_PROOF_FACTS_KEY" ] && [ "$_PROOF_HELD_ID" = "$d/$id" ]; then _PROOF_HELD_FOLD="$d/fold-$id"; return 0; fi
-    if [ -f "$d/made-$id" ] && IFS= read -r m < "$d/made-$id" && [ "$m" = "$k" ]; then _proof_held_take "$d" "$id" "$k"; return 0; fi
+    # Another process's fold is taken only when its key ends in this process's own libraries: a copy of the reader that
+    # differs by a line, asking inside the hold, folds for itself and is never served what another reader folded.
+    if _proof_facts_libsum && [ "${k%" $_PROOF_FACTS_LIBSUM $_PROOF_FACTS_LAYOUT"}" != "$k" ] \
+       && [ -f "$d/made-$id" ] && IFS= read -r m < "$d/made-$id" && [ "$m" = "$k" ]; then _proof_held_take "$d" "$id" "$k"; return 0; fi
   fi
   _proof_reader_load || { printf '_proof_facts: lib/reader.sh cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
   log="$(reader_log "$plan" 2>/dev/null)" || rc=$?
@@ -1846,16 +1850,12 @@ _proof_facts_held() {  # <plan> -> 0 with _PROOF_HELD_FOLD its fold's file (empt
     2) rc=0; log="" ;;
     *) printf '_proof_facts: the lookup of the run log of %s exited %s, so its facts are not read\n' "$plan" "$rc" >&2; return 2 ;;
   esac
-  if [ -z "$_PROOF_FACTS_LIBSUM" ]; then
-    deps=(); for f in $_PROOF_FACTS_LIBS; do deps+=("$_READER_LIB_DIR/$f"); done
-    _PROOF_FACTS_LIBSUM="$(cksum "${deps[@]}" 2>/dev/null)" || _PROOF_FACTS_LIBSUM=""
-    _PROOF_FACTS_LIBSUM="${_PROOF_FACTS_LIBSUM//$'\n'/ }"
-  fi
+  _proof_facts_libsum || :
   _proof_count_fresh; _proof_count sum _proof_facts
   deps=("$plan"); [ -z "$log" ] || [ ! -f "$log" ] || deps+=("$log")
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" || stamp=""
   # A file cksum cannot read would leave the key blind to its changes: then nothing is keyed, and every ask folds.
-  [ -z "$stamp" ] || [ -z "$_PROOF_FACTS_LIBSUM" ] || key="$plan ${stamp//$'\n'/ } $_PROOF_FACTS_LIBSUM facts+findings+inherited"
+  [ -z "$stamp" ] || [ -z "$_PROOF_FACTS_LIBSUM" ] || key="$plan ${stamp//$'\n'/ } $_PROOF_FACTS_LIBSUM $_PROOF_FACTS_LAYOUT"
   if [ -n "$key" ]; then
     if [ "$key" = "$_PROOF_FACTS_KEY" ] && [ "$_PROOF_HELD_ID" = "$d/$id" ] && [ -f "$d/fold-$id" ]; then
       printf '%s\n' "$key" > "$d/key-$id" 2>/dev/null; _PROOF_HELD_FOLD="$d/fold-$id"; return 0
@@ -1885,6 +1885,24 @@ _proof_facts_held() {  # <plan> -> 0 with _PROOF_HELD_FOLD its fold's file (empt
   fi
   if [ -n "$key" ]; then printf '%s\n' "$key" > "$d/made-$id" && printf '%s\n' "$key" > "$d/key-$id"; else rm -f "$d/key-$id" "$d/made-$id"; fi
   _proof_held_take "$d" "$id" "$key" fold
+}
+# _proof_facts_libsum -> 0 with _PROOF_FACTS_LIBSUM the cksum and size of each reader library this process folds with,
+# taken once a process (counted `libs`); 1 when one cannot be read. The libraries are the loaded reader's, or, before it
+# is loaded, the ones beside this file that `_proof_reader_load` would load. A file's path is left out of the sum, so
+# the key is the same wherever a process names the same bytes from, and taking it costs no process but the one cksum.
+_proof_facts_libsum() {
+  [ -z "$_PROOF_FACTS_LIBSUM" ] || return 0
+  local lib="${BASH_SOURCE[0]%/*}" f out c n sum="" IFS=$' \t\n'
+  local -a deps=()
+  [ "$lib" != "${BASH_SOURCE[0]}" ] || lib=.
+  ! declare -F reader_facts >/dev/null 2>&1 || lib="$_READER_LIB_DIR"
+  for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
+  _proof_count libs _proof_facts
+  out="$(cksum "${deps[@]}" 2>/dev/null)" || return 1
+  while read -r c n _; do sum="$sum${sum:+ }$c $n"; done <<PROOF_LIBSUM
+$out
+PROOF_LIBSUM
+  _PROOF_FACTS_LIBSUM="$sum"
 }
 # _proof_held_take <dir> <id> <key> [fold] -> the fold under <key> held by this shell: its files named, its findings and
 # inherited proofs read in, with no process. A fold this shell did not make itself is counted (`held`).

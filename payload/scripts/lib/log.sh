@@ -110,9 +110,17 @@ _log_put_line() {
 # tests/speed-counts.test.sh) when BIONIC_COUNT names a file.
 _log_moved() {
   [ -z "${BIONIC_COUNT:-}" ] || printf 'append _log_put\n' 2>/dev/null >>"$BIONIC_COUNT" || :
-  case "${BIONIC_HELD:-}" in */bionic-held-*) ;; *) return 0 ;; esac
-  [ -d "$BIONIC_HELD" ] && [ ! -L "$BIONIC_HELD" ] && [ -O "$BIONIC_HELD" ] || return 0
-  set -- "$BIONIC_HELD"/key-*
+  # A hold is trusted here exactly as lib/proof.sh `_proof_held_dir` trusts it, which this library cannot load: this
+  # user's directory, no link, writable by neither group nor other, named by a live pid. tests/speed-counts.test.sh
+  # §TRUST holds the two equal.
+  local d="${BIONIC_HELD:-}" pid
+  case "$d" in */bionic-held-*) ;; *) return 0 ;; esac
+  [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] || return 0
+  pid="${d##*/bionic-held-}"; pid="${pid%%.*}"
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 0
+  [ -n "$(find "$d" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ] || return 0
+  set -- "$d"/key-*
   [ ! -e "$1" ] || rm -f "$@" 2>/dev/null
   return 0
 }

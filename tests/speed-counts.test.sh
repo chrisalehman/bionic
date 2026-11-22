@@ -17,6 +17,7 @@
 #           lib/reader.sh reader_q_statuses every row's status, in one pass
 #   facts   lib/proof.sh facts_state        the run's facts answered at a head
 #   held    lib/proof.sh _proof_facts       the command's held fold read by a shell that did not hold it yet
+#   libs    lib/proof.sh _proof_facts       the reader's libraries summed, once a process, to key or to take a held fold
 #   gate    lib/walls.sh dispatch           one pass of the evidence gate's judging arms: one step's checks
 #   pass    lib/walls.sh wall_evidence_gate one pass of the evidence gate, its reads and every step it judges
 #           lib/walls.sh wall_gate_judge_steps  one pass for several steps, each step's checks run in it
@@ -96,7 +97,7 @@ SC_NOW=1791324000     # 2026-10-06T22:00:00Z
 SC_AT=2026-10-06T12:00:00Z
 SC_N=5
 SC_CMDS="card check tick resume watch wall close"
-SC_KINDS="log fold overlay parse table status facts held gate pass matrix owing send sum append judge derive"
+SC_KINDS="log fold overlay parse table status facts held libs gate pass matrix owing send sum append judge derive"
 WALLS="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 CLOSE="${BIONIC_SCRIPTS_DIR}/payload/scripts/close-out.sh"
 SC_OUT="$TMPROOT/out"; mkdir -p "$SC_OUT"
@@ -276,7 +277,7 @@ for SC_SIZE in n 2n; do
   done
   for SC_C in $SC_CMDS; do
     expect_regex "REP-2 ($SC_SIZE) $SC_C counts its reads, each line a known kind and its function" \
-      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|held _proof_facts|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load|send (_proof_facts|proof_held_facts|_units_facts_of|reader_main)|sum (_proof_facts|proof_step_held)|append _log_put|judge _proof_facts|log line_lines|derive [A-Za-z_]+ [^ ]+)( |$))+$' \
+      '^([0-9]+ (log reader_events|fold reader_facts|overlay reader_facts|parse _plan_read_lines|table _units_read|status reader_q_status|status reader_q_statuses|facts facts_state|held _proof_facts|libs _proof_facts|gate dispatch|pass wall_evidence_gate|pass wall_gate_judge_steps|matrix matrix_load|owing matrix_owing_step|owing matrix_owing_open|owing matrix_owing_load|send (_proof_facts|proof_held_facts|_units_facts_of|reader_main)|sum (_proof_facts|proof_step_held)|append _log_put|judge _proof_facts|log line_lines|derive [A-Za-z_]+ [^ ]+)( |$))+$' \
       "$(sort "$SC_OUT/$SC_SIZE.$SC_C.on.count" 2>/dev/null | uniq -c | awk '{ $1 = $1; print }' | paste -sd' ' -)"
   done
 done
@@ -360,6 +361,60 @@ for SC_C in $SC_CMDS; do
   for SC_K in sum append judge; do
     expect_eq "SUM-2 $SC_C counts the same $SC_K at n rows and 2n" "$(sc_count n "$SC_C" "$SC_K")" "$(sc_count 2n "$SC_C" "$SC_K")"
   done
+done
+
+section "§LIBS: a held fold is served only to a process whose reader's libraries made it"
+# fails-when: a process of a held command that loads another copy of the reader's libraries, one line apart, is served
+# the fold the first copy made instead of folding for itself; or a process of the same copy is not served it; or the
+# libraries are summed more than once a process.
+# The probe, on a copy of the n snapshot, with two copies of the libraries, B's reader.sh one comment line longer: one
+# shell opens the hold, and four processes it starts each ask twice: A, A again, B, and B with no hold (the control).
+SL_DIR="$TMPROOT/n/libs"; rm -rf "$SL_DIR" && cp -Rp "$TMPROOT/n/snap" "$SL_DIR"
+cp -R "$SC_LIB" "$SL_DIR/libA" && cp -R "$SC_LIB" "$SL_DIR/libB" && printf '\n# a reader one line apart\n' >> "$SL_DIR/libB/reader.sh"
+SL_RC="$( cd "$SL_DIR/proj" && env TMPDIR="$SL_DIR/tmp" HOME="$SL_DIR/home" bash -c '
+    . "$1/libA/proof.sh" || exit 2; proof_hold_begin || exit 2
+    w="$1" p="$2"
+    ask() {  # <library copy> <asker> -> the asker, a process of its own, asks the facts twice; its counts in <asker>.count
+      BIONIC_COUNT="$w/$2.count" bash -c ". \"\$1/proof.sh\" || exit 2; _proof_facts \"\$2\" >/dev/null && _proof_facts \"\$2\" >/dev/null" \
+        _ "$w/$1" "$p"
+    }
+    ask libA a && ask libA a2 && ask libB b && ( unset BIONIC_HELD; ask libB c ); r=$?
+    proof_hold_end; echo "$r"' _ "$SL_DIR" "$SL_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )"
+sl_n() { awk -v k="$2" '$1 == k { n++ } END { print n + 0 }' "$SL_DIR/$1.count" 2>/dev/null || echo -; }   # <asker> <kind> -> its count
+sl_of() { printf '%s' "fold $(sl_n "$1" fold) held $(sl_n "$1" held) libs $(sl_n "$1" libs)"; }   # <asker> -> its three counts
+expect_eq "LIBS-0 the probe's four processes each asked twice and exited 0" 0 "$SL_RC"
+expect_eq "LIBS-1 A, the first asker in the hold, folds the log and sums its libraries once" "fold 1 held 0 libs 1" "$(sl_of a)"
+expect_eq "LIBS-2 a second process of A is served A's fold, summing its own libraries once to know it may be" \
+  "fold 0 held 1 libs 1" "$(sl_of a2)"
+expect_eq "LIBS-3 B, whose reader is one line apart, folds for itself in the same hold and is not served A's fold" \
+  "fold 1 held 0 libs 1" "$(sl_of b)"
+expect_eq "LIBS-4 CONTROL B with no hold folds, as it does in the hold" 1 "$(sl_n c fold)"
+
+section "§TRUST: the log's writer trusts a hold exactly where the facts' reader trusts one"
+# fails-when: lib/log.sh `_log_moved` and lib/proof.sh `_proof_held_dir` part on a directory: a hold the reader trusts
+# whose keys an append leaves standing, or one it refuses whose keys an append removes. Each is asked of five
+# directories: a live command's, a dead command's, one group can write, a link to a live one, and one named by no pid.
+# It prints `<directory> <reader trusts: 1|0> <writer removed its key: 1|0>`.
+ST_DIR="$TMPROOT/trust"; mkdir -p "$ST_DIR"
+ST_OUT="$( env -u BIONIC_COUNT bash -c '
+    . "$1/proof.sh" && . "$1/log.sh" || exit 2
+    t="$2"; bash -c : & dead=$!; wait "$dead"
+    mkdir -m 700 "$t/bionic-held-$$.live" "$t/bionic-held-$dead.dead" "$t/bionic-held-$$.group" "$t/bionic-held-$$.tgt" "$t/no-pid" || exit 3
+    chmod 770 "$t/bionic-held-$$.group"; ln -s "$t/bionic-held-$$.tgt" "$t/bionic-held-$$.link"
+    for n in live dead group link; do
+      d="$t/bionic-held-$$.$n"; [ "$n" != dead ] || d="$t/bionic-held-$dead.dead"
+      [ "$n" != link ] || : > "$t/bionic-held-$$.tgt/key-x"; [ "$n" = link ] || : > "$d/key-x"
+      BIONIC_HELD="$d"; _PROOF_HELD_SEEN=-; if _proof_held_dir; then r=1; else r=0; fi
+      _log_moved; if [ -e "$d/key-x" ]; then w=0; else w=1; fi
+      echo "$n $r $w"
+    done
+    d="$t/no-pid"; : > "$d/key-x"; BIONIC_HELD="$d"; _PROOF_HELD_SEEN=-; if _proof_held_dir; then r=1; else r=0; fi
+    _log_moved; if [ -e "$d/key-x" ]; then w=0; else w=1; fi; echo "no-pid $r $w"' _ "$SC_LIB" "$ST_DIR" 2>&1 )"
+expect_eq "TRUST-1 a live command's hold is trusted by both: the reader serves from it and the writer removes its key" \
+  "live 1 1" "$(printf '%s\n' "$ST_OUT" | /usr/bin/grep '^live ')"
+for ST_N in dead group link no-pid; do
+  expect_eq "TRUST-2 a $ST_N hold is refused by both, as the live one is trusted by both" "$ST_N 0 0" \
+    "$(printf '%s\n' "$ST_OUT" | /usr/bin/grep "^$ST_N ")"
 done
 
 section "§SCALE: the reads of the log and the facts do not grow with the rows"

@@ -56,6 +56,8 @@
 #   §RELEASE        two landings through the runner, the first deleting code, the next adding a test line onto it:
 #                   both are admitted, for the runner exports the release (BIONIC_CHECK_RELEASE) and the check counts
 #                   its code as well as the landing's base.
+#   §HOLD           the project's check, run from inside a held command, is started with no hold, so its facts are
+#                   folded by the reader at the judge and not by the verb's.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -838,5 +840,25 @@ expect_eq "(rl3) the check as the runner calls it there counts the release's 40 
 OUT="$(cd "$RL" && env -u BIONIC_CHECK_RELEASE BIONIC_CHECK_HEAD="$RL_P2" BIONIC_CHECK_BASE="$RL_P1" bash "$CHECK" "$LIST" 2>&1)"
 expect_contains "(rl4) CONTROL with no release named, the same range is refused on the base's 20 characters" \
   "release-check: test-ratio: 50/20 chars · limit 25" "$OUT"
+
+section "§HOLD — the project's check is started holding nothing, so its facts are folded by its own reader"
+
+# A held command's reads are bionic's for that one command (lib/proof.sh `_proof_held_dir`); the project's check runs
+# at the judge, whose reader may not be the verb's, so it must not be handed the verb's hold. The check here prints
+# what it was handed; the run is made from inside an open hold, as the release-check verb makes it.
+HL="$TMP/hold"; fx_repo "$HL" 1.0.0 1.0.0
+mkdir -p "$HL/.bionic/docs/plans" "$HL/.git/info" && printf '.bionic/\n' >> "$HL/.git/info/exclude"
+printf 'release-check: bash ck.sh\n' > "$HL/.bionic/config.yaml"
+printf 'echo "check: held=${BIONIC_HELD:-none} judge-head=${BIONIC_CHECK_HEAD:-}"\n' > "$HL/ck.sh"
+fx_commit "$HL" "the check"; HL_J="$(git -C "$HL" rev-parse HEAD)"
+printf -- '---\nbase-sha: %s\nintegration-branch: main\n---\n# plan\n' "$HL_J" > "$HL/.bionic/docs/plans/x.plan.md"
+HL_OUT="$( cd "$HL" && . "$FC_LIB/worktree.sh" && . "$FC_LIB/proof.sh" && proof_hold_begin || exit 3
+  printf 'caller: held=%s\n' "${BIONIC_HELD:+yes}"
+  worktree_check_run "$HL" "$HL/.bionic/docs/plans/x.plan.md" "$HL_J" "$HL_J" "$HL_J"; printf 'rc=%s\n%s\n' "$?" "$WT_CHECK_OUT"
+  proof_hold_end )"
+expect_contains "(hl0) the caller held its reads when it ran the check" "caller: held=yes" "$HL_OUT"
+expect_contains "(hl1) the check ran at the judge and printed what it was handed" "check: held=" "$HL_OUT"
+expect_contains "(hl2) …which is the head it judges, so the line is the check's own" "judge-head=$HL_J" "$HL_OUT"
+expect_contains "(hl3) …and no hold: the project's command is started holding nothing" "check: held=none " "$HL_OUT"
 
 finish
