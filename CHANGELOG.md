@@ -8,6 +8,249 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 2.2.0 — 2026-11-21
+
+This release drives a wave with a fraction of the waiting and the typing, in five themes. The cap on tests counts what
+joining lines cannot shrink and deleting code cannot hurt, and it judges this release. The six slow commands take from a
+seventeenth to about a tenth of their 2.1.0 time, and **seven commands are still over the 10-second bound**; the person
+waived each of them by name (Known limits, first). The run no longer closes, waits, stops or wakes on something that is
+not true. A row takes one command to start and none to close. One page says when the person is asked, and the person
+waited 138 minutes for this run's asks against wave 51's 364, though they were asked 13 times against 5 (Known limits).
+The working principles bionic installs carry two paragraphs the person approved word for word. It is a minor release:
+the plan format stays at `canonical_sdlc_version: 15`, and a run begun under 2.1.0 continues under 2.2.0.
+
+**What you do when you upgrade.**
+- **Run `/bionic:setup` again, then restart Claude Code with no agent out.** Setup replaces the span between the
+  `bionic:principles` markers in your instructions file, and touches no byte outside them; the span now holds "Own the
+  code" and "Write for a reader with no context". A session reads that file when it starts, and takes its hooks when it
+  starts, so one that was running at the upgrade keeps the 2.1.0 principles and hooks. Exit `claude` and start it again:
+  a `/clear` is not a restart.
+- **One change of behaviour inside a command.** Within one running command, a line written to the run's log from outside
+  it (another session's stop event during a tick, say) is now seen at that command's next append or its next judgment,
+  not at its next ask. A judgment still folds the log as it stands when it begins. A script that appends to the log
+  while a command runs should not expect the command to see the line before then.
+- **Every release card needs each deferral's sentence stated first.** `session-poker.sh finding-move <record>#<n> stated
+  '<sentence>'` writes it; a card over a deferral with no sentence is refused before it puts anything, naming the
+  finding, and the reply refuses a carry with none.
+- **`publish` opens the pull request from your text.** It stops calling `gh pr create --fill`: it reads
+  `record/<wave>/pr-summary.md` (three sections you write) and refuses, before it pushes, a missing or empty section.
+  `session-poker.sh pr-facts` prints the four sections the reader owns.
+- **The close tags the merge.** On a merge the tool has seen, with the release approval in the log, the close tags the
+  merge commit `v<release>` and pushes the tag to `origin`. It never moves a tag and makes none without both. A failed
+  push holds the close with an ask, and the close runs again once the push can be made.
+- **Commits the tool makes carry your configured author.** The landing numbers, the reviews part and the close's reviews
+  are committed as the checkout's configured user, and each message says the tool made it.
+- **A release judged by a typed word.** `session-poker.sh check-from '<words>' [<commit>]`, on words you typed in a session
+  of the run, moves the copy of the release check that every landing is judged by to a commit the working head holds.
+  The landing's line and the release card name the judge and whose word set it. A dispatched agent cannot run it.
+- **Your release check holds nothing of bionic's.** The command a project declares as `release-check:` is started with
+  no hold, so it folds the run's log with its own copy of bionic's libraries. A check that loads bionic's proof library
+  costs that fold again; one that does not sees no change.
+- **The situation report's fact sheet has one more line,** `tests.cap`, between `tests.whole-run` and `reviews`: the
+  release check's cap line from its newest log, or `not measured` before any check has run.
+
+### What shipped
+
+**Room to test.**
+- The cap reads the non-whitespace characters of the tracked shell files, tests against code, with tests allowed 1.25
+  times the largest of the head's code, the base's and the last release's. Joining lines changes no reading, and a commit
+  that deletes code is admitted and so is the next that adds a test. The line reads `test-ratio: <tests>/<code> chars ·
+  limit <n> · room <n>`. The release card quotes it on its Tests line and the situation report's fact sheet as
+  `tests.cap`, both through the one function that reads it from the check's log.
+- The helpers of the worktree library that nothing called are deleted, 295 lines, with the two test lines that pinned
+  one of them. The 2.1.0 limit that they stay is gone.
+
+**Nothing waited on is slow.**
+- Slowness is caught without a clock. With one variable set, the libraries write a line per whole read of the log, fold,
+  parse of the plan, read of its table, status ask, facts answer and gate pass, and a suite counts them for each slow
+  command over a fixture of n rows and of 2n rows.
+- Each cost was a repetition, and each is cut: one reader answer gives every row's status; in one command the log is
+  folded once and the folded facts are written as files under one key that every reader in every process reads by path;
+  each answer that depends only on the plan, the facts and fixed commits is computed once and served from the command's
+  hold; the judge runs one gate pass for all steps, and the card renders held facts and starts no child to draw them;
+  the tick and resume read once, and the sitrep formats its dates without a process each. The commit wall and the
+  close's check each open a hold of their own, so the wall folds once where it folded five times, and the close's check
+  went from 88.46 s to 19.31 s.
+- A held fold is served only to a process whose reader's libraries sum the same as those of the process that folded
+  it. A process that loaded another copy of the libraries folds for itself.
+- With a pull request open the watcher's pass reads the request's state and runs the tick only when what the tick reads
+  has changed. A first quiet pass keeps its look, so the next asks one question and runs no tick, and the pass after the
+  merge still reads the run as merged.
+
+**The run manages its edges.**
+- The watcher's merge pass and the close refuse while a row of the run has a live writer, and the pass wakes once naming
+  the rows out. The close lands no row a writer holds, and its wipe spares a live session's scratch folder.
+- A dep on a review row is met when the review is registered and its questions read covered at the head, so no row waits
+  for ever on one that never lands. A tick that declines to start an owed regression prints one line with the cause and
+  what would let it start.
+- A landing is returned, naming the criterion, when its change deletes a test section or quoted words that a criterion's
+  eval cites, until the criterion's row differs from the one recorded at dispatch or is waived.
+- A ruling and its acknowledgement are events of the run's log, named by row, so a ruling reaches its writer whichever
+  session recorded it. A writer is stood down only when its row has landed, and a stand-down for load wakes with the load
+  and the writer's name and does not offer the hold verb.
+
+**A row takes one command.**
+- `session-poker.sh start <id>` records the birth, renders the brief, makes the tree, and prints the dispatch call whole
+  with the one task-list entry the row owes. A row born mid-run owes one entry added at the end of the list.
+- A landing closes its row: the roster row, the tree, the record's assumptions appended to the run's. What it owes the
+  orchestrator is the stop of the agent.
+- One resolver reads a docs path spelled from the project root or from the docs root. Every landing runs the static
+  checks over the files the row changed. A brief names a suite whose promise is over the landing bar and leaves it out of
+  the landing set. `rule <writer> '<text>' --files+ <path> --suites+ <suite>` widens a row and records the ruling in one
+  event, and a successor row is born with the grants. Each refusal of `start`, `rule`, `amend` and the landing's returns
+  ends on the command to type, in one `run:` line.
+
+**Asking has one rule.**
+- The decision skill is the one page that says whose call it is, with the short form as its default and one question to a
+  message; the method's, Step 2's and the dispatch page point to it and state no test of their own. The release card
+  draws its decisions heaviest first, each with a recommendation.
+- An ask counts against the person from the instant it is put to them, and the scorecard prints the asks put after the
+  plan's approval and their minutes. A reply is recorded as the person's when one prompt answers several decisions; the
+  cause was the match on the command's text, which a loop of puts never held, and it now reads the instant of the put.
+- The working principles gain "Own the code" and "Write for a reader with no context", each word for word as approved.
+
+**Repairs that landed with it.** The static checks that were red at the head are green again; a shared test setup stops
+its suite when a helper it loads is missing or its repository was not made, and no shared setup writes through an empty
+path; the one-reader check and the proof suite's failed-fold row pass again; the door's five test-ratio rows pass. The
+whole run of the tests is started holding nothing, so no suite reads the facts of the command that started it.
+
+Every suite ran whole at `6d523e840da4`, the head this entry is trued at, on 2026-11-22: 138 passed and none failed. The
+walk discharged 62 of the 68 criteria at that head; the other six are waived by the person (Known limits).
+
+### Timings
+
+Every time is a wall-clock time as measured on one copy of wave 50's record (11,868 log lines), by the protocol in
+`.bionic/tests/w52-speed.md`, on a quiet machine (one-minute load 1.9 to 3.7, no suite running). Each row names the head
+its time was taken at:
+- **The 2.2.0 median** is the median of three runs from a restored state. Every median was taken at `115cd25fb` (rows T35
+  and T56), except the close's check and `ready` before its suites, taken at `2e2b712ce` (row T58). The close's check was
+  timed again there because it began to hold its facts after `115cd25fb`. At that head it is 19.31 s, where it was
+  88.46 s at `115cd25fb`. `ready` was timed there for the first time. The three runs of a median agree within 0.7 s,
+  except resume's first run, 45.69 s, which is 2.4 s above its other two.
+- **The one run at `2e2b712ce`** is T58's run of every other command once more, set beside its median. None differs from
+  it by a tenth or more. The largest gap is the situation report's: +0.60 s, +5.16%.
+- **The 2.1.0 time** is one run of the same command at `75643b752`, taken with another writer's suite on the machine
+  (load 3.5 to 4.7), so part of each ratio is the load.
+
+The records are `speed-baseline.md`, `speed-after.md`, `speed-verbs.md` and `speed-close.md`. No time below is rounded.
+
+| command | 2.1.0, at `75643b752` | 2.2.0 median | median taken at | one run at `2e2b712ce` | the 10 s bound |
+|---|---|---|---|---|---|
+| `resume` from a handoff | 484.85 s | **43.31 s** | `115cd25fb` | 44.46 s | **over** |
+| the watcher's first pass, pull request open | 452.92 s | **33.79 s** | `115cd25fb` | 34.10 s | **over** |
+| one tick, integrate row open | 454.33 s | **32.42 s** | `115cd25fb` | 32.27 s | **over** |
+| the release card's preview | 481.19 s | **29.02 s** | `115cd25fb` | 29.22 s | **over** |
+| the close's check, `close-out.sh <plan> check` | | **19.31 s** | `2e2b712ce` | | **over** |
+| `ready` before its suites | | **16.45 s** | `2e2b712ce` | | **over** |
+| `sitrep` (the fact sheet) | | **11.63 s** | `115cd25fb` | 12.23 s | **over** |
+| one checked advance, `current 6 --check` | 82.57 s | 7.76 s | `115cd25fb` | 7.82 s | under |
+| `start` | | 6.95 s | `115cd25fb` | 7.03 s | under |
+| the commit wall | 55.62 s | 5.61 s | `115cd25fb` | 5.65 s | under |
+| `approve` | | 3.14 s | `115cd25fb` | 3.17 s | under |
+| `brief` | | 2.46 s | `115cd25fb` | 2.50 s | under |
+| `proof-add` | | 2.10 s | `115cd25fb` | 2.12 s | under |
+| `decisions` | | 2.07 s | `115cd25fb` | 2.11 s | under |
+| the watcher's later passes | | 1.84 s | `115cd25fb` | | under |
+
+A blank 2.1.0 cell is a command the 2.1.0 baseline did not time. The watcher's first pass is the one the protocol times:
+its state folder is emptied before every run, so no look is kept. A pass after a first that kept its look made no tick
+and took 1.83 to 1.85 s over four passes (one copy, `quiet`, exit 0). The release card's, the tick's, resume's and the
+watcher's first pass are one cost, a whole tick's fold. The profile that said what remains of it was not taken again, so
+what the 11.63 to 44.46 s of the seven commands over the bound are spent on, by function, is not known. `ready` stops at its
+first suite without starting it, so its time runs to the point where the suites would start. Each print was compared with
+the print of the run it is set beside. The only differences are clock times, a copy's path, one load reading on the
+tick's gate line, and, in the close's check, the installed version and the head of the shipped row.
+
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at b8732178 by T39, 2026-11-22T13:14:51Z (`critic-adversarial.md`)
+- structure review, whole: flag at b8732178 by T39, 2026-11-22T13:14:59Z (`critic-structure.md`)
+- evidence review, whole: flag at b8732178 by T38, 2026-11-22T13:15:16Z (`auditor-evidence.md`)
+- adversarial review, piece: flag at 6d523e84 by T39-r2, 2026-11-22T15:04:16Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 6d523e84 by T39-r2, 2026-11-22T15:04:30Z (`critic-structure-2.md`)
+- evidence review, piece: pass at 6d523e84 by T38-r2, 2026-11-22T16:12:44Z (`auditor-evidence-2.md`)
+
+### Known limits
+
+Stated first because they are what this release leaves on purpose.
+- **Seven commands are over the 10-second bound, and the person waived each of them by name: D36, in their words
+  "D36: 1", the option to waive by name and ship.** The waived criteria are AC-4.1, the release card's preview: 29.02 s
+  (29.22 s in one later run). AC-4.2, the tick: 32.42 s (32.27 s). AC-4.3, `resume`: 43.31 s (44.46 s). AC-5.1, the
+  watcher's first pass: 33.79 s (34.10 s); the waiver judges the criterion on that pass, not on the later passes of
+  1.84 s. AC-7.1 for three commands: the close's check, 19.31 s; `ready` before its suites, 16.45 s; the situation report,
+  11.63 s (12.23 s). The heads are in the Timings table. The waivers were written when the close's check stood at 88.46 s
+  and `ready` was not yet timed, and each names its criterion, so it covers the later times. `sitrep card` and
+  `sitrep --line` were not timed, and `proof-add` was timed on a regression proof only.
+- **AC-28.2 is not met, and the person waived it: D38, in their words "D38: 1", ship 2.2.0 with the criterion not met and
+  its numbers stated.** The criterion asks that this run put fewer asks to the person than wave 51 did, and that the
+  person wait fewer minutes for them. The scorecard verb (`landing-report --scorecard`) over both plans, read at
+  `6d523e840da4` on 2026-11-22, prints `asks put to you: 13 · 138 min` for this run and `asks put to you: 5 · 364 min`
+  for wave 51. The minutes are lower, and the count is not. The walk read 9 asks and 16 minutes earlier
+  (`asks-compared.md`), and the count has grown with each ask put since, D38 among them.
+- The commit wall's ten-second registration is unchanged, and a commit wall that outruns it still admits the commit
+  unjudged. The wall took 5.61 s on a plain `git commit` over this record; the quote-dense 200 KB command that took 23.5
+  to 25.5 s in 2.0.0 was not measured again.
+
+What this release changed in the limits of 2.1.0, which stay as 2.1.0's entry wrote them except where this says.
+- Gone: the helpers that stayed in the worktree library; the cap that joined lines could lower, and the room that left
+  later rows writing joined lines (the lines already joined stay joined); the watcher's pass that was a whole tick every
+  five minutes while a pull request is open (its first pass is 33.79 s, its later passes 1.84 s, on the record this
+  entry times); the tick that said nothing when it declined to start the regression; the stand-down wake that offered
+  `hold` for a writer whose work was not done or for a load stand-down; the ruling sent to a writer before a `/clear` that
+  was not shown again, which is now an event of the run's log (not driven live across a clear).
+- Every other 2.1.0 limit was not read again against this release's code and stands as 2.1.0 wrote it.
+
+New in this release.
+- A session logged in only by `CLAUDE_CODE_OAUTH_TOKEN` cannot dispatch a writer in a bound run. The dispatch wall's
+  environment check knows three credentials, `ANTHROPIC_API_KEY`, the config directory's `.credentials.json` and the
+  login keychain's entry, and refuses with `credential absent` though the session is logged in. Seen in the walk.
+- A session that edits its approved plan with its own tools seals the run: the next commit is refused as changed outside
+  the tool. The session may then tell the person to type `! bash …/session-poker.sh accept '<their words>'`, and so typed,
+  `accept` refuses, because the words stand in no prompt the person typed. A plain message saying what they accept works.
+  Seen in the walk.
+- Six events of this run's own log name the test fixture where the person ruled or approved: the approvals of `seal`,
+  `judge`, `doctrine-growth` and `reader-paragraph`, and the rulings of D8 and D31. The judge's and the reader
+  paragraph's approvals are recorded again under the person's name, and every landing line and the card now name the
+  person as the judge's setter. The other four stand under the fixture's name. The tool's verbs cannot record them again,
+  and they stand as they are (D39).
+- The turn-end stop gate's refusal still says "contract MET" and offers `hold` for every unanswered stand-down order,
+  including a load order that `hold` refuses: a stop order carries no cause. The load stand-down counts load the run did
+  not make, so each tick can stand one more writer down while the five-minute average is falling.
+- `stopped` on a writer that built its row early and has not landed closes its row with the reason `landed` and keeps the
+  tree. The pages that tell the orchestrator to run `stopped` after a landing are stale, not wrong.
+- A waiver the tool opened and no card has put is not counted against the person's minutes; the Patrol's "on you" count and
+  the watcher's rest still read it as the person's.
+- Inside one command, a review record rewritten with no log event is not seen, since the judge's record files are not in the
+  facts key; a command killed by SIGKILL leaves its held directory behind, and a dead process's directory is refused.
+  A debt written mid-command re-folds everything after it, and the card is still drawn by `card.sh release` as a process.
+- The watcher's look assumes sub-second file times, and files in `.bionic/tmp` deeper than two levels are not in it.
+- Refusals of the landing that end through the runner's own FAIL line (the anchor moved; by-hand conflict, lint and
+  stale) give no `run:` line, `usage` of `start`, `rule` and `amend` prints the whole verb list before it, and where the
+  command needs a value only the person has it shows the placeholder.
+- A close row whose Files name the continuation owns all of it: the close appends none of its sections there.
+- No row pins any one of the card's guards against a failed fold alone; the proof suite's row goes red only when all are
+  gone.
+- A writer that has written its record and committed but has not landed is named by no line of the tick, so the orchestrator finds it only by reading the list of agents.
+- When the load on the machine stands down the writer of a close row, the close may write the continuation itself and add to what that writer left.
+- The whole run the tick starts by itself inherits the facts the tick holds for its own pass, in a folder the tick removes when the pass ends; no failure from it has been seen.
+- A project's declared `regression-command:` is also started holding the command's hold; only the test runner, the
+  landing's suites and the project's release check drop it. A derived answer is keyed by the facts and the reader's
+  libraries, never by the code that derives it, so the proof and units libraries are outside the held key. A regression
+  command that loads bionic's proof library from another copy is served this copy's derived answers. This repository
+  declares no regression command.
+- A writer's brief names the landing verb, `ready --within …`, with no script before it, and no writer's role file names
+  the worktree script. The dispatch page teaches `spawn-worktree.sh create` and never names `start`, which since this
+  release makes the tree, renders the brief and prints the call. The rules page says the main skill page's Step 9 holds
+  the terminal-disposition rule, which renders into the Step 9 page.
+- Four suites promise more than the landing bar's 600 seconds and were left out of landing sets by hand, none split:
+  `release-approval.test.sh` (858 s), `rehearsal-failed-review.test.sh` (638 s), `rehearsal-release-waiting.test.sh`
+  (630 s) and `close-replay.test.sh`. A landing does not run them; a whole run does.
+- 30 debts stand in the run's log by `session-poker.sh debt list`: two items burned of 32. Four of the 30 were raised by
+  this release's structure reviews: `row-has-writer`, `row-start-taught`, `reader-lib-sum` and `sheet-measured-keys`.
+  The other 26 were raised by earlier waves.
+
 ## 2.1.0 — 2026-11-19
 
 This release closes the gaps 2.0.0 shipped with, in five themes. The gate holds: a run changed around the tool is caught
@@ -316,10 +559,10 @@ evict a live run's fold and cost the next commit wall about 3 seconds more.
 
 ### The landing numbers
 
-`landing-report --rows` at 79b043e74f312ebbee15aff75e5d4a9e118c9763 on 2026-11-20T20:06:42Z:
+`landing-report --rows` at 75643b7526e84830b9853d6d5f79053db011bd4c on 2026-11-21T05:29:20Z:
 
 ```
-landings: queue=57 hand=0 git=0 · ready-to-landed median=6.7m p75=15.6m max=151.0m · runs: green=147 red=2 none=0 discarded=2 red-then-green=0 run=822 reused=0 absent=0 · waited median=136s · killed=0
+landings: queue=58 hand=0 git=0 · ready-to-landed median=6.6m p75=14.6m max=151.0m · runs: green=148 red=2 none=0 discarded=2 red-then-green=0 run=824 reused=0 absent=0 · waited median=130s · killed=0
 T3 queue ready=2026-11-19T03:25:23Z landed=2026-11-19T03:25:41Z minutes=0.3 runs=1 waited=8s wait=0.1 prove=0.2 rework=0.0 width=2
   run-seal.test.sh green promised=8s actual=10s ratio=1.25
 T35 queue ready=2026-11-19T03:35:15Z landed=2026-11-19T03:37:26Z minutes=2.2 runs=2 waited=8s wait=0.1 prove=2.0 rework=0.0 width=2
@@ -528,6 +771,8 @@ T71 queue ready=2026-11-20T10:13:10Z landed=2026-11-20T10:16:13Z minutes=3.0 run
   run-seal.test.sh green promised=165s actual=162s ratio=0.98
 T70 queue ready=2026-11-20T10:28:39Z landed=2026-11-20T10:31:05Z minutes=2.4 runs=1 waited=20s wait=0.3 prove=0.4 rework=1.7 width=2
   runner-roster.test.sh green promised=21s actual=23s ratio=1.10
+T50 queue ready=2026-11-20T20:19:44Z landed=2026-11-20T20:21:11Z minutes=1.4 runs=1 waited=15s wait=0.2 prove=1.2 rework=0.0 width=2
+  release-check.test.sh green promised=60s actual=71s ratio=1.18
 ```
 
 ## 2.0.0 — 2026-11-16

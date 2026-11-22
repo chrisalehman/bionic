@@ -124,6 +124,7 @@ reader_log_stamp() (  # <log> -> its `cksum` less its stop events; 2 when it can
 # A RUN IS ITS LOG: no other file of its record, and no line of its plan, holds a fact of it, so a plan with no log has
 # no event. A plan that is no file is refused as a plan the walk admits none of.
 reader_events() {  # <plan> -> the run's lines, in the order they were written; 2 when it is no plan
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'log reader_events\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   local log
   [ -f "${1:-}" ] || return 2
   log="$(reader_log "$1")" || return 2
@@ -131,6 +132,9 @@ reader_events() {  # <plan> -> the run's lines, in the order they were written; 
 }
 
 reader_facts() {  # <plan> -> one line per standing fact, in the order the facts were last set
+  # Lines handed in on `-` are an overlay, pending lines laid over facts already folded, and are counted apart from a
+  # fold of the run's log.
+  [ -z "${BIONIC_COUNT:-}" ] || { if [ "${1:-}" = - ]; then printf 'overlay reader_facts\n'; else printf 'fold reader_facts\n'; fi; } 2>/dev/null >>"$BIONIC_COUNT" || :
   reader_events "$1" | awk -F'|' -v ids="$READER_IDENTITY" '
     BEGIN { n = split(ids, a, " "); for (i = 1; i <= n; i++) { e = index(a[i], "="); idk[substr(a[i], 1, e - 1)] = substr(a[i], e + 1) } }
     $1 != "run/v1" { next }
@@ -192,7 +196,15 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
     # question runs under pipefail, its caller's setting put back after, and the failure is its exit in-process too.
     shopt -qo pipefail || pf=off
     set -o pipefail
-    if [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null; else "$fn" "$plan" "$@"; fi; rc=$?
+    # INSIDE A HELD COMMAND (lib/proof.sh `_proof_held_dir`) the question reads the command's one fold of the log by
+    # its file, the same facts a fold here would make, and no pending line laid over them: no second fold is made for it.
+    if declare -F _proof_held_dir >/dev/null 2>&1 && _proof_held_dir && _proof_facts_held "$plan" 2>/dev/null \
+       && [ -n "$_PROOF_HELD_FOLD" ] && [ -n "$_PROOF_FACTS_LOG" ] && [ "${_PROOF_FACTS_KEY%% *}" = "$plan" ]; then
+      ( _PROOF_READ_FILE="$_PROOF_HELD_FOLD"; reader_facts() { cat "$_PROOF_READ_FILE"; }
+        if [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null; else "$fn" "$plan" "$@"; fi )
+    elif [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null
+    else "$fn" "$plan" "$@"; fi
+    rc=$?
     [ "$pf" = on ] || set +o pipefail
     return "$rc"
   done
@@ -461,21 +473,42 @@ reader_q_hands() {  # <plan> -> each act taken by hand: a hand event, or a landi
     ev() == "hand" || ev() == "published" && line_kv("kind") == "hand"'
 }
 
+# A ROW'S STATUS IS PRINTED HERE, by one function both questions below call over the row fold, so the one pass over
+# every row and the ask of one row cannot answer a row two ways. state is the latest of dispatched, candidate, ready,
+# returned, stalled and landed, pending when the log holds none; a dropped row is dropped whatever else stands of it.
+_READER_STATUS_AWK='
+function row_status(r,   s, n, p, i) {
+  s = dropped(r) ? "dropped" : _row_state[r]
+  print "state=" (s == "" ? "pending" : s)
+  n = split(_row_dispatch[r], p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
+  $0 = _row_tree[r]; if (line_kv("path") != "") { print "tree=" line_kv("path"); print "branch=" line_kv("branch"); print "base=" line_kv("base") }
+  if (_row_commit[r] != "") print "commit=" _row_commit[r]
+}
+'
+
 reader_question status value reader_q_status
 reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch contract, its tree and its landing commit
-  # state is the latest of dispatched, candidate, ready, returned, stalled and landed; pending when the
-  # log holds none. A row the plan's Tasks table lacks has no status, so a wrong id never reads as pending.
-  # The state is the one row fold's (`_READER_ROW_AWK`). A dropped row is dropped whatever else stands of it.
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'status reader_q_status\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  # A row the plan's Tasks table lacks has no status, so a wrong id never reads as pending.
   _reader_needs status '<row>' "${2:-}" || return 2
   plan_read_row "$1" Tasks id "$2" >/dev/null || return 1
-  reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
-    END {
-      s = dropped(r) ? "dropped" : _row_state[r]
-      print "state=" (s == "" ? "pending" : s)
-      n = split(_row_dispatch[r], p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
-      $0 = _row_tree[r]; if (line_kv("path") != "") { print "tree=" line_kv("path"); print "branch=" line_kv("branch"); print "base=" line_kv("base") }
-      if (_row_commit[r] != "") print "commit=" _row_commit[r]
-    }'
+  reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK$_READER_STATUS_AWK"'
+    END { row_status(r) }'
+}
+
+# EVERY ROW'S STATUS IN ONE PASS, for a caller that asks of many rows: one fold read and one awk, where an ask a row
+# reads the fold and parses the plan once a row. It answers from the facts alone and reads no table: each row a fact
+# names opens with `row=<id>`, in the order the facts first name it, and its lines follow as `status` prints them. The
+# caller joins it against the Tasks rows it already holds: a row of the table no fact names is pending, and a row
+# named here that the table lacks has no status.
+reader_question statuses value reader_q_statuses
+reader_q_statuses() {  # <plan> -> per row the facts name: row=<id>, then the row's status lines; 2 when the facts cannot be read
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'status reader_q_statuses\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  local f
+  f="$(reader_facts "$1")" || return 2
+  [ -n "$f" ] || return 0
+  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK$_READER_STATUS_AWK"'
+    END { for (i = 1; i <= _rows; i++) { print "row=" _row_order[i]; row_status(_row_order[i]) } }'
 }
 
 reader_question ready yes reader_q_ready
@@ -502,6 +535,16 @@ reader_q_pr() {  # <plan> -> the newest request's fields as key=value lines, `ev
   reader_facts "$1" | awk -F'|' "$_READER_AWK"'
     is_pr() { l = $0 }
     END { if (l == "") exit 1; n = split(l, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|part)=/) print p[i] }'
+}
+
+# THE JUDGE THE PERSON NAMED is an approval of its own key, `key=judge`, written by `check-from` on words they typed: the
+# commit whose copy of the release check judges what lands after it (`head=`), and who typed them (`by=`, `said=`,
+# `session=`). The approval's identity is its key, so the newest word stands and replaces every earlier one.
+reader_question judge value reader_q_judge
+reader_q_judge() {  # <plan> -> the standing judge's fields as key=value lines, `ev=` and `key=` dropped; nothing, 1, for none
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+    ev() == "approval" && line_kv("key") == "judge" { l = $0 }
+    END { if (l == "") exit 1; n = split(l, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|key)=/) print p[i] }'
 }
 
 reader_question handoff value reader_q_handoff

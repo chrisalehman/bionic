@@ -26,6 +26,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order event with the words in the bound run's log (record/orders.log with no run bound)
 #     bash <plugin-root>/hooks/session-poker.sh accept '<their words>' | abandon '<their words>'   the person's word on a run changed around the tool: sealed again as it stands, or ended (writes the run's log and its seal)
+#     bash <plugin-root>/hooks/session-poker.sh check-from '<their words>' [<commit>]   the person's word that the commit judges the release check from now on (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh waive <question|all|AC-id> '<reply>'   the user's waiver of a review question, all three, or a criterion (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh regression-run   run the project's regression (its regression-command:, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add regression (writes a log under record/, never the plan)
@@ -38,7 +39,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, one handoff event names it (writes the file, and the run's log when bound)
 #     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, this session's roster and the recap)
 #     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register: this run's rulings from record/<wave>/design-ledger.md and its log, or every run's with the ADRs (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>'   a decision put: one round in the run's log, and the wait line it prints
+#     bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>' [<row>…]   a decision put: one round in the run's log naming the rows it holds, and the wait line it prints
 #     bash <plugin-root>/hooks/session-poker.sh decisions rule D<n> '<reply>'   a decision ruled on the user's reply: its round in the run's log and its ask closed, in one act
 #     bash <plugin-root>/hooks/session-poker.sh brief <row> [<name>]   render the dispatch brief into record/<wave>/briefs/<name>.md from the row, its plan section and the reader (writes that file, never the plan)
 #
@@ -269,6 +270,13 @@ ADOPT_TAIL_CAP=2000
 
 say()  { printf 'poker: %s\n' "$1"; }
 die()  { printf 'poker: %s\n' "$1" >&2; }
+# THE LAST LINE OF A REFUSAL OF START, RULE AND AMEND IS `run: <command>`: the one a person pastes. A refusal that knows
+# a better command than the verb's own form says it with die_run; the exit trap adds the form to any other non-zero exit.
+RUN_SAID=""; RUN_DEFAULT=""
+run_line() { RUN_SAID=1; printf 'run: %s\n' "$1" >&2; }
+die_run() { die "$1"; run_line "$2"; }  # <the refusal> <the command to type>
+run_last() { [ "$1" -eq 0 ] || [ -n "$RUN_SAID" ] || [ -z "$RUN_DEFAULT" ] || run_line "$RUN_DEFAULT"; }  # <exit status>
+trap 'run_last $?' EXIT
 
 # ONE EXIT CODE FOR EVERY ARGUMENT ERROR IN THIS FILE, AND IT IS 2. `bind` briefly had a 3
 # of its own (wave-session-bound-run S6, on the reading that a missing operand is the same
@@ -297,10 +305,11 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   die "  bash ${HOOK_DIR}/session-poker.sh extend <name> <reason>   re-open a MET row for <name>: a fresh row goes on the roster, launched now, so the next tick reads it live again"
   die "  bash ${HOOK_DIR}/session-poker.sh hold <name> <reason>   answer a STANDDOWN by keeping <name> up: the tick prints it held, and orders no stop, until its launch, deliverable or messages change"
-  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>']   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session"
+  die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] [--files+ <path>]... [--suites+ <suite>]...   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session; --files+ and --suites+ grant, widening the writer's row, and every later brief of its row carries the grant"
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> [--born …]   record the birth of row <id>, which an edit of the bound plan wrote first: the row is read back and judged as a row born mid-run, one born event is appended, and the plan is not written; a short row is refused with the lines it would accept; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite; task-add <id> --drop '<the person's words>' says a pending row's work is no longer owed: one drop event, the plan not written"
+  die "  bash ${HOOK_DIR}/session-poker.sh start <id> [<name>] [--role <role>]   start row <id>, written into the bound plan first: its birth (as task-add), its brief (as brief) and its tree (spawn-worktree.sh create --for the name), then the Agent call printed whole and the one task-list entry it owes; an act that stands is kept, and a tree the row recorded is marked for the name"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh judge <N> [<N>…]   the advance's judgment for each step from 5 to 8 in one process: what current <N> --check prints for each, each closed by judged <N> exit <rc>; appends nothing; exits 0 when every step would advance"
@@ -309,8 +318,10 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>' ['<why>']   record the user's approval <name> as one approval in the run's log: a name a row reads, plan at Step 3, or a T4 criterion the user confirms on words they typed"
   die "  bash ${HOOK_DIR}/session-poker.sh accept '<their words>'   the person's word that the run, changed around the tool, is theirs as it stands: one approval line naming the words and the change, then the run sealed again"
   die "  bash ${HOOK_DIR}/session-poker.sh abandon '<their words>'   the person's word that the bound run ends: one abandon line naming the words, and its seal removed"
+  die "  bash ${HOOK_DIR}/session-poker.sh check-from '<their words>' [<commit>]   the person's word that the commit, the working head unless named, judges every landing and release check after it: one approval of key judge in the run's log, naming the words and who typed them"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh publish   the bound run's pull request, on the release approval at the working head and nothing else: the working branch pushed to origin and the request opened against the integration branch through gh, recorded as a published event of part pr; at a head already published it does nothing, at a new head it pushes and keeps the request; a failed push or request exits 4 with the cause and opens an ask for the user"
+  die "  bash ${HOOK_DIR}/session-poker.sh pr-facts   the bound run's pull request facts, printed from the reader and never typed: ## Testing, ## Review, ## Known limits and ## Decision records, the four sections publish puts after the orchestrator's ## Summary, ## What changed and ## Upgrade notes from record/<wave>/pr-summary.md (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task|walk> <evidence>   record a proof in the run's log, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the regression's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
@@ -334,7 +345,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, adopt and tick; print the run in a dozen lines (bound, step, agents running, landed since, owed now, watch) and the path of the recap file holding the rest (task-list:, settled:, open:, the step file). A closed or no-run file binds nothing"
   die "  bash ${HOOK_DIR}/session-poker.sh promote <adr|design|requirement> <path>   copy one durable record into the project's tracked home (docs-tracked: in .bionic/config.yaml, docs/ when absent) as <home>/<kind>s/<name>, the run number dropped from the name; a plan, a log or a run record is refused and nothing is copied"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions [--all]   the bound run's rulings, D<n> · \"<reply>\" · <who> <date> · <title>, from record/<wave>/design-ledger.md and the run's log as one list; --all: every run's, keyed by wave, with the ADRs (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>'   during a run, append the decision's put to the run's log and print its wait line: what an hour's wait moves, from the tasks that read approval:D<n> and the longest chain"
+  die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>' [<row>…]   during a run, append the decision's put to the run's log and print its wait line: what an hour's wait moves, from the rows the put names as held, the tasks that read approval:D<n> and the longest chain"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions rule D<n> '<reply>'   during a run, on the user's reply, append the ruling, its reply and who said it, to the run's log and close the decision's ask; approve D<n> and a release approval card's reply rule through the same writer; a decision already ruled is refused"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row> [<name>]   render the dispatch brief of that plan row into record/<wave>/briefs/<name>.md (<name> the agent's, else the fill's for the row): the scaffold from the row, the judgment from the task's own section of the plan, the review range, Questions and Lands-red from the reader; it never rewrites a brief it did not render, and never changes the plan"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   append one debt to the run's log per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
@@ -350,6 +361,11 @@ usage() {  # [message]
 # THE VERB'S OLD SPELLING IS REFUSED (wave-39 T18; REQ-13 AC-13.1, D2): the line after VERB is read, before both case blocks,
 # lib/alias.sh names the new one.
 VERB="$1"; shift
+case "$VERB" in
+  start) RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh start <id>" ;;
+  rule) RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>'" ;;
+  amend) RUN_DEFAULT="bash ${HOOK_DIR}/session-poker.sh amend <name> --files+ <path> --reason '<why>'" ;;
+esac
 if declare -F alias_gone >/dev/null 2>&1 && alias_gone verb "$VERB"; then die "REFUSED — $ALIAS_GONE_SAID. Nothing was run."; exit 1; fi
 # THE CARD'S OLD NAME. The card the autonomous half waits on was called by another name before it was the release approval
 # card, and the person's decision it asks for is the release's. The old verb still runs, as the new one, and says so once
@@ -450,17 +466,24 @@ case "$VERB" in
   # takes the one id the push printed; `rulings` the writer whose rulings to read.
   # `--words '<the user's words>'` (wave-36 T9; D10) quotes what the person typed: held to lib/said.sh
   # `user_said` across the run's recorded sessions, and carried in the ruling as `words="…" session=<sid>`.
+  # `--files+ <path>` and `--suites+ <suite>`, each repeatable, are what the ruling grants: one event is both the
+  # ruling and the grant, and the writer's row is widened as `amend` widens it.
   rule)
-    RULE_WORDS=""
-    if [ $# -eq 4 ] && [ "$3" = --words ]; then
-      [ -n "${4//[[:space:]]/}" ] || usage "rule --words takes the user's words, quoted from a prompt they typed."
-      RULE_WORDS="$4"; set -- "$1" "$2"
+    RULE_WORDS=""; RULE_FILES=""; RULE_SUITES=""
+    if [ $# -lt 2 ] || [ -z "${1//[[:space:]]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "rule takes two arguments, the writer's roster name and the ruling's text, then optionally --words '<the user's words>', --files+ <path> and --suites+ <suite>."
     fi
-    if [ $# -ne 2 ] || [ -z "${1//[[:space:]]/}" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "rule takes two arguments, the writer's roster name and the ruling's text, and optionally --words '<the user's words>'."
-    fi
-    RULE_WRITER="$1"
-    RULE_TEXT="$2"
+    RULE_WRITER="$1"; RULE_TEXT="$2"; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in --words|--files+|--suites+) ;; *) usage "unknown argument for rule: $1" ;; esac
+      { [ $# -ge 2 ] && [ -n "${2//[[:space:]]/}" ]; } || usage "rule $1 takes a value."
+      case "$1" in
+        --words) RULE_WORDS="$2" ;;
+        --files+) RULE_FILES="${RULE_FILES}$2"$'\n' ;;
+        --suites+) RULE_SUITES="${RULE_SUITES}$2"$'\n' ;;
+      esac
+      shift 2
+    done
     ;;
   ruling-ack)
     { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "ruling-ack takes exactly one argument: the ruling's id."
@@ -583,6 +606,9 @@ case "$VERB" in
   publish)
     [ $# -eq 0 ] || usage "publish takes no argument: it publishes the bound run's working branch against its integration branch."
     ;;
+  pr-facts)
+    [ $# -eq 0 ] || usage "pr-facts takes no argument: it prints the bound run's facts."
+    ;;
   # THE ENTRY ROW'S RENDER OF THE KNOWN LIMITS: the row id alone; the head is the working branch's.
   known-limits-part)
     [ $# -eq 1 ] && [ -n "$1" ] || usage "known-limits-part takes one argument: the doc or integrate row's id."
@@ -666,6 +692,11 @@ case "$VERB" in
     [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ] || usage "$VERB takes one argument: the person's words, quoted, as they typed them."
     SW_WORDS="$1"
     ;;
+  # THE PERSON'S WORD MOVES THE JUDGE: their words as typed, then optionally the commit, the working head when none.
+  check-from)
+    [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "${1//[[:space:]]/}" ] || usage "check-from takes the person's words, quoted, as they typed them, and optionally a commit the working head holds."
+    CF_WORDS="$1"; CF_AT="${2:-}"
+    ;;
   # THE USER'S ORDER. One operand: the user's words, which must hold something once blanks are gone,
   # or the word lift, which ends the open order.
   order)
@@ -737,11 +768,13 @@ $1"; shift ;;
   # OR THREE (wave-36 T8; D9): the finding, `fixed`, and the row that fixed it, `T<n>`; words or a why
   # after it are the usage error. Whether the plan's table carries the row is the verb's own refusal (1).
   # `carried` takes the same three: the finding stays open and closes when the named row lands. A move to defer
-  # takes a fifth, the deferral's one changelog sentence, a field of the move's event.
+  # takes a fifth, the deferral's one changelog sentence, a field of the move's event. `stated` takes the sentence alone:
+  # the orchestrator's, written before the release card, so it takes no words and moves nothing.
   finding-move)
-    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why, and for defer optionally its changelog sentence; or <record>#<n>, fixed, and the row that fixed it; or <record>#<n>, carried, and the row whose landing closes it."
+    FM_USAGE="finding-move takes <record>#<n>, defer or fix, the user's words as typed, and why, and for defer optionally its changelog sentence; or <record>#<n>, fixed, and the row that fixed it; or <record>#<n>, carried, and the row whose landing closes it; or <record>#<n>, stated, and its Known-limits sentence."
     FM_ROW=""; FM_SENT_RAW=""
     case "${2:-}" in
+      stated) [ $# -eq 3 ] && [ -n "${3//[[:space:]]/}" ] || usage "$FM_USAGE"; FM_SENT_RAW="$3"; set -- "$1" "$2" ;;
       defer|fix)
         { [ $# -eq 4 ] || { [ $# -eq 5 ] && [ "$2" = defer ] && [ -n "${5//[[:space:]]/}" ]; }; } \
           && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$FM_USAGE"
@@ -883,11 +916,11 @@ $1"; shift ;;
     ;;
   # THE REGISTER (wave-38 T13; D24, AC-3.4). At most one flag, --all.
   decisions)
-    DC_ALL=no DC_PUT="" DC_TITLE="" DC_RULE="" DC_REPLY=""
+    DC_ALL=no DC_PUT="" DC_TITLE="" DC_HOLDS="" DC_RULE="" DC_REPLY=""
     if [ $# -eq 1 ] && [ "$1" = --all ]; then DC_ALL=yes
     elif [ $# -ge 1 ] && [ "$1" = put ]; then
-      [ $# -eq 3 ] || usage "decisions put takes two arguments: the decision's number and what is decided, as in: decisions put D7 'which findings reach the user'."
-      DC_PUT="$2"; DC_TITLE="$3"
+      [ $# -ge 3 ] || usage "decisions put takes the decision's number, what is decided and the rows it holds, if any, as in: decisions put D7 'which findings reach the user' T4 T5."
+      DC_PUT="$2"; DC_TITLE="$3"; shift 3; DC_HOLDS="$*"
     elif [ $# -ge 1 ] && [ "$1" = rule ]; then
       [ $# -eq 3 ] || usage "decisions rule takes two arguments: the decision's number and the user's reply, as in: decisions rule D7 '1'."
       DC_RULE="$2"; DC_REPLY="$3"
@@ -898,6 +931,19 @@ $1"; shift ;;
   brief)
     { [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "$1" ]; } || usage "brief takes the plan row's id and, optionally, the name its agent is dispatched under, as in: brief T2 w01-T2."
     BRF_ID="$1"; BRF_NAME="${2:-}"
+    ;;
+  # ONE VERB STARTS A ROW: the row's id, optionally the name its agent is dispatched under (the fill's name when left
+  # out), and --role for a row whose cells name none.
+  start)
+    ST_ID=""; ST_NAME=""; ST_ROLE=""
+    ST_USAGE="start takes the plan row's id, optionally the name its agent is dispatched under, and --role <role> once, as in: start T7 w01-T7 --role bionic:critic."
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --role) { [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$ST_ROLE" ]; } || usage "$ST_USAGE"; ST_ROLE="$2"; shift 2 ;;
+        *) if [ -z "$ST_ID" ]; then ST_ID="$1"; elif [ -z "$ST_NAME" ]; then ST_NAME="$1"; else usage "$ST_USAGE"; fi; shift ;;
+      esac
+    done
+    [ -n "$ST_ID" ] || usage "$ST_USAGE"
     ;;
   # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). A subcommand, its operands, and at most one
   # plan last, which names the run as landing-report's does; without it, the session's bound run.
@@ -1745,13 +1791,9 @@ adopt_plan_key() {  # <plan path> -> a comparable spelling of it
   printf '%s' "$out"
 }
 
-# A roster path is absolute or project-relative, exactly as the row's writer left it.
+# A roster path is absolute, project-relative or docs-root-relative, as the row's writer left it.
 adopt_abs() {  # <path> <repo root>
-  case "$1" in
-    /*) printf '%s' "$1" ;;
-    '') : ;;
-    *)  printf '%s/%s' "$2" "$1" ;;
-  esac
+  [ -z "$1" ] || printf '%s' "$(docs_path "$2" "$1")"
 }
 
 #
@@ -2132,14 +2174,71 @@ launch_sync_hand() {  # <verb> <operand>...
 sitrep_now() {  # -> now, epoch seconds: BIONIC_NOW_EPOCH when it is a number, else the clock
   case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) date -u +%s ;; *) printf '%s\n' "$BIONIC_NOW_EPOCH" ;; esac
 }
-sitrep_date() {  # <epoch> <strftime format> -> the local rendering, BSD date then GNU
+sitrep_date() {  # <epoch> <strftime format> -> the local rendering: from the zone this command holds, else BSD date then GNU
+  if _sitrep_local "$1" "$2"; then printf '%s\n' "$_SITREP_LOCAL"; return 0; fi
   date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2" 2>/dev/null
 }
 sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when its local day is not now's
-  local t
+  local t d
+  if _sitrep_local "$1" '%-I:%M %p|%Y-%m-%d' && t="$_SITREP_LOCAL" && _sitrep_local "$2" '%Y-%m-%d'; then
+    d="${t#*|}"; t="${t%%|*}"; [ "$d" = "$_SITREP_LOCAL" ] || t="$t $d"
+    printf '%s\n' "$t"; return 0
+  fi
   t="$(sitrep_date "$1" '%-I:%M %p')"
   [ "$(sitrep_date "$1" '%Y-%m-%d')" = "$(sitrep_date "$2" '%Y-%m-%d')" ] || t="$t $(sitrep_date "$1" '%Y-%m-%d')"
   printf '%s\n' "$t"
+}
+
+# THE LOCAL CLOCK WITHOUT A PROCESS A READING. The sheet reads many instants on the local clock (each task's landing,
+# each ask, each decision round), and a `date` started for each is most of a late run's tick. So a command that reads
+# them holds its zone once (`sitrep_zone_prime`): one perl lists the zone's offset and abbreviation from 400 days
+# before now to 400 days after, each change found to the second, from the C library's localtime, which `date` reads
+# too. A reading is then arithmetic (`_sitrep_local`). An instant outside the span, a format naming a field it does
+# not render, or no perl reads the clock as before, with `date`.
+_SITREP_ZONE=""   # `<from epoch> <offset seconds> <abbreviation>`, each change in order, then `<end epoch> - -`
+sitrep_zone_prime() {  # -> _SITREP_ZONE set in this shell, so every reading in it and its subshells is arithmetic; nothing without perl
+  [ -z "$_SITREP_ZONE" ] || return 0
+  command -v perl >/dev/null 2>&1 || return 0
+  # shellcheck disable=SC2016  # perl's own variables
+  _SITREP_ZONE="$(perl -MPOSIX=strftime -MTime::Local=timegm -e '
+    my $now = $ARGV[0]; my ($lo, $hi) = ($now - 400 * 86400, $now + 400 * 86400);
+    sub zo { my @l = localtime($_[0]); return (timegm(@l[0 .. 5]) - $_[0]) . " " . strftime("%Z", @l) }
+    my $t = $lo; my $z = zo($t); my @out = ("$t $z");
+    while ($t < $hi) {
+      my $n = $t + 86400; my $nz = zo($n);
+      if ($nz ne $z) { my ($a, $b) = ($t, $n); while ($b - $a > 1) { my $m = int(($a + $b) / 2); if (zo($m) eq $z) { $a = $m } else { $b = $m } } push @out, "$b $nz"; $z = $nz }
+      $t = $n;
+    }
+    push @out, "$hi - -"; print join(" ", @out), "\n";' "$(sitrep_now)" 2>/dev/null)" || _SITREP_ZONE=""
+  case "$_SITREP_ZONE" in *' - -') ;; *) _SITREP_ZONE="" ;; esac
+}
+_SITREP_DAYS="Sunday Monday Tuesday Wednesday Thursday Friday Saturday"
+_sitrep_local() {  # <epoch> <format of %Y %m %d %H %M %S %-I %I %p %A %Z> -> 0 with _SITREP_LOCAL its local rendering from _SITREP_ZONE; 1 when it cannot render it
+  local e="$1" f="$2" o="" a="" t days secs z era doe yoe y doy mp d m h i mi se w p
+  _SITREP_LOCAL=""
+  case "$e" in ''|*[!0-9]*) return 1 ;; esac
+  [ -n "$_SITREP_ZONE" ] || return 1
+  # shellcheck disable=SC2086  # the zone's words, split
+  set -- $_SITREP_ZONE
+  while [ "$#" -ge 3 ] && [ "$e" -ge "$1" ]; do o="$2"; a="$3"; shift 3; done
+  case "$o" in ''|-) return 1 ;; esac
+  # The civil date of the local day (Howard Hinnant's civil-from-days, as lib/time.sh reads the other way).
+  t=$((e + o)); days=$((t / 86400)); secs=$((t % 86400))
+  z=$((days + 719468)); era=$((z / 146097)); doe=$((z - era * 146097))
+  yoe=$(( (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 )); y=$((yoe + era * 400))
+  doy=$((doe - (365 * yoe + yoe / 4 - yoe / 100))); mp=$(( (5 * doy + 2) / 153 )); d=$((doy - (153 * mp + 2) / 5 + 1))
+  if [ "$mp" -lt 10 ]; then m=$((mp + 3)); else m=$((mp - 9)); fi
+  [ "$m" -gt 2 ] || y=$((y + 1))
+  h=$((secs / 3600)); mi=$(( (secs % 3600) / 60 )); se=$((secs % 60)); i=$((h % 12)); [ "$i" -ne 0 ] || i=12; p=AM; [ "$h" -lt 12 ] || p=PM
+  # shellcheck disable=SC2086  # the day names, split
+  set -- $_SITREP_DAYS; shift $(( (days + 4) % 7 )); w="$1"
+  [ "$m" -gt 9 ] || m="0$m"; [ "$d" -gt 9 ] || d="0$d"; [ "$mi" -gt 9 ] || mi="0$mi"; [ "$se" -gt 9 ] || se="0$se"
+  case "$f" in *%%*) return 1 ;; esac
+  f="${f//%Y/$y}"; f="${f//%m/$m}"; f="${f//%d/$d}"; f="${f//%-I/$i}"; [ "$i" -gt 9 ] || i="0$i"; f="${f//%I/$i}"
+  [ "$h" -gt 9 ] || h="0$h"; f="${f//%H/$h}"; f="${f//%M/$mi}"; f="${f//%S/$se}"; f="${f//%A/$w}"; f="${f//%Z/$a}"
+  f="${f//%p/$p}"
+  case "$f" in *%*) return 1 ;; esac
+  _SITREP_LOCAL="$f"
 }
 
 # ---------------------------------------------------------------- the plan transaction
@@ -2220,7 +2319,7 @@ plan_verb_open() {
   PV_NEW="${PV_PLAN}.${verb}.$$"
   PV_SID="planverb-$$"
   PV_MARK="$(engaged_marker_path "$PV_REPO" "$PV_SID")" || PV_MARK=""
-  trap 'rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"}' EXIT
+  trap 'run_last $?; rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"}' EXIT
 }
 
 # plan_verb_dry <verb> <what changed> <step> -> the dry commit through the real gate, asked about the plan itself
@@ -2422,6 +2521,7 @@ poker_part_missing() {  # <part> -> exits as loader_fail_open does, naming the p
 { [ -r "$HOOK_DIR/poker/proof.sh" ] && . "$HOOK_DIR/poker/proof.sh"; } || poker_part_missing proof
 { [ -r "$HOOK_DIR/poker/judge.sh" ] && . "$HOOK_DIR/poker/judge.sh"; } || poker_part_missing judge
 
+poker_dispatch() {  # <verb's args> -> the part verb named by VERB
 case "$VERB" in
   adopt) poker_verb_adopt "$@" ;;
   sweep) poker_verb_sweep "$@" ;;
@@ -2433,15 +2533,18 @@ case "$VERB" in
   task-add) poker_verb_task_add "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   publish) poker_verb_publish "$@" ;;
+  pr-facts) poker_verb_pr_facts "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;
   handoff) poker_verb_handoff "$@" ;;
   brief) poker_verb_brief "$@" ;;
+  start) poker_verb_start ;;
   current) poker_verb_current "$@" ;;
   judge) poker_verb_judge "$@" ;;
   reply) poker_verb_reply "$@" ;;
   release-approval) poker_verb_release_approval "$@" ;;
   approve) poker_verb_approve "$@" ;;
   accept) poker_verb_accept ;;
+  check-from) poker_verb_check_from ;;
   abandon) poker_verb_abandon ;;
   order) poker_verb_order "$@" ;;
   proof-add) poker_verb_proof_add "$@" ;;
@@ -2459,3 +2562,32 @@ case "$VERB" in
   stop-run) poker_verb_stop_run "$@" ;;
   tick) if [ "${1:-}" = --watch ]; then poker_verb_watch_pass; else poker_verb_tick "$@"; fi ;;
 esac
+}
+
+# ONE COMMAND, ONE FOLD (lib/proof.sh `proof_hold_begin`). The first poker of a command opens the command's hold, and
+# every process it starts, a child poker or the card among them, is served the one fold of the run's log and the one
+# answer of its facts at a head; the hold is removed when the command ends, so no later command reads what this one
+# held. The verb runs in a subshell, so its own exit traps stand and the hold is removed after them, however the verb
+# ends. A poker started inside a held command, the judge the card asks, holds nothing of its own. The verbs that judge
+# or read the run's facts fold the bound run first, in the verb's own shell, so every subshell they start inherits it.
+POKER_HOLD_PRIMED="current judge release-approval tick resume sitrep"
+poker_hold_prime() {  # <verb's args> -> the bound run's facts folded in this shell, for the verbs that read them; nothing otherwise
+  local run
+  case " $POKER_HOLD_PRIMED " in *" $VERB "*) ;; *) return 0 ;; esac
+  # The verbs that read the sheet's instants hold the local zone first (`sitrep_zone_prime`); the watcher's pass reads none.
+  case "$VERB ${1:-}" in 'tick --watch') ;; tick*|resume*|sitrep*) sitrep_zone_prime ;; esac
+  declare -F _proof_facts >/dev/null 2>&1 || return 0
+  run="$(session_run "$(project_root "$PWD")" "${CLAUDE_CODE_SESSION_ID:-}" 2>/dev/null)" || return 0
+  case "$run" in 'bound-open '*) [ ! -f "${run#bound-open }" ] || { _proof_facts "${run#bound-open }" >/dev/null 2>&1 && POKER_HELD_RUN="${run#bound-open }"; } ;; esac
+  return 0
+}
+# shellcheck disable=SC2034  # read by hooks/poker/sitrep.sh, sourced below
+POKER_HELD_RUN=""   # the bound run poker_hold_prime folded; a reader of its log by another path asks that fold (sitrep.sh `_sitrep_ledger_facts`)
+if declare -F proof_hold_begin >/dev/null 2>&1 && proof_hold_begin; then
+  ( trap 'run_last $?' EXIT; poker_hold_prime "$@"; poker_dispatch "$@" )
+  POKER_HOLD_RC=$?; RUN_DEFAULT=""
+  proof_hold_end
+  exit "$POKER_HOLD_RC"
+fi
+poker_hold_prime "$@"
+poker_dispatch "$@"

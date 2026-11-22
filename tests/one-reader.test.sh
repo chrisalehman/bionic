@@ -25,6 +25,7 @@
 #                 verb writes a ledger file.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
+#                 tests/lib/lint.sh, told the planted hook changed, names the same sites by line.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none. The tree event is folded in the reader alone: a second fold planted in a
 #                 script is found beside it, and the checkout holds the reader's one.
@@ -32,6 +33,8 @@
 #   §LOGPATH      the run log's path is joined in the reader alone: a planted second join is found by its line.
 #   §GITHOME      a second resolution of the common git directory planted in a hook is found by its file; the checkout holds
 #                 none beside the root library's `git_common_dir`.
+#   §DOCSPATH     adopt and the review proof read a record spelled from the project root or the docs root through lib/root.sh
+#                 `docs_path`; a join of the docs root to an operand planted in a script is found by its file.
 #   §LOADER      the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
 #                 tree; a copy planted in a hook file is listed and counted.
 #   §REPORT       with the plants the check exits 1, refusing each finding of the four kinds once; a loader copy
@@ -254,6 +257,14 @@ expect_eq "the dispatch library says a fact under a key for each of the wall's 4
 expect_eq "every piece of those facts is found in the library's own text" "$(printf '%s\n' "$DPIECES" | grep -c .)" "$(pieces_in "$L/dispatch.sh" | grep -c .)"
 expect_eq "no fact of the dispatch library is found in the wall's file" "" "$(pieces_in "$S/hooks/dispatch-preflight.sh")"
 expect_eq "the stop hook's file, which answers the stop of an agent, lists no refusal" "0" "$(own stop | grep -c .)"
+# The landing runs tests/lib/lint.sh over the files a row changed: told the planted hook alone changed, its REFUSALS
+# names every site the whole check lists there, by line; told only an unregistered file changed, it names none.
+LINT_LIB="${BIONIC_SCRIPTS_DIR}/tests/lib/lint.sh"
+lint_refusal_lines() { printf '%s\n' "$1" | bash "$LINT_LIB" "$S" 2>&1 | awk '$1 == "REFUSALS" { sub(/^hooks\/engage\.sh:/, "", $2); print $2, $3 }'; }
+expect_eq "lint.sh's REFUSALS over the changed hook names the ten planted sites" 10 "$(lint_refusal_lines hooks/engage.sh | grep -c .)"
+expect_eq "…each one a site the check lists in it, by line" \
+  "$(own engage "$AFTER" | tr '\n' ' ')" "$(lint_refusal_lines hooks/engage.sh | tr '\n' ' ')"
+expect_eq "…and over a changed file that is no registered hook it names none" "" "$(lint_refusal_lines payload/scripts/lib/planted-folds.sh)"
 # The stop guard's words are its facts and its details, each line cut at its facts and trimmed.
 DPIECES="$(bash -c '. "$1/refuse.sh" && . "$1/stop.sh" || exit 1
   for k in $(stop_guard_keys); do stop_guard_say "$k" @ @ @ @ @ @ && printf "%s\n%s\n" "$SG_FACT" "$SG_DETAIL"; done' _ "$L" \
@@ -361,5 +372,39 @@ expect_regex "a record's born events are not zero" "^[1-9][0-9]*$" "$BORN"
 expect_eq "reading 7 is the born events the reader lists for the run" "$BORN" "$(count "$R46" r7_born_events)"
 expect_ne "reading 7 moves with the record passed" "$(count "$R46" r7_born_events)" "$(count "$R49" r7_born_events)"
 expect_status "a record that is not a directory exits 2" 2 "$(at "$BIONIC_SCRIPTS_DIR" $OLD "$S/none" >/dev/null; echo $?)"
+
+section "DOCSPATH"
+# A path spelled from the project root or the docs root is read by lib/root.sh `docs_path`, and by adopt and the review proof through it.
+. "$(dirname "$0")/lib/bound-marker.sh"; . "$(dirname "$0")/lib/roster-row.sh"; . "$(dirname "$0")/lib/plan-fixture.sh"
+POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+. "$(dirname "$0")/session-poker.prelude.sh"; trap 'cleanup; rm -rf "$S"' EXIT
+R="$(make_repo dp)"; D="$R/.bionic/docs"; W="$D/record/wave-01-fixture"; mkdir -p "$W"; : > "$W/a.md"
+dp() { bash -c '. "$1/root.sh"; docs_path "$2" "$3"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$R" "$1"; }
+for sp in .bionic/docs/record/wave-01-fixture/a.md record/wave-01-fixture/a.md; do
+  expect_eq "docs_path reads $sp as the file" "$W/a.md" "$(dp "$sp")"
+done
+expect_eq "a record not yet written, spelled from the docs root, is under it" "$W/y.md" "$(dp record/wave-01-fixture/y.md)"
+joins() { ( cd "$1" && /usr/bin/grep -rnE 'docs_root[^|;]*\)/\$\{?[A-Za-z_]*(ARG|arg)' hooks payload/scripts | /usr/bin/grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//' ); }
+expect_eq "no code but root.sh's resolver joins the docs root to an operand for itself" "" "$(joins "$S")"
+printf '%s\n' 'p="$(docs_root "$r")/$arg"' > "$L/planted-join.sh"
+expect_eq "a join planted beside it is found by its file" "payload/scripts/lib/planted-join.sh" "$(joins "$S")"; rm -f "$L/planted-join.sh"
+B="$(git -C "$R" commit -q --allow-empty -m init && git -C "$R" rev-parse HEAD)"
+P="$(s42_plan "$R" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${B:0:8}
+  branch: wave/01-fixture")"; s42_builds_landed "$P"
+git -C "$R" worktree add -q -b wave/01-fixture "$R/.worktrees/01-fixture" "$B" >/dev/null 2>&1
+git -C "$R/.worktrees/01-fixture" commit -q --allow-empty -m C1; C="$(git -C "$R/.worktrees/01-fixture" rev-parse HEAD)"
+printf 'reviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: piece\n' "${B:0:10}" "$C" > "$W/x.md"
+for sp in .bionic/docs/record/wave-01-fixture/x.md record/wave-01-fixture/x.md; do
+  new_roster "$R"; roster_row_fixture session="$SID" name=implementor agent_id=a1 subagent_type=implementor >> "$(roster_of "$R")"
+  printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=aud agent_id=a2 subagent_type=bionic:auditor files="$sp")" >> "$(roster_of "$R")"
+  OS=5f5f5f5f-0000-4000-8000-000000000055; roster_header > "$(roster_of "$R" "$OS")"
+  mkrow session="$OS" name=w plan="$P" deliverable="${sp%x.md}a.md" >> "$(roster_of "$R" "$OS")"; poke "$R" adopt
+  expect_contains "adopt finds a deliverable spelled $sp" "|deliverable_present=yes|" "$OUT"
+  poke "$R" proof-add review record/wave-01-fixture/x.md --question evidence --reader aud
+  expect_eq "the review proof finds a record its reader's row spells $sp (exit 0)" 0 "$RC"
+  [ "$RC" = 0 ] || printf '%s\n' "$OUT" | head -3
+  git -C "$R" checkout -q -- . 2>/dev/null
+done
 
 finish

@@ -1260,6 +1260,7 @@ _eg_owe() {
 BIONIC_WALL_OWED=""
 
 wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
+  [ -z "${BIONIC_COUNT:-}" ] || _wg_own _EG_PRELUDE_HELD || printf 'pass wall_evidence_gate\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   BIONIC_WALL_OWED=""
   # Not a Bash tool call or an empty command — nothing to gate.
   [ -n "$COMMAND" ] || return 0
@@ -1369,37 +1370,123 @@ printed a reason above this line, that is the cause. The commit is still refused
 # The libraries the collector loads (context, fold, git-argv, refuse, root, run, session, units and this file) are
 # the caller's to load, in the subshell it asks from, so the caller's own state is not changed by the ask.
 wall_gate_judge() {
-  ( set -o pipefail
-    cd "$1" 2>/dev/null || exit 2
-    export BIONIC_DRY_STEP="$3" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$2" BIONIC_WALL_VERBOSE=1
-    COMMAND="$4"
-    BIONIC_INPUT="$(jq -n --arg s "$2" --arg cwd "$1" --arg c "$4" \
-      '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
-        tool_input: {command: $c}, tool_use_id: "toolu_planverb"}')" || exit 2
-    unset _BIONIC_JQ_STATE
-    bionic_context 2>/dev/null || exit 0
-    [ "$BIONIC_ENGAGED" = 1 ] || exit 0
-    EVENT=$(bionic_jq .hook_event_name)
-    [ -n "$EVENT" ] || EVENT="PreToolUse"
-    BIONIC_MEM_PROJECTS=""; BIONIC_WRITE_TARGETS=""
-    BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_ORIGIN=""; BIONIC_DEBTS_OPEN=""; BIONIC_READINGS=""
-    case "$COMMAND" in
-      *commit*)
-        if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ] && [ "$_EG_CWD_SRC" != moving ]; then
-          BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
-          BIONIC_DEBTS_ORIGIN="$BIONIC_DEBTS_PLAN"
-          if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_readings_derived >/dev/null 2>&1 && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"; then
-            BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" 2>/dev/null)" || BIONIC_READINGS=""
-          fi
-          local _wg_rec
-          if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_debt_record >/dev/null 2>&1 \
-             && _wg_rec="$(proof_debt_record "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT")"; then
-            BIONIC_DEBTS_OPEN="$(proof_debts_read "$_wg_rec")"
-          fi
-        fi ;;
+  local _wg_k _wg_f _wg_rc
+  # A step the judge's one pass already judged (`wall_gate_judge_steps`, held by hooks/poker/judge.sh) is answered from
+  # it: the same stderr and the same exit, keyed by the repository, the session, the command and the step.
+  if _wg_own _WG_HELD; then
+    _wg_k=$'\036'"$1"$'\035'"$2"$'\035'"$4"$'\035'"$3"$'\037'
+    case "$_WG_HELD" in
+      *"$_wg_k"*)
+        _wg_f="${_WG_HELD#*"$_wg_k"}"; _wg_f="${_wg_f%%$'\036'*}"
+        _wg_rc="${_wg_f%%$'\037'*}"; _wg_f="${_wg_f#*$'\037'}"
+        [ -z "$_wg_f" ] || printf '%s\n' "$_wg_f" >&2
+        return "$_wg_rc" ;;
     esac
+  fi
+  ( set -o pipefail
+    _wg_env "$1" "$2" "$3" "$4"
+    case $? in 0) ;; 1) exit 0 ;; *) exit 2 ;; esac
+    _wg_readings
+    _wg_debts
     BIONIC_RULINGS_UNREAD=""; BIONIC_RULINGS_WRITER=""
     bionic_fold "$EVENT" wall_evidence_gate >/dev/null
+  )
+}
+
+# _wg_own <name> -> 0 when the variable is set in this shell and not exported. A held answer or a held prelude is one a
+# pass of this process set; a variable of that name handed down by the environment is anyone's, and never moves a gate.
+_wg_own() {
+  local d
+  d="$(declare -p "$1" 2>/dev/null)" || return 1
+  case "$d" in 'declare -x'*|'declare -'?'x'*|'declare -'??'x'*) return 1 ;; esac
+  return 0
+}
+
+# _wg_env <repo> <session> <step> <command> -> the collector's facts for one dry commit, set in this shell: the
+# context, the event and the debts plan, as hooks/bash-walls.sh sets them. 0 set; 1 the gate has nothing to judge (no
+# context, or the session is not engaged), which the caller answers with exit 0; 2 the call cannot be made.
+_wg_env() {
+  cd "$1" 2>/dev/null || return 2
+  export BIONIC_DRY_STEP="$3" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$2" BIONIC_WALL_VERBOSE=1
+  COMMAND="$4"
+  BIONIC_INPUT="$(jq -n --arg s "$2" --arg cwd "$1" --arg c "$4" \
+    '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
+      tool_input: {command: $c}, tool_use_id: "toolu_planverb"}')" || return 2
+  unset _BIONIC_JQ_STATE
+  bionic_context 2>/dev/null || return 1
+  [ "$BIONIC_ENGAGED" = 1 ] || return 1
+  EVENT=$(bionic_jq .hook_event_name)
+  [ -n "$EVENT" ] || EVENT="PreToolUse"
+  BIONIC_MEM_PROJECTS=""; BIONIC_WRITE_TARGETS=""
+  BIONIC_DEBTS_PLAN=""; BIONIC_DEBTS_ORIGIN=""; BIONIC_DEBTS_OPEN=""; BIONIC_READINGS=""; _WG_COLLECT=""
+  case "$COMMAND" in
+    *commit*)
+      if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ] && [ "$_EG_CWD_SRC" != moving ]; then
+        _WG_COLLECT=1
+        BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
+        BIONIC_DEBTS_ORIGIN="$BIONIC_DEBTS_PLAN"
+      fi ;;
+  esac
+  return 0
+}
+
+# _wg_readings -> BIONIC_READINGS, the readings' derived results, at the step pending in BIONIC_DRY_STEP: the step decides
+# whether the gate reads them at all (`eg_plan_reads_readings`), so a pass of several steps derives them once a step.
+_wg_readings() {
+  BIONIC_READINGS=""
+  [ -n "$_WG_COLLECT" ] || return 0
+  if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_readings_derived >/dev/null 2>&1 && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"; then
+    BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" 2>/dev/null)" || BIONIC_READINGS=""
+  fi
+}
+
+# _wg_debts -> BIONIC_DEBTS_OPEN, the open debts of the debts plan's record: a record file's, the same at every step.
+_wg_debts() {
+  local _wg_rec
+  [ -n "$_WG_COLLECT" ] || return 0
+  if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_debt_record >/dev/null 2>&1 \
+     && _wg_rec="$(proof_debt_record "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT")"; then
+    BIONIC_DEBTS_OPEN="$(proof_debts_read "$_wg_rec")"
+  fi
+}
+
+# wall_gate_judge_steps <repo> <session> <command> <step>... -> ONE GATE PASS FOR SEVERAL STEPS: what wall_gate_judge
+# answers for each step, as one frame a step on stdout, `\036<repo>\035<session>\035<command>\035<step>\037<rc>\037<stderr>`,
+# for the judge to hold (hooks/poker/judge.sh). The reads that do not depend on the step are made once: the context, the
+# debts, and the body's prelude (`_eg_prelude`: the plan, its hygiene, its header). Each step then runs in a subshell of
+# that pass with its step pending, its readings derived at it and its arms judged (`_eg_arms`), so the facts each
+# step is judged on are that step's alone. Its stderr is laid out as the pass of its own lays it: the readings', the
+# debts', the prelude's, then the arms' and the refusal. A frame is printed only for a step the pass judged: nothing is
+# printed when the prelude ends the judgment (a refusal, or no plan to judge), or for a step whose stderr holds a frame
+# byte, and the judge asks each of those steps alone. A step that is not a step number is no step of the pass (rc 1).
+wall_gate_judge_steps() {
+  local repo="$1" sid="$2" cmd="$3" s
+  shift 3
+  [ "$#" -ge 1 ] || return 1
+  for s in "$@"; do case "$s" in [0-9]|[0-9][ab]) ;; *) return 1 ;; esac; done
+  ( set -o pipefail
+    [ -z "${BIONIC_COUNT:-}" ] || printf 'pass wall_gate_judge_steps\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+    _wg_env "$repo" "$sid" "$1" "$cmd" || exit 0
+    _wg_tmp="$(mktemp -d "${TMPDIR:-/tmp}/bionic-gate.XXXXXX" 2>/dev/null)" || exit 0
+    trap 'rm -rf "$_wg_tmp"' EXIT
+    { _wg_debts; } 2>"$_wg_tmp/debts"
+    # A refusal of the prelude is every step's: it ends the pass with no frame, and each step is asked alone, so the
+    # refusal is rendered and recorded by that step's own pass, once.
+    _wg_rf="$(declare -f refuse)"
+    refuse() { exit 3; }
+    { _eg_prelude; } >/dev/null 2>"$_wg_tmp/pre"
+    eval "$_wg_rf"
+    _EG_PRELUDE_HELD=1
+    for _wg_s in "$@"; do
+      _wg_err="$( { export BIONIC_DRY_STEP="$_wg_s"; _PROOF_DRY_SID="-"
+                    _wg_readings
+                    cat "$_wg_tmp/debts" "$_wg_tmp/pre" >&2
+                    BIONIC_RULINGS_UNREAD=""; BIONIC_RULINGS_WRITER=""
+                    bionic_fold "$EVENT" wall_evidence_gate >/dev/null; } 2>&1 >/dev/null )"
+      _wg_rc=$?
+      case "$_wg_err" in *$'\036'*|*$'\037'*) continue ;; esac
+      printf '\036%s\035%s\035%s\035%s\037%s\037%s' "$repo" "$sid" "$cmd" "$_wg_s" "$_wg_rc" "$_wg_err"
+    done
   )
 }
 
@@ -1481,6 +1568,7 @@ matrix_auditor_required() {
 # leaves the verdict standing and code past it ends it. Otherwise the reader answers at the working head. A caller that
 # names no head asks for no review. A dry copy's facts are its plan's run's; its text is its own.
 matrix_load() {  # <plan> [head]
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'matrix matrix_load\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   local rc=0 rp h="${2:-}" rv lh
   rp="$(proof_run_plan "$1")"
   if [ -n "$h" ]; then
@@ -1498,6 +1586,7 @@ matrix_load() {  # <plan> [head]
   # from them, each asked in a subshell that can keep no fold, so asking per criterion folds the run once a criterion.
   MATRIX_UROWS_OF="$1"; MATRIX_UROWS_RC=0
   MATRIX_UROWS="$(units_rows "$1" 2>/dev/null)" || MATRIX_UROWS_RC=1
+  MATRIX_OWING=""; MATRIX_OWING_OF=""
   return 0
 }
 
@@ -1579,6 +1668,7 @@ matrix_criterion_task() {  # <plan> <AC> -> the value
 # rows, and the literal `9` stays the close's step. Any other value, or an id the table lacks,
 # owes at no particular step, so the row is judged as every row is.
 matrix_owing_step() {  # <plan> <AC> -> the step number, or nothing
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'owing matrix_owing_step\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   local val id rec s best="" rows
   val="$(matrix_criterion_task "$1" "$2")"
   [ -n "$val" ] || return 0
@@ -1600,6 +1690,7 @@ matrix_owing_step() {  # <plan> <AC> -> the step number, or nothing
 # landed nor dropped: the work that proves the criterion is still under way. A task naming no
 # row prints nothing. The status is read through the same `units_rows` the owing step is.
 matrix_owing_open() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'owing matrix_owing_open\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   local id rec s rows
   _matrix_urows "$1" || return 0
   rows="$_MATRIX_UROWS"
@@ -1609,6 +1700,53 @@ matrix_owing_open() {
     units_field_v s "$rec" status
     case "$s" in landed|dropped) ;; *) printf 'yes\n'; return 0 ;; esac
   done
+}
+
+# matrix_owing_load <plan> -> MATRIX_OWING, every criterion's owing step and openness in one pass: a line a criterion,
+# `<AC>\t<owing step>\t<yes or nothing>`, as matrix_owing_step and matrix_owing_open answer them one criterion at a time,
+# read from what matrix_load holds for <plan> (MATRIX_TASKS, MATRIX_UROWS). Nothing is set when it holds another plan's.
+# A row id is a word of the task's value split at commas and blanks; its first row in the table answers for it.
+matrix_owing_load() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'owing matrix_owing_load\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  MATRIX_OWING=""; MATRIX_OWING_OF=""
+  [ "${MATRIX_TASKS_OF:-}" = "$1" ] && [ "${MATRIX_UROWS_OF:-}" = "$1" ] || return 1
+  MATRIX_OWING="$( { printf '%s\n' "${MATRIX_TASKS:-}"; printf '\034\n'; [ "${MATRIX_UROWS_RC:-1}" -ne 0 ] || printf '%s\n' "${MATRIX_UROWS:-}"; } \
+    | awk -F'\t' '
+      $0 == "\034" { part = 1; next }
+      !part { if ($1 == "" || ($1 in val)) next; val[$1] = substr($0, length($1) + 2); ord[++n] = $1; next }
+      $1 != "" && !($1 in step) { step[$1] = $2; status[$1] = $10; rows = 1 }
+      END {
+        for (i = 1; i <= n; i++) {
+          c = ord[i]; v = val[c]; best = ""; open = ""
+          gsub(/,/, " ", v); m = split(v, id, /[ \t\n]+/)
+          for (j = 1; j <= m; j++) {
+            if (id[j] == "" || !(id[j] in step)) continue
+            s = step[id[j]]; sub(/[ab]$/, "", s)
+            if (s ~ /^[0-9]+$/ && (best == "" || s + 0 > best + 0)) best = s
+            if (status[id[j]] != "landed" && status[id[j]] != "dropped") open = "yes"
+          }
+          if (val[c] == "9") best = "9"
+          else if (!rows) best = ""
+          printf "%s\t%s\t%s\n", c, best, open
+        }
+      }')"
+  MATRIX_OWING_OF="$1"
+}
+
+# _matrix_owing <plan> <AC> -> _MO_STEP and _MO_OPEN, the criterion's owing step and openness: from MATRIX_OWING when it
+# holds <plan>'s (loaded the first time it is asked after matrix_load), with no process started; else asked of the
+# criterion alone. One answer whichever way it is read.
+_matrix_owing() {
+  local r
+  if [ "${MATRIX_OWING_OF:-}" != "$1" ] || [ "${MATRIX_TASKS_OF:-}" != "$1" ]; then
+    matrix_owing_load "$1" >/dev/null 2>&1 || { _MO_STEP="$(matrix_owing_step "$1" "$2")"; _MO_OPEN="$(matrix_owing_open "$1" "$2")"; return 0; }
+  fi
+  _MO_STEP=""; _MO_OPEN=""
+  case $'\n'"$MATRIX_OWING" in
+    *$'\n'"$2"$'\t'*)
+      r=$'\n'"$MATRIX_OWING"; r="${r#*$'\n'"$2"$'\t'}"; r="${r%%$'\n'*}"
+      _MO_STEP="${r%%$'\t'*}"; _MO_OPEN="${r#*$'\t'}" ;;
+  esac
 }
 
 # matrix_row_deferred <plan> <owing step> <current> <status> [<open>] -> 0 when the row owes nothing yet.
@@ -1663,11 +1801,12 @@ matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"
 # order: owed at Step 9, and its Eval design row's eval is the close's measure (matrix_close_eval).
 # close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC ac tier status ev aud conf w
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC MATRIX_OWING MATRIX_OWING_OF _MO_STEP _MO_OPEN ac tier status ev aud conf w
   matrix_load "$PLAN" || return 2
   while IFS=$'\037' read -r ac tier status ev aud conf w; do
     [ -n "$ac" ] && [ "$status" = pending ] || continue
-    [ "$(matrix_owing_step "$PLAN" "$ac")" = 9 ] || continue
+    _matrix_owing "$PLAN" "$ac"
+    [ "$_MO_STEP" = 9 ] || continue
     matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
@@ -1771,15 +1910,27 @@ matrix_row_owes() {
 # lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read. A fourth argument,
 # any word, prints only those that also await their person (`matrix_row_awaits`, fed as the commit gate feeds it).
 matrix_unruled() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC RIGOR ac tier status ev aud conf waiver defer
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC MATRIX_OWING MATRIX_OWING_OF RIGOR
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
   matrix_load "$PLAN" "${3:-}" || return 2
+  matrix_unruled_held "$PLAN" "$2" "${4:-}"
+}
+
+# matrix_unruled_held <plan> <step> [awaiting] -> matrix_unruled's answer over the criteria matrix_load already holds for
+# <plan>, at the rigor RIGOR names, so a caller that reads the loaded rows itself as well (the release approval card)
+# loads the criteria once and still asks the gate's own walk. Nothing at `single` rigor; 2 when what is held is another
+# plan's or nothing.
+matrix_unruled_held() {
+  local PLAN="$1" _MO_STEP _MO_OPEN ac tier status ev aud conf waiver defer
+  matrix_auditor_required || return 0
+  [ "${MATRIX_TASKS_OF:-}" = "$1" ] || return 2
   while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
     [ -n "$ac" ] || continue
-    defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$ac")" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" && defer=1
+    _matrix_owing "$PLAN" "$ac"
+    defer=0; matrix_row_deferred "$PLAN" "$_MO_STEP" "$2" "$status" "$_MO_OPEN" && defer=1
     matrix_row_owes "$2" "$tier" "$status" "$aud" "$conf" "$waiver" "$defer" >/dev/null || continue
-    [ -z "${4:-}" ] || matrix_row_awaits "$tier" "$status" "$aud" "$conf" "$waiver" || continue
+    [ -z "${3:-}" ] || matrix_row_awaits "$tier" "$status" "$aud" "$conf" "$waiver" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
@@ -1854,7 +2005,7 @@ eg_review_failing_line() { printf '%s' "- %s: the newest review is result=fail (
 # `keys_for_tier`, the matrix's readers and predicates, and the review refusal's two spellings, so a source defines them. Its `exit` statements are load-bearing and deliberate — see the subshell
 # note above — and its margin is column zero because `tests/cross-gate-agreement.test.sh`
 # and `tests/docs-pins.test.sh` read literals out of it with `^`-anchored extractions.
-_eg_body() {
+_eg_prelude() {
 
 # Is any segment of the command a `git commit`? The library answers by argv
 # position: git must be argv[0] (after leading VAR=value assignments and git's
@@ -2939,7 +3090,16 @@ Grew:${grown}"
   refuse exit2 commit "$fact" "approve doctrine-growth or shrink" "$_eg_detail"
 }
 
+# Every read above is the step's to share: none of it reads the step a dry judgment asks about, so a pass judging several
+# steps (`wall_gate_judge_steps`) runs it once and every step's arms below in a subshell of its own.
+}
+
+# _eg_arms -> the gate's judgment at the run's step: the step read, the tree's row and every arm keyed by the step, over
+# what `_eg_prelude` set. Exits as the body does.
+_eg_arms() {
+
 # The step is the run's newest step event: an integer, or 8b, the adversarial critic's step.
+_EG_MATRIX_RC=""
 _eg_step="$(_run_place "$PLAN")" || _eg_v15_unreadable
 CURRENT="$(sed -n 's/^n=//p' <<< "$_eg_step")"
 [ -n "$CURRENT" ] || refuse exit2 commit "the run's log holds no step" "record the run's step" \
@@ -3591,12 +3751,23 @@ matrix_is_placeholder() {
   is_placeholder_value "$1"
 }
 
-validate_matrix() {
-  local rows ac tier status ev aud block_txt key val val_lc deferred row_is_waived ev_abs ucv owed live_exit head
-
+# _eg_matrix_once -> the matrix arm's one load of the criteria (matrix_load, the evidence review read at the working
+# branch's head), made the first time an arm of this judgment asks and held for every later ask: the walk arm, which
+# reads only each criterion's state and who discharged it, neither of which the head moves, and the matrix arm. Its
+# exit is the load's, held too.
+_eg_matrix_once() {
+  local head
+  [ -z "${_EG_MATRIX_RC:-}" ] || return "$_EG_MATRIX_RC"
   # The evidence review is read at the working branch's head.
   head="$(proof_branch_head "$PLAN" "$BIONIC_ROOT" 2>/dev/null)" || head=""
-  if ! matrix_load "$PLAN" "$head"; then
+  matrix_load "$PLAN" "$head"; _EG_MATRIX_RC=$?
+  return "$_EG_MATRIX_RC"
+}
+
+validate_matrix() {
+  local rows ac tier status ev aud block_txt key val val_lc deferred row_is_waived ev_abs ucv owed live_exit
+
+  if ! _eg_matrix_once; then
     block_matrix "the run's facts could not be read" "run the commit again" \
       "the run's facts could not be read, so no criterion's state can be judged." \
       "run the commit again; if it is refused the same way, the run's log or its record cannot be read: bash payload/scripts/reader.sh <plan> step names why."
@@ -3630,7 +3801,8 @@ validate_matrix() {
     # `delivered:`, so no commit against an open plan demands it.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     deferred=0
-    matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$ac")" "$CURRENT" "$status" "$(matrix_owing_open "$PLAN" "$ac")" && deferred=1
+    _matrix_owing "$PLAN" "$ac"
+    matrix_row_deferred "$PLAN" "$_MO_STEP" "$CURRENT" "$status" "$_MO_OPEN" && deferred=1
     # waived rows (the run holds a waiver of the criterion) are
     # exempt from the per-tier evidence requirement.
     if [ "$row_is_waived" = "1" ]; then
@@ -3841,12 +4013,11 @@ validate_walk_artifact() {
   local discharged raw abs
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
-  # Reuses the reader's answer validate_matrix() loads (MATRIX_CELLS). It runs immediately before
-  # this arm at its call sites in dispatch, so the answer is
-  # loaded by the time we get here; a third call site that forgot the ordering loads it again, and
-  # a run whose facts could not be read arms the walk gate rather than reading as "nothing
-  # discharged" and letting it fall open.
-  [ -n "${MATRIX_CELLS:-}" ] || matrix_load "$PLAN" || discharged=1
+  # Reads the matrix arm's one load (`_eg_matrix_once`, MATRIX_CELLS), made here when this arm asks first, so one
+  # judgment loads the criteria once. A load that fails is asked again without the head, as this arm always asked it;
+  # a run whose facts could not be read arms the walk gate rather than reading as "nothing discharged" and letting it
+  # fall open.
+  [ -n "${MATRIX_CELLS:-}" ] || _eg_matrix_once || matrix_load "$PLAN" || discharged=1
   [ -n "${discharged:-}" ] || discharged=$(awk -F'\037' '$2 == "discharged" && $3 != "waiver" { n++ } END { print n + 0 }' <<< "${MATRIX_CELLS:-}")
   [ "$discharged" -gt 0 ] || return 0
 
@@ -4154,6 +4325,7 @@ validate_merge_target() {
 INTEGRATE_STEP=8
 
 dispatch() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'gate dispatch\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
   # that reaches this dispatcher (guarded internally; no-op otherwise).
   validate_dispatch_ledger
@@ -4172,6 +4344,13 @@ dispatch() {
 
 dispatch
 exit 0
+}
+
+# _eg_body -> the evidence gate's whole judgment of one commit: its shared reads, then its step's arms. A pass that holds
+# the shared reads already (`_EG_PRELUDE_HELD`, this shell's own and never the environment's) runs the arms alone.
+_eg_body() {
+  _wg_own _EG_PRELUDE_HELD || _eg_prelude
+  _eg_arms
 }
 
 # ─── wall_farm_out_reminder — hooks/farm-out-reminder.sh ─────────────────────
@@ -4605,7 +4784,8 @@ return 0
 # verbs: `amend`, `extend`, `task-add` and `hold` (a roster row, or a row's birth); `current` (the
 # run's step); `proof-add` (a proof the gates judge by); `approve` and `waive` (each written on the
 # user's word); `accept` and `abandon` (the person's word on a run changed around the tool, which seals it
-# again or ends it); `release-check` (the check's fact); `finding-move` (a finding across the line);
+# again or ends it); `check-from` (the person's word that moves the judge every landing is run by);
+# `release-check` (the check's fact); `finding-move` (a finding across the line);
 # `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
 # writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
 # user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
@@ -4685,7 +4865,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|current|proof-add|approve|accept|abandon|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|accept|abandon|check-from|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|publish|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"

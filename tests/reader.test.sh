@@ -12,6 +12,9 @@
 #   §UNKNOWN  an unlisted question exits 2 and prints the list.
 #   §REST     the twelve log-side questions each answer a planted log in their form, honour the fold, and
 #             answer the same with each line's fields moved.
+#   §STATUSES the one pass over every row the facts name answers each Tasks row as its own status ask does, the
+#             same with each line's fields moved, and the ledger's findings over it are the launched rows not
+#             dispatched under a name.
 #   §HEADER     the plan's header keys, its body never read as one, CR-only line ends too.
 #   §ROW        a Tasks row is its nine authored cells, named by the table's header.
 #   §CRITERION  a criterion is its Eval design row, an escaped bar kept as a bar.
@@ -244,6 +247,72 @@ expect_eq "the scheduler's trees: the latest timed tree line of each row" "T2=/t
   _units_live "$D/plans/epic-x/rest.plan.md" ) | awk -F'\t' '$1 ~ /^T[234]$/ { print $1 "=" $4 }' | sort | paste -sd' ' -)"
 ask status 2>/dev/null; expect_status "status with no row exits 2" 2 "$?"
 ask ready 2>/dev/null; expect_status "ready with no row exits 2" 2 "$?"
+
+section "STATUSES"
+# fails-when: the one pass answers a row otherwise than its own status ask (a state, a dispatch field, a tree or a
+# commit line differs, or a row the facts name is missing), or the ledger's findings over that pass move.
+# Every state the row fold answers is planted, one row each: pending by a verdict alone (T1) and by nothing (T12),
+# dispatched timed (T2), untimed (T3), with no name (T13) and with an empty one (T14), candidate, ready, stalled, landed with a tree (T7),
+# dropped (T8), dropped then landed (T9), a cancelled launch with its tree removed (T10), returned under a later
+# untimed dispatch (T11); X1 is named by a fact and lacks a Tasks row.
+W=sts; t=2026-11-03T00:00; plan sts <<EOF
+run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=green|at=${t}:01Z
+run/v1|ev=dispatch|row=T2|name=w2|files=f|suites=a.test.sh|at=${t}:02Z
+run/v1|ev=dispatch|row=T3|name=w3
+run/v1|ev=dispatch|row=T4|name=w4|at=${t}:03Z
+run/v1|ev=candidate|row=T4|at=${t}:04Z
+run/v1|ev=dispatch|row=T5|name=w5|at=${t}:05Z
+run/v1|ev=ready|row=T5|at=${t}:06Z
+run/v1|ev=dispatch|row=T6|name=w6|at=${t}:07Z
+run/v1|ev=stalled|row=T6|at=${t}:08Z
+run/v1|ev=dispatch|row=T7|name=w7|at=${t}:09Z
+run/v1|ev=tree|row=T7|path=/t7|branch=wt/T7|base=c0|at=${t}:10Z
+run/v1|ev=published|row=T7|commit=c7|kind=queue|at=${t}:11Z
+run/v1|ev=dispatch|row=T8|name=w8|at=${t}:12Z
+run/v1|ev=drop|row=T8|why=gone|at=${t}:13Z
+run/v1|ev=drop|row=T9|why=gone|at=${t}:14Z
+run/v1|ev=published|row=T9|commit=c9|kind=queue|at=${t}:15Z
+run/v1|ev=dispatch|row=T10|name=w10|at=${t}:16Z
+run/v1|ev=tree|row=T10|path=/t10|branch=wt/T10|base=c1|at=${t}:17Z
+run/v1|ev=cancel|of=dispatch|row=T10|name=w10|at=${t}:18Z
+run/v1|ev=tree|row=T10|path=|branch=wt/T10|base=|why=removed|at=${t}:19Z
+run/v1|ev=dispatch|row=T11|name=a11|at=${t}:20Z
+run/v1|ev=returned|row=T11|why=red|at=${t}:21Z
+run/v1|ev=dispatch|row=T11|name=b11
+run/v1|ev=finding|ref=F1|to=fix|row=X1|at=${t}:22Z
+run/v1|ev=dispatch|row=T13|at=${t}:23Z
+run/v1|ev=dispatch|row=T14|name=|suites=a.test.sh|at=${t}:24Z
+EOF
+printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' >> "$D/plans/epic-x/sts.plan.md"
+STS_ROWS="T1 T2 T3 T4 T5 T6 T7 T8 T9 T10 T11 T12 T13 T14"
+for r in $STS_ROWS; do printf '| %s | 4 | build | t | — | 30 | R | f | out/%s.md |\n' "$r" "$r" >> "$D/plans/epic-x/sts.plan.md"; done
+# sts_block <answer> <row> -> that row's lines of the one answer, its `row=` line dropped; `state=pending` for a row the
+# answer does not open, which is how a Tasks row no fact names reads
+sts_block() {
+  printf '%s\n' "$1" | awk -v r="$2" 'index($0, "row=") == 1 { on = ($0 == "row=" r); seen = seen || on; next } on { print }
+    END { if (!seen) print "state=pending" }'
+}
+STS="$(ask statuses)"; expect_status "ST-1 statuses answers" 0 "$?"
+expect_eq "ST-2 the answer reads a landed row with its launch, tree and commit (the block reader proved on real output)" \
+  "state=landed name=w7 tree=/t7 branch=wt/T7 base=c0 commit=c7" "$(sts_block "$STS" T7 | paste -sd' ' -)"
+expect_eq "ST-3 one block for each row the facts name, in the order the facts first name it" \
+  "T1 T2 T3 T4 T5 T6 T7 T8 T9 T10 T11 X1 T13 T14" "$(printf '%s\n' "$STS" | sed -n 's/^row=//p' | paste -sd' ' -)"
+for r in $STS_ROWS; do
+  expect_eq "ST-4 $r: the one answer is the row's own status ask" "$(ask status "$r")" "$(sts_block "$STS" "$r")"
+done
+ask status X1 >/dev/null 2>&1; expect_status "ST-5 X1 has no status of its own, the table lacking it" 1 "$?"
+expect_eq "ST-5 and the one answer holds it as the facts do, for the caller's join to drop" "state=pending" "$(sts_block "$STS" X1)"
+expect_regex "ST-6 the answer has lines to read" '^[1-9][0-9]*$' "$(printf '%s\n' "$STS" | grep -c .)"
+expect_eq "ST-6 every line of it is key=value, the value form" "$(printf '%s\n' "$STS" | grep -c .)" "$(printf '%s\n' "$STS" | grep -c '^[a-z_]*=')"
+awk -F'|' -v OFS='|' '{ f = $2; for (i = 2; i < NF; i++) $i = $(i + 1); $NF = f; print }' "$D/record/sts/run.log" | plan stsmoved
+cp "$D/plans/epic-x/sts.plan.md" "$D/plans/epic-x/stsmoved.plan.md"
+expect_eq "ST-7 the one answer is the same with each line's fields moved" "$STS" "$(W=stsmoved; ask statuses)"
+# The ledger joins the one answer against its Tasks rows: a landed row stands when it answers landed, a launched row with
+# no roster when it answers dispatched under a name; any other answer is the row's `evidence` finding, in table order.
+expect_eq "ST-8 the ledger's findings over the one answer: the launched rows not dispatched under a name" \
+  "evidence T4,evidence T5,evidence T6,evidence T11,evidence T13,evidence T14|rc=1" \
+  "$( ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh"; o="$(units_findings "$D/plans/epic-x/sts.plan.md" "")"; rc=$?
+      printf '%s|rc=%s' "$(printf '%s\n' "$o" | paste -sd, -)" "$rc" ) )"
 
 EVAL='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
 |---|---|---|---|---|---|
@@ -660,7 +729,7 @@ HP="$HS/docs/plans/epic-x/held-stop.plan.md"; HL="$HS/docs/record/held-stop/run.
 printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# held\n' > "$HP"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:01:00Z\n' > "$HL"
 hs_ask() { TMPDIR="$HT" bash -c '. "$1/lib/proof.sh" && proof_step_held "$2" | sed -n "s/^n=//p"' _ "${READER%/*}" "$HP" 2>/dev/null; }
 hs_file() { ls -d "$HT"/bionic-place-*/[!.]* 2>/dev/null | head -1; }
-hs_plant() { local f; f="$(hs_file)"; awk '$0 == "n=4" || $0 == "n=5" { $0 = "n=7" } { print }' "$f" > "$f.t" && mv "$f.t" "$f"; }
+hs_plant() { local f; f="$(hs_file)"; [ -n "$f" ] || return 1; awk '$0 == "n=4" || $0 == "n=5" { $0 = "n=7" } { print }' "$f" > "$f.t" && mv "$f.t" "$f"; }
 hs_stop() { RUN_LOG="$HL" bash -c '. "$1/lib/log.sh" && log_append stop session=s1 turn="$2" current=4 state=ok ceiling= width=4 open=0 free=4 ready= launched= declined= missed=0 idle= room=4' _ "${READER%/*}" "$1"; }
 expect_eq "HS0 meta: the place is folded from the log and held in a file" "4|n=4" "$(hs_ask)|$(/usr/bin/grep -x 'n=4' "$(hs_file)" 2>/dev/null)"
 hs_plant; hs_stop t1

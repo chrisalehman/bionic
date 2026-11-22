@@ -291,6 +291,25 @@ $(patrol_state_session_ids "$root")
 EOF
 }
 
+# WHO IS OUT: the rows of a run a live writer holds, the one question the watcher's merge pass and the close both ask
+# before they close the run. A writer is out while a roster of the run's state directory holds its name open under the
+# run's plan, by the dispatch wall's closure rule (lib/fill.sh `fill_held_ids`: an ack after its launch, a dead
+# session whose files the sweep takes, or a closed run closes it, and nothing else). Every row of the table is asked,
+# whatever its kind or status: a run is closed only when nobody is still writing any part of it.
+# <plan> -> `<id><TAB><name><TAB><session id>` per row out, in table order; rc 2, nothing printed, when the rows or the
+# rosters' reader cannot be had, which no caller may read as "nobody is out".
+patrol_rows_out() {  # <plan>
+  local plan="${1:-}" rows d
+  [ -n "$plan" ] && [ -f "$plan" ] || return 2
+  d="$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )" || return 2
+  # shellcheck source=/dev/null
+  declare -F units_rows >/dev/null 2>&1 || . "$d/units.sh" >/dev/null 2>&1 || return 2
+  declare -F _units_roster_libs >/dev/null 2>&1 && _units_roster_libs || return 2
+  declare -F fill_held_ids >/dev/null 2>&1 || return 2
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 2
+  fill_held_ids "$plan" "$(printf '%s\n' "$rows" | awk -F'\t' '$1 != "" { print $1 }')"
+}
+
 # The transcript file for a session id. Scanned rather than derived from a
 # slugged cwd, the same way hooks/dispatch-preflight.sh's liveness probe scans:
 # the slug rule belongs to the CLI and a copy of it here would be a second
@@ -698,8 +717,10 @@ WATCH_LIFE_MARGIN=600
 #
 # THE WOKEN KINDS ARE THE LINES THAT ASK FOR AN ACT, OF THE MODEL OR OF THE PERSON, AND NO OTHERS. In the order the
 # line leads with them, the person's first: GATE (a denied reserved request, put to the person), restart, GOAL,
-# DUPLICATE-SESSION and DUPLICATE-START, GONE? and GONE, NOTIFY, STANDDOWN, NOT-LANDED, FILL (IDLE rides it), and
-# RECONCILE. Advice (HELD, LEDGER, FINDING, SPLIT, RANGE), what the tick did itself (LANDED, regression-run, RUNNING),
+# DUPLICATE-SESSION and DUPLICATE-START, GONE? and GONE, NOTIFY, STANDDOWN, LOAD, NOT-LANDED, FILL (IDLE rides it), and
+# RECONCILE. A STANDDOWN for the load is LOAD: its row is pending and live, which hold refuses, so its act says the
+# load and offers no hold; the tick's band line alone does not make it a met stand-down. Advice (HELD, LEDGER,
+# FINDING, SPLIT, RANGE), what the tick did itself (LANDED, regression-run, RUNNING),
 # DISARM (the run is delivered, and nothing is owed for it) and the quiet lines (QUIET, WAITING, no FILL, the gate
 # share) wake nothing.
 #
@@ -776,6 +797,7 @@ watch_wake_line() {  # <tick print file> [<told file>]
       else if (index($0, "started without its checks") && why == "") why = "started without its checks"
       next
     }
+    $2 == "STANDDOWN" && $5 == "load" { add("LOAD", $3); ld = $6 " over " $8; sub(/;$/, "", ld); next }
     $2 == "STANDDOWN" { if (!dash($3)) add("STANDDOWN", $3); else mark("STANDDOWN"); next }
     $2 == "FILL" { if (!dash($3)) for (i = 3; i <= NF; i++) add("FILL", $i); else mark("FILL"); next }
     $2 == "IDLE" { mark("FILL"); next }
@@ -803,10 +825,12 @@ watch_wake_line() {  # <tick print file> [<told file>]
       act["GONE"] = "close its row with stop-orders.sh stopped"
       act["NOTIFY"] = (why == "" ? "needs a look" : why) ": ListAgents and message the agent"
       act["STANDDOWN"] = "met: TaskStop it, or keep it up with the hold verb"
+      act["LOAD"] = "load " ld "; its row is pending again: TaskStop it"
+      if ("LOAD" in seen && !("STANDDOWN" in subj)) delete seen["STANDDOWN"]
       act["NOT-LANDED"] = "its landing waits: read the refusal the tick prints and repair it"
       act["FILL"] = "ready with room: dispatch each row now"
       act["RECONCILE"] = "TaskList and bring the task list in line with the plan"
-      k = split("GATE restart GOAL DUPLICATE-SESSION DUPLICATE-START GONE? GONE NOTIFY STANDDOWN NOT-LANDED FILL RECONCILE", order, " ")
+      k = split("GATE restart GOAL DUPLICATE-SESSION DUPLICATE-START GONE? GONE NOTIFY STANDDOWN LOAD NOT-LANDED FILL RECONCILE", order, " ")
       lead = ""; tail = ""
       for (i = 1; i <= k; i++) {
         if (!(order[i] in seen)) continue

@@ -68,6 +68,11 @@
 #   §HEADER              a suite header that lists a section its body lacks, or omits one its body has, is refused.
 #   §INTEGRATION-REF     no product line merges into the integration branch or moves its ref; a fetch fills a
 #                        remote-tracking ref alone.
+#   §LINT                tests/lib/lint.sh, the landing's run of §EXIT's, §BP's and §HEADER's programs over the files a
+#                        row changed, names each hit there by file and line, and a lowered ceiling at its own line.
+#   §SETUP               a shared setup that loads a helper on a line with no stop is refused by file and line.
+#   §STOP                a maker that fails stops the suite that asked, its processes and nothing beside it, with one
+#                        line; a setup or a tests/lib file that calls maker_stop with no load of it is refused by line.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
@@ -104,6 +109,11 @@ WSL_SH="${REPO}/wsl-setup.sh"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# The programs of §EXIT, §BP and §HEADER, and the census's section reader, are tests/lib/lint.sh's: the landing line
+# runs that file over the files a row changed, and these sections prove the same programs over the whole tree.
+LINT_TMP="$TMP"
+# shellcheck source=/dev/null
+. "$TESTS_DIR/lib/lint.sh" || { echo "shell-lint.test.sh: tests/lib/lint.sh does not load"; exit 1; }
 
 # ── the lexer ────────────────────────────────────────────────────────────────
 LINT_AWK="$TMP/lint.awk"
@@ -951,191 +961,11 @@ section "BP — no writer is piped into a reader that quits early where the stat
 # THE ALLOW FILE, tests/lib/quitting-readers.allow: `<path>:<pattern> # <reason>`. The pattern is a
 # fixed substring of the logical line; the reason says why the writer cannot outrun the buffer. A line
 # without a reason, without a colon, or naming a path outside the roster is refused.
-QUIT_AWK="$TMP/quit.awk"
-cat > "$QUIT_AWK" <<'QUIT_AWK_EOF'
-# QUITTING READERS. A writer piped into a reader that quits early (grep -q, -l or -m, head, an awk that
-# exits) is sent SIGPIPE once its output outruns the 64 KB pipe buffer; under pipefail the pipeline then
-# reports the writer's 141, and a test of its status reads a present line as absent.
-#
-# Run once per file with -v ALLOW=<allow file> -v ROSTER=<file listing every path swept>, the file's path
-# relative to the root as its one argument. -v REPORT=1 on a run over /dev/null prints the allow file's
-# own faults. Prints
-#   Q<TAB><path>:<line><TAB><the logical line>      a site neither allowed nor excused
-#   A<TAB><allow line number><TAB><what is wrong>   an allow line that is refused
-function blank(s,   n, i, c, q, o) {  # quoted text becomes underscores, so a quoted ; | && is not read
-  n = length(s); q = ""; o = ""
-  for (i = 1; i <= n; i++) {
-    c = substr(s, i, 1)
-    if (q == "") {
-      if (c == "\\") { o = o c substr(s, i + 1, 1); i++; continue }
-      if (c == "'" || c == "\"") { q = c; o = o c; continue }
-      o = o c
-    } else if (c == q) { q = ""; o = o c }
-    else if (q == "\"" && c == "\\") { o = o "__"; i++ }
-    else o = o "_"
-  }
-  return o
-}
-function strip_comment(s,   b, n, i, c, prev) {
-  b = blank(s); n = length(b); prev = " "
-  for (i = 1; i <= n; i++) {
-    c = substr(b, i, 1)
-    if (c == "#" && (prev == " " || prev == "\t" || prev == ";" || prev == "") && i > 1) return substr(s, 1, i - 1)
-    prev = c
-  }
-  return s
-}
-function open_sq(s,   n, i, c, q) {  # does s end inside a single-quoted string
-  n = length(s); q = ""
-  for (i = 1; i <= n; i++) {
-    c = substr(s, i, 1)
-    if (q == "'") { if (c == "'") q = ""; continue }
-    if (q == "\"") { if (c == "\\") i++; else if (c == "\"") q = ""; continue }
-    if (c == "\\") { i++; continue }
-    if (c == "'" || c == "\"") q = c
-  }
-  return q == "'"
-}
-# s starts right after a pipe: 0 not a quitting reader, 1 a predicate (grep -q, -l), 2 a limiter
-function reader(s,   rest, n, i, t, prog) {
-  sub(/^[ \t]+/, "", s)
-  while (match(s, /^(env|LC_ALL=[A-Za-z0-9_.]+|LANG=[A-Za-z0-9_.]+)[ \t]+/)) s = substr(s, RLENGTH + 1)
-  sub(/^(\/usr\/bin\/|\/bin\/)/, "", s)
-  if (match(s, /^(grep|egrep|fgrep)[ \t]/)) {
-    n = split(substr(s, RLENGTH + 1), T, /[ \t]+/)
-    for (i = 1; i <= n; i++) {
-      t = T[i]
-      if (t == "") continue
-      if (t == "--") break
-      if (t == "--quiet" || t == "--silent" || t == "--files-with-matches") return 1
-      if (t ~ /^--max-count/) return 2
-      if (t ~ /^--/) continue
-      if (t ~ /^-[A-Za-z0-9]/) {
-        if (t ~ /^-[A-Za-z]*[ql]/) return 1
-        if (t ~ /^-[A-Za-z]*m/) return 2
-        if (t == "-e" || t == "-f") i++
-        continue
-      }
-      break
-    }
-    return 0
-  }
-  if (s ~ /^head([ \t]|$)/) return 2
-  if (match(s, /^(awk|gawk|mawk)[ \t]/)) {
-    prog = s
-    gsub(/END[ \t]*\{[^}]*\}/, "", prog)
-    return (prog ~ /(^|[^A-Za-z0-9_])exit([^A-Za-z0-9_]|$)/) ? 2 : 0
-  }
-  return 0
-}
-# Is the status of the pipeline whose reader starts at `rest` (the text from the reader on) consumed?
-# before is the text ahead of the pipe. Inside a command substitution the status is the assignment's,
-# so it counts only when the substitution is the value of an assignment and && or || follows it.
-function consumed(before, rest, nxt,   b, n, i, c, d, tail, cut, inside, pre) {
-  b = blank(rest); n = length(b); d = 0; inside = 0; cut = n + 1
-  for (i = 1; i <= n; i++) {
-    c = substr(b, i, 1)
-    if (c == "(") d++
-    else if (c == ")") { if (d == 0) { inside = 1; cut = i; break } d-- }
-  }
-  if (inside) {
-    pre = before
-    if (!(pre ~ /[A-Za-z_][A-Za-z0-9_]*\+?=\"?[$][(][^$]*$/ || pre ~ /[A-Za-z_][A-Za-z0-9_]*\+?=\"?`[^`]*$/)) return 0
-    tail = substr(b, cut + 1)
-  } else tail = b
-  sub(/;[ \t]*(then|do)([ \t;]|$).*/, " THEN ", tail)
-  sub(/;.*/, "", tail)
-  if (tail ~ /THEN/) return 1
-  if (tail ~ /&&/) return 1
-  if (tail ~ /[|][|]/ && tail !~ /[|][|][ \t]*(true|:)([ \t)]|$)/) return 1
-  if (tail ~ /[$][?]/) return 1
-  if (tail ~ /^[ \t]*$/ && nxt ~ /^[ \t]*(then|do)([ \t;]|$)/) return 1
-  if (nxt ~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=[$][?]/ || nxt ~ /^[ \t]*(if|\[\[?)[^#]*[$][?]/) return 1
-  return 0
-}
-BEGIN {
-  nallow = 0
-  while ((getline al < ALLOW) > 0) {
-    alno++
-    if (al ~ /^[ \t]*(#|$)/) continue
-    reason = ""; entry = al
-    k = index(al, " # ")
-    if (k > 0) { entry = substr(al, 1, k - 1); reason = substr(al, k + 3) }
-    gsub(/^[ \t]+|[ \t]+$/, "", reason)
-    c = index(entry, ":")
-    if (c == 0) { if (REPORT) printf "A\t%d\tno <path>:<pattern>\n", alno; continue }
-    if (reason == "") { if (REPORT) printf "A\t%d\tno reason after a space, a hash and a space\n", alno; continue }
-    nallow++; ALNO[nallow] = alno; APATH[nallow] = substr(entry, 1, c - 1); APAT[nallow] = substr(entry, c + 1)
-    gsub(/[ \t]+$/, "", APAT[nallow])
-  }
-  while ((getline r < ROSTER) > 0) IN[r] = 1
-  for (a = 1; a <= nallow; a++)
-    if (!(APATH[a] in IN)) { if (REPORT) printf "A\t%d\tthe path %s is not in the roster\n", ALNO[a], APATH[a]; APATH[a] = "" }
-}
-{ P[++nl] = $0 }
-END {
-  pf = (FILENAME ~ /\/lib\// || FILENAME ~ /^hooks\/poker\//) ? 1 : 0
-  for (ln = 1; ln <= nl; ln++)
-    if (P[ln] ~ /^[ \t]*set[ \t]/ && P[ln] ~ /pipefail/) pf = 1
-  if (!pf) exit
-  hd = ""
-  for (ln = 1; ln <= nl; ln++) {
-    s = P[ln]
-    if (hd != "") { t = s; sub(/^\t+/, "", t); if (t == hd) hd = ""; continue }
-    if (s ~ /^[ \t]*#/) continue
-    start = ln; end = ln
-    while (end < nl && end - start < 40 && (s ~ /\\$/ || strip_comment(s) ~ /[|][ \t]*$/ || (s ~ /(awk|gawk|mawk)[ \t]/ && open_sq(s)))) {
-      if (s ~ /\\$/) s = substr(s, 1, length(s) - 1)
-      end++; s = s " " P[end]
-    }
-    if (open_sq(s) && end - start >= 40) end = start   # a quote that never closes: read the one line
-    if (end == start) s = P[start]
-    ln = end
-    if (match(s, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/) && substr(s, RSTART - 1, 1) != "<" && substr(s, RSTART + 2, 1) != "<") {
-      d = substr(s, RSTART, RLENGTH); sub(/^<<-?[ \t]*['"]?/, "", d); hd = d
-    }
-    s = strip_comment(s)
-    if (s !~ /[|]/) continue
-    nxt = ""
-    for (k = ln + 1; k <= nl; k++) if (P[k] !~ /^[ \t]*$/) { nxt = P[k]; break }
-    b = blank(s); n = length(b); site = 0
-    for (i = 1; i <= n; i++) {
-      if (substr(b, i, 1) != "|") continue
-      if (substr(b, i + 1, 1) == "|") { i++; continue }
-      if (substr(b, i + 1, 1) == "&") continue
-      if (i > 1 && substr(b, i - 1, 1) == "|") continue
-      cls = reader(substr(s, i + 1))
-      if (cls == 1 && substr(s, i + 1) !~ /[|][|][ \t]*(true|:)([ \t)]|$)/) site = 1
-      else if (cls == 2 && consumed(substr(s, 1, i - 1), substr(s, i + 1), nxt)) site = 1
-      if (site) break
-    }
-    if (!site) continue
-    ok = 0
-    for (a = 1; a <= nallow; a++) if (APATH[a] != "" && APATH[a] == FILENAME && index(s, APAT[a]) > 0) { ok = 1; break }
-    if (ok) continue
-    printf "Q\t%s:%d\t%s\n", FILENAME, start, s
-  }
-}
-QUIT_AWK_EOF
 QUIT_ALLOW="$TESTS_DIR/lib/quitting-readers.allow"
-
-# quit_sweep <root> <allow file> <relative path>... -> the Q and A rows the awk prints
-quit_sweep() {
-  local root="$1" allow="$2" roster f
-  shift 2
-  roster="$(mktemp "$TMP/quit-roster.XXXXXX")"
-  printf '%s\n' "$@" > "$roster"
-  ( cd "$root" || exit 1
-    LC_ALL=C awk -v REPORT=1 -v ALLOW="$allow" -v ROSTER="$roster" -f "$QUIT_AWK" /dev/null
-    for f in "$@"; do
-      LC_ALL=C awk -v ALLOW="$allow" -v ROSTER="$roster" -f "$QUIT_AWK" "$f"
-    done )
-}
 # quit_sites <sweep output> -> the sorted path:line of each site
 quit_sites() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' '$1 == "Q" { print $2 }' | LC_ALL=C sort; }
 
-BP_ROSTER="$(cd "$REPO" && { find hooks payload/scripts -name '*.sh' -type f; \
-  printf '%s\n' tests/lib/release-check.sh tests/lib/name-scan.sh; } 2>/dev/null | LC_ALL=C sort)"
+BP_ROSTER="$(quit_roster "$REPO")"
 expect_eq "the sweep found shell files to read" "yes" "$([ -n "$BP_ROSTER" ] && echo yes || echo no)"
 expect_eq "…and its roster reaches hooks, payload/scripts and both files of the check closure" "yes" \
   "$(LC_ALL=C grep -q '^hooks/poker/' <<< "$BP_ROSTER" \
@@ -1341,120 +1171,14 @@ section "EXIT — every refusal names its exit, and the ones that do not burn do
 # THE CEILING FILE, tests/lib/refusal-exits.ceiling: `<path> <count> # <reason or date>`, one line per file
 # with unexcused sites. A file it does not name has ceiling 0. A line with no count, no reason after a space,
 # a hash and a space, or a path named twice is refused by line.
-EXIT_VERBS="finding-move known-limits-part landing-report proof-add regression-run release-approval
-  release-check release-note reviews-part ruling-ack stop-run task-add"
-EXIT_WORDS="adopt amend approve bind extend reply ready resume waive"
-EXIT_AWK="$TMP/exit.awk"
-cat > "$EXIT_AWK" <<'EXIT_AWK_EOF'
-# REFUSALS AND THEIR EXITS. Run once per file with -v VERBS=<hyphenated verbs> -v WORDS=<one-word verbs>, the
-# file's path relative to the root as its one argument. Prints
-#   X<TAB><path>:<line><TAB><the site's first 80 columns>   a site that names no exit
-#   E<TAB><path>:<line>                                      a site that names one
-function dq_open(s,   n, i, c, q) {  # does s end inside a double-quoted string
-  n = length(s); q = ""
-  for (i = 1; i <= n; i++) {
-    c = substr(s, i, 1)
-    if (q == "'") { if (c == "'") q = ""; continue }
-    if (q == "\"") { if (c == "\\") i++; else if (c == "\"") q = ""; continue }
-    if (c == "\\") { i++; continue }
-    if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[ \t;]/)) break
-    if (c == "'" || c == "\"") q = c
-  }
-  return q == "\""
-}
-function names_exit(s,   t, n, i) {
-  t = s
-  gsub(/[A-Za-z0-9_.-]+ refused (—|--)/, "", t)
-  gsub(/REFUSED (—|--) [a-z][a-z-]*( --[a-z-]+)*:/, "REFUSED —", t)
-  if (t ~ /session-poker\.sh [a-z]/ || t ~ /card\.sh [a-z]/ || index(t, "spawn-worktree.sh") || index(t, "close-out.sh")) return 1
-  if (index(t, "Fix:") || index(t, "next call:") || index(t, "run again:") || index(t, "needs: ")) return 1
-  if (index(t, "set fix-cap") || index(t, "decisions rule")) return 1
-  n = split(VERBS, V, /[ \t\n]+/)
-  for (i = 1; i <= n; i++) if (V[i] != "" && match(t, "(^|[^A-Za-z0-9_-])" V[i] "([^A-Za-z0-9_-]|$)")) return 1
-  n = split(WORDS, W, /[ \t\n]+/)
-  for (i = 1; i <= n; i++) if (W[i] != "" && match(t, "(^|[^A-Za-z0-9_-])" W[i] " [-<'$`0-9]")) return 1
-  return 0
-}
-{ P[++nl] = $0 }
-END {
-  hd = ""
-  for (ln = 1; ln <= nl; ln++) {
-    s = P[ln]
-    if (hd != "") { t = s; sub(/^\t+/, "", t); if (t == hd) hd = ""; continue }
-    if (s ~ /^[ \t]*#/) continue
-    start = ln; end = ln
-    while (end < nl && end - start < 40 && (s ~ /\\$/ || dq_open(s))) {
-      if (s ~ /\\$/) s = substr(s, 1, length(s) - 1)
-      end++; s = s " " P[end]
-    }
-    if (dq_open(s) && end - start >= 40) { end = start; s = P[start] }   # a quote that never closes: the one line
-    ln = end
-    if (match(s, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/) && substr(s, RSTART - 1, 1) != "<" && substr(s, RSTART + 2, 1) != "<") {
-      d = substr(s, RSTART, RLENGTH); sub(/^<<-?[ \t]*['"]?/, "", d); hd = d
-    }
-    if (s !~ /REFUSED/ && s !~ /refused (—|--)/) continue
-    if (match(s, /(^|[;&|({ \t])refuse[ \t]+[a-z"$]/)) { print "E\t" FILENAME ":" start; continue }
-    if (!match(s, /(^|[;&|({ \t])(die|block)[ \t]+"/)) continue
-    site = substr(s, RSTART); sub(/^[;&|({ \t]/, "", site)
-    if (site ~ /^die[ \t]+"( +bash|Usage)/) continue
-    nxt = ""
-    for (k = end + 1; k <= nl; k++) if (P[k] !~ /^[ \t]*$/) { nxt = P[k]; break }
-    if (names_exit(site) || nxt ~ /^[ \t]*pv_next[ \t]/) { print "E\t" FILENAME ":" start; continue }
-    site = substr(site, 1, 80); sub(/[\200-\377]+$/, "", site)   # never end on half a character
-    printf "X\t%s:%d\t%s\n", FILENAME, start, site
-  }
-}
-EXIT_AWK_EOF
-# THE JUDGE. The sweep's rows on stdin, -v CEIL=<ceiling file> -v NAME=<the name the lower line says>. Prints
-#   F<TAB><ceiling line number><TAB><what is wrong>     a ceiling line refused
-#   O<TAB><path><TAB><count> over ceiling <n>          a file above its ceiling, then each of its sites:
-#   S<TAB><path>:<line><TAB><text>
-#   L<TAB>lower <NAME>: <path> <count>                 a file below its ceiling, with the number to write
-EXIT_JUDGE_AWK="$TMP/exit-judge.awk"
-cat > "$EXIT_JUDGE_AWK" <<'EXIT_JUDGE_EOF'
-BEGIN {
-  FS = "\t"
-  while ((getline l < CEIL) > 0) {
-    no++
-    if (l ~ /^[ \t]*(#|$)/) continue
-    k = index(l, " # "); reason = ""; entry = l
-    if (k > 0) { entry = substr(l, 1, k - 1); reason = substr(l, k + 3) }
-    gsub(/^[ \t]+|[ \t]+$/, "", reason)
-    n = split(entry, f, /[ \t]+/)
-    if (n != 2 || f[2] !~ /^[0-9]+$/) { printf "F\t%d\tnot <path> <count>\n", no; continue }
-    if (reason == "") { printf "F\t%d\tno reason after a space, a hash and a space\n", no; continue }
-    if (f[1] in C) { printf "F\t%d\t%s is named twice\n", no, f[1]; continue }
-    C[f[1]] = f[2] + 0
-  }
-}
-$1 == "X" { p = $2; sub(/:[0-9]+$/, "", p); N[p]++; SITES[p] = SITES[p] "S\t" $2 "\t" $3 "\n" }
-END {
-  for (p in N) {
-    c = (p in C) ? C[p] : 0
-    if (N[p] > c) { printf "O\t%s\t%d over ceiling %d: give the new site its exit (a verb, needs: <person> — <why>, or a pv_next line)\n", p, N[p], c; printf "%s", SITES[p] }
-  }
-  for (p in C) if ((p in N ? N[p] : 0) < C[p]) printf "L\tlower %s: %s %d\n", NAME, p, (p in N ? N[p] : 0)
-}
-EXIT_JUDGE_EOF
 EXIT_CEIL="$TESTS_DIR/lib/refusal-exits.ceiling"
 
-# exit_sweep <root> <relative path>... -> the X and E rows of each file
-exit_sweep() {
-  local root="$1" f
-  shift
-  ( cd "$root" || exit 1
-    for f in "$@"; do LC_ALL=C awk -v VERBS="$(tr '\n' ' ' <<< "$EXIT_VERBS")" -v WORDS="$EXIT_WORDS" -f "$EXIT_AWK" "$f"; done )
-}
-# exit_judge <sweep rows> <ceiling file> -> the F, O, S and L rows, sorted
-exit_judge() {
-  printf '%s\n' "$1" | LC_ALL=C awk -v CEIL="$2" -v NAME="tests/lib/refusal-exits.ceiling" -f "$EXIT_JUDGE_AWK" | LC_ALL=C sort
-}
 # exit_sites <sweep rows> -> the sorted path:line of each unexcused site
 exit_sites() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' '$1 == "X" { print $2 }' | LC_ALL=C sort; }
 # exit_count <sweep rows> <path> -> how many unexcused sites the file holds
 exit_count() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' -v p="$2" '$1 == "X" && index($2, p ":") == 1 { n++ } END { print n + 0 }'; }
 
-EXIT_ROSTER="$(cd "$REPO" && find hooks payload/scripts -name '*.sh' -type f 2>/dev/null | LC_ALL=C sort)"
+EXIT_ROSTER="$(exit_roster "$REPO")"
 expect_eq "the sweep found shell files to read, under hooks/poker and payload/scripts/lib" "yes" \
   "$(LC_ALL=C grep -q '^hooks/poker/' <<< "$EXIT_ROSTER" && LC_ALL=C grep -q '^payload/scripts/lib/' <<< "$EXIT_ROSTER" && echo yes || echo no)"
 # shellcheck disable=SC2086  # one path per line, none with blanks
@@ -1571,70 +1295,7 @@ expect_eq "EXIT-3c the gate's two auditor refusals the release card settles each
 census_registry() { sed -n 's/^REGISTRY_FILES="\([^" ]*\).*$/\1/p' "$1" | head -1; }   # <units.sh> -> the first registry file
 CENSUS_MD="$REPO/$(census_registry "$REPO/payload/scripts/lib/units.sh")"
 CENSUS_RUBRIC="$TESTS_DIR/RUBRIC.md"
-CENSUS_PROG="$TMP/census-prog.awk"
-cat > "$TMP/census-extract.awk" <<'CENSUS_EXTRACT_EOF'
-index($0, "awk '/^[[:space:]]*(setup_)?section") == 1 { on = 1; sub(/^awk '/, "") }
-on && (i = index($0, "' tests/<suite>.test.sh")) { print substr($0, 1, i - 1); exit }
-on { print }
-CENSUS_EXTRACT_EOF
-awk -f "$TMP/census-extract.awk" "$CENSUS_RUBRIC" > "$CENSUS_PROG" 2>/dev/null
-# The file with every heredoc body blanked, line numbers kept. A `<<` opens a body only outside
-# quotes (a nested `$( )` has quotes of its own) and not as a here-string, and a body ends at its
-# delimiter line.
-cat > "$TMP/census-blank.awk" <<'CENSUS_BLANK_EOF'
-function opener(line,   i, n, c, top, rest, d, st) {
-  n = length(line); st = "c"
-  for (i = 1; i <= n; i++) {
-    c = substr(line, i, 1); top = substr(st, length(st), 1)
-    if (top == "s") { if (c == "'") st = substr(st, 1, length(st) - 1); continue }
-    if (c == "\\") { i++; continue }
-    if (top == "d") {
-      if (c == "\"") st = substr(st, 1, length(st) - 1)
-      else if (c == "$" && substr(line, i + 1, 1) == "(") { st = st "c"; i++ }
-      continue
-    }
-    if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) return ""
-    if (c == "'") { st = st "s"; continue }
-    if (c == "\"") { st = st "d"; continue }
-    if (c == "$" && substr(line, i + 1, 1) == "(") { st = st "c"; i++; continue }
-    if (c == ")" && length(st) > 1) { st = substr(st, 1, length(st) - 1); continue }
-    if (c == "<" && substr(line, i, 2) == "<<") {
-      if (substr(line, i, 3) == "<<<") { i += 2; continue }
-      rest = substr(line, i + 2); hdash = 0
-      if (substr(rest, 1, 1) == "-") { hdash = 1; rest = substr(rest, 2) }
-      sub(/^[ \t]+/, "", rest)
-      if (match(rest, /^(\\?'[A-Za-z_0-9]+'|"[A-Za-z_0-9]+"|\\?[A-Za-z_0-9]+)/)) {
-        d = substr(rest, 1, RLENGTH); gsub(/['"\\]/, "", d); return d
-      }
-      i += 1
-    }
-  }
-  return ""
-}
-{
-  if (hd != "") {
-    ln = $0
-    if (hdash) sub(/^\t+/, "", ln)
-    if (ln == hd) hd = ""
-    print ""
-    next
-  }
-  hd = opener($0)
-  print
-}
-CENSUS_BLANK_EOF
-# census_calls <tests dir> -> `<suite> TAB <section|setup> TAB <key>` per call outside a heredoc body.
-census_calls() {
-  local d f
-  d="$(mktemp -d "$TMP/census-blank.XXXXXX")"
-  for f in "$1"/*.test.sh; do
-    [ -f "$f" ] || continue
-    awk -f "$TMP/census-blank.awk" "$f" > "$d/${f##*/}"
-  done
-  ( cd "$d" && LC_ALL=C awk -f "$CENSUS_PROG" ./*.test.sh 2>/dev/null ) \
-    | awk '{ loc = $1; kind = $2; key = $0; sub(/^[^ ]+ [^ ]+ §/, "", key); sub(/^\.\//, "", loc); sub(/:[0-9]+$/, "", loc)
-             printf "%s\t%s\t%s\n", loc, kind, key }'
-}
+census_prog "$CENSUS_RUBRIC"
 # census_records <census file> -> `R TAB <suite> TAB <key> TAB <verdict> TAB <defect> TAB <catcher> TAB <line>` per record line.
 census_records() {
   awk -F' [|] ' '/^[A-Za-z0-9._-]+\.test\.sh [|] / { k = $2; sub(/^§/, "", k); printf "R\t%s\t%s\t%s\t%s\t%s\t%s\n", $1, k, $3, $4, $5, $0 }' "$1" 2>/dev/null
@@ -1967,41 +1628,6 @@ adr_refusals() {
   done
 }
 
-# header_entries <suite file> -> the keys the suite header lists, one per line: a line of the leading comment block
-# that opens `#`, two or more spaces and `§KEY`. A `§` inside a sentence refers to something else and is not a claim.
-header_entries() {
-  awk 'NR == 1 && /^#!/ { next } /^#/ { print; next } { exit }' "$1" \
-    | LC_ALL=C sed -n 's/^#[ ][ ][ ]*§\([A-Za-z0-9][A-Za-z0-9._-]*\).*$/\1/p' \
-    | sed 's/[._-]*$//' | LC_ALL=C sort -u
-}
-# body_keys <census_calls output> <suite file name> -> the keys of the suite's `section` calls, one per line: the
-# census key cut again at its first space. A title with no ` — ` or `: ` and more than one word is a sentence, not a
-# key, and is left out.
-body_keys() {
-  printf '%s\n' "$1" | LC_ALL=C awk -F'\t' -v S="$2" '$1 == S && $2 == "section" {
-    k = $3; i = index(k, " — "); j = index(k, ": ")
-    if (i && (!j || i < j)) k = substr(k, 1, i - 1); else if (j) k = substr(k, 1, j - 1); else if (k ~ /[ \t]/) next
-    sub(/[ \t].*$/, "", k); sub(/[.,;:-]*$/, "", k); print k }' | LC_ALL=C sort -u
-}
-# header_refusals <tests dir> -> one line per suite whose header lists a section its body lacks, or whose body has a
-# section its header does not list, naming the suite and both differences. A header that lists none makes no claim.
-header_refusals() {
-  local f s calls hdr bdy only_h only_b out
-  calls="$(census_calls "$1")"
-  for f in "$1"/*.test.sh; do
-    [ -f "$f" ] || continue
-    s="${f##*/}"
-    header_entries "$f" > "$TMP/hdr.keys"
-    [ -s "$TMP/hdr.keys" ] || continue
-    body_keys "$calls" "$s" > "$TMP/bdy.keys"
-    only_h="$(LC_ALL=C comm -23 "$TMP/hdr.keys" "$TMP/bdy.keys" | sed 's/^/§/' | paste -sd' ' -)"
-    only_b="$(LC_ALL=C comm -13 "$TMP/hdr.keys" "$TMP/bdy.keys" | sed 's/^/§/' | paste -sd' ' -)"
-    out=""
-    [ -z "$only_h" ] || out="header lists ${only_h} with no section"
-    [ -z "$only_b" ] || out="${out:+$out; }body has ${only_b} with no header entry"
-    [ -z "$out" ] || printf '%s: %s\n' "$s" "$out"
-  done
-}
 
 # ============================================================
 section "ADR: an ADR whose status: word differs from its ## Status word is refused by file, naming both words"
@@ -2138,5 +1764,150 @@ expect_contains "…among them the merge's one reader's fetch, into origin's tra
   "$(ir_lines "$IR_FETCH" "$REPO/payload/scripts/lib/line.sh")"
 expect_eq "no product line in hooks/ or payload/scripts merges into the integration branch, moves its ref, or fetches into a local ref" "" \
   "$(ir_refusals "$REPO/hooks" "$REPO/payload/scripts")"
+
+
+# ============================================================
+section "LINT — tests/lib/lint.sh, told the files a row changed, names each check's hit there by file and line"
+# ============================================================
+# The landing runs tests/lib/lint.sh over the paths a row changed. A planted tree holds one hit for each of EXIT, BP
+# and HEADER, each in a file of its own, and a clean file; told one path, the run names that file's hit and no other.
+LT="$TMP/lint-tree"; mkdir -p "$LT/hooks" "$LT/payload/scripts/lib" "$LT/tests/lib"
+cp "$TESTS_DIR/RUBRIC.md" "$LT/tests/RUBRIC.md"
+printf '%s\n' '#!/bin/bash' 'die "REFUSED — no exit"' > "$LT/hooks/e.sh"
+printf '%s\n' '#!/bin/bash' 'set -o pipefail' 'git show HEAD:x | grep -q y && echo found' > "$LT/payload/scripts/lib/q.sh"
+printf '%s\n' '#!/bin/bash' 'echo clean' > "$LT/payload/scripts/lib/c.sh"
+printf '%s\n' '#!/bin/bash' '# t.test.sh' '#' '#   §ONE   the first' '#   §TWO   the second' '' 'section "ONE — the first"' > "$LT/tests/t.test.sh"
+lint_at() { printf '%s\n' "${@:2}" | bash "$TESTS_DIR/lib/lint.sh" "$1" 2>&1 | cut -d' ' -f1-2 | paste -sd'|' -; }   # <root> <path>... -> CHECK and site of each hit
+expect_eq "LINT-1 told the refusal's file, the run names its EXIT hit by line and nothing else" "EXIT hooks/e.sh:2" "$(lint_at "$LT" hooks/e.sh)"
+expect_eq "…told the pipe's file, its BP hit by line" "BP payload/scripts/lib/q.sh:3" "$(lint_at "$LT" payload/scripts/lib/q.sh)"
+expect_eq "…told the suite, its HEADER hit, naming the listed key the body lacks" "HEADER tests/t.test.sh: header lists §TWO with no section" \
+  "$(printf '%s\n' tests/t.test.sh | bash "$TESTS_DIR/lib/lint.sh" "$LT" 2>&1)"
+expect_eq "…told all four, the three hits; told the clean file alone, none, and it exits 0" "BP payload/scripts/lib/q.sh:3|EXIT hooks/e.sh:2|HEADER tests/t.test.sh:|0" \
+  "$(lint_at "$LT" hooks/e.sh payload/scripts/lib/q.sh tests/t.test.sh payload/scripts/lib/c.sh | tr '|' '\n' | LC_ALL=C sort | paste -sd'|' -)|$(printf '%s\n' payload/scripts/lib/c.sh | bash "$TESTS_DIR/lib/lint.sh" "$LT" >/dev/null 2>&1; echo $?)"
+# The ceiling file: the refusal at its file's ceiling is no hit; a row that lowers the ceiling under the count, told
+# only the ceiling changed, is named at the ceiling's own line as well as at the site.
+printf '%s\n' '# the ceiling' 'hooks/e.sh 1 # one left' > "$LT/tests/lib/refusal-exits.ceiling"
+expect_eq "LINT-2 a refusal within its file's ceiling is no hit" "" "$(lint_at "$LT" hooks/e.sh)"
+printf '%s\n' '# the ceiling' 'hooks/e.sh 0 # none left' > "$LT/tests/lib/refusal-exits.ceiling"
+expect_eq "…a ceiling lowered under the count, told the ceiling alone changed, is named at its line and at the site" \
+  "EXIT hooks/e.sh:2|EXIT tests/lib/refusal-exits.ceiling:2" "$(lint_at "$LT" tests/lib/refusal-exits.ceiling | tr '|' '\n' | LC_ALL=C sort | paste -sd'|' -)"
+rm -f "$LT/tests/RUBRIC.md"
+expect_eq "LINT-3 a check that cannot run exits 2 naming what it lacks" "2|lint.sh: HEADER reads sections by tests/RUBRIC.md's command" \
+  "$(printf '%s\n' tests/t.test.sh | bash "$TESTS_DIR/lib/lint.sh" "$LT" 2>"$TMP/lint3.err" >/dev/null; echo "$?|$(sed 's/, which.*//' "$TMP/lint3.err")")"
+
+
+# ============================================================
+section "SETUP — a shared setup that loads a helper on a line with no stop is refused by file and line"
+# ============================================================
+# A shared setup (tests/*.prelude.sh) that cannot load a helper goes on without its functions: a maker that is not
+# there leaves a fixture's path empty, and the next `git -C ""` acts on the repository the suite stands in. So every
+# load in a setup reads its own status: a `||` that exits or returns, a chain whose next command needs it, or an `if`
+# that tests it. A heredoc body is fixture text, and a load inside a quoted child script is that child's.
+# fails-when: a setup loads a helper on a line with no stop, and the sweep passes.
+SU="$TMP/setup"; mkdir -p "$SU"
+printf '%s\n' '#!/bin/bash' \
+  '. "$(dirname "${BASH_SOURCE[0]}")/lib/a.sh"' \
+  'declare -F f >/dev/null 2>&1 || . "$(dirname "$0")/lib/b.sh"' \
+  'mk() { ( cd "$1" || exit 1; . "$R/lib/c.sh"; c_make "$1" ); }' \
+  'source lib/d.sh 2>&1; echo after' > "$SU/bad.prelude.sh"
+printf '%s\n' '#!/bin/bash' \
+  '[ -r "$H/lib/a.sh" ] && . "$H/lib/a.sh" || { echo "x: cannot load $H/lib/a.sh" >&2; exit 1; }' \
+  'declare -F f >/dev/null 2>&1 || { [ -r "$H/lib/b.sh" ] && . "$H/lib/b.sh"; } || { echo "x: no b" >&2; exit 1; }' \
+  'chk() { . "$1/run.sh" && . "$1/proof.sh" || exit 99; }' \
+  'ask() { ( . "$R/lib/gate.sh" 2>/dev/null && gate_ask "$1" ); }' \
+  'if [ -r "$LINE" ] && . "$LINE" 2>/dev/null; then L=1; fi' \
+  'type -t g >/dev/null 2>&1 || . "$R/lib/g.sh" || return 1 2>/dev/null || exit 1' \
+  "kid() { bash -c '. \"\$1/run.sh\"; run_it' _ \"\$R\"; }" \
+  'find . -name x >/dev/null; git -C "$r" init -q .' \
+  '# . lib/commented.sh' \
+  "cat > \"\$p/s.sh\" <<'EOF'" '. lib/fixture-text.sh' 'EOF' > "$SU/good.prelude.sh"
+for f in "$SU"/*.prelude.sh; do expect_true "the planted ${f##*/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+# The hazard, measured: a bare load of a missing helper goes on to the next line; the stopped form ends there, in one line.
+printf '%s\n' '. "$(dirname "${BASH_SOURCE[0]}")/lib/a.sh"' 'echo went-on' > "$SU/run-bare.sh"
+printf '%s\n' '[ -r "$(dirname "${BASH_SOURCE[0]}")/lib/a.sh" ] && . "$(dirname "${BASH_SOURCE[0]}")/lib/a.sh" || { echo "x: cannot load lib/a.sh" >&2; exit 1; }' \
+  'echo went-on' > "$SU/run-stopped.sh"
+SU_OUT="$(/bin/bash "$SU/run-bare.sh" 2>/dev/null)"; SU_RC=$?
+expect_eq "mutant: a bare load of a missing helper, run under /bin/bash, goes on past it" "went-on|0" "$SU_OUT|$SU_RC"
+SU_OUT="$(/bin/bash "$SU/run-stopped.sh" 2>"$SU/stopped.err")"; SU_RC=$?
+expect_eq "control: the stopped load exits 1 before the next line, with one line naming the helper" "|1|x: cannot load lib/a.sh" \
+  "$SU_OUT|$SU_RC|$(paste -sd'#' "$SU/stopped.err")"
+expect_eq "SETUP-1 each load with no stop is refused by file and line: a bare load, the fallback of a test, a subshell that goes on, a load a ; drops" \
+  "$SU/bad.prelude.sh:2|$SU/bad.prelude.sh:3|$SU/bad.prelude.sh:4|$SU/bad.prelude.sh:5" \
+  "$(setup_refusals "$SU/bad.prelude.sh" | cut -f1 | paste -sd'|' -)"
+expect_eq "…and the same reader finds every load of the stopped setup, the tested and chained ones too: seven, none in the heredoc, the quoted child or the comment" "7" \
+  "$(setup_loads "$SU/good.prelude.sh" | wc -l | tr -d ' ')"
+expect_eq "control: stopped, chained and tested loads, a quoted child's load, a heredoc body and a comment are refused for nothing" "" \
+  "$(setup_refusals "$SU/good.prelude.sh")"
+SU_REAL="$(setup_loads "$TESTS_DIR"/*.prelude.sh | wc -l | tr -d ' ')"
+expect_true "the real sweep reads loads: ${SU_REAL} in the shared setups under tests/" [ "${SU_REAL:-0}" -gt 0 ]
+expect_eq "SETUP-2 every load in the real shared setups reads its own status: no refusal" "" "$(setup_refusals "$TESTS_DIR"/*.prelude.sh)"
+mkdir -p "$LT/tests" && cp "$SU/bad.prelude.sh" "$LT/tests/bad.prelude.sh" && cp "$SU/good.prelude.sh" "$LT/tests/good.prelude.sh"
+expect_eq "SETUP-3 the landing's run, told the bad setup, names its four loads as SETUP hits by line" \
+  "SETUP tests/bad.prelude.sh:2|SETUP tests/bad.prelude.sh:3|SETUP tests/bad.prelude.sh:4|SETUP tests/bad.prelude.sh:5" \
+  "$(lint_at "$LT" tests/bad.prelude.sh)"
+expect_eq "…told the stopped setup alone, none, and it exits 0" "|0" \
+  "$(printf '%s\n' tests/good.prelude.sh | bash "$TESTS_DIR/lib/lint.sh" "$LT" 2>&1; echo "|$?")"
+
+# ============================================================
+section "STOP — a maker that fails stops the suite that asked, and a file that stops through maker_stop loads it"
+# ============================================================
+# A suite takes a maker's path as `R="$(make_repo x)"`, in a command substitution, so a maker's own exit ends only
+# that child: tests/lib/maker-stop.sh ends the shell that loaded it, and every process under that shell, from
+# wherever the maker runs. Each take below runs in a child bash that loads the real file, the way a row that tests a
+# refusal must; the child is then the suite that stops. The maker is handed a folder it cannot make, and the line
+# after the take would write a mark.
+# fails-when: maker_stop only exits its own process, or signals a process group, or leaves its notice twice, and
+# the take's next line runs; or a file calls maker_stop with no load of maker-stop.sh, and the sweep passes.
+ST="$TMP/stop"; mkdir -p "$ST/ro"; chmod 500 "$ST/ro"
+st_child() {  # <maker body> <take shape> -> rc|stderr lines|marks, of a child bash that takes through the shape
+  rm -f "$ST/went-on" "$ST/cleaned"
+  { printf '%s\n' ". \"$TESTS_DIR/lib/maker-stop.sh\" || exit 9" "trap ': > \"$ST/cleaned\"' EXIT" \
+      "mk() { mkdir -p \"\$1\" 2>/dev/null && git -C \"\$1\" init -q 2>/dev/null || $1; printf '%s' \"\$1\"; }"
+    printf '%s\n' "$2" ": > \"$ST/went-on\""; } > "$ST/child.sh"
+  /bin/bash "$ST/child.sh" 2>"$ST/child.err"; printf '%s|%s|%s%s' "$?" "$(awk 'END { print NR }' "$ST/child.err")" \
+    "$([ -e "$ST/cleaned" ] && echo cleaned)" "$([ -e "$ST/went-on" ] && echo ' went-on')"
+}
+ST_STOP='maker_stop mk "no repository of its own at $1"'
+expect_true "tests/lib/maker-stop.sh parses under /bin/bash -n" /bin/bash -n "$TESTS_DIR/lib/maker-stop.sh"
+expect_eq "mutant: a maker that only returns 1 hands the take an empty path, and the next line runs" "0|0|cleaned went-on" \
+  "$(st_child 'return 1' "R=\"\$(mk \"$ST/ro/r\")\"; [ -z \"\$R\" ] || exit 7")"
+expect_eq "STOP-1 a take in the suite's own shell: exit 1, one line, the EXIT trap run, no next line" "1|1|cleaned" \
+  "$(st_child "$ST_STOP" "R=\"\$(mk \"$ST/ro/r\")\"")"
+expect_eq "…the one line names the maker and says the suite stops" "mk: no repository of its own at $ST/ro/r; the suite stops" \
+  "$(cat "$ST/child.err")"
+expect_eq "…a take inside ( … ): the subshell's next line and the suite's do not run" "1|1|cleaned" \
+  "$(st_child "$ST_STOP" "( R=\"\$(mk \"$ST/ro/r\")\"; : > \"$ST/went-on\" )")"
+expect_eq "…a take two command substitutions deep" "1|1|cleaned" \
+  "$(st_child "$ST_STOP" "f() { local x; x=\"\$(mk \"$ST/ro/r\")\"; printf '%s' \"\$x\"; }; R=\"\$(f)\"")"
+expect_eq "…a take beside a background row: the row is ended too, and leaves no notice" "1|1|cleaned" \
+  "$(st_child "$ST_STOP" "( sleep 2; : > \"$ST/went-on\" ) & R=\"\$(mk \"$ST/ro/r\")\"")"
+sleep 3
+expect_eq "…and the background row never ran its line" "no" "$([ -e "$ST/went-on" ] && echo yes || echo no)"
+# The stop reaches the loading shell and what runs under it, by process id: a process beside the child, started
+# from this suite, is alive after the child stopped.
+sleep 30 & ST_SIB=$!
+expect_eq "STOP-2 a process beside the stopped child, under this suite, is not reached by the stop" "1|1|cleaned|alive" \
+  "$(st_child "$ST_STOP" "R=\"\$(mk \"$ST/ro/r\")\"")|$(kill -0 "$ST_SIB" 2>/dev/null && echo alive || echo gone)"
+kill "$ST_SIB" 2>/dev/null; wait "$ST_SIB" 2>/dev/null
+chmod 700 "$ST/ro"
+# The lint: a file that calls maker_stop loads it itself, since without the function the call answers 127 and the
+# maker goes on to write through the path it refused.
+printf '%s\n' '#!/bin/bash' 'mk() {' '  # maker_stop in a comment is no call' \
+  '  git -C "$1" init -q || maker_stop mk "no repository at $1"' '}' > "$ST/bad.prelude.sh"
+printf '%s\n' '#!/bin/bash' '[ -r "$H/lib/maker-stop.sh" ] && . "$H/lib/maker-stop.sh" || { echo "x: cannot load" >&2; exit 1; }' \
+  'mk() { git -C "$1" init -q || maker_stop mk "no repository at $1"; }' > "$ST/good.prelude.sh"
+printf '%s\n' '#!/bin/bash' "cat > \"\$p/s.sh\" <<'EOF'" 'maker_stop mk "fixture text"' 'EOF' > "$ST/text.prelude.sh"
+for f in "$ST"/*.prelude.sh; do expect_true "the planted ${f##*/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+expect_eq "STOP-3 a call of maker_stop in a file with no load of it is refused at the call's line" "$ST/bad.prelude.sh:4" \
+  "$(stop_refusals "$ST/bad.prelude.sh" | cut -f1)"
+expect_eq "control: the file that loads it, and a heredoc body that names it, are refused for nothing" "" \
+  "$(stop_refusals "$ST/good.prelude.sh" "$ST/text.prelude.sh")"
+ST_REAL="$(for f in "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh; do /usr/bin/grep -l 'maker_stop [a-z"]' "$f"; done | wc -l | tr -d ' ')"
+expect_true "the real sweep has callers to read: ${ST_REAL} files of tests/ call maker_stop" [ "${ST_REAL:-0}" -gt 1 ]
+expect_eq "STOP-4 every real setup and library that calls maker_stop loads it" "" \
+  "$(stop_refusals "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh)"
+cp "$ST/bad.prelude.sh" "$LT/tests/stopbad.prelude.sh" && mkdir -p "$LT/tests/lib" && cp "$ST/bad.prelude.sh" "$LT/tests/lib/stopbad.sh"
+expect_eq "STOP-5 the landing's run, told a setup and a library that call it unloaded, names each as a STOP hit" \
+  "STOP tests/lib/stopbad.sh:4|STOP tests/stopbad.prelude.sh:4" "$(lint_at "$LT" tests/stopbad.prelude.sh tests/lib/stopbad.sh | tr '|' '\n' | LC_ALL=C sort | paste -sd'|' -)"
 
 finish

@@ -45,7 +45,8 @@
 #
 # WHAT THE FIXTURE HOLDS, at its accepted head, committed: hooks/ and payload/scripts/ copied whole from the tree
 # under test, with the payload/hooks link; tests/run.sh and tests/lib/ whole, so the check and the name scan are
-# the copies a relative `bash tests/lib/release-check.sh` opens there; CHANGELOG.md as the tree under test's HEAD
+# the copies a relative `bash tests/lib/release-check.sh` opens there; tests/RUBRIC.md, which the landing's copy of
+# tests/lib/lint.sh reads to judge a changed suite's header, and without which it refuses to judge; CHANGELOG.md as the tree under test's HEAD
 # commits it, the real file of more than a pipe's buffer, never a filler; payload/.claude-plugin/plugin.json.
 # Ignored and so never landed: .bionic/config.yaml declaring `release-check: bash tests/lib/release-check.sh
 # <list>`, the list a file beside <dir>, outside every checkout, and the check's files as bionic declares its own,
@@ -78,6 +79,10 @@ if ! type -t bound_marker >/dev/null 2>&1; then
   . "${BIONIC_SCRIPTS_DIR}/tests/lib/bound-marker.sh" || return 1
 fi
 
+# A maker here that cannot make its fixture stops the suite that asked for it (tests/lib/maker-stop.sh).
+[ -r "${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" ] && . "${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" \
+  || { echo "door.sh: cannot load ${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" >&2; return 1 2>/dev/null || exit 1; }
+
 DOOR_VERSION="99.0.0"
 DOOR_BRANCH="${DOOR_BRANCH:-wave/x}"
 # The listed name is built, never written whole: the fixture commits this file, and the name scan reads every
@@ -97,21 +102,23 @@ _door_inside() {  # <path> -> 0 when it lies under WORLD_ROOT
   return 1
 }
 
-door_world() { _door_world door_world double "${1:-}"; }          # <dir> -> `<root> <accepted head>`
-door_project() { _door_world door_project none "${1:-}"; }        # <dir> -> the same, with no plan and no binding
-door_world_single() { _door_world door_world_single single "${1:-}"; }   # <dir> -> the same, at `rigor: single`
+# A fixture that cannot be built stops the suite, with one line naming the maker the suite called.
+door_world() { _door_world door_world double "${1:-}" || maker_stop door_world "no fixture at '${1:-}'"; }          # <dir> -> `<root> <accepted head>`
+door_project() { _door_world door_project none "${1:-}" || maker_stop door_project "no fixture at '${1:-}'"; }        # <dir> -> the same, with no plan and no binding
+door_world_single() { _door_world door_world_single single "${1:-}" || maker_stop door_world_single "no fixture at '${1:-}'"; }   # <dir> -> the same, at `rigor: single`
 
 # _door_world <name> <rigor> <dir> -> the fixture at <dir>, its plan at <rigor>; <name> heads every refusal
 _door_world() (
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
   local src="$BIONIC_SCRIPTS_DIR" me="$1" rigor="$2" dir="${3:-}" root list head plan
-  case "$dir" in ''|*[[:space:]]*) echo "$me: name a directory, without blanks" >&2; exit 2 ;; esac
+  case "$dir" in ''|*[[:space:]]*) maker_stop "$me" "name a directory, without blanks" ;; esac
   mkdir -p "$dir" && root="$(cd "$dir" && pwd -P)" || exit 1
-  _door_inside "$root" || { echo "$me: $root is outside WORLD_ROOT" >&2; exit 2; }
-  [ -z "$(ls -A "$root")" ] || { echo "$me: $root is not empty" >&2; exit 2; }
-  git -C "$root" init --quiet && git -C "$root" symbolic-ref HEAD refs/heads/main || exit 1
+  _door_inside "$root" || maker_stop "$me" "$root is outside WORLD_ROOT"
+  [ -z "$(ls -A "$root")" ] || maker_stop "$me" "$root is not empty"
+  git -C "$root" init --quiet || exit 1
   [ "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" = "$root" ] \
-    || { echo "$me: git's toplevel is not $root — refusing" >&2; exit 1; }
+    || maker_stop "$me" "git's toplevel is not $root"
+  git -C "$root" symbolic-ref HEAD refs/heads/main || exit 1
   # The repository's own identity: a hand landing records `by=` from it, so no person's name reaches the record.
   git -C "$root" config user.name door && git -C "$root" config user.email door@example.invalid \
     && git -C "$root" config commit.gpgsign false || exit 1
@@ -119,6 +126,7 @@ _door_world() (
   mkdir -p "$root/payload/.claude-plugin" "$root/tests"
   cp -R "$src/hooks" "$root/hooks" && cp -R "$src/payload/scripts" "$root/payload/scripts" \
     && cp -R "$src/tests/lib" "$root/tests/lib" && cp "$src/tests/run.sh" "$root/tests/run.sh" \
+    && cp "$src/tests/RUBRIC.md" "$root/tests/RUBRIC.md" \
     && cp "$src/payload/.claude-plugin/plugin.json" "$root/payload/.claude-plugin/plugin.json" \
     && ln -s ../hooks "$root/payload/hooks" || exit 1
   git -C "$src" show HEAD:CHANGELOG.md > "$root/CHANGELOG.md" || exit 1

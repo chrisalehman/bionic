@@ -149,8 +149,53 @@ _units_plan_read() {
   return 0
 }
 _units_plan_read
+_UNITS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+
+# ONE READ A COMMAND (lib/proof.sh `_proof_held_dir`). Inside a held command an answer this library computes from the
+# plan or the facts is kept in the command's directory, so every process the command starts, the judge the card asks
+# and the tick resume runs among them, is served the one read. A kept answer's key is whole on its first line: the
+# answer's kind, the plan, and the cksum of every input it is computed from, so a plan edited or a log written during
+# the command is read again, never served stale. Outside a held command nothing is kept.
+# _units_hold <kind> <plan> <key> -> 0 with _UNITS_HOLD_FILE and _UNITS_HOLD_KEY set when this command holds its reads
+_units_hold() {
+  _UNITS_HOLD_FILE=""; _UNITS_HOLD_KEY=""
+  declare -F _proof_held_dir >/dev/null 2>&1 && _proof_held_dir && [ -n "${3:-}" ] || return 1
+  _UNITS_HOLD_KEY="$1 $2 ${3//$'\n'/ }"
+  _UNITS_HOLD_FILE="$_PROOF_HELD_DIR/units-$1-$(printf '%s' "$2" | cksum | tr -c '0-9\n' '-')"
+}
+# _units_held -> 0 with the answer kept under _UNITS_HOLD_KEY in _UNITS_HELD_OUT and its exit in _UNITS_HELD_RC; 1 when
+# none is kept under it
+_units_held() {
+  local got
+  _UNITS_HELD_OUT=""; _UNITS_HELD_RC=""
+  [ -n "$_UNITS_HOLD_FILE" ] && [ -f "$_UNITS_HOLD_FILE" ] && got="$(cat "$_UNITS_HOLD_FILE" 2>/dev/null; printf x)" || return 1
+  [ "${got%%$'\n'*}" = "$_UNITS_HOLD_KEY" ] || return 1
+  got="${got%x}"; got="${got#*$'\n'}"
+  _UNITS_HELD_RC="${got%%$'\n'*}"; _UNITS_HELD_OUT="${got#*$'\n'}"
+}
+# _units_keep <exit> <answer> -> the answer and its exit kept under _UNITS_HOLD_KEY, when a key is set
+_units_keep() {
+  local tmp
+  [ -n "$_UNITS_HOLD_FILE" ] && tmp="$(mktemp "$_UNITS_HOLD_FILE.XXXXXX" 2>/dev/null)" || return 0
+  { printf '%s\n%s\n' "$_UNITS_HOLD_KEY" "$1"; printf '%s' "$2"; } > "$tmp" && mv -f "$tmp" "$_UNITS_HOLD_FILE" 2>/dev/null || rm -f "$tmp"
+}
+
+# The table's answer is the plan's text read by this library and lib/plan-read.sh, so it is kept under their cksum.
 _units_read() {
-  [ -n "${1:-}" ] && [ -f "$1" ] && declare -F plan_read_table >/dev/null 2>&1 || return 1
+  local out rc
+  [ -n "${1:-}" ] && [ -f "$1" ] && declare -F plan_read_table >/dev/null 2>&1 || {
+    [ -z "${BIONIC_COUNT:-}" ] || printf 'table _units_read\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+    return 1; }
+  if _units_hold table "$1" "$(cksum "$1" "$_UNITS_DIR/units.sh" "$_UNITS_DIR/plan-read.sh" 2>/dev/null)" \
+     && _units_held; then
+    printf '%s' "$_UNITS_HELD_OUT"; return "$_UNITS_HELD_RC"
+  fi
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'table _units_read\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  out="$(_units_read_table "$1"; printf 'x%s' "$?")"; rc="${out##*x}"; out="${out%x*}"
+  _units_keep "$rc" "$out"
+  printf '%s' "$out"; return "$rc"
+}
+_units_read_table() {
   plan_read_table "$1" Tasks id 2>/dev/null | awk -F'\t' '
     BEGIN {
       # The contract order. `disp` is the spelling a violation names; `want` the header name it answers to.
@@ -209,7 +254,7 @@ _units_table() {
 # _units_live <plan> -> `<id><TAB><state><TAB><agent><TAB><tree><TAB><base>` per row the log moves; nothing without a
 # log; 2 a failed fold
 _units_live() {
-  local plan="${1:-}" log facts
+  local plan="${1:-}" log
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "$plan" ] && [ -n "${_UNITS_MEMO_LIVE_RC:-}" ]; then
     printf '%s' "$_UNITS_MEMO_LIVE"; return "$_UNITS_MEMO_LIVE_RC"
   fi
@@ -217,8 +262,11 @@ _units_live() {
   _units_lib proof.sh _proof_facts && _units_lib reader.sh reader_log || return 0
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
-  facts="$(_units_facts_of "$plan")" || return 2
-  printf '%s\n' "$facts" | awk -F'|' "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
+  _units_facts_at "$plan" || return 2
+  _proof_derive _units_live "$plan" _units_live_made
+}
+_units_live_made() {
+  _proof_facts_awk -F'|' "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
     END { for (i = 1; i <= _rows; i++) { r = _row_order[i]; s = dropped(r) ? "dropped" : _row_held[r]; $0 = _row_tree_held[r]
       if (s != "" || $0 != "") printf "%s\t%s\t%s\t%s\t%s\n", r, s, _row_name[r], line_kv("path"), substr(line_kv("base"), 1, 8) } }'
 }
@@ -229,28 +277,40 @@ _units_live() {
 # it holds, so the call enters the kept fold once. Outside a hold each asks the fold itself.
 # _units_proofs <plan> -> one `proved:` line per standing proof, in fact order; nothing without lib/proof.sh; 2 a failed fold
 _units_proofs() {
-  local facts
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ] && [ -n "${_UNITS_MEMO_PROOFS_RC:-}" ]; then
     printf '%s' "$_UNITS_MEMO_PROOFS"; return "$_UNITS_MEMO_PROOFS_RC"
   fi
   _units_lib proof.sh proof_fact_lines || return 0
-  facts="$(_units_facts_of "$(_units_origin "${1:-}")")" || return 2
-  [ -z "$facts" ] || printf '%s\n' "$facts" | proof_fact_lines
+  local o
+  o="$(_units_origin "${1:-}")"
+  _units_facts_at "$o" || return 2
+  _proof_derive _units_proofs "$o" _proof_facts_proofs
 }
 
-# _units_fold <plan> -> 0 with the fold's answer for <plan>'s run held in _UNITS_FACTS (its plan in _UNITS_FACTS_PLAN),
+# _units_fold <plan> -> 0 with the fold's answer for <plan>'s run held (its plan in _UNITS_FACTS_PLAN): inside a held
+# command its file in _UNITS_FACTS_FILE and its key in _UNITS_FACTS_KEY, outside one the string in _UNITS_FACTS, all
 # variables the caller declares local; 0 holding nothing without lib/proof.sh; 2 a failed fold
 _units_fold() {
-  _UNITS_FACTS_PLAN=""; _UNITS_FACTS=""
+  local o
+  _UNITS_FACTS_PLAN=""; _UNITS_FACTS=""; _UNITS_FACTS_FILE=""; _UNITS_FACTS_KEY=""
   _units_lib proof.sh _proof_facts || return 0
-  _UNITS_FACTS="$(proof_held_facts "$(_units_origin "${1:-}")")" \
-    || _UNITS_FACTS="$(_proof_facts "$(_units_origin "${1:-}")")" || { _UNITS_FACTS=""; return 2; }
-  _UNITS_FACTS_PLAN="$(_units_origin "${1:-}")"
+  o="$(_units_origin "${1:-}")"
+  _proof_held_facts_at "$o" || proof_facts_at "$o" || return 2
+  _UNITS_FACTS_FILE="$_PROOF_FACTS_FILE"; _UNITS_FACTS="$_PROOF_FACTS_TEXT"; _UNITS_FACTS_KEY="$_PROOF_FACTS_KEY"
+  _UNITS_FACTS_PLAN="$o"
 }
-# _units_facts_of <plan, a copy already read as its plan> -> the held answer when the call holds this plan's, else the fold's
-_units_facts_of() {
-  if [ -n "${_UNITS_FACTS_PLAN:-}" ] && [ "$_UNITS_FACTS_PLAN" = "${1:-}" ]; then printf '%s' "$_UNITS_FACTS"; return 0; fi
-  proof_held_facts "${1:-}" || _proof_facts "${1:-}"
+_UNITS_FACTS_FILE=""; _UNITS_FACTS_KEY=""
+# _units_facts_at <plan, a copy already read as its plan> -> 0 with the facts ready as lib/proof.sh `proof_facts_at`
+# leaves them, for `_proof_facts_awk`: the held answer when the call holds this plan's, else the fold's; 2 a failed fold
+_units_facts_at() {
+  if [ -n "${_UNITS_FACTS_PLAN:-}" ] && [ "$_UNITS_FACTS_PLAN" = "${1:-}" ]; then
+    _PROOF_FACTS_FILE="$_UNITS_FACTS_FILE"; _PROOF_FACTS_TEXT="$_UNITS_FACTS"; return 0
+  fi
+  _proof_held_facts_at "${1:-}" || proof_facts_at "${1:-}" || return 2
+}
+# _units_facts_cat -> the facts the call holds, on stdout: their file read inside a held command, the string outside one
+_units_facts_cat() {
+  if [ -n "${_UNITS_FACTS_FILE:-}" ]; then cat "$_UNITS_FACTS_FILE"; else printf '%s' "${_UNITS_FACTS:-}"; fi
 }
 
 # _units_place <plan> -> `<step> <1|0>`: the run's step, its sub-step letter dropped, and whether the plan's Step-3
@@ -260,7 +320,7 @@ _units_place() {
   local a
   declare -F reader_q_step >/dev/null 2>&1 || { declare -F _proof_reader_load >/dev/null 2>&1 && _proof_reader_load; } \
     || { printf ' 0'; return 0; }
-  a="$(set -o pipefail; reader_facts() { printf '%s' "$_UNITS_FACTS"; }
+  a="$(set -o pipefail; reader_facts() { _units_facts_cat; }
     reader_q_step "${1:-}" | sed -n 's/^n=//p' || exit 2
     reader_q_approved "${1:-}" step3; case $? in (0) echo 1 ;; (1) echo 0 ;; (*) exit 2 ;; esac)" || return 2
   case "$a" in *$'\n'*) printf '%s %s' "$(a="${a%$'\n'*}"; printf '%s' "${a%[ab]}")" "${a##*$'\n'}" ;; *) printf ' %s' "$a" ;; esac
@@ -337,11 +397,14 @@ units_drop_event() {
 # reason, the first per row, in the facts' order, each field read by its name. Nothing for a run with none; 2 a failed
 # fold.
 _units_born_facts() {
-  local plan facts
+  local plan
   plan="$(_units_origin "${1:-}")"
   [ -f "$plan" ] && _units_lib proof.sh _proof_facts || return 0
-  facts="$(_units_facts_of "$plan")" && _proof_fields || return 2
-  printf '%s\n' "$facts" | awk -F'|' "$_LINE_FIELDS_AWK"'
+  _proof_fields && _units_facts_at "$plan" || return 2
+  _proof_derive _units_born_facts "$plan" _units_born_made
+}
+_units_born_made() {
+  _proof_facts_awk -F'|' "$_LINE_FIELDS_AWK"'
     line_ev() == "born" && line_kv("row") != "" && line_kv("reason") != "" && !seen[line_kv("row")]++ {
       printf "%s\t%s\t%s\t%s\n", line_kv("row"), line_kv("reason"), line_kv("finding"), line_kv("promoted") }'
 }
@@ -400,7 +463,7 @@ units_memoised() {  # <plan> <command> [args...]
   fi
   local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
   local _UNITS_MEMO_WAITS="${TMPDIR:-/tmp}/bionic-units-waits-$$-${RANDOM}${RANDOM}"
-  local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC="" _UNITS_MEMO_PROOFS="" _UNITS_MEMO_PROOFS_RC="" _UNITS_FACTS_PLAN="" _UNITS_FACTS=""
+  local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC="" _UNITS_MEMO_PROOFS="" _UNITS_MEMO_PROOFS_RC="" _UNITS_FACTS_PLAN="" _UNITS_FACTS="" _UNITS_FACTS_FILE="" _UNITS_FACTS_KEY=""
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _units_fold "${1:-}"
   _UNITS_MEMO_LIVE="$(_units_live "${1:-}")"; _UNITS_MEMO_LIVE_RC=$?
@@ -1078,7 +1141,8 @@ _units_proof_awk() {
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out rows i fst rst rc wts live proofs
-  local _UNITS_FACTS_PLAN="${_UNITS_FACTS_PLAN:-}" _UNITS_FACTS="${_UNITS_FACTS:-}"
+  local _UNITS_FACTS_PLAN="${_UNITS_FACTS_PLAN:-}" _UNITS_FACTS="${_UNITS_FACTS:-}" _UNITS_FACTS_FILE="${_UNITS_FACTS_FILE:-}"
+  local _UNITS_FACTS_KEY="${_UNITS_FACTS_KEY:-}"
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ] \
      && [ "$mode" != questions ]; then
     case "$step" in ''|*[!0-9]*) return 2 ;; esac
@@ -1122,7 +1186,9 @@ _units_sched() {
 _units_sched_run() {
   {
     printf '\034rows\n'; printf '%s\n' "$4"
-    printf '\034facts\n'; printf '%s\n' "${_UNITS_FACTS:-}"
+    # The program reads the approvals alone of this part, so a file is read for them and nothing else is handed on.
+    printf '\034facts\n'
+    if [ -n "${_UNITS_FACTS_FILE:-}" ]; then awk 'index($0, "|ev=approval|")' "$_UNITS_FACTS_FILE"; else printf '%s\n' "${_UNITS_FACTS:-}"; fi
     printf '\034waits\n'; printf '%s\n' "${7:-}"
     printf '\034proofs\n'; printf '%s\n' "${8:-}"
   } | _UNITS_FLOOR_ST="$5" _UNITS_READ_ST="${6:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" \
@@ -1207,8 +1273,11 @@ _units_floor_kept() {
 # no writer slot; the scheduler asks `in_docs` which rows write what a `record` read waits on.
 # Prepended to each program; NO APOSTROPHE inside it (it is single-quoted).
 _units_files_awk() {
+  local h
+  declare -F docs_heads >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/root.sh"
+  h="$(docs_heads)"
+  printf 'function in_docs(e) { return (index(e, ".bionic/") == 1 || e ~ /^(%s)\//) }\n' "${h//$'\n'/|}"
   printf '%s' '
-    function in_docs(e) { return (index(e, ".bionic/") == 1 || index(e, "record/") == 1) }
     function writes_head(cell,   a, m, k, e) {
       m = split(cell, a, ",")
       for (k = 1; k <= m; k++) {
@@ -1714,6 +1783,15 @@ _units_sched_awk() {
       lwhy = "the judge (facts_state) reads " s " at " substr(livehead, 1, 12) "; only an uncovered question is read again"
       return 0
     }
+    # revcover(j) -> 1 when row j is a review with a reading for each question it carries (a bare one, any review
+    # proof) that the judge owes nothing past. The readings are asked as live_judge asks them (needread).
+    function revcover(j,   k) {
+      if (knd[j] != "review") return 0
+      if (nq[j]) { for (k = 1; k <= nq[j]; k++) if (!(rq[j, k] in prvq)) return 0 }
+      else if (!("review" in prvh)) return 0
+      if (readst == "") { needread = 1; return 0 }
+      return (rdparse() && !live_owes(j))
+    }
     # live_past(i) -> 1 when pending row i reads live:head past a reading, with a head handed in: the judge decides it.
     function live_past(i,   k) {
       if (!rlive[i] || rbadq[i] || livehead == "") return 0
@@ -1809,8 +1887,10 @@ _units_sched_awk() {
       }
       # A ROW ID waits until that row lands or is dropped, whatever other state it is in, itself
       # included: a row that reads its own id waits for ever, and the validator names the cycle.
+      # A REVIEW ROW NEVER LANDS: a proof returns it to pending, so a dep on it is met by its cover. It is met when
+      # every question it carries has a reading (registered) and the judge owes it none (revcover).
       if (t in at) {
-        for (c = 1; c <= ncw; c++) if (st[cw[c]] != satisfied && st[cw[c]] != "dropped") wj[++nw] = cw[c]
+        for (c = 1; c <= ncw; c++) if (st[cw[c]] != satisfied && st[cw[c]] != "dropped" && !revcover(cw[c])) wj[++nw] = cw[c]
         return (nw == 0)
       }
       # head, record, merge AND A PATH wait on each open row the read names (a row reading the settled
@@ -1985,7 +2065,7 @@ _units_sched_awk() {
       if ((mode == "ready" || mode == "held" || mode == "waiting") && readst == "") {
         for (i = 1; i <= n; i++) {
           if (st[i] != "pending" || rowheld(i) != 0 || knd[i] == "integrate") continue
-          for (k = 1; k <= ntk[i]; k++) if (tk[i, k] == "proof:review") { judge(i, tk[i, k]); if (needread) exit 4 }
+          for (k = 1; k <= ntk[i]; k++) if (tk[i, k] == "proof:review" || (tk[i, k] in at)) { judge(i, tk[i, k]); if (needread) exit 4 }
         }
       }
       for (i = 1; i <= n; i++) {
@@ -2405,9 +2485,11 @@ units_run_rosters() {
 #
 # A ROW'S LANDING AND LAUNCH ARE THE READER'S: a landed row stands when the reader's status answers landed, and a
 # launched row with no roster to judge stands when the reader holds its dispatch under a name. An answer other than
-# the one asked is the `evidence` finding.
+# the one asked is the `evidence` finding. Every row asked is answered by ONE pass of the reader over the facts this call
+# holds (lib/reader.sh `reader_q_statuses`), joined here against the rows this call already read, never by an ask a row,
+# so a pass costs the same at any number of rows. A reader that cannot answer answers no row, so each asked row is a finding.
 _units_ledger() {
-  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" rows useroster=0 own="" run="" rf first=1 out line found=0
+  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" rows useroster=0 own="" run="" rf first=1 out line found=0 sts=""
   rows="$(units_rows "$plan")" || return 0
   [ -n "$rows" ] || return 0
   while IFS= read -r rf; do
@@ -2465,12 +2547,20 @@ UNITS_RUN
         } else printf "ask dispatched %s\n", id[i]
       }
     }')"
+  case "$out" in
+    'ask '*|*$'\n''ask '*)
+      if _units_lib reader.sh reader_q_statuses; then sts="$(_units_statuses "$(_units_origin "$plan")" 2>/dev/null)" || sts=""; fi
+      # The join: each row's first line is its state, and a dispatch is under a name when a `name=` line is not empty.
+      out="$({ printf '%s\n' "$sts"; printf '\034\n'; printf '%s\n' "$out"; } | awk '
+        $0 == "\034" { part = 1; next }
+        !part && index($0, "row=") == 1 { r = substr($0, 5); first = 1; next }
+        !part { if (first) st[r] = substr($0, 7); else if ($0 ~ /^name=./) named[r] = 1; first = 0; next }
+        $1 == "ask" && $2 == "landed" { if (st[$3] != "landed") print "evidence " $3; next }
+        $1 == "ask" { if (st[$3] != "dispatched" || !($3 in named)) print "evidence " $3; next }
+        { print }')" ;;
+  esac
   while IFS= read -r line; do
-    case "$line" in
-      '') continue ;;
-      'ask '*) _units_asked "$plan" "${line##* }" "$(line="${line#ask }"; printf '%s' "${line%% *}")" && continue
-               line="evidence ${line##* }" ;;
-    esac
+    [ -n "$line" ] || continue
     printf '%s\n' "$line"; found=1
   done <<UNITS_FOUND
 $out
@@ -2478,17 +2568,39 @@ UNITS_FOUND
   return "$found"
 }
 
-# _units_asked <plan> <row> <landed|dispatched> -> 0 when the reader's status of <row> answers it so, a dispatch under a
-# name, over the facts this call holds; 1 for any other answer and when the reader cannot answer.
-_units_asked() {
-  local a
-  _units_lib reader.sh reader_q_status || return 1
-  a="$(if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then reader_facts() { printf '%s' "$_UNITS_FACTS"; }; fi
-    reader_q_status "$(_units_origin "$1")" "$2" 2>/dev/null)" || return 1
-  case "$3" in
-    landed) [ "${a%%$'\n'*}" = state=landed ] ;;
-    *) [ "${a%%$'\n'*}" = state=dispatched ] && case "$a" in *$'\n'name=?*) : ;; *) false ;; esac ;;
-  esac
+# _units_statuses <plan> -> lib/reader.sh `reader_q_statuses` over the facts this call holds (`_units_fold`), else over the
+# reader's own fold. Its answer reads only the facts that name a row (`_READER_ROW_AWK` and `_READER_DROP_AWK` read a
+# line by its `row=`), so it is kept under the cksum of those lines and the reader's libraries: a judgment's pending
+# step, which names no row, is laid over the same answer, and a pending landing or tree, which does, is passed again.
+_units_statuses() {
+  local out rc
+  # Nothing is kept unless the key below is made, so no earlier ask's hold is written over.
+  _UNITS_HOLD_FILE=""; _UNITS_HOLD_KEY=""
+  if [ -n "${_UNITS_FACTS_PLAN:-}" ] && _units_rowkey && _units_hold statuses "$1" "$_UNITS_ROWKEY $(cksum "$_UNITS_DIR/reader.sh" "$_UNITS_DIR/line.sh" 2>/dev/null)" \
+     && _units_held; then
+    printf '%s' "$_UNITS_HELD_OUT"; return "$_UNITS_HELD_RC"
+  fi
+  out="$(if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then reader_facts() { _units_facts_cat; }; fi
+    reader_q_statuses "$1"; printf 'x%s' "$?")"; rc="${out##*x}"; out="${out%x*}"
+  [ "$rc" -ne 0 ] || _units_keep "$rc" "$out"
+  printf '%s' "$out"; return "$rc"
+}
+
+# _units_rowkey -> 0 with _UNITS_ROWKEY the key of the held facts that name a row. Facts held as the command's file are
+# keyed with no process: the fold's key and the pending lines laid over it that name one, so a pending step, which names
+# no row, is served the same answer. Facts a caller holds as a string are keyed by the cksum of their lines that name a
+# row. Outside a held command nothing is kept whatever the key (`_units_hold`).
+_units_rowkey() {
+  local k="" l
+  _UNITS_ROWKEY=""
+  if [ -z "${_UNITS_FACTS_FILE:-}" ] || [ -z "${_UNITS_FACTS_KEY:-}" ]; then
+    _UNITS_ROWKEY="$(printf '%s\n' "${_UNITS_FACTS:-}" | grep -F '|row=' | cksum)"; return 0
+  fi
+  case "$_UNITS_FACTS_FILE" in */out-*) [ -f "$_UNITS_FACTS_FILE.key" ] && IFS= read -r -d '' k < "$_UNITS_FACTS_FILE.key" ;; esac
+  _UNITS_ROWKEY="$_UNITS_FACTS_KEY"
+  while IFS= read -r l; do case "$l" in *'|row='*) _UNITS_ROWKEY="$_UNITS_ROWKEY $l" ;; esac; done <<UNITS_ROWKEY
+$k
+UNITS_ROWKEY
 }
 
 # _units_files_tokens <Files cell> -> one entry per line, as the readiness program reads a Files cell: comma-split,
@@ -2694,6 +2806,17 @@ UNITS_BORN_COUNTED
 #   finding; exit 1 when the plan cannot be read. Readers: lib/proof.sh `proof_fixed` (the judge's fixed findings) and the poker's
 #   `finding_disposition` (the fix row of each finding).
 units_born_findings() {
+  local k="" c
+  # The answer reads the plan's table, so its key holds the plan's cksum now: a verb may write the plan between two sums
+  # of the log. A verb's copy is computed at every ask; the plan's own answer is kept.
+  case "${1:-}" in ''|*.plan.md.*) ;; *)
+    ! declare -F _proof_derive_ready >/dev/null 2>&1 || ! _proof_derive_ready "$1" \
+      || ! c="$(cksum < "$1" 2>/dev/null)" || k="$1"$'\035'"plan=$c" ;;
+  esac
+  if declare -F _proof_derive >/dev/null 2>&1; then _proof_derive units_born_findings "$k" _units_born_findings_made "$@"
+  else _units_born_findings_made "$@"; fi
+}
+_units_born_findings_made() {
   local out
   out="$(_units_born_rows "${1:-}" 10)" || return 1
   [ -z "$out" ] || printf '%s\n' "$out" | awk -F'\t' "$_UNITS_REVIEW_AWK"'

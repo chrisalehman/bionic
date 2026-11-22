@@ -43,6 +43,8 @@
 #   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
 #             and one line names the word and the change.
 #   §ABANDON  abandon is taken only on words a session typed, and on them it ends the run.
+#   §HELD     a living command's held fold, a planted step in it too, is what its processes are served; once the
+#             command ends its directory is gone, and a copy under a dead pid serves a decider nothing.
 #
 # FIXTURE FIDELITY. Every world is a real `git init` in a scratch directory, with a real linked worktree
 # where one is named; plan and log are real files changed by the shell commands a person would type.
@@ -474,6 +476,10 @@ for k in place facts 'place facts'; do
   gate "git commit -m x"
   expect_eq "with the kept $k read delivered, the refusal is the one before, word for word" "$E0" "$(cat "$SB/gate.err")"
 done
+# The kept files rewritten by hand are this section's own: every world after it is built byte for byte as this one, so
+# under the same key they would answer delivered to the hooks of the sections below, which read the kept place as a
+# hook outside a command does. A held command no longer writes that file over, so it is taken away here.
+rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"
 
 section "SHUT"
 HL="bionic: write refused — this changes the seal's home (only the tool writes there)"
@@ -616,5 +622,25 @@ rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; CK="$(bash -c '. "$(dirname "$0")/lib/reso
   ck >/dev/null; E0="$(ck)"; k="$(keep "$RL" "$P" | grep -c "kind=regression")"; E1="$(ck)"; f="${RL#run/v1|ev=proof|}"; IFS="|" read -ra kv <<< "${f%|at=*}"; LOG_AT=2026-10-04T12:00:00Z bash -c "$R proof_event \"\${@:2}\"" _ "$LIB" "$P" "${kv[@]}"
   printf "%s|%s|%s|%s" "$k" "$(printf "%s\n" "$E0" | grep -c "would refuse\|^rc=1\|^facts: WOULD REFUSE")" "$([ "$E0" = "$E1" ] && echo same)" "$(ck | grep -c "would advance\|^rc=0\|^facts: every fact")"' "$BIONIC_SCRIPTS_DIR/tests/judged")"
 expect_eq "with the regression proof given the kept facts by hand, current 8 --check and the close's facts refuse word for word; written by its writer, both admit" "1|3|same|3" "$CK"
+
+section "HELD"
+# fails-when: a command's held fold is served once the command that made it has ended, so a decider of a later command
+# reads a fold an earlier one left; or a fold in the held directory of a living command is not what its processes are
+# served, so the hold holds nothing. The held fold is planted with a step no event holds (n=9).
+world
+hd_step() { sed -n '2,$ s/.*|ev=step|n=\([0-9]*\)|.*/\1/p' "$1"/fold-* 2>/dev/null | sort -n | tail -1; }  # <held dir> -> the highest step its fold holds
+hd_ask() {  # <held dir> -> the step a decider in a process of its own reads, BIONIC_HELD naming <held dir>
+  BIONIC_HELD="$1" bash -c '. "$1/proof.sh" && _PROOF_FRESH=1 _proof_ask "$2" reader_q_step "$2" | sed -n "s/^n=//p"' _ "$LIB" "$GP" 2>/dev/null
+}
+HD="$( proof_hold_begin && _PROOF_FRESH=1 _proof_facts "$GP" >/dev/null || exit 1
+  for f in "$BIONIC_HELD"/fold-*; do sed '2,$ s/|ev=step|n=5|/|ev=step|n=9|/' "$f" > "$f.t" && mv "$f.t" "$f"; done
+  cp -Rp "$BIONIC_HELD" "$SB/held-copy"; printf '%s|%s|%s' "$(hd_step "$BIONIC_HELD")" "$(hd_ask "$BIONIC_HELD")" "$BIONIC_HELD"; proof_hold_end )"
+sleep 0 & HD_PID=$!; wait "$HD_PID"; HD_DEAD="$TMPDIR/bionic-held-$HD_PID.copy"; rm -rf "$HD_DEAD"; mv "$SB/held-copy" "$HD_DEAD"
+expect_eq "a process of a living command is served its command's held fold, the planted step with it" "9|9" "${HD%|*}"
+expect_eq "once the command ends its held directory is gone, and a decider naming it reads the log" "absent|5" \
+  "$([ -e "${HD##*|}" ] && echo there || echo absent)|$(hd_ask "${HD##*|}")"
+expect_eq "a held directory whose command is dead, the planted fold in it, serves a decider nothing: it reads the log" "9|5" \
+  "$(hd_step "$HD_DEAD")|$(hd_ask "$HD_DEAD")"
+rm -rf "$HD_DEAD"
 
 finish

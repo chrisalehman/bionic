@@ -25,8 +25,14 @@
 # is a single plain file each part makes afresh in its own sandbox.
 
 # ---- from S10h (part a): the decoy roster file §RECORDER (part b) points a symlink at ----
+# A helper is found beside this file, wherever the suite that sources it stands; one that does not load stops the suite.
+DP4_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=/dev/null
-declare -F seal_fixture >/dev/null 2>&1 || . "$(dirname "$0")/lib/seal-fixture.sh"
+declare -F seal_fixture >/dev/null 2>&1 || { [ -r "$DP4_HERE/lib/seal-fixture.sh" ] && . "$DP4_HERE/lib/seal-fixture.sh"; } \
+  || { echo "dispatch-preflight-4.prelude.sh: cannot load $DP4_HERE/lib/seal-fixture.sh" >&2; exit 1; }
+# The sandbox is dispatch-preflight.prelude.sh's, sourced first: without it the decoy would be written at the root.
+[ -n "${SANDBOX:-}" ] && [ -d "$SANDBOX" ] \
+  || { echo "dispatch-preflight-4.prelude.sh: no sandbox; source dispatch-preflight.prelude.sh first" >&2; exit 1; }
 DECOY_ROSTER="$SANDBOX/decoy-roster.txt"
 printf 'untouched\n' > "$DECOY_ROSTER"
 
@@ -57,7 +63,7 @@ q_gate() {  # <repo> <tag> <role> <brief>
 
 # ---- from §Q: the repo bound to no plan ----
 q_unbound() {  # <name> -> a repo whose session is engaged and bound to no plan
-  local repo; repo=$(make_repo "$1" yes)
+  local repo; repo=$(make_repo "$1" yes) || return 1
   rm -f "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   unbound_marker "$repo" "$SID_A" empty
   write_attestation "$repo" "$SID_A"

@@ -16,8 +16,9 @@
 # A value holding `|` or a line break would split a field or a line, so it is refused unwritten.
 #
 # THE CLOSED LIST. LOG_TYPES is every event type a line may carry: the 28 of the kernel map, `hand`
-# (any act taken by hand to keep the run going) and `drop` (a row's work no longer owed, in the person's
-# words). A type outside it is refused, so a misspelt or retired event cannot become a fact the reader has
+# (any act taken by hand to keep the run going), `drop` (a row's work no longer owed, in the person's
+# words) and `ruling` (the orchestrator's binding word to one row's writer, its push and its reading:
+# lib/roster.sh). A type outside it is refused, so a misspelt or retired event cannot become a fact the reader has
 # no question for.
 #
 # EXITS. 0 appended; 2 refused with the file untouched (no type, a type outside the list, a field that is
@@ -51,7 +52,7 @@ fi
 declare -F seal_write >/dev/null 2>&1 || . "$_LOG_LIB_DIR/seal.sh"
 
 LOG_TYPES=" ready candidate verdict published returned stalled standing admitted void run walk step approval"
-LOG_TYPES="${LOG_TYPES} proof finding waiver decision order bind handoff dispatch tree born ask stop debt abandon cancel hand drop "
+LOG_TYPES="${LOG_TYPES} proof finding waiver decision order bind handoff dispatch tree born ask stop debt abandon cancel hand drop ruling "
 
 log_append() {  # <event type> <key>=<value>… -> 0 appended, 2 refused, 1 not written
   local ev="${1:-}" f k line at="${LOG_AT:-}"
@@ -75,6 +76,12 @@ log_append() {  # <event type> <key>=<value>… -> 0 appended, 2 refused, 1 not 
 LOG_SEALED_WHY="no seal stood for this open run, so it was sealed as it was found"
 
 _log_put() {  # <log> <line> -> 0 appended, 1 not; inside the seal when the log is a run's
+  local rc
+  _log_put_line "$@"; rc=$?
+  _log_moved
+  return "$rc"
+}
+_log_put_line() {
   local log plan
   log="$(_seal_canon "$1")"
   _log_plan "$log" || { _wt_proofs_put "$1" "$2"; return; }
@@ -95,6 +102,27 @@ _log_put() {  # <log> <line> -> 0 appended, 1 not; inside the seal when the log 
     64) _wt_proofs_put "$1" "$2"; return ;;
   esac
   return "$SEAL_RC"
+}
+
+# _log_moved -> a log was written to. Inside a held command (lib/proof.sh `_proof_facts_held`) every key line the command
+# holds is removed, so the next ask in any of its processes sums the log again and folds what this line added; the
+# files folded under the old key stay, and serve again only if the sum finds it unchanged. Counted (`append`,
+# tests/speed-counts.test.sh) when BIONIC_COUNT names a file.
+_log_moved() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'append _log_put\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  # A hold is trusted here exactly as lib/proof.sh `_proof_held_dir` trusts it, which this library cannot load: this
+  # user's directory, no link, writable by neither group nor other, named by a live pid. tests/speed-counts.test.sh
+  # §TRUST holds the two equal.
+  local d="${BIONIC_HELD:-}" pid
+  case "$d" in */bionic-held-*) ;; *) return 0 ;; esac
+  [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] || return 0
+  pid="${d##*/bionic-held-}"; pid="${pid%%.*}"
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 0
+  [ -n "$(find "$d" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ] || return 0
+  set -- "$d"/key-*
+  [ ! -e "$1" ] || rm -f "$@" 2>/dev/null
+  return 0
 }
 
 # _log_plan <canonical log> -> _LOG_PLAN, the plan of the run whose log it is; rc 1 when no plan is. The record is

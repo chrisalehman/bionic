@@ -144,4 +144,39 @@ expect_contains "R3 …including what a comment never names" "never names a wave
 PR_FLAT="$(printf '%s' "$PR_OUT" | tr '\n' ' ' | tr -s ' ')"
 expect_contains "R4 the consent screen shows the rule before the question (the page was read)" "never names a wave" "$PR_FLAT"
 
+section "PRINCIPLES — setup writes the rendered block between the markers and touches no byte outside them"
+# fails-when: the installed block differs from the rendered file's, or a byte outside the markers changes.
+# The home holds the user's own CLAUDE.md, ending in a blank line: the shape a strip or a write gets wrong by a byte.
+SB_PB="$TMP/sb-principles-bytes"; mkdir -p "$SB_PB/.claude"
+printf '%s\n' '# My own notes' '' '- prefer small commits' '' > "$SB_PB/.claude/CLAUDE.md"
+cp "$SB_PB/.claude/CLAUDE.md" "$TMP/pb-planted.md"
+printf 'y\n' | HOME="$SB_PB" ZDOTDIR="$SB_PB" SHELL=/bin/zsh PATH="$STUB:$PATH" BIONIC_CLAUDE_HOME="$SB_PB/.claude" \
+  bash "$SETUP_SH" --only working-principles >/dev/null 2>&1
+# The rendered file's own span, start marker to end marker, and the same span read out of the installed file.
+pb_span() {  # <file> -> the lines from the start marker to the end marker, markers included
+  local line inside=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$line" = "<!-- bionic:principles:start -->" ] && inside=1
+    [ "$inside" = "1" ] && printf '%s\n' "$line"
+    [ "$line" = "<!-- bionic:principles:end -->" ] && inside=0
+  done < "$1"
+}
+pb_outside() {  # <file> -> every line outside the span
+  local line inside=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$line" = "<!-- bionic:principles:start -->" ] && inside=1
+    [ "$inside" = "0" ] && printf '%s\n' "$line"
+    [ "$line" = "<!-- bionic:principles:end -->" ] && inside=0
+  done < "$1"
+}
+pb_span "$PAYLOAD/context/working-principles.md" > "$TMP/pb-rendered-span"
+pb_span "$SB_PB/.claude/CLAUDE.md" > "$TMP/pb-installed-span"
+pb_outside "$SB_PB/.claude/CLAUDE.md" > "$TMP/pb-outside"
+expect_true "PB1 the rendered file's span was read (the extractor is not empty)" test -s "$TMP/pb-rendered-span"
+expect_true "PB2 the install wrote a span (the twin of the next row)" test -s "$TMP/pb-installed-span"
+expect_true "PB3 the installed span is the rendered span, byte for byte" cmp -s "$TMP/pb-rendered-span" "$TMP/pb-installed-span"
+expect_true "PB4 every byte outside the span is the user's, as planted" cmp -s "$TMP/pb-planted.md" "$TMP/pb-outside"
+expect_true "PB5 the installed span carries the reader principle's line (a positive beside PB3's equality)" \
+  grep -q -F '**Write for a reader with no context.** The reader has not seen your tool calls' "$TMP/pb-installed-span"
+
 finish

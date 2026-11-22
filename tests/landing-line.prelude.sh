@@ -47,8 +47,12 @@ ll_cleanup() {  # every carrier and stand-in runner the suite started
   while IFS= read -r p; do kill "$p" 2>/dev/null; done < "$WORLD_ROOT/pids"
 }
 trap ll_cleanup EXIT
-. "$(dirname "$0")/lib/world.sh"
-. "$(dirname "$0")/lib/wait.sh"
+# A helper is found beside this file, wherever the suite that sources it stands; one that does not load stops the suite.
+LL_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+for LL_HELPER in world wait; do
+  [ -r "$LL_HERE/lib/$LL_HELPER.sh" ] && . "$LL_HERE/lib/$LL_HELPER.sh" \
+    || { echo "landing-line.prelude.sh: cannot load $LL_HERE/lib/$LL_HELPER.sh" >&2; exit 1; }
+done
 
 LL_LOADED=0
 if [ -r "$LINE" ] && . "$LINE" 2>/dev/null; then LL_LOADED=1; fi
@@ -249,8 +253,8 @@ ll_kill_bg() {  # <pid> — a background drive and every process under it
 }
 
 ll_carrier_env() {  # the carrier's environment, as the carrier section of part 1 sets it (wave-28 T4); the lines are that section's own
-  . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
-  . "$(dirname "$0")/lib/roster-row.sh"
+  . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" || return 1
+  . "$LL_HERE/lib/roster-row.sh" || return 1
   export CLAUDE_CONFIG_DIR="$WORLD_ROOT/home"
   mkdir -p "$CLAUDE_CONFIG_DIR/bionic"; printf '80\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
   export CLAUDE_CODE_SESSION_ID="$WORLD_SID" BIONIC_GATE_POLL=0.1 BIONIC_LINE_POLL=0.2

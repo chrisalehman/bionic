@@ -277,6 +277,67 @@ line_merge_seen() {
   printf 'unmerged\t-\t%s\tthe pull request %s is %s\n' "$name" "$url" "$(printf '%s' "${st:-of no state}" | tr '[:upper:]' '[:lower:]')"
   return 1
 }
+# THE TAG AT THE MERGE. The release the plan names is tagged at the commit the merge was read at, and the tag is
+# pushed, once the run's log holds the person's release approval; the approval authorises the tag and its push. Both
+# are read here and nowhere else, so the close and its check agree. A tag is never moved: one that stands at another
+# commit, here or on origin, is left as it is and said, and the push is never forced. A push that fails removes the
+# tag this call made, so nothing stands half done.
+#
+#   line_tag_merge <plan> <root> <commit> [--check]
+#     prints one line, three tab-separated fields: <verdict> <tag or -> <words>, and returns
+#       0  tagged   the tag was made at the commit and pushed to origin (or only made, a project with no origin)
+#       0  stands   the tag is already at the commit, and nothing was made
+#       0  would    --check alone: the tag would be made and pushed; nothing was
+#       1  none     no tag is made: the plan names no release, the run holds no release approval, or no commit was read
+#       1  left     a tag of that name stands at another commit, here or on origin
+#       2  failed   the tags of origin cannot be read, or the tag or its push failed; nothing was left made
+line_tag_merge() {
+  local plan="${1:-}" root="${2:-}" c="${3:-}" mode="${4:-}" rel tag ah here="" there="" out err made=no s
+  _line_load_run && _line_load_proof \
+    || { printf 'none\t-\tthe plan readers (lib/run.sh, lib/proof.sh) cannot be loaded\n'; return 1; }
+  rel="$(plan_frontmatter_get "$plan" release 2>/dev/null)"
+  [ -n "$rel" ] || { printf 'none\t-\tno tag: the plan names no release:\n'; return 1; }
+  tag="v${rel#v}"
+  git check-ref-format "refs/tags/$tag" 2>/dev/null \
+    || { printf 'none\t-\tno tag: the release %s is not a name a tag can have\n' "$rel"; return 1; }
+  ah="$(proof_approved_head "$plan" release 2>/dev/null)" || ah=""
+  [ -n "$ah" ] || { printf 'none\t%s\tno tag: the run'"'"'s log holds no release approval\n' "$tag"; return 1; }
+  c="$(git -C "$root" rev-parse --verify -q "${c:-none}^{commit}" 2>/dev/null)" \
+    || { printf 'none\t%s\tno tag: no merge commit was read\n' "$tag"; return 1; }
+  s="${c:0:12}"
+  here="$(git -C "$root" rev-parse --verify -q "refs/tags/$tag^{commit}" 2>/dev/null)" || here=""
+  if git -C "$root" remote get-url origin >/dev/null 2>&1; then
+    out="$(GIT_TERMINAL_PROMPT=0 git -C "$root" ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}" 2>&1)" \
+      || { printf 'failed\t%s\tthe tags of origin cannot be read: %s\n' "$tag" "$(printf '%s' "$out" | tr '\t\n' '  ')"; return 2; }
+    there="$(printf '%s\n' "$out" | awk '$2 ~ /\^\{\}$/ { p = $1 } $2 !~ /\^\{\}$/ { t = $1 } END { print (p != "" ? p : t) }')"
+  fi
+  if [ -n "$here" ] && [ "$here" != "$c" ]; then
+    printf 'left\t%s\t%s stands here at %s, not at the merge commit %s; left as it is, nothing moved\n' "$tag" "$tag" "${here:0:12}" "$s"; return 1
+  fi
+  if [ -n "$there" ] && [ "$there" != "$c" ]; then
+    printf 'left\t%s\t%s stands on origin at %s, not at the merge commit %s; left as it is, nothing moved\n' "$tag" "$tag" "${there:0:12}" "$s"; return 1
+  fi
+  if [ "$there" = "$c" ] || { [ "$here" = "$c" ] && ! git -C "$root" remote get-url origin >/dev/null 2>&1; }; then
+    printf 'stands\t%s\t%s already stands at the merge commit %s; nothing was made\n' "$tag" "$tag" "$s"; return 0
+  fi
+  if [ "$mode" = --check ]; then
+    printf 'would\t%s\trun would tag %s at the merge commit %s and push it\n' "$tag" "$tag" "$s"; return 0
+  fi
+  if [ -z "$here" ]; then
+    err="$(git -C "$root" tag "$tag" "$c" 2>&1)" \
+      || { printf 'failed\t%s\t%s could not be made at %s: %s\n' "$tag" "$tag" "$s" "$(printf '%s' "$err" | tr '\t\n' '  ')"; return 2; }
+    made=yes
+  fi
+  if ! git -C "$root" remote get-url origin >/dev/null 2>&1; then
+    printf 'tagged\t%s\t%s at the merge commit %s; no remote named origin, so nothing was pushed\n' "$tag" "$tag" "$s"; return 0
+  fi
+  err="$(GIT_TERMINAL_PROMPT=0 git -C "$root" push --quiet origin "refs/tags/$tag:refs/tags/$tag" 2>&1)" || {
+    [ "$made" = yes ] && git -C "$root" tag -d "$tag" >/dev/null 2>&1
+    printf 'failed\t%s\tthe push of %s to origin failed: %s; no tag was left made\n' "$tag" "$tag" "$(printf '%s' "$err" | tr '\t\n' '  ')"; return 2
+  }
+  printf 'tagged\t%s\t%s at the merge commit %s, pushed to origin\n' "$tag" "$tag" "$s"
+  return 0
+}
 # line_merge_ask_key <working branch> -> the register's key of a request closed unmerged: each character outside
 # [A-Za-z0-9._-] written `:`, as the publish verb writes its own `pr:` key
 line_merge_ask_key() { printf 'pr-closed:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }
@@ -297,6 +358,9 @@ _line_merge_ask() {  # <plan> <root> <mode> <working branch> <open|close> [<addr
 # it stands; a log that is a link is read as absent, as the readers that guard the record against a link always read it.
 line_lines() {  # <run log> -> the log's lines; rc 0 when it does not stand, else cat's
   line_held "$1" || return 0
+  # A whole read of the log, counted as lib/reader.sh `reader_events` counts its own (tests/speed-counts.test.sh), so
+  # the ceiling on a command's reads of the log holds this one too.
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'log line_lines\n' 2>/dev/null >>"$BIONIC_COUNT" || :
   cat "$1"
 }
 line_held() {  # <run log> -> 0 when the log stands
@@ -616,14 +680,14 @@ _line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
 # once a release row of the plan has published, every later landing would leave the check red until someone typed
 # the numbers again by hand. So the line renders them as part of that landing: `release-note --at <candidate> --on
 # <instant>` for the plan, the entry's block in the candidate's CHANGELOG.md replaced by what it prints, committed on
-# the candidate under the line's own author. The commit is made in the object store alone, before the release check
-# and the fast-forward, which then judge and publish it: a render that fails refuses the landing with nothing moved.
+# the candidate under the checkout's own author, as a commit typed by hand there would be. The commit is made in the
+# object store alone, before the release check and the fast-forward, which then judge and publish it: a render that
+# fails refuses the landing with nothing moved.
 # The instant is one second before the render, since the record's lines carry whole seconds and the report keeps a
 # line written at the instant: every line the block folds is then written before it is rendered, so the release
 # check rendering it again for the same head and instant gets the same block. No published release row (the release
 # row itself carries its own numbers), no `release:` in the plan, or an entry with no numbers block: nothing is made.
 # Sets LINE_NUMBERS (the commit, or empty) and, on a refusal, LINE_NUMBERS_SAID (the renderer's words).
-LINE_NUMBERS_AUTHOR="bionic line"; LINE_NUMBERS_EMAIL="line@bionic.invalid"
 # _line_release_landed <plan> <record> -> the first release row, in table order, the record holds a landing of: read
 # through lib/units.sh `units_record_landings`, the reading the reader rule's publish order asks, so the two agree on
 # whether the release has landed; nothing when none has.
@@ -690,8 +754,7 @@ _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothi
   && GIT_INDEX_FILE="$tmp/index" git -C "$root" read-tree "$cand" >/dev/null 2>&1 \
   && GIT_INDEX_FILE="$tmp/index" git -C "$root" update-index --cacheinfo "${mode:-100644},${blob},CHANGELOG.md" >/dev/null 2>&1 \
   && tree="$(GIT_INDEX_FILE="$tmp/index" git -C "$root" write-tree 2>&1)" \
-  && c="$(GIT_AUTHOR_NAME="$LINE_NUMBERS_AUTHOR" GIT_AUTHOR_EMAIL="$LINE_NUMBERS_EMAIL" \
-         git -C "$root" commit-tree "$tree" -p "$cand" -m "line: release numbers ${row}" 2>&1)" \
+  && c="$(git -C "$root" commit-tree "$tree" -p "$cand" -m "line: release numbers ${row}" 2>&1)" \
   || { LINE_NUMBERS_SAID="the numbers commit on ${cand} cannot be made: ${c:-${tree:-${blob:-git refused}}}"; rm -rf "$tmp"; return 1; }
   rm -rf "$tmp"
   LINE_NUMBERS="$c"
@@ -792,8 +855,9 @@ line_reviews_checkout() {
     printf 'CHANGELOG.md is changed in %s, the checkout holding %s: commit or restore it' "$co" "$2"
   fi
 }
-# line_reviews_commit <root> <parent> <file> <author> <email> <message> -> LINE_RV_COMMIT, the commit of <file> as
-# CHANGELOG.md on <parent>, made in the object store alone (nothing moves); rc 1 with LINE_RV_SAID saying why
+# line_reviews_commit <root> <parent> <file> <message> -> LINE_RV_COMMIT, the commit of <file> as CHANGELOG.md on
+# <parent>, made in the object store alone (nothing moves) under the checkout's own author, which <message> says the tool
+# made; rc 1 with LINE_RV_SAID saying why
 LINE_RV_COMMIT=""
 line_reviews_commit() {
   local root="$1" tip="$2" f="$3" tmp mode blob tree c
@@ -804,7 +868,7 @@ line_reviews_commit() {
      && GIT_INDEX_FILE="$tmp/index" git -C "$root" read-tree "$tip" >/dev/null 2>&1 \
      && GIT_INDEX_FILE="$tmp/index" git -C "$root" update-index --cacheinfo "${mode:-100644},${blob},CHANGELOG.md" >/dev/null 2>&1 \
      && tree="$(GIT_INDEX_FILE="$tmp/index" git -C "$root" write-tree 2>&1)" \
-     && c="$(GIT_AUTHOR_NAME="$4" GIT_AUTHOR_EMAIL="$5" git -C "$root" commit-tree "$tree" -p "$tip" -m "$6" 2>&1)"; then
+     && c="$(git -C "$root" commit-tree "$tree" -p "$tip" -m "$4" 2>&1)"; then
     rm -rf "$tmp"; LINE_RV_COMMIT="$c"; return 0
   fi
   rm -rf "$tmp"
@@ -1319,16 +1383,21 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
           line_returned_event "$plan" "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
           _wt_refuse "conflict branch=${branch} onto=${onto} files=${c:-<unreadable>} — the row does not merge onto what is ahead of it; merge ${onto} into the tree, land again"; rc=2; break
         fi
-        # The comment lint the queue runs (`_line_carry` 3b), over the same range: a comment the row adds that cites
-        # the run returns the row with a LINT line per hit, and nothing publishes.
-        lo="$(_line_comment_lint "$root" "$base" "$c")"; lc=$?
+        # The lints the queue runs (`_line_carry` 3b), over the same range: a line the row adds that a lint refuses
+        # returns the row with a LINT line per hit, and nothing publishes.
+        lo="$(_line_lint_all "$root" "$lt" "$base" "$c")"; lc=$?
         case $lc in
           0) ;;
           1) line_returned_event "$plan" "row=${row}" why=lint "detail=$(printf '%s\n' "$lo" | head -1)" >/dev/null
              printf '%s\n' "$lo" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
-             _wt_refuse "lint branch=${branch} — a comment the row adds cites the run; say the reason without it, land again"; rc=2; break ;;
+             _wt_refuse "lint branch=${branch} — a line the row adds is refused by a lint, each named on a LINT line above; fix it there, land again"; rc=2; break ;;
           *) _wt_refuse "lint-unreadable row=${row} — ${lo:-the lint printed nothing}"; rc=2; break ;;
         esac
+        _line_stale_say "$plan" "$row" "$root" "$base" "$c"; lc=$?
+        if [ "$lc" != 0 ]; then
+          [ "$lc" != 1 ] || _wt_refuse "stale branch=${branch} — the row deletes what the eval of a criterion cites; restate the criterion or have it waived, land again"
+          rc=2; break
+        fi
         line_candidate_event "$plan" "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
         lb="$base"
       fi
@@ -1342,8 +1411,8 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   [ "$rc" = 0 ] || return 2
   [ -z "$suites" ] || printf 'verdicts: %s green at %s, from %s\n' "$suites" "$g" "$vlog"
   _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec" || return $?
-  # What is owed, when the row has an agent on this session's roster (T6): its task, then its stop.
-  [ -z "$LINE_MARKED" ] || _line_owed "$row" "$LINE_PUBLISHED" "$LINE_MARKED"
+  # The row closed and what is owed, when the row has an agent on this session's roster: its stop.
+  [ -z "$LINE_MARKED" ] || _line_owed "$rec" "$root" "$row" "$LINE_PUBLISHED" "$LINE_MARKED"
 }
 
 # ---------------------------------------------------------------------------- the carrier
@@ -1605,7 +1674,61 @@ _line_resumed() {  # -> 0 when this process is the carrier `_line_one_head` star
   _line_me
   [ "$c" = "$LINE_ME" ]
 }
-_line_owed() { printf 'landed %s %s — owed: complete task %s, then stop %s\n' "$1" "$2" "$1" "$3"; }   # <row> <commit> <name>
+# THE LANDING CLOSES ITS ROW, so the stop of the agent is all a person owes for it: a script cannot stop an agent.
+# The row's record's assumptions join the run's, its roster row is acked through the sweeper (the ack ledger's one
+# writer; `--by patrol`, an automated close), and its tree goes when <tree> is given (a hand landing removed its own).
+# Each act that happens says so on a line; an ack that cannot be written leaves `stopped <name>` owed, and a tree that
+# stands says why. Run in the carrier's subshell, whose working directory may be the tree it removes.
+_line_owed() {  # <rec> <root> <row> <commit> <name> [<tree>]
+  local why owed="stop $5"
+  why="$(_line_close_assumptions "$1" "$3")" && [ -n "$why" ] && printf '%s\n' "$why"
+  if _line_close_ack "$2" "$5"; then [ -z "$LINE_ACKED" ] || printf 'closed: %s — its roster row is acked, reason landed\n' "$5"
+  else owed="${owed}, then stopped $5"
+  fi
+  if [ -n "${6:-}" ]; then
+    cd "$2" 2>/dev/null || :
+    why="$(worktree_remove_landed "$2" "$6" "$4")"
+    case $? in
+      0) printf 'removed: %s (its branch stays)\n' "$6" ;;
+      2) printf 'tree stands: %s — %s\n' "$6" "$why" ;;
+    esac
+  fi
+  printf 'landed %s %s — owed: %s\n' "$3" "$4" "$owed"
+}
+# THE ROW'S ASSUMPTIONS, ONCE: each item of the `## Assumptions` section of the row's record (`<row>.md` beside the
+# run's log), a wrapped line joined to its item, is appended to the run's `assumptions.md` as `- (<row>): <item>`
+# unless that line stands there already. Prints what it appended, nothing when nothing was.
+_line_close_assumptions() {  # <rec> <row>
+  local d="${1%/*}" l n=0 new=""
+  [ -f "$d/$2.md" ] || return 0
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    grep -qxF -- "$l" "$d/assumptions.md" 2>/dev/null && continue
+    new="${new}${l}"$'\n'; n=$((n + 1))
+  done <<LINE_ASSUME
+$(awk -v r="$2" '
+  function put() { if (i != "") print "- (" r "): " i; i = "" }
+  /^## / { put(); s = ($0 ~ /^## Assumptions[[:space:]]*$/); next }
+  !s { next }
+  /^- / { put(); i = substr($0, 3); next }
+  /^[[:space:]]+[^[:space:]]/ && i != "" { sub(/^[[:space:]]+/, ""); i = i " " $0; next }
+  { put() }
+  END { put() }' "$d/$2.md" 2>/dev/null)
+LINE_ASSUME
+  [ "$n" -gt 0 ] || return 0
+  printf '%s' "$new" >> "$d/assumptions.md" || return 1
+  printf 'assumptions: %s of %s.md appended to %s/assumptions.md\n' "$n" "$2" "$d"
+}
+# The roster row's ack, when the session's roster still holds it open. Sets LINE_ACKED to 1 when this call wrote it.
+_line_close_ack() {  # <root> <name> -> 0 acked or closed already · 1 not written
+  local roster="${1%/}/.bionic/tmp/roster-${LINE_SID:-}.state"
+  LINE_ACKED=""
+  [ -n "${LINE_SID:-}" ] && _line_load_roster || return 1
+  roster_open_names "$roster" "$(roster_ack_ledger "$roster")" "$LINE_SID" | grep -xF -- "$2" >/dev/null || return 0
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID="$LINE_SID" \
+      bash "$_LINE_LIB_DIR/../../hooks/session-sweeper.sh" ack "$2" --by patrol --reason landed ) >/dev/null 2>&1 || return 1
+  LINE_ACKED=1
+}
 # THE ROW'S DEBT (wave-30 T22; D2, P2, AC-11.3): `debt: burned <N>, touched <M>` for <row>, when the run
 # holds a debt (lib/proof.sh `proof_debt_row_counts`): N the debts burned by <row>, M those one of whose
 # sites the row's `Files` cell covers. Printed between LANDED and the owed line, so the owed line stays the
@@ -1646,6 +1769,8 @@ _line_review_born() {  # <plan>
 }
 # A LANDING NEVER WAITS IN SILENCE (wave-38 T31; D21, D22; A-orch-43): every WAITING line is followed by
 # `waiting: <reason>`, what held the row when its time ran out. The WAITING line itself is unchanged.
+# THE LAST LINE OF A RETURN IS `run: <command>`: the one a person pastes to go on.
+_line_run() { printf 'run: %s\n' "$1"; }
 _line_waiting() {  # <row> <the same command> [<reason>]
   printf 'WAITING %s — run again: %s\n' "$1" "$2"
   printf 'waiting: %s\n' "${3:-the time in --within ${_LINE_WITHIN:-} ran out}"
@@ -1777,7 +1902,7 @@ _line_lease_end() {  # <the carrier's exit status>
 _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again> [resumed]
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
-  local c rc s said anchored="" linted=""
+  local c rc s said anchored="" linted="" cited=""
   _LINE_LT=""   # the landing tree, freed when the subshell ends (a global: the trap outlives the locals)
   _LINE_KEY="$(_line_landing_key "$root" "$plan" "$row")"   # the key every runner of this landing asks under (D21)
   _LINE_JT=""   # the red judge's tree, taken on first use (`_line_red_owner`), freed the same way
@@ -1795,7 +1920,7 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
     all="$(_line_entries "$rec" "$head")"
     first="$(printf '%s\n' "$all" | awk -F'\t' '$4 == "yes" && $7 != "stalled" { print $1; exit }')"
     ent="$(printf '%s\n' "$all" | awk -F'\t' -v r="$row" '$1 == r { print; exit }')"
-    [ -n "$ent" ] || { _line_closed "$rec" "$row" "$name" "$plan"; return $?; }
+    [ -n "$ent" ] || { _line_closed "$rec" "$row" "$name" "$plan" "$root" "$wt"; return $?; }
     IFS=$'\t' read -r _ _ _ _ base cand _ _ _ cbase _ _ _ <<EOF
 $ent
 EOF
@@ -1831,7 +1956,7 @@ EOF
            continue ;;
         1) if [ "$base" = "$head" ]; then
              line_returned_event "$plan" "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
-             printf 'CONFLICT %s %s\n' "$row" "${c:-?}"; return 1
+             printf 'CONFLICT %s %s\n' "$row" "${c:-?}"; _line_run "git -C $(_wt_shquote "$wt") merge $base"; return 1
            fi
            waitbase="$base"; continue ;;
         *) _wt_refuse "landing-tree-unpointable tree=${_LINE_LT} base=${base}"; return 2 ;;
@@ -1850,17 +1975,24 @@ EOF
         *) _wt_refuse "anchors-unreadable row=${row} — ${c:-the check printed nothing}"; return 2 ;;
       esac
     fi
-    # 3b. THE COMMENT LINT, once per candidate and before any suite: a comment the row adds that cites the run
-    # returns the row to its writer, one LINT line per hit.
+    # 3b. THE LINTS, once per candidate and before any suite: the comment lint and the project's static checks over
+    # what the row changed. A line the row adds that one refuses returns the row to its writer, one LINT line per hit.
     if [ "$linted" != "$cand" ]; then
-      c="$(_line_comment_lint "$root" "$cbase" "$cand")"; rc=$?
+      [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
+      c="$(_line_lint_all "$root" "$_LINE_LT" "$cbase" "$cand")"; rc=$?
       case $rc in
         0) linted="$cand" ;;
         1) line_returned_event "$plan" "row=${row}" why=lint "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
            printf '%s\n' "$c" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
-           return 1 ;;
+           _line_run "$again"; return 1 ;;
         *) _wt_refuse "lint-unreadable row=${row} — ${c:-the lint printed nothing}"; return 2 ;;
       esac
+    fi
+    # 3c. WHAT AN EVAL CITES, once per candidate and before any suite: a candidate that deletes a section or words a
+    # criterion's eval cites, while the criterion reads as at the row's dispatch and is not waived, returns the row.
+    if [ "$cited" != "$cand" ]; then
+      _line_stale_say "$plan" "$row" "$root" "$cbase" "$cand"
+      case $? in 0) cited="$cand" ;; 1) _line_run "$again"; return 1 ;; *) return 2 ;; esac
     fi
     # 3. THE PROOF, A DRAIN (wave-37 T1; D3, AC-1.1; wave-38 T6, D21): each named suite not yet green on this
     # candidate, as many runners at once as the gate answers: before the pass's first runner, and again as
@@ -1881,8 +2013,10 @@ EOF
       # names it on the Lands-on its brief gave, and a runner could only fail to start it (two `none`s stall the
       # entry). Held by the candidate's base and not by the candidate, it is recorded once, `absent` with no log,
       # and counts as proved; nothing runs for it. A name the base lacks too still stalls (wave-34 T27).
+      # THE LANDING SAYS IT: the suite leaves the row's set here, with no command to take it out.
       if _line_removed "$root" "$cbase" "$cand" "$s"; then
-        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null; continue
+        _line_verdict_put "$plan" "$row" "$cand" "$s" absent - >/dev/null
+        printf 'GONE %s %s — the row deletes the suite, so it leaves the set; nothing runs for it\n' "$row" "$s"; continue
       fi
       said="$(_line_none_logs "$rec" "$row" "$cand" "$s")"
       if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
@@ -1896,7 +2030,7 @@ EOF
     # user's words and nothing ran; once the user lifts the order, the writer says ready again.
     if [ "$_LINE_DN" -gt 0 ] && c="$(_line_order "$root")"; then
       line_returned_event "$plan" "row=${row}" why=order "detail=${c%%$'\n'*}" >/dev/null
-      printf 'ORDER %s %s\n' "$row" "${c#*$'\n'}"; return 1
+      printf 'ORDER %s %s\n' "$row" "${c#*$'\n'}"; _line_run "$again"; return 1
     fi
     if [ "$_LINE_DN" -gt 0 ]; then
       [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
@@ -1939,7 +2073,7 @@ EOF
           _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
         *) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
            line_returned_event "$plan" "row=${row}" why=red "detail=${c}" >/dev/null
-           printf 'RED %s %s %s\n' "$row" "$s" "$c"; return 1 ;;
+           printf 'RED %s %s %s\n' "$row" "$s" "$c"; _line_run "tail -n 40 $(_wt_shquote "$c")"; return 1 ;;
       esac
     done
     # 4. THE PUBLISH, once first in line on the accepted head (line_publish asks both again, locked).
@@ -1956,7 +2090,7 @@ EOF
     said="$(line_publish "$plan" "$row" 2>&1)"; rc=$?
     case $rc in
       0) [ -z "$said" ] || printf '%s\n' "$said"
-         printf 'LANDED %s %s\n' "$row" "$cand"; _line_debt "$plan" "$row"; _line_review_born "$plan"; _line_owed "$row" "$cand" "$name"; return 0 ;;
+         printf 'LANDED %s %s\n' "$row" "$cand"; _line_debt "$plan" "$row"; _line_review_born "$plan"; _line_owed "$rec" "$root" "$row" "$cand" "$name" "$wt"; return 0 ;;
       3|75) : ;;
       4) [ -n "$held" ] || printf '%s\n' "$said"; held=1 ;;
       6) c="$(_wt_bionic_committed "$root" "$head" "$cand")"; c="${c%/}"
@@ -2027,7 +2161,8 @@ function line_shapes(t,   b, e, f, s, n, i, a) {
   if (t ~ (b "D[0-9]+" e)) s = s ",decision"
   return substr(s, 2)
 }'
-# The added lines of a `git diff -U0` that carry a shape anywhere on them and are not moved: `<file> TAB <line>`.
+# The added lines of a `git diff -U0` that carry a shape anywhere on them and are not moved: `<file> TAB <line>`;
+# with -v all=1, every added line that is not moved.
 _LINE_ADDS_AWK='
 function line_trim(t) { sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); return t }
 /^diff --git / { hdr = 1; f = ""; next }
@@ -2041,7 +2176,7 @@ END {
   for (i = 1; i <= na; i++) {
     t = line_trim(AT[i])
     if (R[t] > 0) { R[t]--; continue }
-    if (line_shapes(AT[i]) != "") print AF[i] "\t" AL[i]
+    if (all || line_shapes(AT[i]) != "") print AF[i] "\t" AL[i]
   }
 }'
 # The comment on each wanted line of one file: `<line> TAB <comment>`. want= the line numbers, py=1 for python.
@@ -2141,6 +2276,152 @@ _line_comment_lint() {  # <root> <base> <candidate> -> `<file>:<line> <shapes>` 
   return 1
 }
 
+# EVERY LINT A LANDING RUNS over the range <base>..<candidate>, before any suite: the comment lint, then the project's
+# static checks. One hit a line, each check's own shape; 0 none · 1 hits · 2 a check unreadable, with its reason.
+_line_lint_all() {  # <root> <tree> <base> <candidate>
+  local a b ra rb
+  a="$(_line_comment_lint "$1" "$3" "$4")"; ra=$?
+  [ "$ra" -le 1 ] || { printf '%s\n' "$a"; return 2; }
+  b="$(_line_lints "$1" "$2" "$3" "$4")"; rb=$?
+  [ "$rb" -le 1 ] || { printf '%s\n' "$b"; return 2; }
+  [ "$ra$rb" != 00 ] || return 0
+  printf '%s\n' "$a" "$b" | awk 'NF'
+  return 1
+}
+
+# THE PROJECT'S STATIC CHECKS. A candidate that holds tests/lib/lint.sh is judged by that copy, run in <tree> pointed
+# at the candidate over every file the range changed, whatever the row's landing set names: a lint red is the row's to
+# fix at its own landing, not the next row's. A hit is the row's when it is on a line the range added (a moved line is
+# not added) or names no line, which the lint prints only of a file the range changed; a hit on an older line stands
+# from before and returns nothing. A candidate without the file has no static check to run. The lint's contract is its
+# file's header: `<CHECK> <file>[:<line>] <what>` per hit; rc 0 none, 1 hits, 2 a check that cannot run.
+_line_lints() {  # <root> <tree> <base> <candidate> -> the row's hits; 0 none · 1 hits · 2 unreadable, with the reason
+  local root="$1" t="$2" base="$3" cand="$4" paths diff out err rc
+  git -C "$root" cat-file -e "${cand}:tests/lib/lint.sh" 2>/dev/null || return 0
+  landing_tree_point "$t" "$cand" || { printf 'landing-tree-unpointable tree=%s base=%s\n' "$t" "$cand"; return 2; }
+  paths="$(git -C "$root" -c core.quotePath=false diff --name-only --no-renames "$base" "$cand" 2>&1)" \
+    || { printf 'diff-unreadable base=%s candidate=%s — %s\n' "$base" "$cand" "$(printf '%s\n' "$paths" | head -1)"; return 2; }
+  [ -n "$paths" ] || return 0
+  err="$(mktemp "${TMPDIR:-/tmp}/line-lint.XXXXXX")" || { printf 'no temporary file for the lint\n'; return 2; }
+  out="$(printf '%s\n' "$paths" | bash "$t/tests/lib/lint.sh" "$t" 2>"$err")"; rc=$?
+  case $rc in
+    0) rm -f "$err"; return 0 ;;
+    1) rm -f "$err" ;;
+    *) printf 'tests/lib/lint.sh exited %s — %s\n' "$rc" "$(head -1 "$err")"; rm -f "$err"; return 2 ;;
+  esac
+  diff="$(git -C "$root" -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --no-renames \
+    --src-prefix=a/ --dst-prefix=b/ "$base" "$cand" 2>&1)" \
+    || { printf 'diff-unreadable base=%s candidate=%s — %s\n' "$base" "$cand" "$(printf '%s\n' "$diff" | head -1)"; return 2; }
+  out="$(printf '%s\n' "$diff" | LC_ALL=C awk -v all=1 "$_LINE_SHAPES_AWK$_LINE_ADDS_AWK" \
+    | LINE_LINT_HITS="$out" LC_ALL=C awk -F'\t' 'BEGIN { n = split(ENVIRON["LINE_LINT_HITS"], H, "\n") } { A[$1 ":" $2] = 1 }
+      END { for (i = 1; i <= n; i++) { split(H[i], w, " "); if (H[i] == "") continue
+              if (w[2] !~ /:[0-9]+$/ || (w[2] in A)) print H[i] } }')"
+  [ -n "$out" ] || return 0
+  printf '%s\n' "$out"
+  return 1
+}
+
+# A LANDING THAT REMOVES WHAT AN EVAL CITES. An eval names its proof in two shapes a landing can match: a section, the
+# `§NAME` after the suite it names (`x.test.sh §NAME`), and words it quotes, in backticks or in double quotes. A
+# backtick span that names a suite or a section is the command around them, not words. Free prose is never read, so a
+# criterion written in it holds nothing here. The row's dispatch recorded each criterion's sum
+# (lib/plan-read.sh `plan_read_criterion_sums`); a criterion still at that sum, and not waived, holds the row when its
+# candidate deletes what it cites: the section's line from its suite, or the words from every tracked file. A criterion
+# restated since the dispatch, or waived, holds nothing; a row whose last dispatch recorded no sums is not read, since
+# nothing says what its writer was given. The awk reads, in order: `R` the recorded sums, `X` each waived criterion,
+# `C` each criterion as the plan reads it now, then `D` and the diff, and prints each cite a removed line touches.
+_LINE_CITES_AWK='
+  function sect(s, nm,   p, c, L) { L = length("§")
+    while ((p = index(s, "§" nm)) > 0) { c = substr(s, p + L + length(nm), 1); if (c !~ /[A-Za-z0-9_-]/) return 1; s = substr(s, p + L) }
+    return 0 }
+  function cite(t, c, su, w,   k) { k = t SUBSEP c SUBSEP su SUBSEP w; if (k in had) return; had[k] = 1
+    nk++; ct[nk] = t; cc[nk] = c; cs[nk] = su; cw[nk] = w }
+  function cites(c, e,   n, seg, i, t, j, nt, tok, p, rest, su, w, L) { L = length("§"); su = ""
+    n = split(e, seg, "`")
+    for (i = 1; i <= n; i++) { t = seg[i]
+      if (i % 2 == 0 && t !~ /[.]test[.]sh/ && !index(t, "§")) { w = t; gsub(/^[ ]+|[ ]+$/, "", w); if (w != "") cite("W", c, "", w); continue }
+      if (i % 2 == 1) { rest = t; while (match(rest, /"[^"]+"/)) { cite("W", c, "", substr(rest, RSTART + 1, RLENGTH - 2)); rest = substr(rest, RSTART + RLENGTH) } }
+      nt = split(t, tok, /[ ]+/)
+      for (j = 1; j <= nt; j++) { rest = tok[j]
+        if (match(rest, /[A-Za-z0-9_\/.-]*[.]test[.]sh/)) su = substr(rest, RSTART, RLENGTH)
+        while ((p = index(rest, "§")) > 0) { rest = substr(rest, p + L); if (su != "" && match(rest, /^[A-Za-z0-9_-]+/)) cite("S", c, su, substr(rest, 1, RLENGTH)) } } } }
+  !part && $1 == "R" { n = split($2, a, ","); for (i = 1; i <= n; i++) { p = index(a[i], ":"); was[substr(a[i], 1, p - 1)] = substr(a[i], p + 1) }; next }
+  !part && $1 == "X" { off[$2] = 1; next }
+  !part && $1 == "C" { if (($2 in was) && was[$2] == $3 && !($2 in off)) cites($2, $4); next }
+  !part && $0 == "D" { part = 1; next }
+  !part { next }
+  /^diff --git / { hdr = 1; f = ""; next }
+  hdr && /^--- a\// { f = substr($0, 7); next }
+  hdr && /^[+][+][+] b\// { f = substr($0, 7); next }
+  /^@@/ { hdr = 0; next }
+  hdr || !/^-/ { next }
+  { s = substr($0, 2)
+    for (k = 1; k <= nk; k++) if (!(k in hit)) {
+      if (ct[k] == "S" && (f == cs[k] || f == "tests/" cs[k]) && sect(s, cw[k])) hit[k] = f
+      else if (ct[k] == "W" && index(s, cw[k])) hit[k] = "-" } }
+  END { for (k = 1; k <= nk; k++) if (k in hit) printf "%s\t%s\t%s\t%s\n", ct[k], cc[k], hit[k], cw[k] }'
+_line_load_plan_read() {
+  declare -F plan_read_criterion_sums >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  [ -r "$_LINE_LIB_DIR/plan-read.sh" ] && . "$_LINE_LIB_DIR/plan-read.sh" 2>/dev/null
+  declare -F plan_read_criterion_sums >/dev/null 2>&1
+}
+_line_stale() {  # <plan> <row> <root> <base> <candidate> -> `<criterion><TAB><what it deletes>` per criterion held; 0 none · 1 held · 2 unreadable
+  # The run's facts are the reader's: the sums are the row's dispatch contract as `status` answers it, and a criterion
+  # is waived while a waiver is what discharges it (`reader_cells`, the cell question's one fold). The landing decides,
+  # so the facts are folded from the log, never served from the kept file.
+  local plan="$1" row="$2" root="$3" base="$4" cand="$5" _PROOF_FRESH=1 rec rc cells crit diff hits out="" k c p w
+  _line_load_proof || { printf 'proof-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
+  rec="$(_proof_ask "$plan" reader_q_status "$plan" "$row")"; rc=$?
+  case $rc in 0) ;; 1) return 0 ;; *) printf 'log-unreadable plan=%s\n' "$plan"; return 2 ;; esac
+  rec="$(printf '%s\n' "$rec" | sed -n 's/^criteria=//p')"
+  [ -n "$rec" ] || return 0
+  _line_load_plan_read || { printf 'plan-read-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
+  crit="$(plan_read_criterion_sums "$plan" eval)"
+  case $? in 0) ;; 1) return 0 ;; *) printf 'plan-unreadable plan=%s\n' "$plan"; return 2 ;; esac
+  cells="$(_proof_ask "$plan" reader_cells "$plan")" || { printf 'log-unreadable plan=%s\n' "$plan"; return 2; }
+  diff="$(git -C "$root" -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --no-renames \
+    --src-prefix=a/ --dst-prefix=b/ "$base" "$cand" 2>&1)" \
+    || { printf 'diff-unreadable base=%s candidate=%s — %s\n' "$base" "$cand" "$(printf '%s\n' "$diff" | head -1)"; return 2; }
+  hits="$({ printf 'R\t%s\n' "$rec"; printf '%s\n' "$cells" | awk -F'\037' '$3 == "waiver" { print "X\t" $1 }'
+            printf '%s\n' "$crit" | sed 's/^/C	/'; printf 'D\n%s\n' "$diff"; } \
+    | LC_ALL=C awk -F'\t' "$_LINE_CITES_AWK")"
+  [ -n "$hits" ] || return 0
+  while IFS=$'\t' read -r k c p w; do
+    if [ "$k" = S ]; then
+      ! git -C "$root" cat-file -e "$cand:$p" 2>/dev/null \
+        || ! git -C "$root" show "$cand:$p" | LC_ALL=C grep -E "§${w}([^A-Za-z0-9_-]|\$)" >/dev/null || continue
+      out="${out}${c}	§${w} of ${p}
+"
+    else
+      git -C "$root" grep -qF -e "$w" "$cand" -- 2>/dev/null
+      case $? in 0) continue ;; 1) ;; *) printf 'grep-unreadable candidate=%s\n' "$cand"; return 2 ;; esac
+      out="${out}${c}	the words \"${w}\"
+"
+    fi
+  done <<EOF
+$hits
+EOF
+  [ -n "$out" ] || return 0
+  printf '%s' "$out" | awk -F'\t' '!($1 in w) { o[++n] = $1 } { w[$1] = ($1 in w) ? w[$1] "; " $2 : $2 } END { for (i = 1; i <= n; i++) print o[i] "\t" w[o[i]] }'
+  return 1
+}
+# The landing's answer to `_line_stale`: the row returned, `why=stale` and one STALE line per criterion it deletes the
+# cite of, or refused when the check could not read what it needs.
+_line_stale_say() {  # <plan> <row> <root> <base> <candidate> -> 0 nothing held · 1 returned · 2 refused
+  local out
+  out="$(_line_stale "$@")"
+  case $? in
+    0) return 0 ;;
+    1) line_returned_event "$1" "row=$2" why=stale "detail=$(printf '%s\n' "$out" | head -1 | tr '|\t' '/ ')" >/dev/null
+       printf '%s\n' "$out" | while IFS=$'\t' read -r c w; do
+         printf 'STALE %s %s — the row deletes %s, which the eval of %s cites; restate its row in the Eval design of the plan, or have it waived, then land again\n' "$2" "$c" "$w" "$c"
+       done
+       return 1 ;;
+    *) _wt_refuse "stale-unreadable row=$2 — ${out:-the check printed nothing}"; return 2 ;;
+  esac
+}
+
 # is keyed by the commit's tree, `tree:<id>` (anchors.sh's key for a set it cannot derive), unless it names a suite
 # file, whose key it then takes.
 
@@ -2152,14 +2433,14 @@ _line_ahead_open() {  # <entries> <row> <candidate>
 
 # The entry left the fold while its carrier ran: a person's own git merge carried it (published
 # kind=git), or something else closed it.
-_line_closed() {  # <rec> <row> <name> [<plan>]
+_line_closed() {  # <rec> <row> <name> [<plan>] [<root>] [<tree>]
   local last
   last="$(line_lines "$1" | awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
     { e = line_ev() } line_kv("row") == r && (e == "published" || e == "returned") { l = $0 } END { print l }' 2>/dev/null)"
   case "$(line_value "$last" ev)" in
     published)
       last="$(line_value "$last" commit)"
-      printf 'LANDED %s %s\n' "$2" "$last"; [ -z "${4:-}" ] || { _line_debt "$4" "$2"; _line_review_born "$4"; }; _line_owed "$2" "$last" "$3"; return 0 ;;
+      printf 'LANDED %s %s\n' "$2" "$last"; [ -z "${4:-}" ] || { _line_debt "$4" "$2"; _line_review_born "$4"; }; _line_owed "$1" "${5:-}" "$2" "$last" "$3" "${6:-}"; return 0 ;;
   esac
   printf '%s\n' "${last:-RETURNED ${2}}"; return 1
 }

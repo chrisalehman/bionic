@@ -233,6 +233,92 @@ edit_block() {  # <file> <line>
 }
 
 # ---------------------------------------------------------------------------
+section "§OWN: the ownership principle is the approved paragraph, placed after the first, and nothing else changed (AC-29.1)"
+# ---------------------------------------------------------------------------
+# fails-when: a word of the paragraph differs from the approved text, the paragraph is not the one
+# right after "Correctness over expedience", it is absent from the rendered block, or any other line
+# of the template differs from the template before this principle was added.
+TEMPLATE="${REPO}/agents-src/templates/context/working-principles.md.tmpl"
+OWN_LIT='**Own the code.** You are the owner and long-term maintainer of this codebase, and its design is up to you. What it does is the user'\''s to decide.'
+OWN_FIRST='**Correctness over expedience.**'
+# The reader paragraph is a later principle; the earlier-template reduction below removes it as well.
+READER_LIT='**Write for a reader with no context.** The reader has not seen your tool calls, your reasoning or the files you opened. Each message stands on its own. Use plain words and full sentences: short, active, one idea each, the same word for the same thing. Never use a label you made up during the work; say what the thing is. Use prose where ideas connect and bullets for separate items.'
+# The template before the principle: its cksum, pinned. Removing the paragraph and the one blank line
+# after it must give exactly these bytes, so a changed word anywhere else moves it.
+OWN_BEFORE_SUM='529972342 1901'
+
+# own_place <file> -> "<count of the paragraph line> <the line two above it starts with the first principle: yes|no> <the line between is blank: yes|no>"
+own_place() {
+  local file="$1" line n=0 idx=0 i=0 a="" b="" l1="" l2=""
+  [ -f "$file" ] || { printf '0 no no'; return 0; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    i=$((i + 1))
+    if [ "$line" = "$OWN_LIT" ]; then n=$((n + 1)); a="$l2"; b="$l1"; fi
+    l2="$l1"; l1="$line"
+  done < "$file"
+  local first=no blank=no
+  case "$a" in "$OWN_FIRST"*) first=yes ;; esac
+  [ -z "$b" ] && [ "$n" != "0" ] && blank=yes
+  printf '%s %s %s' "$n" "$first" "$blank"
+}
+
+expect_eq "OWN: the template holds the paragraph once, right after the first principle's paragraph" \
+  "1 yes yes" "$(own_place "$TEMPLATE")"
+expect_eq "OWN: the rendered file holds it once, in the same place" "1 yes yes" "$(own_place "$SHIPPED")"
+block_to "$SHIPPED" "$TMP/own-block"
+expect_eq "OWN: …and inside the markers (the extractor read the block)" "1" "$(count_lines_equal "$TMP/own-block" "$OWN_LIT")"
+expect_eq "OWN: the block is not empty (positive for the row above)" "yes" \
+  "$([ -s "$TMP/own-block" ] && printf yes || printf no)"
+
+# The template less the paragraph and its blank line is the earlier template, byte for byte.
+{
+  skip_blank=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$OWN_LIT" ] || [ "$line" = "$READER_LIT" ]; then skip_blank=1; continue; fi
+    if [ "$skip_blank" = "1" ]; then skip_blank=0; [ -z "$line" ] && continue; fi
+    printf '%s\n' "$line"
+  done < "$TEMPLATE"
+} > "$TMP/own-without"
+expect_eq "OWN: the template differs from the earlier one by that paragraph alone" \
+  "$OWN_BEFORE_SUM" "$(cksum < "$TMP/own-without")"
+expect_eq "OWN: the reduction was read (the earlier template is not empty)" "yes" \
+  "$([ -s "$TMP/own-without" ] && printf yes || printf no)"
+
+# ---------------------------------------------------------------------------
+section "§READER: the reader principle is the approved paragraph, between Lead and Decide, on one line (AC-29.1)"
+# ---------------------------------------------------------------------------
+# fails-when: a word of the paragraph differs from the approved text, it is not the line between the
+# "Lead with what the reader needs to decide" paragraph and the "Decide what is yours" paragraph with
+# one blank line each side, it is absent from the rendered block, or it appears twice.
+READER_PREV='**Lead with what the reader needs to decide.**'
+READER_NEXT='**Decide what is yours.**'
+
+# reader_place <file> -> "<count> <paragraph two above starts with Lead: yes|no> <paragraph two below starts with Decide: yes|no> <blank lines both sides: yes|no>"
+reader_place() {
+  local file="$1" line n=0 above="" below="" b1="x" b2="x" i
+  local -a rows=()
+  [ -f "$file" ] || { printf '0 no no no'; return 0; }
+  while IFS= read -r line || [ -n "$line" ]; do rows+=("$line"); done < "$file"
+  for i in "${!rows[@]}"; do
+    if [ "${rows[$i]}" = "$READER_LIT" ]; then
+      n=$((n + 1)); above="${rows[$((i - 2))]:-}"; b1="${rows[$((i - 1))]-x}"
+      b2="${rows[$((i + 1))]-x}"; below="${rows[$((i + 2))]:-}"
+    fi
+  done
+  local prev=no next=no blank=no
+  case "$above" in "$READER_PREV"*) prev=yes ;; esac
+  case "$below" in "$READER_NEXT"*) next=yes ;; esac
+  [ -z "$b1" ] && [ -z "$b2" ] && [ "$n" != "0" ] && blank=yes
+  printf '%s %s %s %s' "$n" "$prev" "$next" "$blank"
+}
+
+expect_eq "READER: the template holds the paragraph once, after Lead and before Decide, blank lines each side" \
+  "1 yes yes yes" "$(reader_place "$TEMPLATE")"
+expect_eq "READER: the rendered file holds it once, in the same place" "1 yes yes yes" "$(reader_place "$SHIPPED")"
+expect_eq "READER: …and inside the markers (the extractor read the block)" "1" "$(count_lines_equal "$TMP/own-block" "$READER_LIT")"
+expect_eq "READER: the paragraph and its blank line are 386 bytes" "386" "$(printf '%s\n\n' "$READER_LIT" | wc -c | tr -d ' ')"
+
+# ---------------------------------------------------------------------------
 section "§SET: written only on a yes, inside the markers (AC-9.1)"
 # ---------------------------------------------------------------------------
 

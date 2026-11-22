@@ -8,6 +8,9 @@
 #   §OPEN     with the approval at the head, the remote holds the working head, the stand-in's log one create against
 #             the integration branch, the run's log the pull request; the local integration branch is unmoved; at that
 #             head again nothing is pushed or opened; at a new approved head the branch is pushed and the request kept.
+#   §BODY     the request opens titled `<project> <release>: <the plan's title>`, its body the summary's three
+#             written sections then the four `pr-facts` prints, each count the reader's; a summary with an empty
+#             section, or a count the facts do not state, is refused before the push.
 #   §FAIL     with the remote unreachable, and with the stand-in exiting 1, publish exits non-zero and prints the cause,
 #             an ask waits on the person, the log holds no pull request and the sitrep does not read delivered.
 #   §STATE    `reader <plan> pr` answers nothing before the publish and the request after it; the stand-in answers a
@@ -22,7 +25,17 @@
 #             fetch once the request is closed unmerged and the person's ask is open.
 #   §MERGE    the pass that sees the merge closes the run: the integrate row lands at the merge, the run reads delivered,
 #             and a close that holds wakes once.
-#   §WALL     publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
+#   §MERGE-OUT with the merge seen and the close row's writer live, the pass runs no close and wakes once naming the
+#             row out; the writer gone, the next pass closes the run and leaves the writer's continuation as written.
+#   §MERGE-LOOK a pass over an unchanged run with the request open runs no tick and asks the host alone, and the pass
+#             after the merge still reads the run as merged; a change to what the tick reads, a writer out, or a
+#             request closed unmerged runs the tick; over a fresh state folder, a file the tick writes in its own
+#             first pass moves nothing, so the first quiet pass keeps its look.
+#   §TAG      the close of a merged, approved run leaves the release's tag on the remote at the merge commit and the
+#             run delivered; with no approval in the log, no release named, or the merge not seen, no tag is made; a tag
+#             that stands elsewhere is left and said and is never moved; a push the remote refuses holds the close with
+#             the person's ask, leaves no tag made, and the close made again once the push can be delivers.
+#   §WALL    publish is the orchestrator's: the Bash wall reads it as one of the verbs a writer may not call.
 #   §STRAY    the whole run a world's tick started detached is ended before the worlds go: none is alive at the end.
 #
 # FIXTURE FIDELITY. Each case is a copy of one door fixture (tests/lib/door.sh): a real repository on its working branch
@@ -50,6 +63,10 @@ awk 'NR == 1 { print; print "integration-branch: main"; next } { print }' "$PRR_
 # The working branch carries one commit past main, the row's work, so a merge has something to merge.
 printf 'rehearsal_landed() { return 0; }\n' > "$PRR_BASE/payload/scripts/lib/said.sh" \
   && git -C "$PRR_BASE" add -A && git -C "$PRR_BASE" commit --quiet -m "the row's work"
+
+# The orchestrator's three written sections, as Step 8 has it write them before the publish.
+printf '## Summary\n\nThe fixture'"'"'s one change.\n\n## What changed\n\n- said.sh answers.\n\n## Upgrade notes\n\nNone.\n' \
+  > "$PRR_BASE/.bionic/docs/record/wave-x/pr-summary.md"
 
 # prr_case <name> -> a copy of the fixture under WORLD_ROOT/<name>, its bare remote at <name>.git and its host in
 # <name>-host; sets R (the copy), B (the bare remote), HD (the host's directory), P (the plan), L (the run's log)
@@ -200,6 +217,58 @@ expect_eq "OP-7 at a new approved head publish exits 0, the remote holds the new
   "0|$OP_H2|1" "$DOOR_RC|$(git -C "$B" rev-parse --verify -q "refs/heads/$DOOR_BRANCH")|$(prr_gh_log | /usr/bin/grep -c '^pr create ' | tr -d ' ')"
 expect_contains "OP-7b …and the run's log holds the request at the new head, the same address" \
   "|ev=published|part=pr|url=$PRR_URL1|branch=$DOOR_BRANCH|commit=$OP_H2|base=main|by=publish|at=" "$(tail -1 "$L")"
+
+# ============================================================
+section "§BODY: the request is titled and its body is seven headings, the facts printed and the summary checked (AC-20.1, AC-20.2)"
+# ============================================================
+# fails-when: the body is commit subjects, a heading is missing or out of order, the title is not the project, the
+# release and the plan's title, a count under Testing, Review, Known limits or Decision records differs from the
+# reader's, or a summary with an empty section or a count the facts do not state is opened.
+prr_put() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && . "$1/line.sh" && "${@:2}"' _ "$PRR_LIB" "$1" "$P" "${@:2}"; }   # <writer> <field>=<value>…
+prr_capture() {  # -> the stand-in keeps the title and the body its create is handed, in gh.title and gh.body
+  mv "$HD/bin/gh" "$HD/bin/gh.real" && printf '%s\n' '#!/bin/bash' 'me="$(cd "$(dirname "$0")" && pwd -P)"; a=("$@")' \
+    'for i in "${!a[@]}"; do case "${a[i]}" in --title) printf "%s\n" "${a[i+1]}" > "$me/gh.title" ;; --body) printf "%s\n" "${a[i+1]}" > "$me/gh.body" ;; esac; done' \
+    'exec "$me/gh.real" "$@"' > "$HD/bin/gh" && chmod +x "$HD/bin/gh"
+}
+bd_part() { awk -v h="## $1" '$0 == h { on = 1; next } /^## / { on = 0 } on && /^- /' "$HD/bin/gh.body"; }   # <heading> -> its bullets
+prr_case body; prr_capture
+BD_H="$(prr_head)"; prr_approve "$BD_H"
+for s in a b; do prr_put line_verdict_event row=regression "commit=$BD_H" "suite=$s.test.sh" result=green kind=regression; done
+prr_put line_verdict_event row=regression "commit=$BD_H" suite=c.test.sh result=red kind=regression
+prr_put proof_event kind=task "head=$BD_H" evidence=record/wave-x/T1.md ac=AC-1.1 rc=0
+prr_put proof_event kind=review "head=$BD_H" evidence=record/wave-x/critic.md question=adversarial reader=r result=pass scope=whole
+prr_put proof_finding_event ref=record/wave-x/critic.md#1 severity=S3 reach=on to=deferred title=t "stated=The cap is not measured."
+mkdir -p "$R/.bionic/docs/adrs/epic-x"
+printf -- '---\nwave: wave-x\nstatus: accepted\n---\n# ADR-001 — the run'"'"'s own\n' > "$R/.bionic/docs/adrs/epic-x/adr-001-own.md"
+printf -- '---\nwave: wave-y\nstatus: accepted\n---\n# ADR-002 — another run'"'"'s\n' > "$R/.bionic/docs/adrs/epic-x/adr-002-other.md"
+BD_G="$(bash "$PRR_READER" "$P" verdicts regression | /usr/bin/grep "|commit=$BD_H|" | /usr/bin/grep -c '|result=green|' | tr -d ' ')"
+BD_RV="$(bash "$PRR_READER" "$P" reviews | /usr/bin/grep -c . | tr -d ' ')"
+expect_eq "BD-0 precondition: the reader holds 2 green suites of the head's regression, one review and AC-1.1 discharged" \
+  "2|1|state=discharged" "$BD_G|$BD_RV|$(bash "$PRR_READER" "$P" cell AC-1.1 | head -1)"
+door_run "$R" bash "$DOOR_POKER" pr-facts; BD_FACTS="$DOOR_OUT"
+expect_eq "BD-1 pr-facts exits 0 and prints the four fact sections, in order" "0|Testing|Review|Known limits|Decision records" \
+  "$DOOR_RC|$(printf '%s\n' "$BD_FACTS" | sed -n 's/^## //p' | paste -sd'|' -)"
+prr_publish
+expect_eq "BD-2 publish exits 0, its request titled <project> <release>: <the plan's title>" \
+  "0|body $DOOR_VERSION: door fixture plan (tests/lib/door.sh)" "$DOOR_RC|$(cat "$HD/bin/gh.title" 2>/dev/null)"
+[ "$DOOR_RC" = 0 ] || printf '%s\n' "$DOOR_OUT" | tail -5 | sed 's/^/    | /'
+expect_eq "BD-3 …its body the seven headings in order, no commit subject in it, and its tail what pr-facts printed" \
+  "Summary|What changed|Upgrade notes|Testing|Review|Known limits|Decision records|0|yes" \
+  "$(sed -n 's/^## //p' "$HD/bin/gh.body" | paste -sd'|' -)|$(/usr/bin/grep -c "the row's work" "$HD/bin/gh.body" | tr -d ' ')|$([ -n "$BD_FACTS" ] && [ "$(sed -n '/^## Testing$/,$p' "$HD/bin/gh.body")" = "$BD_FACTS" ] && echo yes)"
+expect_eq "BD-4 …Testing names the reader's green suites of 3 and its criteria, Review its one review" \
+  "yes|yes|1" "$(bd_part Testing | /usr/bin/grep -q "$BD_G of 3 suites green" && echo yes)|$(bd_part Testing | /usr/bin/grep -q '1 of 1 criteria discharged' && echo yes)|$(bd_part Review | /usr/bin/grep -c 'adversarial: pass' | tr -d ' ')"
+expect_eq "BD-5 …Known limits the deferral's sentence, Decision records the run's one ADR and not another run's" \
+  "- The cap is not measured.|1|0" "$(bd_part 'Known limits')|$(bd_part 'Decision records' | /usr/bin/grep -c 'ADR-001' | tr -d ' ')|$(bd_part 'Decision records' | /usr/bin/grep -c 'ADR-002' | tr -d ' ')"
+# A count the facts do not state, then an empty section: each refused before the push, nothing opened.
+prr_case body-wrong; BW_S="$R/.bionic/docs/record/wave-x/pr-summary.md"; prr_approve "$(prr_head)"
+printf '## Summary\n\nAll 137 of 137 suites green.\n\n## What changed\n\n- x\n\n## Upgrade notes\n\nNone.\n' > "$BW_S"
+prr_publish
+expect_eq "BD-6 a summary stating a count the facts do not is refused, naming it: exit 2, no push, no create, no request" \
+  "2|yes|main||0" "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q '137 of 137' && echo yes)|$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
+printf '## Summary\n\nThe change.\n\n## What changed\n\n## Upgrade notes\n\nNone.\n' > "$BW_S"
+prr_publish
+expect_eq "BD-7 a summary with an empty section is refused, naming it: exit 2, no push, no create, no request" \
+  "2|yes|main||0" "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q 'What changed' && echo yes)|$(prr_remote_heads)|$(prr_gh_log)|$(prr_pr_events)"
 
 # ============================================================
 section "§FAIL: a failed push or request exits non-zero with the cause and leaves an ask for the person"
@@ -540,6 +609,250 @@ expect_eq "MG-6b …nothing landed, the run still at step 8, close-out's refusal
   "$(prr_landed)|$(prr_log_step)|$(prr_close_out | /usr/bin/grep -q 'close-out refused' && echo yes)"
 prr_pass
 expect_eq "MG-7 …the next pass over the same hold is quiet: the hold was told once" "$PRR_QUIET|" "$PASS_RC|$PASS_OUT"
+
+# ============================================================
+section "§MERGE-OUT: with the merge seen and a close row's writer live, the pass runs no close and says once which rows are out (AC-8.1, AC-8.2)"
+# ============================================================
+# fails-when: the pass that sees the merge runs the close while the close row's writer is live (the integrate row lands,
+# the run reads delivered, or close-out's account is written); that pass wakes nobody, or its wake names no row; the
+# next pass over the same facts wakes again; or, the writer gone, the close writes into the continuation the close
+# row's writer wrote.
+# FIXTURE FIDELITY: §MERGE's world, its plan gaining the close row a planner writes (T4, step 9, its Files the
+# continuation), dispatched as the run's log records a dispatch, and its writer a row of this session's roster under
+# this plan, launched a minute ago with four hours to run, as the dispatch wall writes it.
+# Every pass here reads a machine with room. The tick reads the machine's load, and with the five-minute load over the
+# gate's share it stands the newest live writer down for the load and takes its launch back: the pass then wakes on the
+# load, and the close, with the row's dispatch taken back, writes into the continuation. A whole run loads the machine
+# that far, so the real one would decide what this section checks.
+MO_ROOM=(BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=16384 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_FREE_PCT=70 BIONIC_PROBE_FREE_MB=11468
+  BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_SWAP_PCT=0)
+prr_watch_world mergeout
+awk '{ print } /^\| T3 \|/ { print "| T4 | 9 | close | the close | T3 | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — |" }' "$P" > "$P.n" \
+  && mv "$P.n" "$P"
+printf 'run/v1|ev=dispatch|row=T4|name=w-T4|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$L"
+seal_fixture "$P" "$L"
+MO_AT="$(t=$(( $(date +%s) - 60 )); date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ)"
+roster_row_fixture session="$WORLD_SID" name=w-T4 row=T4 agent_id=aw-T4-1111111111111111 launched_at="$MO_AT" duration="4 hours" \
+  plan="$P" deliverable="$R/.bionic/docs/record/wave-x/T4.md" >> "$R/.bionic/tmp/roster-$WORLD_SID.state"
+prr_pass "${MO_ROOM[@]}"
+expect_eq "MO-0 precondition: the request open and the writer out, the pass quiet, nothing landed" "$PRR_QUIET|0" "$PASS_RC|$(prr_landed)"
+prr_gh pr merge 1 --squash
+prr_pass "${MO_ROOM[@]}"
+expect_eq "MO-1 AC-8.1 merged with the close row's writer live: the pass runs no close — nothing landed, the run at step 8, no word of close-out in its account" \
+  "0|n=8 state=open|no" "$(prr_landed)|$(prr_log_step)|$(prr_close_out | /usr/bin/grep -qE '^merge: |close-out refused' && echo yes || echo no)"
+expect_eq "MO-2 AC-8.2 …that pass wakes, with one line naming the row out" "$PRR_WAKE|1|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | awk 'END { print NR }')|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - rows out: T4[;: ]' && echo yes)"
+expect_eq "MO-2b …within the line's ceiling" "yes" "$([ "${#PASS_OUT}" -le "$PRR_LINE_MAX" ] && echo yes)"
+expect_eq "MO-2c …and the account the pass keeps names the row and its writer" "yes|yes" \
+  "$(prr_close_out | /usr/bin/grep -q '^rows out: T4 ' && echo yes)|$(prr_close_out | /usr/bin/grep -q '^  T4: w-T4 open on roster ' && echo yes)"
+prr_pass "${MO_ROOM[@]}"
+expect_eq "MO-3 …the next pass over the same facts is quiet, and still lands nothing" "$PRR_QUIET||0" "$PASS_RC|$PASS_OUT|$(prr_landed)"
+# The writer writes the continuation and leaves: the next pass closes the run, and the close writes none of that file.
+printf '# continuation — the close row'"'"'s\n' > "$R/.bionic/docs/record/wave-x/continuation.md"
+MO_CK="$(cksum < "$R/.bionic/docs/record/wave-x/continuation.md")"
+: > "$R/.bionic/tmp/roster-$WORLD_SID.state"
+prr_pass "${MO_ROOM[@]}"
+expect_eq "MO-4 the writer gone: the next pass closes the run, the integrate row landed and the run delivered" "$PRR_WAKE|1|n=9 state=delivered" \
+  "$PASS_RC|$(prr_landed)|$(prr_log_step)"
+expect_eq "MO-5 …and the continuation the close row's writer wrote stands as written" "$MO_CK" \
+  "$(cksum < "$R/.bionic/docs/record/wave-x/continuation.md")"
+
+# ============================================================
+section "§MERGE-LOOK: a pass over an unchanged run with the request open asks the host alone, and the merge is still read (AC-5.2)"
+# ============================================================
+# fails-when: the pass after the host merges the request reads the run as open; the pass over an unchanged run runs the
+# tick again (the gate's judging passes are counted: none); a pass over an unchanged run makes no fetch, so the merge
+# is not reached; an input the tick reads moves and the pass does not run the tick (a denied request is not told); or
+# the request closed unmerged is not told to the person, and the pass after it does not rest; or, with a writer out on
+# the roster, a pass over an unchanged run runs no tick, so what the tick's clock reads of the row is never read.
+# A file the tick writes in its first pass over a fresh state folder (the told file) that the token does not leave out keeps no
+# look at the first quiet pass, so the pass after it pays a whole tick again.
+# The watcher names the file its passes keep what they read in (BIONIC_WATCH_LOOK); the first passes settle it, as the
+# fetch of the first moves origin/main, which the tick reads.
+prr_look_pass() {  # <world file stem> <n> -> PASS_OUT PASS_RC, and the pass's counts in <stem>.count.<n>
+  : > "$WORLD_ROOT/$1.count.$2"
+  prr_pass BIONIC_WATCH_LOOK="$WORLD_ROOT/$1.look" BIONIC_COUNT="$WORLD_ROOT/$1.count.$2"
+}
+prr_look_n() { awk -v k="$3" '$1 == k { n++ } END { print n + 0 }' "$WORLD_ROOT/$1.count.$2"; }   # <stem> <n> <kind>
+prr_look_warm() {  # <stem> -> two passes over the world, the look file made first, each quiet
+  : > "$WORLD_ROOT/$1.look"
+  prr_look_pass "$1" 1; LK_R1="$PASS_RC"; prr_look_pass "$1" 2; LK_R2="$PASS_RC"
+}
+prr_watch_world lookmerge
+prr_look_warm lookmerge
+expect_eq "LK-0 precondition: two passes over the open request are quiet, and the tick judged in each (gate counted)" \
+  "$PRR_QUIET $PRR_QUIET|yes" "$LK_R1 $LK_R2|$([ "$(prr_look_n lookmerge 1 gate)" -gt 0 ] && [ "$(prr_look_n lookmerge 2 gate)" -gt 0 ] && echo yes)"
+LK_FETCH="$(prr_origin)"
+rm -f "$R/.git/FETCH_HEAD"
+prr_look_pass lookmerge 3
+expect_eq "LK-1 the third pass over the unchanged run is quiet and prints nothing" "$PRR_QUIET|" "$PASS_RC|$PASS_OUT"
+expect_eq "LK-1b …runs no tick: nothing judged, no status pass, no facts answer" "0 0 0" \
+  "$(prr_look_n lookmerge 3 gate) $(prr_look_n lookmerge 3 status) $(prr_look_n lookmerge 3 facts)"
+expect_eq "LK-1c …and still asks the host: the integration branch fetched, origin/main where it was" "yes|$LK_FETCH" \
+  "$([ -f "$R/.git/FETCH_HEAD" ] && echo yes)|$(prr_origin)"
+prr_gh pr merge 1 --squash; LK_TIP="$(prr_bare_main)"
+prr_look_pass lookmerge 4
+expect_eq "LK-2 merged on the host: the very next pass wakes, naming the delivered run" "$PRR_WAKE|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: DELIVERED - ' && echo yes)"
+expect_contains "LK-2b …the log holds the integrate row's landing as merged, at the host's merge commit" \
+  "|ev=published|row=T3|commit=$LK_TIP|kind=close|by=close-out|why=merged|" "$(cat "$L")"
+expect_eq "LK-2c …and the run reads delivered" "n=9 state=delivered" "$(prr_log_step)"
+
+# AN INPUT THE TICK READS MOVES: the pass runs the tick, and a wake it owes is told.
+prr_watch_world lookgate
+prr_look_warm lookgate
+prr_look_pass lookgate 3
+expect_eq "LK-3 precondition: the third pass over the unchanged run judges nothing" "$PRR_QUIET|0" "$PASS_RC|$(prr_look_n lookgate 3 gate)"
+printf 'gate/v1|at=2026-10-11T00:00:00Z|session=%s|asker=w99-T9|category=leaves-the-machine|head=git push origin wave/99-p\n' \
+  "$WORLD_SID" >> "$R/.bionic/tmp/gate-$WORLD_SID.state"
+prr_look_pass lookgate 4
+expect_eq "LK-4 a request denied since the last pass: the pass runs the tick, and wakes with the gate's line" "$PRR_WAKE|yes|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: GATE ' && echo yes)|$([ "$(prr_look_n lookgate 4 gate)" -gt 0 ] && echo yes)"
+
+# A REQUEST CLOSED UNMERGED: the pass that reads it tells the person, and the pass after it rests with no fetch.
+prr_watch_world lookclosed
+prr_look_warm lookclosed
+prr_gh pr close "$PRR_URL1"
+prr_look_pass lookclosed 3
+expect_eq "LK-5 the request closed on the host: the pass over the unchanged run is quiet, and opens the person's ask" "$PRR_QUIET||yes" \
+  "$PASS_RC|$PASS_OUT|$([ -n "$(prr_ask pr-closed:wave:01-x)" ] && echo yes)"
+LK_SEEN="$(prr_origin)"
+prr_side lookclosed
+prr_look_pass lookclosed 4
+expect_eq "LK-6 …the next pass rests, the run waiting only on the person, and makes no fetch" "$PRR_REST|$LK_SEEN" "$PASS_RC|$(prr_origin)"
+
+# A WRITER OUT: the tick reads its row against the clock (quiet past its cadence, past its duration, gone), which no file
+# moving says, so with a row on the roster every pass runs the tick, the request open and nothing else moving.
+prr_watch_world lookrow
+LK_AT="$(t=$(( $(date +%s) - 60 )); date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ)"
+roster_row_fixture session="$WORLD_SID" name=busy agent_id=abusy-1111111111111111 launched_at="$LK_AT" duration="4 hours" \
+  deliverable="$R/never-written.md" >> "$R/.bionic/tmp/roster-$WORLD_SID.state"
+prr_look_warm lookrow
+prr_look_pass lookrow 3
+expect_eq "LK-7 a writer out on the roster: three quiet passes over the unchanged run, and the third still judges (its tick ran)" \
+  "$PRR_QUIET $PRR_QUIET $PRR_QUIET|yes" "$LK_R1 $LK_R2 $PASS_RC|$([ "$(prr_look_n lookrow 3 gate)" -gt 0 ] && echo yes)"
+
+# A FRESH STATE FOLDER: the tick writes state files of its own in its first pass, the told file among them when the log
+# holds a red the branch carries; none of them is a change from outside, so the first quiet pass over the open request
+# keeps its look and the pass after it asks the host alone. The fetch is made first, as the fetch of the first pass moves
+# origin/main, which the tick reads.
+prr_watch_world lookfresh
+git -C "$R" fetch --quiet origin
+printf 'run/v1|ev=standing|head=%s|suite=a.test.sh|lines=3|log=/rec/line/T1-a-%s.log|at=2026-10-06T10:00:00Z\n' \
+  "$(prr_head)" "$(prr_head | cut -c1-12)" >> "$L"
+LK_FR_BEFORE="$(ls "$R/.bionic/tmp" | /usr/bin/grep -c '^line-told-')"
+: > "$WORLD_ROOT/lookfresh.look"
+prr_look_pass lookfresh 1
+LK_FR1="$PASS_RC|$([ "$(prr_look_n lookfresh 1 gate)" -gt 0 ] && echo yes)|$LK_FR_BEFORE>$(ls "$R/.bionic/tmp" | /usr/bin/grep -c '^line-told-')"
+expect_eq "LK-8a precondition: the first pass is quiet, its tick judged, and its tick wrote the told file the folder lacked" \
+  "$PRR_QUIET|yes|0>1" "$LK_FR1"
+prr_look_pass lookfresh 2
+expect_eq "LK-8 a fresh state folder: the pass after the first quiet pass is quiet, and judges nothing, runs no status pass and no facts answer" \
+  "$PRR_QUIET|0 0 0" "$PASS_RC|$(prr_look_n lookfresh 2 gate) $(prr_look_n lookfresh 2 status) $(prr_look_n lookfresh 2 facts)"
+prr_gh pr merge 1 --squash
+prr_look_pass lookfresh 3
+# The red is planted by hand, so the run's seal holds the close; the merge is read all the same, and the wake says so.
+expect_eq "LK-9 …and the pass after the merge reads the run as merged: it wakes, naming the merge" "$PRR_WAKE|yes" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - close-out held' && echo yes)"
+
+# ============================================================
+section "§TAG: the close tags the merge once the release is approved, and never moves a tag (AC-21.1, AC-21.2)"
+# ============================================================
+# fails-when: the close of a merged, approved run leaves the remote with no tag, or one at a commit other than the
+# merge's; makes a tag with no release approval in the log, no release named, or the merge not seen; moves a tag that
+# stands elsewhere, here or on the remote, or says nothing of it; a refused push leaves a tag made, the run closed, or no
+# ask open; or the close made again after the push can be made does not tag and deliver.
+# FIXTURE FIDELITY: §MERGE's world, the stand-in host merging into the bare remote, the tag the one `v` plus the
+# release the plan's header names; the refused push a pre-receive hook on the bare remote, as a host's protected tags.
+TG_TAG="v${DOOR_VERSION}"
+prr_tag_there() { git -C "$B" rev-parse --verify -q "refs/tags/$TG_TAG^{commit}" 2>/dev/null; }
+prr_tag_here() { git -C "$R" rev-parse --verify -q "refs/tags/$TG_TAG^{commit}" 2>/dev/null; }
+prr_tag() {  # <commit> [--check] -> DOOR_OUT, DOOR_RC: line_tag_merge's line and answer over the case
+  door_run "$R" env PATH="$RH_GHPATH" bash -c '. "$1/line.sh" && line_tag_merge "$2" "$3" "$4" ${5:-}' _ "$PRR_LIB" "$P" "$R" "$1" "${2:-}"
+}
+prr_tag_refuse() {  # -> the bare remote refuses every tag pushed to it
+  printf '#!/bin/sh\nwhile read o n ref; do case "$ref" in refs/tags/*) echo "tags are protected" >&2; exit 1;; esac; done\n' > "$B/hooks/pre-receive" \
+    && chmod +x "$B/hooks/pre-receive"
+}
+
+prr_case8 taglib
+TG_A="$(prr_main)"; TG_B="$(prr_head)"
+prr_tag "$TG_A"
+expect_eq "TG-1 AC-21.2 no release approval in the log: no tag is made, here or on the remote, and the answer is none" "none|1||" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_approve "$TG_B"
+cp "$P" "$P.keep"; sed '/^release:/d' "$P.keep" > "$P"
+prr_tag "$TG_A"
+expect_eq "TG-2 AC-21.2 approved, the plan naming no release: no tag is made" "none|1||" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+mv "$P.keep" "$P"
+prr_tag "$TG_A" --check
+expect_eq "TG-3 --check: the tag would be made at the commit, and none is" "would|0||" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_tag "$TG_A"
+expect_eq "TG-4 AC-21.1 approved, the release named: the tag is made at the commit and pushed" "tagged|0|$TG_A|$TG_A" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_tag "$TG_A"
+expect_eq "TG-5 the call made again: the tag stands at the commit, and nothing is made" "stands|0|$TG_A|$TG_A" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_tag "$TG_B"
+expect_eq "TG-6 AC-21.2 a commit other than the tag's: the tag is left and said, and stands where it was, here and there" "left|1|$TG_A|$TG_A|yes" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)|$(printf '%s' "$DOOR_OUT" | /usr/bin/grep -q "$TG_TAG stands here at ${TG_A:0:12}" && echo yes)"
+
+prr_case8 tagelse
+prr_approve "$(prr_head)"; TG_A="$(prr_main)"
+git -C "$R" push --quiet origin "$(prr_head):refs/tags/$TG_TAG"
+prr_tag "$TG_A"
+expect_eq "TG-7 AC-21.2 a tag of the name stands on the remote at another commit: left and said, none made here, the remote's where it was" \
+  "left|1||$(prr_head)|yes" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)|$(printf '%s' "$DOOR_OUT" | /usr/bin/grep -q "stands on origin at $(prr_head | cut -c1-12)" && echo yes)"
+
+prr_case8 tagfail
+prr_approve "$(prr_head)"; TG_A="$(prr_main)"; prr_tag_refuse
+prr_tag "$TG_A"
+expect_eq "TG-8 a push the remote refuses: the answer is failed, naming the push, and no tag stands here or there" "failed|2|yes||" \
+  "$(printf '%s' "$DOOR_OUT" | cut -f1)|$DOOR_RC|$(printf '%s' "$DOOR_OUT" | /usr/bin/grep -q 'push of .* failed: .*tags are protected' && echo yes)|$(prr_tag_here)|$(prr_tag_there)"
+
+# The close, driven by the pass that sees the merge.
+prr_watch_world tag
+prr_pass
+expect_eq "TG-9 AC-21.2 the request open, the merge not seen: the pass is quiet and no tag is made, here or there" "$PRR_QUIET||" \
+  "$PASS_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_close run
+expect_eq "TG-9b …close-out's run typed by hand holds the same way, and makes no tag" "2||" "$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+prr_gh pr merge 1 --squash; TG_TIP="$(prr_bare_main)"
+prr_pass
+expect_eq "TG-10 AC-21.1 merged and approved: the pass closes the run, and the remote holds the release's tag at the merge commit" \
+  "$PRR_WAKE|n=9 state=delivered|$TG_TIP" "$PASS_RC|$(prr_log_step)|$(prr_tag_there)"
+expect_eq "TG-10b …the tag is also made in the project, and the account says it was pushed" "$TG_TIP|yes" \
+  "$(prr_tag_here)|$(prr_close_out | /usr/bin/grep -q "^tag: $TG_TAG at the merge commit ${TG_TIP:0:12}, pushed to origin" && echo yes)"
+
+prr_watch_world tagdrive
+git -C "$R" push --quiet origin "$(prr_head):refs/tags/$TG_TAG"; TG_OLD="$(prr_head)"
+prr_gh pr merge 1 --squash
+prr_pass
+TG_TIP="$(prr_bare_main)"
+# The close's own fetch follows a tag that points into what it downloads, so the project may hold the remote's tag too;
+# what must hold is that neither stands at the merge commit.
+expect_eq "TG-11 AC-21.2 a tag of the name stands elsewhere on the remote: the run is closed, the tag left where it was and none made at the merge" \
+  "n=9 state=delivered|$TG_OLD|yes" \
+  "$(prr_log_step)|$(prr_tag_there)|$([ "$(prr_tag_here)" != "$TG_TIP" ] && echo yes)"
+expect_eq "TG-11b …and the account says it was left" "yes" \
+  "$(prr_close_out | /usr/bin/grep -qE "^tag: $TG_TAG stands (here|on origin) at ${TG_OLD:0:12}.*left as it is" && echo yes)"
+
+prr_watch_world tagpush
+prr_tag_refuse
+prr_gh pr merge 1 --squash; TG_TIP="$(prr_bare_main)"
+prr_pass
+expect_eq "TG-12 a push the remote refuses: the pass wakes saying close-out held, nothing landed, the run still at step 8, no tag made" \
+  "$PRR_WAKE|yes|0|n=8 state=open||" \
+  "$PASS_RC|$(printf '%s\n' "$PASS_OUT" | /usr/bin/grep -q '^bionic watch: MERGED - close-out held (exit [0-9]*): ' && echo yes)|$(prr_landed)|$(prr_log_step)|$(prr_tag_here)|$(prr_tag_there)"
+expect_eq "TG-12b …the person's ask is open, naming the push" "yes" \
+  "$(prr_ask hold:merge | /usr/bin/grep -q 'push of .* failed' && echo yes)"
+rm -f "$B/hooks/pre-receive"
+prr_pass
+expect_eq "TG-13 the push can be made: the next pass closes the run and the remote holds the tag at the merge commit" \
+  "n=9 state=delivered|$TG_TIP" "$(prr_log_step)|$(prr_tag_there)"
 
 # ============================================================
 section "§WALL: publish is the orchestrator's verb"

@@ -763,6 +763,16 @@ expect_contains "RV-1c: …naming the verb it refused" "session-poker.sh approve
 run_hook "$(mk_payload "$R_RV" "$RV_CMD")"
 expect_status "RV-2: the orchestrator's own approve AC-x passes the wall" 0 "$ST"
 expect_absent "RV-2b: …and that arm's line is absent on the same stream RV-1b read" "$RV_ARM" "$ERR"
+# `check-from` moves the judge every landing is run by, on words the person typed: an agent quoting their words from an
+# earlier prompt must not move it.
+RV_CF="bash ${BIONIC_HOOKS_DIR}/session-poker.sh check-from 'the new check judges from here'"
+run_hook "$(mk_payload "$R_RV" "$RV_CF" "$ACTOR" "" Bash test-runner)"
+expect_status "RV-4: a dispatched agent's check-from is refused" 2 "$ST"
+expect_contains "RV-4b: …with the wall's line" "$RV_ARM" "$ERR"
+expect_contains "RV-4c: …naming the verb it refused" "session-poker.sh check-from" "$ERR"
+run_hook "$(mk_payload "$R_RV" "$RV_CF")"
+expect_status "RV-5: the orchestrator's own check-from passes the wall" 0 "$ST"
+expect_absent "RV-5b: …and that arm's line is absent on the same stream RV-4b read" "$RV_ARM" "$ERR"
 
 # ---------------------------------------------------------------------------
 section "§PART — reviews-part is the main thread's and the integrate row's own writer's; any other writer is refused with the row named"

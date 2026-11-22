@@ -68,7 +68,10 @@ plan_read_header() {  # <plan> [key [all]] -> `key=value` lines in the header's 
 
 # _plan_read_lines <file> -> its lines, a carriage return ending a line wherever it stands. A file saved
 # with CR alone is one awk record, which no later pass can split again, so this pass comes first.
-_plan_read_lines() { awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"; }
+_plan_read_lines() {
+  [ -z "${BIONIC_COUNT:-}" ] || printf 'parse _plan_read_lines\n' 2>/dev/null >>"$BIONIC_COUNT" || :
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
+}
 
 # The walk the table readers share, over `_plan_read_lines`: `cells` splits a row and returns how many
 # cells it holds, the header line's names fill head[1..nh], `name(i)` prints column i's and `line()` a
@@ -135,6 +138,24 @@ plan_read_table() {
   _plan_read_lines "$1" | awk -v sec="${2:-}" -v key="${3:-id}" '
     function start(   i, o) { o = "#\thead"; for (i = 1; i <= nh; i++) o = o "\t" name(i); print o; found = 1 }
     function row() { print line(); if (rn > nh) printf "#\tover\t%s\t%d\n", r[kc], rn }'"$_PLAN_READ_TABLE"
+}
+
+# plan_read_criterion_sums <plan> [eval] -> `<criterion><TAB><sum>` per criterion, file order, and its `Eval` cell as a
+# third field when a second argument is given. The sum is of the first `## Eval design` row naming it, its cells as the
+# table reader reads them, so a row reads as restated exactly when a cell's words change and never for its spacing: a
+# 32-bit string hash over bytes, the same on every awk. Only a criterion id of letters, digits, `.`, `_` and `-` is
+# summed, so a sum always fits a log field. 1 none, 2 no plan.
+plan_read_criterion_sums() {
+  [ -f "${1:-}" ] || return 2
+  plan_read_rows "$1" 'Eval design' criterion 2>/dev/null | LC_ALL=C awk -F'\t' -v ev="${2:-}" '
+    BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
+    { c = ""; e = ""
+      for (i = 1; i <= NF; i++) { k = index($i, "="); f = substr($i, 1, k - 1)
+        if (f == "criterion") c = substr($i, k + 1); else if (f == "eval") e = substr($i, k + 1) }
+      if (c !~ /^[A-Za-z0-9._-]+$/ || (c in seen)) next; seen[c] = 1
+      h = 5381; for (i = 1; i <= length($0); i++) h = (h * 33 + ord[substr($0, i, 1)]) % 4294967296
+      printf "%s\t%.0f%s\n", c, h, (ev != "" ? "\t" e : ""); n++ }
+    END { exit !n }'
 }
 
 # plan_read_criterion_task <plan> [<criterion>] -> `<criterion><TAB><value>` per criterion that names the task proving it,

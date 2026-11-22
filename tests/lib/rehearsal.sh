@@ -31,7 +31,8 @@
 #                      the failing reviewer, a second review failing on the same site is registered, a fix row born
 #                      of the first review's finding is added (the later rows' deps naming it), cut, launched and
 #                      landed through ready, settling both, the release check runs at its head, the release approval
-#                      card is rendered there and the user's reply approves it, the integrate row renders the release entry's
+#                      card is rendered there and the user's reply approves it, the orchestrator reads `pr-facts` and
+#                      writes the request's summary beside the run's log, the integrate row renders the release entry's
 #                      reviews part on the working branch and publishes it (`session-poker.sh publish`: the push to
 #                      the bare remote and the request through the stand-in gh), the person merges it by a merge
 #                      commit and pulls main, the integrate row delivers its record, close-out runs, and the Patrol is
@@ -61,7 +62,7 @@
 #   [prose]   the person's words: the plan's page (its header, goal, rows and Eval design), the requirements and
 #             the spec, and the project's config
 #   [record]  a record an agent writes: a review's, a criterion's evidence, the walk and the audit, a row's report,
-#             the records two of the goals are measured by, the document Step 7 names
+#             the records two of the goals are measured by, the document Step 7 names, the pull request's summary
 #   [code]    a row's code and its suite, and the release's changelog entry
 #   [typed]   what the CLI writes in the session's transcript, the user's typed words and the answer to the
 #             orchestrator's ListAgents call, with the session's start record, which session-start writes
@@ -97,6 +98,9 @@ if ! type -t roster_row_fixture >/dev/null 2>&1; then
 fi
 # shellcheck source=/dev/null
 type -t live_answer_body >/dev/null 2>&1 || . "${BIONIC_SCRIPTS_DIR}/tests/lib/live-answer.sh" || return 1 2>/dev/null || exit 1
+# A maker here that cannot make its fixture stops the suite that asked for it (tests/lib/maker-stop.sh).
+[ -r "${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" ] && . "${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" \
+  || { echo "rehearsal.sh: cannot load ${BIONIC_SCRIPTS_DIR}/tests/lib/maker-stop.sh" >&2; return 1 2>/dev/null || exit 1; }
 
 # The kinds of hand write, each what a person, an agent or the harness writes in a real run (above).
 RH_HAND_KINDS="prose record code typed launch plan"
@@ -393,8 +397,15 @@ _rh_tick_land() {
 # the bare repository, so no push is made to build it, and it never holds the working branch until something pushes it.
 rh_remote() {
   local b="${3:-main}"
-  git init --quiet --bare "$2" && git -C "$2" symbolic-ref HEAD "refs/heads/$b" \
-    && git -C "$2" fetch --quiet "$1" "refs/heads/$b:refs/heads/$b" && git -C "$1" remote add origin "$2"
+  # `git -C ""` acts where the caller stands: the project must be the top of its own repository and <dir> a bare one
+  # of its own before a ref or a remote is written to either.
+  [ -n "$1" ] && [ -d "$1" ] && [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$1" && pwd -P)" ] \
+    || maker_stop rh_remote "'$1' is no repository of its own"
+  [ -n "$2" ] && git init --quiet --bare "$2" \
+    && [ "$(git -C "$2" rev-parse --absolute-git-dir 2>/dev/null)" = "$(cd "$2" && pwd -P)" ] \
+    && git -C "$2" symbolic-ref HEAD "refs/heads/$b" \
+    && git -C "$2" fetch --quiet "$1" "refs/heads/$b:refs/heads/$b" && git -C "$1" remote add origin "$2" \
+    || maker_stop rh_remote "no bare remote of its own at '$2'"
 }
 
 # rh_host <dir> [pull] -> the stand-in for the host's command line tool at <dir>/bin/gh, and RH_GHPATH: that
@@ -512,6 +523,12 @@ _rh_replay() {
   _rh_poker "the release check at the fix's head" release-check || return 1
   _rh_poker "the release approval card at the fix's head" release-approval "$RH_PLAN" || return 1
   _rh_reply "the user's reply to the card at the fix's head" || return 1
+  # On the release approval the orchestrator reads the run's facts and writes the request's three written sections in
+  # pr-summary.md beside the run's log, the one place publish reads them; publish puts the facts after them.
+  _rh_poker "the integrate row reads the pull request's facts" pr-facts || return 1
+  printf '## Summary\n\nThe release answers the structure finding its review failed: a caller reaches the library change.\n\n## What changed\n\n- tests/rehearsal-row.test.sh calls rehearsal_landed in payload/scripts/lib/said.sh.\n\n## Upgrade notes\n\nNone.\n' \
+    > "$RH_REC/pr-summary.md" || return 1
+  _rh_hand record "the pull request's summary record/wave-x/pr-summary.md: its ## Summary, ## What changed and ## Upgrade notes"
   # The part goes on the branch before the pull request opens, so the merge carries it to main.
   _rh_poker "the integrate row renders the entry's reviews part" reviews-part T4 || return 1
   # The host: a bare remote holding main as it stands, and the stand-in gh, which pulls main for the person on a merge.

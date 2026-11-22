@@ -245,6 +245,18 @@ BIONIC_ENGAGED=1
 EVENT=$(bionic_jq .hook_event_name)
 [ -n "$EVENT" ] || EVENT="PreToolUse"
 
+# ONE COMMIT, ONE FOLD (lib/proof.sh `proof_hold_begin`). A commit is judged on the run's facts, which the collectors
+# below and the evidence gate each ask, the gate in its own subshells too. So the wall opens the hold for its process
+# tree, as the poker does for a verb, and every ask reads the one fold of the bound run's log by its files; each
+# judgment still sums the log at its entry. The hold is removed when the wall exits. A wall started inside a command
+# that already holds, a plan verb's dry commit, reads that command's hold and opens none. A call that holds no commit
+# holds nothing. The hold is opened only where the reads above have loaded lib/proof.sh (a bound run's place is read
+# through it), so what the collectors are handed is what they were handed without it; the gate then folds as it did.
+case "$COMMAND" in
+  *commit*)
+    if declare -F proof_hold_begin >/dev/null 2>&1 && proof_hold_begin; then trap 'proof_hold_end' EXIT; fi ;;
+esac
+
 # THE MEMORY STORE'S TWO FACTS, gathered for `wall_memory_store` (wave-24-fixit-1811 T12;
 # REQ-3, D16). A sixth wall, after the manifest's five, and a pure predicate over what this
 # block hands it — the store root and the command's write targets — per the freeze.

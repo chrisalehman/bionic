@@ -13,6 +13,7 @@
 #   §T47  a refusal never loses its own line to a long value.
 #   §DUTY  an agent's refusal goes out as one fixed line, its whole reason kept for the duty verb.
 #   §NEEDS  a refusal that needs a person is an event on the bound plan's landing record.
+#   §ROW-VERBS  each refusal of start, rule, amend and the landing's returns ends on a line run: with a command.
 #
 # THE SHAPES ARE ASSERTED LITERALLY, NOT READ BACK OUT OF THE TABLE. §2's exit2 rows say
 # what the stream IS — a verdict line, then the detail behind it — as a literal
@@ -956,5 +957,61 @@ needs_drive "$NZ" s "$FX_FACT" "$NEEDS_FIX" ""
 needs_drive "$NZ" ghost "$FX_FACT" "$NEEDS_FIX" ""
 expect_status "NEEDS-6 plan=none and no marker: the refusal exits 2 as ever" "2" "$DRV_RC"
 expect_false "NEEDS-7 …and no record is created" test -e "$NZ/.bionic/docs/record"
+
+section "§ROW-VERBS — each refusal of start, rule, amend and the landing's returns ends on a line run: with a command (AC-17.1)"
+# fails-when: a refusal of one of these verbs, or a landing's return, ends on any other line, or its last line names a verb
+# that is not the one that mends it.
+# FIXTURE FIDELITY: the landing's model world (landing-line.prelude.sh), the real verbs and the real `ready` on it.
+. "$(dirname "$0")/landing-line.prelude.sh"; trap 'cleanup; ll_cleanup' EXIT
+ll_carrier_env; printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"
+RV="$(ll_rworld)"; RVP="$BIONIC_HOOKS_DIR/session-poker.sh"
+rv_poker() { RV_OUT="$( cd "$RV" && CLAUDE_CODE_SESSION_ID="${RV_SID:-$WORLD_SID}" bash "$RVP" "$@" 2>&1 )"; RV_RC=$?; RV_LAST="$(printf '%s\n' "$RV_OUT" | tail -n 1)"; }
+rv_row() {  # <label> <regex of the last line> <verb args...>: refused, with more than the line itself, ending on the command
+  local l="$1" re="$2"; shift 2
+  rv_poker "$@"
+  expect_eq "($l) is refused" "1" "$([ "$RV_RC" -ne 0 ] && echo 1 || echo 0)"
+  expect_regex "($l) …and ends on the command to type" "^run: bash [^ ]*session-poker\\.sh $re\$" "$RV_LAST"
+  # A verb that spoke its own command and the default printed after it would still end on a run: line.
+  expect_eq "($l) …the one run: line it prints" "1" "$(printf '%s\n' "$RV_OUT" | /usr/bin/grep -c '^run: ')"
+  expect_true "($l) …after the words that say why" test "$(printf '%s\n' "$RV_OUT" | wc -l)" -ge 2
+}
+SPK='.*'
+rv_row rv1 'start T99$' start T99
+rv_row rv2 'start T1 --role bionic:implementor' start T1
+rv_row rv3 'start T1$' start T1 nope --role bionic:implementor
+rv_row rv4 "start <id>" start
+rv_row rv5 "rule <writer> '<text>'" rule
+rv_row rv6 'adopt' rule nobody 'a ruling'
+RV_SID=other rv_row rv7 'adopt' rule wx-T1 'a ruling'
+rv_row rv8 "amend <name> --files\\+ <path> --reason '<why>'" amend wx-T1 --reason 'no change asked'
+rv_row rv9 'adopt' amend nobody --files+ x.txt --reason 'no such row'
+rv_row rv10 "amend wx-T1 --suites\\+ zz.test.sh --reason '<why>'" amend wx-T1 --suites=zz.test.sh --reason 'a widening'
+rv_row rv11 "rule wx-T1 '<text>'" rule wx-T1 'a ruling' --files+ x.txt --suites+ a.test.sh --words 'words nobody typed'
+expect_contains "(rv9-pre) the amend of a row the roster holds is not refused: the world's verbs work" "amended" \
+  "$( cd "$RV" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$RVP" amend wx-T1 --files+ x.txt --reason 'control' 2>&1 )"
+# The landing's returns: a red suite, a conflict, an order, a comment that cites the run, a criterion the row left stale.
+rv_ready() {  # <label> <last-line regex> <root>
+  ll_verb "$3" T1
+  expect_eq "($1) the row is returned (exit 1)" "1" "$LL_RC"
+  expect_regex "($1) …ending on the command to type" "$2" "$(printf '%s\n' "$LL_OUT" | tail -n 1)"
+}
+RX="$(ll_rworld)"; ll_redsuite "$RX" T1 a; rv_ready rv20 '^run: tail -n 40 .*/T1-a-[0-9a-f]+\.log$' "$RX"
+RC="$(ll_rworld)"; printf 'one\n' > "$RC/T1.txt"; git -C "$RC" add T1.txt; git -C "$RC" commit -qm "the branch writes T1.txt too"
+rv_ready rv21 "^run: git -C .*T1 merge [0-9a-f]{40}\$" "$RC"
+RO="$(ll_rworld)"; LOG_AT=2026-10-20T00:00:00Z bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_order_event "$2" given "stop"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$RO")"
+rv_ready rv22 '^run: bash .*spawn-worktree\.sh ready$' "$RO"
+RL="$(ll_rworld)"; mkdir -p "$RL/.worktrees/T1/payload"; printf '#!/bin/bash\n# from wave-39 T5\n' > "$RL/.worktrees/T1/payload/q.sh"
+git -C "$RL/.worktrees/T1" add payload/q.sh && git -C "$RL/.worktrees/T1" commit -qm "T1: a citing comment"
+rv_ready rv23 '^run: bash .*spawn-worktree\.sh ready$' "$RL"
+expect_contains "(rv23) …after its LINT line" "LINT T1 payload/q.sh:2 wave" "$LL_OUT"
+RS="$(ll_world)"; RSP="$(ll_plan "$RS")"; ll_launch "$RS" T1 a.test.sh
+printf '# §RUN: one case\n' >> "$RS/tests/a.test.sh"; git -C "$RS" add -A && git -C "$RS" commit -qm "a section"
+git -C "$RS/.worktrees/T1" merge -q --no-edit wave/x && sed -i '' '/§RUN/d' "$RS/.worktrees/T1/tests/a.test.sh" && git -C "$RS/.worktrees/T1" commit -qam "T1: section gone"
+printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|---|\n| REQ-1 | r | AC-9.1 | hermetic | `tests/run.sh --only a.test.sh` §RUN → one case | x | T1 |\n' >> "$RSP"
+( eval "$(sed -n '/^line_field() {/,/^}/p; /^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
+  BIONIC_LIB="$REPO/payload/scripts/lib" BIONIC_ROOT="$RS" BIONIC_SID="$WORLD_SID"
+  dispatch_event "status=confirmed|row=T1|name=wx-T1|brief=.bionic/docs/record/wave-x/briefs/T1.md|brief_sum=s|plan=$RSP" )
+rv_ready rv24 '^run: bash .*spawn-worktree\.sh ready$' "$RS"
+expect_contains "(rv24) …after its STALE line" "STALE T1 AC-9.1" "$LL_OUT"
 
 finish

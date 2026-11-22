@@ -8,11 +8,25 @@ loading: deferred
 
 # Decision
 
-One shape for every decision put to the user, so a decision reads the same whoever raises it and at whatever step.
+One page holds the rule for asking: whose call it is, the form it takes, and how many at a time. A decision reads the same whoever raises it and at whatever step.
 
-Typed as `/bionic:decision` with no argument, it puts what was last under discussion to the user in this shape. With an argument, it puts that.
+Typed as `/bionic:decision` with no argument, it puts what was last under discussion to the user. With an argument, it puts that.
 
-## The shape
+## Whose call it is
+
+A call is the person's when it is hard to undo, changes what the release contains, leaves this machine, or spends money. Every other call is the orchestrator's: make it and say what you chose in one line.
+
+- A push, a tag, a merge, a rewrite of history, a change to the git identity and a change under the person's home config leave this machine or are hard to undo, so they are the person's. The release approval covers the push, the pull request and the tag of that release.
+- A waiver the tool opens is the orchestrator's to close by work. It becomes the person's only when it is put to them.
+- This is the one test. No other page states its own.
+
+## The short form
+
+The short form is the default: the heading line, then a few plain sentences, the question, each option in a line, the pick and why, and the reply line. It carries no labels. The long form below is kept for a call that is hard to undo.
+
+An act only the person can take, a restart among them, is not a decision: ask for it as an act, in one line that says what to do, with no decision number and no options.
+
+## The long form
 
 ```text
 **D<n> · <what is decided, in a few words>**
@@ -144,7 +158,7 @@ Design altitude:
 
 ## Forms
 
-Every decision arrives first as the four parts, in the terminal. A richer form adds to them and never replaces them, and the recommendation always appears in the terminal.
+Every long-form decision arrives first as the four parts, in the terminal. A richer form adds to them and never replaces them, and the recommendation always appears in the terminal.
 
 - **Matrix**, in the terminal under Options, when there are three or more options or the options differ on three or more criteria. Rows are options; columns are criteria.
 - **Diagram**, offered at medium significance or above when the options differ in structure the user has not seen: what connects, what moves, what comes first.
@@ -173,9 +187,9 @@ A reply that names a form gets that form directly, with no form in between. The 
 
 ## When it applies
 
-- Any decision put to the user, at any step and with no run open. The requirements interview and the design interview are its heaviest users.
-- Small decisions may share a turn, at your discretion, when they make sense together: each in the full shape, with its own number and reply line. A momentous decision always goes alone.
-- Approvals and reversible calls stay out. Approvals wait for the release approval card. A reversible call is yours: make it and say so.
-- A settled decision, one the run's log holds as ruled, is put again only as `reopening D<n>: <one sentence of new evidence>`; with no new evidence, the ruling stands.
+- Any decision that is the person's by the rule above, at any step and with no run open. The requirements interview and the design interview are its heaviest users.
+- One question per message. A decision waits for the person's answer before the next is put.
+- Approvals wait for the release approval card. A call that is the orchestrator's stays out: make it and say so in one line.
+- A settled decision, one the run's log holds as ruled, is put again only as `reopening D<n>: <one sentence of new evidence>`; with no new evidence, the ruling stands. A ruling comes back only as a reopening with new evidence, never as an option of another decision.
 
 During a run, a decision is put with one command before it is shown: `bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>'`. It appends the put to the run's log, `record/<wave>/run.log`, and prints a `wait:` line: what changes if the decision is answered in an hour rather than now, computed from the tasks that wait on it and the longest chain. That line ends Significance as printed, never typed. Each put is a round, so a re-put or a reopening is put the same way. It is ruled with `decisions rule D<n> '<reply>'`, the ruling, its reply and who said it appended to the same log, which closes the round; a ruling written by hand into a file is not read as one. With no run open, nothing is written. The fixed labels and the reply line let a reader find decisions in a transcript afterwards.

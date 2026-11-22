@@ -448,7 +448,7 @@ ll_redsuite "$RM1" T1 b
 ll_verb "$RM1" T1
 KM1="$(ll_field "$(ll_ev "$RM1" candidate)" commit)"
 expect_eq "(r6e) a row amended to a b, b red on the candidate: ready exits 1, RED naming b" \
-  "1 RED T1 b.test.sh $RM1/.bionic/docs/record/wave-x/line/T1-b-${KM1:0:12}.log" "$LL_RC $LL_OUT"
+  "1 RED T1 b.test.sh $RM1/.bionic/docs/record/wave-x/line/T1-b-${KM1:0:12}.log" "$LL_RC $(printf '%s\n' "$LL_OUT" | head -1)"
 expect_eq "(r6e) …proved on the amended set, both suites run" "a.test.sh,b.test.sh a.test.sh:green b.test.sh:red" \
   "$(ll_field "$(ll_ev "$RM1" ready)" suites) $(ll_verdicts "$RM1")"
 expect_eq "(r6e) …and nothing is published" "$HM1" "$(ll_head "$RM1")"
@@ -476,7 +476,7 @@ K3B="$(ll_field "$(ll_ev "$RM3b" published)" commit)"
 expect_nonempty "(r6g2-pre) the adopted row's landing was published" "$K3B"
 expect_contains "(r6g2) the adopted-only row's landing is marked on its roster row (the mark reads the row the wall reads)" "|landed=${K3B}|" \
   "$(grep '|name=wx-T1|' "$(ll_roster "$RM3b")" | tail -1)"
-expect_contains "(r6g2) …and the owed line is printed, naming the agent" "owed: complete task T1, then stop wx-T1" "$LL_OUT"
+expect_contains "(r6g2) …and the owed line is printed, naming the agent" "owed: stop wx-T1" "$LL_OUT"
 # THE MARK GOES TO THE WRITER `ready` HELD THE LANDING TO (wave-35 T7; burns debt row-writer-lookup). The
 # launch line is wx-T1; the agent's latest row carries the same id under another name, wx-T1b, so
 # `line_row_writer` answers wx-T1b. `_line_roster_mark` asks it too, and marks wx-T1b's row, never the
@@ -578,6 +578,27 @@ expect_eq "(r6k2) …a path keeps its directories, one spelling per file; no ..,
   "tests/a.test.sh|./a.test.sh|d/x.test.sh,x.test.sh|FAIL|FAIL|FAIL|FAIL|FAIL" \
   "$(_line_suites './tests/a, tests/a.test.sh')|$(_line_suites ./a)|$(_line_suites 'd/x x')|$(_line_suites ../a.test.sh || echo FAIL)|$(_line_suites /d/a.test.sh || echo FAIL)|$(_line_suites d//a.test.sh || echo FAIL)|$(_line_suites d/./a.test.sh || echo FAIL)|$(_line_suites d/run.sh || echo FAIL)"
 
+section "§CLOSES: the landing closes its row: the roster row acked, the tree gone, the record's assumptions in the run's once, the stop alone owed (AC-15.1, AC-15.3)"
+# fails-when: a command is owed to close the row or remove the tree; the assumptions are absent, or there twice.
+RCL="$(ll_rworld)"; DCL="$RCL/.bionic/docs/record/wave-x"
+printf '# T1\n\n## Assumptions\n\n- A-T1.1 — one.\n- A-T1.2 — two,\n  carried on.\n\n## Reuse\n\n- not one.\n' > "$DCL/T1.md"
+printf '# assumptions\n\n- (T0): older.\n' > "$DCL/assumptions.md"
+ll_verb "$RCL" T1
+KCL="$(ll_field "$(ll_ev "$RCL" published)" commit)"
+expect_eq "(cl0) T1 lands (exit 0)" "0" "$LL_RC"
+expect_nonempty "(cl0) …and its landing was published" "$KCL"
+expect_eq "(cl1) the owed line, last, names the stop and nothing else" "landed T1 $KCL — owed: stop wx-T1" "$(printf '%s\n' "$LL_OUT" | tail -1)"
+expect_contains "(cl2) the roster row is closed: acked on the sweeper's ledger, reason landed" "|name=wx-T1|by=patrol|reason=landed" \
+  "$(cat "$RCL/.bionic/tmp/sweeper-$WORLD_SID.state" 2>/dev/null)"
+expect_false "(cl3) the tree is gone" test -e "$RCL/.worktrees/T1"
+expect_eq "(cl3) …and its branch stays" "$(git -C "$RCL" rev-parse "$KCL^2")" "$(git -C "$RCL" rev-parse --verify -q wt/T1)"
+cl_items() { grep -c '^- (T1): A-T1\.' "$DCL/assumptions.md"; }
+expect_eq "(cl4) the record's two assumptions stand in the run's, a carried line joined, the older line kept" \
+  "2|- (T1): A-T1.2 — two, carried on.|- (T0): older." \
+  "$(cl_items)|$(grep -F 'A-T1.2' "$DCL/assumptions.md")|$(grep -F '(T0)' "$DCL/assumptions.md")"
+_line_close_assumptions "$(ll_log "$RCL")" T1 >/dev/null
+expect_eq "(cl5) …and a second close appends none: each stands once" "2" "$(cl_items)"
+
 # ---------------------------------------------------------------------------
 section "§GATE: the line runs the suites the brief names, asks the gate before each start, and holds no width of its own"
 #
@@ -645,15 +666,15 @@ ll_stamp() {  # <root> <row> <rc> — a clean stamp at the row's head naming a.t
 }
 RQ="$(ll_rworld)"; HQ="$(ll_head "$RQ")"
 ll_redsuite "$RQ" T1 a; ll_stamp "$RQ" T1 0
-expect_false "(q1-pre) the planted stamp is green proof to 1.12.0's reader" \
-  _wt_stale_proof "$RQ/.worktrees/T1" "$(git -C "$RQ/.worktrees/T1" rev-parse HEAD)"
+expect_true "(q1-pre) the planted stamp stands green at the row's head" \
+  grep -q "^stamp/v1|head=$(git -C "$RQ/.worktrees/T1" rev-parse HEAD)|dirty=0|rc=0|" "$(git -C "$RQ/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-stamps"
 ll_verb "$RQ" T1
 expect_eq "(q1) a green stamp beside a red candidate: red (exit 1)" "1" "$LL_RC"
 expect_match "(q1) …printing RED" "RED T1 a.test.sh *" "$LL_OUT"
 expect_eq "(q1) …and nothing is published" "$HQ" "$(ll_head "$RQ")"
 RQ2="$(ll_rworld)"; ll_stamp "$RQ2" T1 1
-expect_true "(q2-pre) the planted stamp is red to 1.12.0's reader" \
-  _wt_stale_proof "$RQ2/.worktrees/T1" "$(git -C "$RQ2/.worktrees/T1" rev-parse HEAD)"
+expect_true "(q2-pre) the planted stamp stands red at the row's head" \
+  grep -q "^stamp/v1|head=$(git -C "$RQ2/.worktrees/T1" rev-parse HEAD)|dirty=0|rc=1|" "$(git -C "$RQ2/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-stamps"
 ll_verb "$RQ2" T1
 expect_eq "(q2) a red stamp beside a green candidate: published (exit 0)" "0" "$LL_RC"
 
@@ -665,7 +686,8 @@ ll_verb "$RX" T1
 KX="$(ll_field "$(ll_ev "$RX" candidate)" commit)"
 LX="$RX/.bionic/docs/record/wave-x/line/T1-a-${KX:0:12}.log"
 expect_eq "(x1) a red candidate: ready exits 1" "1" "$LL_RC"
-expect_eq "(x1) …printing RED, the suite and the log's path" "RED T1 a.test.sh $LX" "$LL_OUT"
+expect_eq "(x1) …printing RED, the suite and the log's path, then the command that reads the log" \
+  "RED T1 a.test.sh $LX"$'\n'"run: tail -n 40 $LX" "$LL_OUT"
 expect_contains "(x1) …a log that holds the failing line" "FAIL: a planted red" "$(cat "$LX" 2>/dev/null)"
 expect_eq "(x1) the branch's head is unchanged" "$HX" "$(ll_head "$RX")"
 expect_regex "(x2) the verdict is red on the candidate" "\\|commit=${KX}\\|suite=a.test.sh\\|result=red\\|log=${LX}\\|" "$(ll_ev "$RX" verdict)"
@@ -676,7 +698,8 @@ printf 'one\n' > "$RC1/T1.txt"; git -C "$RC1" add T1.txt; git -C "$RC1" commit -
 HC1="$(ll_head "$RC1")"
 ll_verb "$RC1" T1
 expect_eq "(x4) a conflict with the accepted head returns the row (exit 1)" "1" "$LL_RC"
-expect_eq "(x4) …printing CONFLICT and the files" "CONFLICT T1 T1.txt" "$LL_OUT"
+expect_eq "(x4) …printing CONFLICT and the files, then the merge that settles it in the tree" \
+  "CONFLICT T1 T1.txt"$'\n'"run: git -C $RC1/.worktrees/T1 merge $HC1" "$LL_OUT"
 expect_regex "(x4) …returned why=conflict" "^run/v1\\|ev=returned\\|row=T1\\|why=conflict\\|detail=T1.txt\\|" "$(ll_ev "$RC1" returned)"
 expect_eq "(x4) …nothing published" "$HC1" "$(ll_head "$RC1")"
 # THE USER'S ORDER: while one stands the line starts no suite and returns the entry with the user's words; lifted, the same ready runs it.
@@ -1320,10 +1343,13 @@ expect_eq "(k0) precondition: the owed list reads two deferrals, and the second'
 expect_eq "(k0b) …and the entry on the branch carries the hand's limit" "- a limit typed by hand" "$(kl_part "$RK" | /usr/bin/grep '^- ')"
 KL_OUT="$(ww_poke "$RK" known-limits-part T3)"; KL_RC=$?
 KL_T="$(kl_tip "$RK")"
-expect_eq "(k1) known-limits-part renders the part: exit 0, a commit by the line's author on the old head" "0|bionic line|$KL_H" \
-  "$KL_RC|$(git -C "$RK" log -1 --format='%an|%P' "$KL_T" 2>/dev/null)"
+expect_eq "(k1) known-limits-part renders the part: exit 0, a commit by the checkout's own author on the old head" "0|world <world@example.invalid>|$KL_H" \
+  "$KL_RC|$(git -C "$RK" log -1 --format='%an <%ae>|%P' "$KL_T" 2>/dev/null)"
 [ "$KL_RC" = 0 ] || printf '%s\n' "$KL_OUT" | sed 's/^/    | /' | head -8
 expect_eq "(k2) …touching CHANGELOG.md alone" "CHANGELOG.md" "$(git -C "$RK" diff --name-only "$KL_H" "$KL_T" 2>/dev/null)"
+KL_CODE="$(/usr/bin/grep -rn 'line_reviews_commit' "$BIONIC_HOOKS_DIR" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null | wc -l | tr -d ' ')"
+expect_eq "(k2b) the scan of the code finds the commit's maker, and no author name or address of the tool's own beside it" "yes|" \
+  "$([ "${KL_CODE:-0}" -gt 0 ] && echo yes)|$(/usr/bin/grep -rnE 'bionic\.invalid|bionic line|bionic close-out' "$BIONIC_HOOKS_DIR" "$BIONIC_SCRIPTS_DIR/payload/scripts" 2>/dev/null)"
 expect_eq "(k3) the part holds each stated sentence, unescaped, in the order registered, and nothing else" \
   "- $KL_S1|- $KL_S2" "$(kl_part "$RK" | /usr/bin/grep '^- ' | paste -sd'|' -)"
 expect_eq "(k4) the part keeps its place before The landing numbers" "### The work|### Known limits|### The landing numbers" "$(kl_heads "$RK")"

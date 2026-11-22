@@ -2378,8 +2378,9 @@ _card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or 
   local facts
   _card_writer && return 0
   _proof_reader_load || return 1
-  facts="$(_proof_facts "$2")" || return 2
-  ( reader_facts() { printf '%s' "$facts"; }
+  proof_facts_at "$2" || return 2
+  facts="$_PROOF_FACTS_TEXT"
+  ( _PROOF_READ_FILE="$_PROOF_FACTS_FILE"; reader_facts() { if [ -n "$_PROOF_READ_FILE" ]; then cat "$_PROOF_READ_FILE"; else printf '%s' "$facts"; fi; }
     m="$1"
     while [ "$m" -le 3 ] 2>/dev/null; do reader_q_approved "$2" "step$m" && exit 0; m=$((m + 1)); done
     s="$(reader_q_step "$2" | sed -n 's/^n=//p')"; s="${s%[ab]}"
@@ -3746,6 +3747,9 @@ case "$1" in
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable plan at '$2'"
     _card_early_load || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }
     _card_early_ctx "$2" || { printf 'card.sh: %s: %s\n' "$1" "$CF_ERR" >&2; exit 1; }
+    # THE RUN'S FACTS ARE READ ONCE, IN THIS SHELL, before any subshell asks: inside the command's hold the held fold
+    # is read here and inherited, so no subshell below reads it again; outside one this shell folds once for them all.
+    if declare -F _proof_facts >/dev/null 2>&1; then _proof_facts "$CF_PLAN" >/dev/null 2>&1 || :; fi
     if ! _card_early; then printf 'CARD-EARLY — %s\n' "$CARD_EARLY_WHY" >&2; exit 1; fi
     printf '%s' "$CF_SETTLE" | awk 'NF && !seen[$0]++ { print "settles: " $0 }'
     exit 0 ;;

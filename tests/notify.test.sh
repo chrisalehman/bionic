@@ -419,7 +419,7 @@ SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
 export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 NT_IMPORT_MISSING=""
-for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to run_close_as plant_tmp_session; do
+for _f in in_fixture fixture_own fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to run_close_as plant_tmp_session; do
   nt_import_fn "$_f" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
 done
 expect_eq "D0 close-out.prelude.sh's fixture builders were all read out of it" "" "$NT_IMPORT_MISSING"
