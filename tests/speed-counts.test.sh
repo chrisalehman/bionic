@@ -41,10 +41,11 @@
 # names the plan for resume. Each size is snapshotted once built, and every command is run from that snapshot, with
 # its own TMPDIR, so no command reads what another left, and a kept file of an earlier run is never what is counted.
 #
-# THE SIX COMMANDS (SC_CMDS): card `release-approval --preview <plan>` · check `current 6 --check` · tick `tick` ·
+# THE SEVEN COMMANDS (SC_CMDS): card `release-approval --preview <plan>` · check `current 6 --check` · tick `tick` ·
 # resume `resume <handoff>` · watch `tick --watch` · wall, the commit wall (hooks/bash-walls.sh) handed the PreToolUse
-# payload of `git commit -m probe` from the bound session, which it admits. Each runs once per size with the counters on (`on`), and at
-# SC_N once more with them off (`off`), for §PRINT.
+# payload of `git commit -m probe` from the bound session, which it admits · close, the close's check
+# (scripts/close-out.sh `<plan> check`), which stands at Step 5 and so prints each act it would refuse and exits 0. Each
+# runs once per size with the counters on (`on`), and at SC_N once more with them off (`off`), for §PRINT.
 #
 # ADDING A CEILING. `sc_count <size> <command> <kind>` prints how many lines of that kind the command wrote at that
 # size (`n` or `2n`), 0 for none. A row that holds a command to a count adds one assertion over it, in a section of
@@ -94,9 +95,10 @@ SID="5c1e7a2b-3d4f-4e8a-9b6c-1f2e3d4c5b6a"
 SC_NOW=1791324000     # 2026-10-06T22:00:00Z
 SC_AT=2026-10-06T12:00:00Z
 SC_N=5
-SC_CMDS="card check tick resume watch wall"
+SC_CMDS="card check tick resume watch wall close"
 SC_KINDS="log fold overlay parse table status facts held gate pass matrix owing send sum append judge derive"
 WALLS="${BIONIC_HOOKS_DIR}/bash-walls.sh"
+CLOSE="${BIONIC_SCRIPTS_DIR}/payload/scripts/close-out.sh"
 SC_OUT="$TMPROOT/out"; mkdir -p "$SC_OUT"
 
 # ---------- the run ----------
@@ -173,6 +175,7 @@ sc_args() {
     resume) printf '%s\n' resume "$SC_ROOT/.bionic/handoffs/handoff.md" ;;
     watch) printf '%s\n' tick --watch ;;
     wall) : ;;
+    close) printf '%s\n' "$SC_PLAN" check ;;
   esac
 }
 # sc_wall -> the commit wall run from the project of the size last named, handed the bound session's commit payload
@@ -185,18 +188,19 @@ sc_wall() {
 # $SC_OUT/<size>.<command>.<mode>.{count,out,err,rc}, and the live tree as the command left it. `count` is the
 # counters' file, made empty before the run, so a command that counts nothing leaves it empty, never absent.
 sc_run() {
-  local size="$1" cmd="$2" mode="$3" f a
+  local size="$1" cmd="$2" mode="$3" f a pk="$POKER"
   f="$SC_OUT/$size.$cmd.$mode"
   rm -rf "$TMPROOT/$size/live" && cp -Rp "$TMPROOT/$size/snap" "$TMPROOT/$size/live" || return 1
   SC_W="$TMPROOT/$size/live"; SC_ROOT="$SC_W/proj"; SC_PLAN="$SC_ROOT/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
   set --; while IFS= read -r a; do set -- "$@" "$a"; done < <(sc_args "$cmd")
+  [ "$cmd" != close ] || pk="$CLOSE"
   : > "$f.count"
   if [ "$cmd" = wall ] && [ "$mode" = on ]; then BIONIC_COUNT="$f.count" sc_wall > "$f.out" 2> "$f.err"
   elif [ "$cmd" = wall ]; then sc_wall > "$f.out" 2> "$f.err"
   elif [ "$mode" = on ]; then
-    BIONIC_COUNT="$f.count" sc_env "$POKER" "$@" > "$f.out" 2> "$f.err"
+    BIONIC_COUNT="$f.count" sc_env "$pk" "$@" > "$f.out" 2> "$f.err"
   else
-    sc_env "$POKER" "$@" > "$f.out" 2> "$f.err"
+    sc_env "$pk" "$@" > "$f.out" 2> "$f.err"
   fi
   printf '%s\n' "$?" > "$f.rc"
 }
@@ -215,7 +219,7 @@ sc_print() {
     | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z/<at>/g'
 }
 
-setup_section "the run at n and 2n rows, and the five commands over each"
+setup_section "the run at n and 2n rows, and the seven commands over each"
 
 SC_BUILT=""; SC_FETCHED=""
 for SC_SIZE in n 2n; do
@@ -249,7 +253,7 @@ section "§FIXTURE: each size is built, and each command runs the path its count
 # read nothing.
 expect_eq "FX-1 both sizes are built" " n 2n" "$SC_BUILT"
 for SC_SIZE in n 2n; do
-  expect_eq "FX-2 ($SC_SIZE) the exits: card 0, check 1 (it would refuse), tick 0, resume 0, watch 0, wall 0 (it admits)" "0 1 0 0 0 0" \
+  expect_eq "FX-2 ($SC_SIZE) the exits: card 0, check 1 (it would refuse), tick 0, resume 0, watch 0, wall 0 (it admits), close 0" "0 1 0 0 0 0 0" \
     "$(for SC_C in $SC_CMDS; do cat "$SC_OUT/$SC_SIZE.$SC_C.on.rc" 2>/dev/null || echo -; done | paste -sd' ' -)"
   SC_ROWS="$(sc_rows "$SC_SIZE")"
   expect_regex "FX-3 ($SC_SIZE) the card's head counts every row, all but the integrate row landed" \
@@ -263,12 +267,12 @@ section "§REPORTS: every counter reports, at each size"
 # fails-when: a counted function writes no line when BIONIC_COUNT names a file, or a command counts nothing.
 for SC_SIZE in n 2n; do
   for SC_K in $SC_KINDS; do
-    # A held command hands the facts on as a string nowhere, and none of the six appends to the log, so `send` and
+    # A held command hands the facts on as a string nowhere, and none of the seven appends to the log, so `send` and
     # `append` are each proved by a probe of their own (§SEND, §SUM).
     case "$SC_K" in send|append) continue ;; esac
     SC_BY=""
     for SC_C in $SC_CMDS; do [ "$(sc_count "$SC_SIZE" "$SC_C" "$SC_K")" -eq 0 ] || SC_BY="$SC_BY $SC_C"; done
-    expect_nonempty "REP-1 ($SC_SIZE) $SC_K is counted by a command of the five (by:${SC_BY:- none})" "$SC_BY"
+    expect_nonempty "REP-1 ($SC_SIZE) $SC_K is counted by a command of the seven (by:${SC_BY:- none})" "$SC_BY"
   done
   for SC_C in $SC_CMDS; do
     expect_regex "REP-2 ($SC_SIZE) $SC_C counts its reads, each line a known kind and its function" \
@@ -282,7 +286,7 @@ section "§ONCE: one fold of the run's log a command, one answer of its facts at
 # starts is not served the command's one fold, or the facts at the head are judged a second time in one command; or
 # a judgment's pending step is laid over the fold more than once a gate pass.
 for SC_SIZE in n 2n; do
-  for SC_C in card check wall; do
+  for SC_C in card check wall close; do
     expect_eq "ONCE-1 ($SC_SIZE) $SC_C folds the run's log once" 1 "$(sc_count "$SC_SIZE" "$SC_C" fold)"
   done
   for SC_C in card tick resume watch; do
@@ -299,7 +303,7 @@ for SC_SIZE in n 2n; do
 done
 
 section "§SEND: inside a held command the facts are read by path, never handed on as a string"
-# fails-when: a reader of any of the six commands is handed the whole fold as a string (a `$( )` of the facts, a held
+# fails-when: a reader of any of the seven commands is handed the whole fold as a string (a `$( )` of the facts, a held
 # copy printed, a reader's override fed the variable), in the command's first process or any it starts.
 # The counter is proved first, on the same snapshot: a shell that opens a hold and takes the facts as a string counts
 # one send, and one that sends them to /dev/null counts none.
@@ -495,7 +499,7 @@ if [ -n "${SPEED_COUNTS_TIMES:-}" ]; then
   done
 fi
 
-# The prints the five commands made, for a record to compare across two runs of the suite (SPEED_COUNTS_PRINTS=<dir>).
+# The prints the seven commands made, for a record to compare across two runs of the suite (SPEED_COUNTS_PRINTS=<dir>).
 [ -z "${SPEED_COUNTS_PRINTS:-}" ] || { mkdir -p "$SPEED_COUNTS_PRINTS"
   for SC_SIZE in n 2n; do for SC_C in $SC_CMDS; do sc_print "$SC_SIZE" "$SC_C" on > "$SPEED_COUNTS_PRINTS/$SC_SIZE.$SC_C.txt"; done; done
   cp "$SC_OUT"/*.judge-* "$SPEED_COUNTS_PRINTS/" 2>/dev/null; }
@@ -639,7 +643,7 @@ section "§LOG: a command reads the run's log whole no more often than its ceili
 # or raw as the landing record (`line_lines`), in its first process or any it starts. Each ceiling is the command's
 # count over this fixture, the same at n rows and 2n (§SCALE); a row that removes reads lowers it, and one that adds a
 # read raises it in this table, by name.
-SC_LOG_MOST="card=9 check=2 tick=15 resume=21 watch=18 wall=2"
+SC_LOG_MOST="card=9 check=2 tick=15 resume=21 watch=18 wall=2 close=5"
 SC_LOG_MOST_FCARD=13
 expect_eq "LOG-0 a raw read of the log is counted: the card counts both readers (the counter proved)" "yes yes" \
   "$([ "$(sc_count n card log)" -gt "$(sc_raw n card)" ] && echo yes) $([ "$(sc_raw n card)" -ge 1 ] && echo yes)"
