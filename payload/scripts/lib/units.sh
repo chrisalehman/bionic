@@ -1074,11 +1074,12 @@ units_approval_names() {
 # units_order <plan> -> the id of the regression row when the plan is in the order build, regression, review, release,
 # exit 0: a test row at Step 5 or earlier and a doc row at Step 7 or later (the release), neither dropped. Nothing, exit 1,
 # otherwise. THE ONE READING of the order: `current 8` (hooks/poker/judge.sh) and the commit wall ask it, and
-# `units_validate` holds an open plan to the order itself.
+# `units_validate` holds an open plan to the order itself. A test row marked as a whole-run point (`marked`) is a run
+# among the build, never the regression row, so the order skips it.
 units_order() {
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$(_units_cell_awk)"'
     tolower($10) == "dropped" || $2 !~ /^[0-9]+$/ { next }
-    $3 == "test" && $2 + 0 <= 5 && reg == "" { reg = $1 }
+    $3 == "test" && $2 + 0 <= 5 && reg == "" && !marked($4) { reg = $1 }
     $3 == "doc" && $2 + 0 >= 7 { rel = 1 }
     END { if (reg == "" || !rel) exit 1; print reg }'
 }
@@ -1336,7 +1337,7 @@ _units_files_awk() {
 '
 }
 
-# _units_cell_awk -> the awk functions `kdef(kind, step)`, the reads a row of that kind takes when its cell is
+# _units_cell_awk -> the awk functions `kdef(kind, step[, task])`, the reads a row of that kind takes when its cell is
 # empty (units_ready above), and `cellq(v)`, a cell value as the suspect test prints it: `—` for
 # nothing, else the value in single quotes. ONE DEFAULT, TWO READERS: the scheduler
 # reads an empty cell through it, and the suspect test prints a cell back
@@ -1348,9 +1349,16 @@ _units_files_awk() {
 # THE FLOOR ROW READS THE READINGS (wave-35 T9; D8, AC-1.1; ADR-054): a test row at Step 6 or later is the
 # floor, Step 6's last act, and takes `approval:plan, proof:review, head`, so it waits for every owed reading
 # and every fix row born of one; a test row before Step 6 keeps `approval:plan, head`.
+# A WHOLE-RUN POINT IS A MARKED TEST ROW: `marked(t)` is 1 when the task cell t carries the tag ` · point`, ending the
+# cell or followed by the next ` · ` tag, so `· points` or `· point: …` is no mark. `kdef` given the cell answers a
+# marked test row `approval:plan` alone: a point runs after the rows its deps name, and waiting on `head` would hold it
+# behind every code row, the ones that wait on the point among them. A plan with no mark reads the default it read before.
+# `index`, never `==`, because the tag holds a multibyte glyph.
 _units_cell_awk() {
   printf '%s' '
-    function kdef(k, s) {
+    function marked(t) { return index(t " · ", " · point · ") > 0 }
+    function kdef(k, s, t) {
+      if (k == "test" && marked(t)) return "approval:plan"
       if (k == "test" && s ~ /^[0-9]+$/ && s + 0 >= 6) return "approval:plan, proof:review, head"
       if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
       if (k == "review") return "approval:plan, live:head"
@@ -2265,6 +2273,13 @@ units_validate() {
               if (qbad) printf "%s: task declares questions: %s, which is no list of questions: each one of %s, once, comma-separated with no space\n", \
                 id[i], (q == "" ? "(empty)" : q), pq
             }
+          }
+
+          # A WHOLE-RUN POINT IS A TEST ROW AMONG THE BUILD: the mark drops the wait of its row on every code row, so on any
+          # other kind it would be read as nothing, and on a test row past step 5 it would strip the floor of its readings.
+          if (marked(tsk[i])) {
+            if (knd[i] != "test") printf "%s: task marks a whole-run point; only a test row is a point\n", id[i]
+            else if (stp[i] ~ /^[0-9]+$/ && stp[i] + 0 > 5) printf "%s: task marks a whole-run point at step %s; a point stands among the build, at step 5 or earlier\n", id[i], stp[i]
           }
 
           # THE ORIGIN IS DECLARED BESIDE THE IDENTITY (wave-17 REQ-2, AC-2.1, D3, ADR-032).
