@@ -42,6 +42,14 @@
 #   - §C carries an unmutated control (a cache holding 1.3.2 alone must select 1.3.2),
 #     so "picked 1.10.0" cannot pass by hardcoding.
 #
+# THE ONE FUNCTION a library calls to load a sibling library once, `bionic_need <lib> <marker>`:
+#
+#   §NEED   a marker already defined loads nothing and answers 0; the library folder a hook resolved
+#           (BIONIC_LIB) is preferred over the loader's own folder; with none resolved, or a resolved folder
+#           that lacks the library, the loader's own folder serves; a library that is nowhere, or that is
+#           there and does not define the marker, answers nonzero and leaves the marker undefined; a
+#           library's own output is swallowed; sourcing the loader sets no BIONIC_LIB.
+#
 # Usage: bash tests/loader.test.sh
 #   BIONIC_LOADER_LIB_UNDER_TEST=/tmp/mutant/loader.sh bash tests/loader.test.sh
 
@@ -478,5 +486,42 @@ case "$RN_YES" in *"bionic/notify"*) ok "RN.3a …and the item names the file it
 eq "RN.3b …and the share file beside it is untouched" "80" "$(cat "$RN_HOME/.claude/bionic/share" 2>/dev/null)"
 RN_AGAIN="$(rn_run y --only notify)"
 case "$RN_AGAIN" in *"already clean"*) ok "RN.4 with no channel file the item is already clean" ;; *) no "RN.4 with no channel file the item is already clean" "out=[$RN_AGAIN]" ;; esac
+
+# ── §NEED — bionic_need loads a library once, preferring the hook's folder ───
+section "NEED: bionic_need <lib> <marker> loads a library once, preferring the folder a hook resolved"
+# fails-when: the loader's own folder is tried before BIONIC_LIB, a defined marker is sourced over, a missing library
+# or a library that lacks its marker answers 0, or the library's output reaches the caller.
+NEED_OWN="$WORK/need-own"; NEED_HOOK="$WORK/need-hook"; NEED_BARE="$WORK/need-bare"
+mkdir -p "$NEED_OWN" "$NEED_HOOK" "$NEED_BARE"
+cp "$LOADER_LIB" "$NEED_OWN/loader.sh"
+printf 'need_fn() { echo own; }\necho noise-own\necho noise-own-err >&2\n' > "$NEED_OWN/l.sh"
+printf 'need_fn() { echo hook; }\necho noise-hook\n' > "$NEED_HOOK/l.sh"
+printf 'other_fn() { :; }\n' > "$NEED_OWN/nomarker.sh"
+need_run() {  # <hook lib dir or ""> <lib> <marker> [predefine] -> "<rc>|<marker's answer or none>|<call's output>"
+  local out
+  out="$(env -i PATH=/usr/bin:/bin HOME="$FAKE_HOME" HOOKLIB="$1" LIB="$2" MARK="$3" PRE="${4:-}" WORK_O="$WORK/need.out" /bin/bash -c '
+    set -u
+    . "'"$NEED_OWN"'/loader.sh"
+    [ -z "$HOOKLIB" ] || BIONIC_LIB="$HOOKLIB"
+    [ -z "$PRE" ] || eval "$MARK() { echo predefined; }"
+    bionic_need "$LIB" "$MARK" >"$WORK_O" 2>&1; rc=$?; o="$(cat "$WORK_O")"
+    a=none; declare -F need_fn >/dev/null 2>&1 && a="$(need_fn)"
+    printf "%s|%s|%s" "$rc" "$a" "$o"' 2>&1)"
+  printf '%s' "$out"
+}
+expect_eq "NEED.1 sourcing the loader sets no BIONIC_LIB" "unset" \
+  "$(env -i PATH=/usr/bin:/bin /bin/bash -c 'set -u; . "'"$NEED_OWN"'/loader.sh"; [ -z "${BIONIC_LIB+x}" ] && echo unset || echo set')"
+expect_eq "NEED.2 the folder a hook resolved is preferred, and its output is swallowed" "0|hook|" \
+  "$(need_run "$NEED_HOOK" l.sh need_fn)"
+expect_eq "NEED.3 with none resolved the loader's own folder serves, and its output is swallowed" "0|own|" \
+  "$(need_run "" l.sh need_fn)"
+expect_eq "NEED.4 a resolved folder that lacks the library falls back to the loader's own" "0|own|" \
+  "$(need_run "$NEED_BARE" l.sh need_fn)"
+expect_eq "NEED.5 a marker already defined answers 0 and sources nothing over it" "0|predefined|" \
+  "$(need_run "$NEED_HOOK" l.sh need_fn predefined)"
+expect_eq "NEED.6 a library nowhere answers nonzero and defines nothing" "1|none|" \
+  "$(need_run "$NEED_HOOK" absent.sh need_fn)"
+expect_eq "NEED.7 a library that does not define the marker answers nonzero" "1|none|" \
+  "$(need_run "" nomarker.sh need_fn)"
 
 finish
