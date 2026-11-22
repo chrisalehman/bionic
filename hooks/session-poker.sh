@@ -2584,8 +2584,8 @@ poker_hold_prime() {  # <verb's args> -> the bound run's facts folded in this sh
 # shellcheck disable=SC2034  # read by hooks/poker/sitrep.sh, sourced below
 POKER_HELD_RUN=""   # the bound run poker_hold_prime folded; a reader of its log by another path asks that fold (sitrep.sh `_sitrep_ledger_facts`)
 if declare -F proof_hold_begin >/dev/null 2>&1 && proof_hold_begin; then
-  ( poker_hold_prime "$@"; poker_dispatch "$@" )
-  POKER_HOLD_RC=$?
+  ( trap 'run_last $?' EXIT; poker_hold_prime "$@"; poker_dispatch "$@" )
+  POKER_HOLD_RC=$?; RUN_DEFAULT=""
   proof_hold_end
   exit "$POKER_HOLD_RC"
 fi
