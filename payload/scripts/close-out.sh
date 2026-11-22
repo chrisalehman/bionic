@@ -337,6 +337,13 @@ RELEASE="$(plan_frontmatter_get "$PLAN" release)"
 # the same one. What this script still reads of the plan is what the plan authors: its header and its rows' kinds. It
 # writes nothing into the plan: what step 8 cleaned, the delivery, the archive and the handoff's place are events.
 _proof_reader_load || _co_refuse "the reader (lib/reader.sh) cannot be loaded from $CO_LIB, so the run's facts cannot be read"
+# THE CHECK IS ONE COMMAND, ONE FOLD (lib/proof.sh `proof_hold_begin`). Its asks run in `$( )` subshells and in the
+# gate's dry walls, and outside a hold each of them folds the log again and loses its fold when it exits. So `check`
+# opens the hold for its process tree, before its first ask, as the commit wall does for a commit, and the hold is
+# removed on every exit. A judgment still sums the log at its entry. `check` appends nothing to the log and writes no
+# plan, so nothing it reads goes stale under the hold. `run` writes the plan, the seal and the archive by paths the
+# hold does not see, so it holds nothing. A check started inside a command that already holds reads that hold.
+if [ "$VERB" = check ] && proof_hold_begin; then trap 'proof_hold_end' EXIT; fi
 co_ask() {  # <reader question's function> [args] -> its answer, over the kept fold of this run
   local q="$1"; shift
   _proof_ask "$PLAN" "$q" "$PLAN" "$@"
@@ -626,6 +633,12 @@ act_lands() {  # <rows> -> each landed by one published event at the integration
 # work that exists only on that branch, and deleting the branch would be the last moment
 # anyone could have noticed.
 WT_LINE=""
+# co_wt_refs -> every wt/ branch this repository holds, each as ` refs/heads/wt/<name> `, from one ask of git: a tree's
+# branch is then a membership test that starts no process, however many trees the register names. Taken again at each
+# call, never kept, so a branch `run` deletes is not read as held after.
+co_wt_refs() {
+  printf ' %s ' "$(git -C "$ROOT" for-each-ref --format='%(refname)' refs/heads/wt/ 2>/dev/null | tr '\n' ' ')"
+}
 # wt_branches -> the registered trees' branches, in the order the reader holds the rows'
 # trees: for each tree fact, `wt/<basename of its path>` when this repository actually
 # holds that branch, each branch once (spawn-worktree.sh's own tree<->branch contract,
@@ -633,7 +646,8 @@ WT_LINE=""
 # hold names nothing to the census, the same as a row with none; a run with no trees is
 # an empty census, not a fault.
 wt_branches() {
-  local cell b seen=" "
+  local cell b seen=" " refs
+  refs="$(co_wt_refs)"
   # The register is the reader's tree facts: a row's tree, as its `worktree` cell or its tree event names it.
   while IFS= read -r cell; do
     case "$cell" in ''|'—') continue ;; esac
@@ -641,7 +655,7 @@ wt_branches() {
     b="wt/${cell##*/}"
     case "$seen" in *" $b "*) continue ;; esac
     seen="$seen$b "
-    git -C "$ROOT" show-ref --verify --quiet "refs/heads/$b" && printf '%s\n' "$b"
+    case "$refs" in *" refs/heads/$b "*) printf '%s\n' "$b" ;; esac
   done <<< "$(co_facts tree path)"
   return 0
 }
@@ -1797,15 +1811,16 @@ co_delivered_words() {
 # `_proof_dry_step`): its step 8 with the fields it will give, the landing of each row its merge lands, and each tree it
 # removes. A parked close lands and removes nothing. The wipe has not run, so its field is what the census reads now.
 co_close_facts() {
-  local ih id
+  local ih id refs
   printf '8|cleanup=done|tmp-wiped=%s entries under %s (not yet wiped)|tasks-completed=%s' "$(tmp_count)" "$TMP_DIR" "$TASKS_LINE"
   [ "$PARKED" = no ] || return 0
   # A row is landed only on a merge read: with none, the judgment folds no landing, as the run would write none.
   ih="$CO_MERGE_COMMIT"
   [ -z "$ih" ] || for id in $(co_lands_rows); do printf '\npublished|row=%s|commit=%s|kind=close|by=close-out|why=merged' "$id" "$ih"; done
+  refs="$(co_wt_refs)"
   co_ask reader_trees | awk -F'|' "$_READER_AWK"'{ p = line_kv("path"); sub(/\/$/, "", p); if (p != "" && p != "—") print line_kv("row") "\t" p }' \
     | while IFS=$'\t' read -r id p; do
-        git -C "$ROOT" show-ref --verify --quiet "refs/heads/wt/${p##*/}" && printf '\ntree|row=%s|path=' "$id"
+        case "$refs" in *" refs/heads/wt/${p##*/} "*) printf '\ntree|row=%s|path=' "$id" ;; esac
       done
   return 0
 }
