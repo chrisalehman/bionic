@@ -971,6 +971,8 @@ rv_row() {  # <label> <regex of the last line> <verb args...>: refused, with mor
   rv_poker "$@"
   expect_eq "($l) is refused" "1" "$([ "$RV_RC" -ne 0 ] && echo 1 || echo 0)"
   expect_regex "($l) …and ends on the command to type" "^run: bash [^ ]*session-poker\\.sh $re\$" "$RV_LAST"
+  # A verb that spoke its own command and the default printed after it would still end on a run: line.
+  expect_eq "($l) …the one run: line it prints" "1" "$(printf '%s\n' "$RV_OUT" | /usr/bin/grep -c '^run: ')"
   expect_true "($l) …after the words that say why" test "$(printf '%s\n' "$RV_OUT" | wc -l)" -ge 2
 }
 SPK='.*'
