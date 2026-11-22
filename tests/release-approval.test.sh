@@ -982,7 +982,7 @@ expect_contains "WINDOW-2a-2 …a window that ends before it does not" "waivers=
 expect_eq "HANDHOLDS-3 the report read after the reply counts the page's decline and the reply's waiver after the card: the card ends nothing" \
   "$(printf '%s\n' "$HH_PAGE" | sed 's/total=1 /total=2 /; s/waivers=0 /waivers=1 /')" "$(hh_lr)"
 expect_eq "HANDHOLDS-3b …and the report's ends line runs to now, printing the start alone and no page time" \
-  "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the plan names no delivered: time") > 0) "|" (index($0, at) > 0) }')"
+  "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the run\047s log holds no delivery yet") > 0) "|" (index($0, at) > 0) }')"
 expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
 rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md
 
