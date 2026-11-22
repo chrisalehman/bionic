@@ -365,7 +365,11 @@ s41_transcript() {  # <messages from w-1> <name:status>... -> this session's tra
 }
 # A LIVE LEDGER WITH NO GAP: writers=1, one ready row, and the MET row still unacked holds the
 # slot — so the tick names no FILL and the stop wall's fill duty owes nothing.
-s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with a landed deliverable
+# A WRITER IS DONE WHEN ITS ROW HAS LANDED, not when its record is on disk: the record is the
+# first thing a writer writes, so the tick stands a writer down only once the roster carries its
+# landing's mark. w-1 is a writer, so the world marks its row landed the way the landing does.
+S41_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
+s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with its deliverable on disk and its row landed
   local r; r="$(make_repo "$1")"; new_roster "$r"; bound_ago "$r"
   local p; p="$(wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" \
     "writers=1 suites=2 worktrees=8 test_jobs=8 source=user" \
@@ -374,7 +378,12 @@ s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with a landed delivera
   echo "done" > "$r/w1-report.md"; backdate "$r/w1-report.md" 300
   add_row "$r" name=w-1 agent_id=aw1-41414141414141 deliverable="$r/w1-report.md" \
     duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$r" w-1)"
+  bash -c '. "$1/roster.sh" && roster_mark_landed "$2" w-1 "$3" 2026-09-05T00:51:00Z' _ "$S41_LIB" \
+    "$(roster_of "$r")" "$(printf 'a%.0s' $(seq 1 40))"
   printf '%s' "$r"
+}
+s41_landed() {  # <repo> -> w-1's landing mark as the tick reads it, empty when none
+  bash -c '. "$1/roster.sh" && roster_landed "$2" w-1' _ "$S41_LIB" "$(roster_of "$1")" 2>/dev/null
 }
 s41_count() {  # <text> <fixed string> -> lines carrying it
   printf '%s\n' "$1" | grep -cF -- "$2" | tr -d ' '
@@ -385,6 +394,8 @@ R41B="$(s41_world s41-band)"
 s41_transcript 1 "w-1:idle"
 poke "$R41B" tick
 S41B_OUT="$OUT"
+expect_contains "41b precondition: the writer's row carries its landing's mark" \
+  "$(printf 'a%.0s' $(seq 1 40))" "$(s41_landed "$R41B")"
 expect_contains "41b precondition: the MET row on the panel is stood down" "poker: STANDDOWN w-1" "$S41B_OUT"
 expect_contains "41b AC-4.2 …and the decision says so" "decision=STANDDOWN" "$S41B_OUT"
 expect_absent "41b2 …never QUIET beside a STANDDOWN line" "decision=QUIET" "$S41B_OUT"
