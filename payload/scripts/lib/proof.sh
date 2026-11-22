@@ -2003,12 +2003,33 @@ _proof_derive() {
   _proof_count derive "$name ${idx:+${key//[[:space:]]/_}}${idx:--}"
   [ -n "$idx" ] || { "$fn" "$@"; return; }
   out="$("$fn" "$@"; printf 'x%s' "$?")"; rc="${out##*x}"; out="${out%x*}"
-  if [ "$rc" = 0 ]; then
+  if [ "$rc" = 0 ] && _proof_derive_file "$idx" "$out"; then
     # The answer is whole on disk before the index names it, so a reader in another process never reads half of one.
-    p="$idx.$$.$RANDOM"
-    { printf '%s' "$out" > "$p" && printf '%s\t%s\n' "$key" "$p" >> "$idx"; } 2>/dev/null || rm -f "$p"
+    printf '%s\t%s\n' "$key" "$_PROOF_DERIVE_FILE" >> "$idx" 2>/dev/null || rm -f "$_PROOF_DERIVE_FILE"
   fi
   printf '%s' "$out"; return "$rc"
+}
+# _proof_derive_file <index> <answer> -> 0 with _PROOF_DERIVE_FILE a file beside <index> made new for <answer> and
+# holding it; 1, nothing made, when none can be. NO KEPT ANSWER IS WRITTEN OVER: a subshell shares its parent's $$,
+# and under bash 3.2 the children of a subshell that drew $RANDOM each draw the same next value, so two answers made
+# in sibling subshells draw one name. Each file is made exclusively (noclobber's O_EXCL), and a name another holds is
+# drawn again, so an index line names only the answer written for its own key.
+_PROOF_DERIVE_FILE=""
+_proof_derive_file() {
+  local p n=0 off=1
+  _PROOF_DERIVE_FILE=""
+  case "$-" in *C*) off=0 ;; esac
+  set -C
+  while [ "$n" -lt 8 ]; do
+    p="$1.$$.$RANDOM.$n"
+    if { printf '%s' "$2" > "$p"; } 2>/dev/null; then
+      [ "$off" = 0 ] || set +C
+      _PROOF_DERIVE_FILE="$p"; return 0
+    fi
+    n=$((n + 1))
+  done
+  [ "$off" = 0 ] || set +C
+  return 1
 }
 # _proof_derive_key <key> -> 0 with _PROOF_DERIVE_KEY <key> and the key of each view of the facts the caller holds, one
 # line; 1 when a view has none
