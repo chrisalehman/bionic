@@ -16,8 +16,8 @@
 # THE SUITE'S ENVIRONMENT, the whole run's (tests/run.sh's worker, wave-30 T9 and wave-28 T12):
 #   - its working directory is <tree>, and <suite> is run there as `bash <suite> [args...]`: a path
 #     the caller names, relative to the tree or absolute; nothing else about the project is assumed;
-#   - BIONIC_GATE_DIR, CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT are unset in it: the caller keeps the store for its
-#     own ask and end, a run a hook started carries the session's roots, and a suite that wants one sets it itself;
+#   - BIONIC_GATE_DIR, CLAUDE_PROJECT_DIR, CLAUDE_PLUGIN_ROOT and BIONIC_HELD are unset in it: the caller keeps the store
+#     for its own ask and end, a run a hook started carries the session's roots, a held command its hold (lib/proof.sh);
 #   - with `--admit <id>` (the caller holds that admission) BIONIC_GATE_ADMIT is <id> in it, so a
 #     nested ask under the suite is placed under the caller's admission; without it, whatever the
 #     caller inherited is left as it was. An empty <id> is refused (exit 2), as any empty flag is;
@@ -115,7 +115,7 @@ bionic_job() {  # <command> [args...] -> BIONIC_JOB_PID
 # The suite's own process: the environment above, then the suite in place of this shell.
 _bionic_suite_env() {  # <admission | empty> <tree>
   cd -- "$2" || exit 126
-  unset BIONIC_GATE_DIR CLAUDE_PROJECT_DIR CLAUDE_PLUGIN_ROOT
+  unset BIONIC_GATE_DIR CLAUDE_PROJECT_DIR CLAUDE_PLUGIN_ROOT BIONIC_HELD
   [ -z "$1" ] || export BIONIC_GATE_ADMIT="$1"
 }
 _bionic_suite_run() {  # <admission | empty> <tree> <suite> [args...]

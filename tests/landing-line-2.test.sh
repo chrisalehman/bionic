@@ -82,10 +82,17 @@ expect_absent "(sig1) …no row of it fails" "FAIL:" "$G1"
 G2="$(cd "$WORLD_ROOT" && BIONIC_GATE_ADMIT=7 ll_dfl bash "$LL_SX" "$LL_SUITE_LIB" start "$SXT" probe.sh 2>&1)"
 expect_contains "(sig2-pre) the primitive ran without --admit" "cwd=$SXT" "$G2"
 expect_contains "(sig2) with no admission of the caller's, an inherited BIONIC_GATE_ADMIT is left as it was" "admit=7" "$G2"
-printf '#!/bin/bash\necho "cwd=$(pwd -P) store=${BIONIC_GATE_DIR-unset} admit=${BIONIC_GATE_ADMIT-unset}"\nread -r l; echo "stdin=${l:-none}"\nexit 3\n' > "$SXT/rc3.sh"
-G3="$(cd "$WORLD_ROOT" && printf 'piped\n' | ll_dfl bash "$LL_SX" "$LL_SUITE_LIB" exec "$SXT" rc3.sh 42 2>&1)"
-expect_eq "(sig3) bionic_suite_exec runs the suite to its end in its tree, without the store, with the admission, stdin closed, its rc the suite's" \
-  "$(printf 'cwd=%s store=unset admit=42\nstdin=none\nrc=3' "$SXT")" "$G3"
+printf '#!/bin/bash\necho "cwd=$(pwd -P) store=${BIONIC_GATE_DIR-unset} admit=${BIONIC_GATE_ADMIT-unset} held=${BIONIC_HELD-unset}"\nread -r l; echo "stdin=${l:-none}"\nexit 3\n' > "$SXT/rc3.sh"
+# THE CALLER'S HOLD. A poker verb holds its command's reads in a folder it names in BIONIC_HELD for every process it
+# starts (lib/proof.sh proof_hold_begin), and the regression verb starts the whole run. A suite started under it must
+# not read or write that folder: its own fixtures' reads would be served from the command's hold, not from its temp.
+# The folder is one the proof trusts: this suite's own pid, alive, this user's, closed to others.
+LL_HELD="$(mktemp -d "$WORLD_ROOT/bionic-held-$$.XXXXXX")" && chmod 700 "$LL_HELD"
+expect_eq "(sig3-pre) the caller's hold is a folder the proof holds reads in, and the probe run under it reads it" \
+  "$LL_HELD|held=$LL_HELD" "$(BIONIC_HELD="$LL_HELD" bash -c '. "$1" && _proof_held_dir && printf %s "$_PROOF_HELD_DIR"' _ "${LL_SUITE_LIB%/suite.sh}/proof.sh")|$(cd "$SXT" && BIONIC_HELD="$LL_HELD" bash rc3.sh </dev/null | grep -o 'held=.*')"
+G3="$(cd "$WORLD_ROOT" && printf 'piped\n' | BIONIC_HELD="$LL_HELD" ll_dfl bash "$LL_SX" "$LL_SUITE_LIB" exec "$SXT" rc3.sh 42 2>&1)"
+expect_eq "(sig3) bionic_suite_exec runs the suite to its end in its tree, without the store or the caller's hold, with the admission, stdin closed, its rc the suite's" \
+  "$(printf 'cwd=%s store=unset admit=42 held=unset\nstdin=none\nrc=3' "$SXT")" "$G3"
 G4="$( . "$LL_SUITE_LIB" 2>/dev/null; bionic_suite_exec --admit '' "$SXT" probe.sh 2>&1 )"; G4R=$?
 expect_eq "(sig4) an empty --admit is refused (exit 2), naming the flag" "2" "$G4R"
 expect_contains "(sig4) …saying so" "--admit" "$G4"
@@ -146,7 +153,7 @@ done
 ll_one_tree() {  # <dir> <with: real | spy | none> -> the tree: tests/run.sh, tests/x.test.sh, the library or not
   rm -rf "$1"; mkdir -p "$1/tests" || return 1
   cp "$REPO/tests/run.sh" "$1/tests/run.sh"
-  printf '#!/bin/bash\necho "cwd=$(pwd -P) store=${BIONIC_GATE_DIR-unset} admit=${BIONIC_GATE_ADMIT-unset}"\nexit 3\n' > "$1/tests/x.test.sh"
+  printf '#!/bin/bash\necho "cwd=$(pwd -P) store=${BIONIC_GATE_DIR-unset} admit=${BIONIC_GATE_ADMIT-unset} held=${BIONIC_HELD-unset}"\nexit 3\n' > "$1/tests/x.test.sh"
   case "$2" in
     real) mkdir -p "$1/payload/scripts/lib" && cp "$LL_SUITE_LIB" "$1/payload/scripts/lib/suite.sh" ;;
     spy) mkdir -p "$1/payload/scripts/lib"
@@ -155,19 +162,19 @@ ll_one_tree() {  # <dir> <with: real | spy | none> -> the tree: tests/run.sh, te
   printf 'x.test.sh\tbash tests/x.test.sh\n' > "$1/queue"; mkdir -p "$1/work"
   (cd "$1" && pwd -P)
 }
-ll_one() {  # <tree> -> runs its --one worker for x.test.sh, BIONIC_GATE_ADMIT=9 inherited; prints <rc file>|<out>
-  ( cd "$1" && BIONIC_GATE_ADMIT=9 BIONIC_TEST_QUEUE="$1/queue" BIONIC_TEST_WORK="$1/work" bash tests/run.sh --one x.test.sh </dev/null >/dev/null 2>&1 )
+ll_one() {  # <tree> -> runs its --one worker for x.test.sh, BIONIC_GATE_ADMIT=9 and the caller's hold inherited; prints <rc file>|<out>
+  ( cd "$1" && BIONIC_GATE_ADMIT=9 BIONIC_HELD="$LL_HELD" BIONIC_TEST_QUEUE="$1/queue" BIONIC_TEST_WORK="$1/work" bash tests/run.sh --one x.test.sh </dev/null >/dev/null 2>&1 )
   printf '%s|%s' "$(cat "$1/work/x.test.sh.rc" 2>/dev/null)" "$(cat "$1/work/x.test.sh.out" 2>/dev/null)"
 }
 O1="$(ll_one_tree "$WORLD_ROOT/one-spy" spy)"
 expect_eq "(sig9) --one with the library present calls bionic_suite_exec with the tree and the suite's path" \
   "$O1 tests/x.test.sh" "$(ll_one "$O1" >/dev/null; cat "$O1/spy.log" 2>/dev/null)"
 O2="$(ll_one_tree "$WORLD_ROOT/one-real" real)"
-expect_eq "(sig9) …and through the real primitive the suite runs without the store, the inherited admission kept, its rc in the .rc file" \
-  "3|cwd=$O2 store=unset admit=9" "$(ll_one "$O2")"
+expect_eq "(sig9) …and through the real primitive the suite runs without the store or the caller's hold, the inherited admission kept, its rc in the .rc file" \
+  "3|cwd=$O2 store=unset admit=9 held=unset" "$(ll_one "$O2")"
 O3="$(ll_one_tree "$WORLD_ROOT/one-none" none)"
-expect_eq "(sig10) a tree without the plugin library runs the suite by the runner's own path, the same" \
-  "3|cwd=$O3 store=unset admit=9" "$(ll_one "$O3")"
+expect_eq "(sig10) a tree without the plugin library runs the suite by the runner's own path, the same, the hold dropped too" \
+  "3|cwd=$O3 store=unset admit=9 held=unset" "$(ll_one "$O3")"
 expect_false "(sig10) …and no spy log exists there" test -e "$O3/spy.log"
 
 # ---------------------------------------------------------------------------

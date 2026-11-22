@@ -15,7 +15,8 @@
 #
 # FIXTURE FIDELITY. The runner, the framework, the libraries and the poker are this tree's own
 # files, copied or run in place; the plan is the shared fixture plan's page at 15 and its run's
-# log, bound through the real bind writer. Stub suites, SYNTHESIZED: x, a green row and a line per run; f1-f4, a line and an exit.
+# log, bound through the real bind writer. Stub suites, SYNTHESIZED: x, a green row and a line per run; f1-f4, a line and an exit;
+# h, a green row and the BIONIC_HELD it saw.
 #
 # ANTI-VACUITY. Each "never ran" count reads the same run log as the lifted run's count of one,
 # and the order is read by the reader, whose answer moves from given to none.
@@ -62,10 +63,12 @@ printf 'ran\n' >> "$(dirname "$0")/../ran.log"
 expect_eq "x runs" "1" "1"
 finish
 SUITE
+# h, the hold's probe: one line per run naming the BIONIC_HELD it was started with.
+printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"; . "$(dirname "$0")/lib/assert.sh"\nprintf "held=%%s\\n" "${BIONIC_HELD-unset}" >> "$(dirname "$0")/../held.log"\nexpect_eq "h runs" 1 1\nfinish\n' > "$W/tests/h.test.sh"
 rt_plant() { printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"; . "$(dirname "$0")/lib/assert.sh"\necho "%s" >&2\nexit %s\nfinish\n' "$2" "$3" > "$W/tests/$1.test.sh"; }
 RF='fork: Resource temporarily unavailable'; rt_plant f1 "tests/f1.test.sh: $RF" 1; rt_plant f2 'FAIL: red' 1; rt_plant f3 "tests/f3.test.sh: $RF" 0; rt_plant f4 "missing 'y' in: tests/f4.test.sh: $RF" 1
 ( cd "$W" && git init -q . && git config user.name "Dana Fixture" && git config user.email d@example.com \
-  && printf '.bionic/\nran.log\n' > .gitignore && git add -A && git commit -qm world ) >/dev/null 2>&1
+  && printf '.bionic/\nran.log\nheld.log\n' > .gitignore && git add -A && git commit -qm world ) >/dev/null 2>&1
 P="$(plan_fixture "$W/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave \
   "| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | pending |")"
 bound_marker "$W" "$SID" "$P" >/dev/null 2>&1
@@ -119,5 +122,14 @@ rt_ev lifted
 section "§FORK: a failed suite whose output holds the shell's own refusal of a process did not run: exit 75, its output shown"
 rt_fk() { OUT="$(cd "$W" && env "${RT_ENV[@]}" CLAUDE_CODE_SESSION_ID="$SID" bash tests/run.sh --only "$1.test.sh" 2>&1)"; FK="$FK$?:$(printf '%s\n' "$OUT" | awk -v l="$1.test.sh" '$1 == l { print $3 }') "; }; FK=""; rt_fk f1; F1="$OUT"; rt_fk f2; rt_fk f3; rt_fk f4
 expect_eq "F1 refused, exit 1: not run (75), its line shown · exit 1 without it: red · refused, exit 0: green · quoted: red" "75:REFUSED 1:FAIL 0:PASS 1:FAIL 1" "$FK$(printf '%s\n' "$F1" | grep -c "^tests/f1.test.sh: $RF\$")"
+section "§HELD: a suite the runner starts from inside a held command never inherits the command's hold, by the door or --serial"
+# A poker verb names its command's hold in BIONIC_HELD for every process it starts (lib/proof.sh proof_hold_begin), and the
+# regression verb starts this runner. A suite that inherited it would read and write the command's folder, not its own temp.
+RT_HELD="$(mktemp -d "$TMPROOT/bionic-held-$$.XXXXXX")" && chmod 700 "$RT_HELD"
+rt_held() { : > "$W/held.log"; OUT="$(cd "$W" && env "${RT_ENV[@]}" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_HELD="$RT_HELD" bash tests/run.sh "$@" --only h.test.sh 2>&1)"; RC=$?; printf '%s|%s' "$RC" "$(cat "$W/held.log")"; }
+expect_eq "H0 meta: the hold is a folder the proof holds reads in, and h run under it records it" "$RT_HELD|held=$RT_HELD" \
+  "$(BIONIC_HELD="$RT_HELD" bash -c '. "$1" && _proof_held_dir && printf %s "$_PROOF_HELD_DIR"' _ "$REPO/payload/scripts/lib/proof.sh")|$(: > "$W/held.log"; cd "$W" && BIONIC_HELD="$RT_HELD" bash tests/h.test.sh >/dev/null 2>&1; cat "$W/held.log")"
+expect_eq "H1 the door: started held, the runner runs h green, and h sees no BIONIC_HELD" "0|held=unset" "$(rt_held)"
+expect_eq "H2 --serial: the same" "0|held=unset" "$(rt_held --serial)"
 
 finish
