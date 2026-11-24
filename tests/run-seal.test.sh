@@ -30,6 +30,8 @@
 #   §TOOLS    the same roads by Write and Edit through the write hook, then the commit.
 #   §CHANGED  a caught change: the refusal names the log and both replies, the ask it opens is in the log
 #             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
+#   §CHANGED-WORDS  the changed-run refusal asks for the person's words as a plain message, names the verb as the
+#             orchestrator's act, and offers no command behind a shell escape; the staged ask says the same.
 #   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
 #             log and binding untouched: the commit's refusal is the one before, word for word.
 #   §JUDGED   a fact written by hand into the kept facts moves no door; written over it by its own verb, it admits.
@@ -458,6 +460,16 @@ the plan removed|PG|rm "$GP"
 the plan edited|PC|printf "| T9 | x |\n" >> "$GP"
 a line of the log rewritten|LC|sed -i.bak "1s/n=1/n=7/" "$GL"
 ROWS
+section "CHANGED-WORDS"
+# AC-22.1: the refusal asks the person for a plain message and names the verb as the orchestrator's act; it
+# never offers a command behind a shell escape, which the verb refuses when typed (lib/said.sh `user_said`).
+world; eval 'rm "$GL"'; gate "git commit -m x"; E="$(cat "$SB/gate.err")"
+expect_status "the changed-run refusal: refused" 2 "$GRC"
+expect_contains "the refusal asks for the person's words as a plain message" "as a plain message" "$E"
+expect_contains "and names the verb as the orchestrator's act, never the person's" "you run the verb, never the person" "$E"
+expect_contains "and the verb carries their words" "session-poker.sh accept '<their words>'" "$E"
+expect_no_regex "the refusal holds no command behind a shell escape" '(^|[ `])! *(bash|session-poker)' "$E"
+expect_contains "the staged ask says the person rules by a plain message" "the person rules by a plain message" "$(cat "$GL")"
 rm "$GP"
 expect_regex "the ask of the changed log is listed still, with the plan then removed" "$SA" "$(sitrep_asks)"
 gated "the plan removed, its commit refused, then put back" "$PC" 'cp "$GP" "$SB/keep"; rm "$GP"; gate "git commit -m x"; cp "$SB/keep" "$GP"'

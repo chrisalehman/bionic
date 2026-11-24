@@ -6658,7 +6658,7 @@ Plan:  ${BIONIC_SEAL_PLAN:-}"
     *)     _fact="the run's $_w was $_h outside the tool" ;;
   esac
   _r="session-poker.sh accept '<their words>' or session-poker.sh abandon '<their words>'"
-  BIONIC_WALL_OWED="seal:changed"$'\t'"changed run: $_w $_h"$'\t'"$_fact: the person rules, by $_r"
+  BIONIC_WALL_OWED="seal:changed"$'\t'"changed run: $_w $_h"$'\t'"$_fact: the person rules by a plain message, and the orchestrator then runs $_r"
   fold_block exit2 commit "$_fact" "only the person can rule" \
 "The run this session is bound to no longer matches its seal: $_fact.
 Plan:  ${BIONIC_SEAL_PLAN:-}
@@ -6666,7 +6666,10 @@ Log:   ${BIONIC_SEAL_LOG:-}
 Seal:  $BIONIC_SEAL_LINE
 Its plan and its log hold only what the tool wrote; a line written by hand, or a file moved, cut
 or removed, is not the run's own work, so no commit of this run is admitted until the person
-rules on the change. Tell them what changed and wait for their word, one of two replies:
+rules on the change. Tell them what changed and ask for their word as a plain message in the
+chat, for instance \"I accept the run as it now stands\" or \"abandon the run\". A verb takes only
+words the person typed at the prompt, so what they type is the ruling. Then
+you run the verb, never the person, with their words quoted as they wrote them:
   session-poker.sh accept '<their words>'    the run as it now stands is theirs, sealed again
   session-poker.sh abandon '<their words>'   the run ends here
 Until then the change is the ask seal:changed on the run's register, in the log above."
