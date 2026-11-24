@@ -369,11 +369,12 @@ done
 # The grep a reader runs: the three files that carry the rule, and no other agent file.
 # THE PAIRED NEGATIVE: a file without the rule is read as lacking it, so 17c cannot pass blind.
 
-section "Section 18: §ORDER-TEXT — the Step-8 text and the brief scaffold name the integrate row's order: reviews-part, push, gh pr create"
+section "Section 18: §ORDER-TEXT — the Step-8 text and the brief scaffold name the integrate row's order: reviews-part, push, gh pr create (the scaffold names reviews-part alone)"
 # The integrate row publishes the release entry's reviews part before it pushes and before it opens the pull request, so the
-# order is doctrine the step text and the scaffold carry, rendered from their sources. A reader of either file that finds
-# the verb after the push, or not at all, would run the part late.
-# fails-when: a rendered file lacks `reviews-part`, names the three acts out of order, or differs from its source.
+# order is doctrine the step text carries, rendered from its source; the scaffold's Row: comment names the part alone,
+# because the push and the pull request belong to `publish` and a second actor named for them would be taught the act twice.
+# fails-when: the Step-8 text lacks `reviews-part` or names the three acts out of order; the scaffold lacks
+# `reviews-part <id>`, or its line naming it also names a push or `gh pr create`; or a rendered file differs from its source.
 ot_order() {  # <file> <verb> <push> <create> -> `ordered` when the file's first line naming the verb names push, then create after it
   awk -v v="$2" -v p="$3" -v c="$4" '
     { i = index($0, v); if (i == 0) next
@@ -387,14 +388,22 @@ expect_nonempty "18-0 precondition: the Step-8 text exists and is read" "$(cat "
 expect_eq "18a the rendered Step-8 text names reviews-part <row>, then the push, then gh pr create" "ordered" \
   "$(ot_order "$OT_STEP" 'reviews-part <row>' 'push' 'gh pr create')"
 expect_eq "18b …and so does its source" "ordered" "$(ot_order "$OT_TMPL" 'reviews-part <row>' 'push' 'gh pr create')"
+ot_alone() {  # <file> <verb> -> `alone` when the file's first line naming the verb names no push and no gh pr create, `late` when it names one
+  awk -v v="$2" '
+    { if (index($0, v) == 0) next
+      print ((index($0, "push") || index($0, "gh pr create")) ? "late" : "alone"); exit }' "$1"
+}
 for _ot_f in skills/canonical-sdlc/dispatch.md skills/canonical-sdlc/SKILL.md; do
-  expect_eq "18c $_ot_f's scaffold names reviews-part <id>, then push, then gh pr create" "ordered" \
-    "$(ot_order "$REPO/$_ot_f" 'reviews-part <id>' 'push' 'gh pr create')"
+  expect_eq "18c $_ot_f's scaffold names reviews-part <id> and no push and no gh pr create" "alone" \
+    "$(ot_alone "$REPO/$_ot_f" 'reviews-part <id>')"
 done
-expect_eq "18d …and the scaffold's source block does" "ordered" "$(ot_order "$REPO/agents-src/blocks/brief-scaffold.md" 'reviews-part <id>' 'push' 'gh pr create')"
+expect_eq "18d …and the scaffold's source block does" "alone" "$(ot_alone "$REPO/agents-src/blocks/brief-scaffold.md" 'reviews-part <id>')"
 # THE PAIRED NEGATIVE: the same reader, shown the three acts in the wrong order, says nothing.
 OT_BAD="$TMPROOT/step8-late.md"
 printf 'the integrate row pushes, then runs `reviews-part <row>`, then `gh pr create`\n' > "$OT_BAD"
+OT_PUSH="$TMPROOT/scaffold-push.md"
+printf 'Row: <id>  # the integrate row runs reviews-part <id>, push, gh pr create\n' > "$OT_PUSH"
+expect_eq "18d2 a scaffold line naming a push after reviews-part <id> is read as late, not alone" "late" "$(ot_alone "$OT_PUSH" 'reviews-part <id>')"
 expect_eq "18e a text naming the push before reviews-part is not read as ordered" "" "$(ot_order "$OT_BAD" 'reviews-part <row>' 'push' 'gh pr create')"
 
 section "19 — this suite's header names suites that exist"
