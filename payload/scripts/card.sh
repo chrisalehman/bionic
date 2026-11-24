@@ -176,7 +176,9 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
     eval-design)
       CARD_SECTION="Eval design"
       CARD_HDRCOLS="2:static 3:unit 4:hermetic 5:live 6:human"
-      CARD_FMT_1='    %-8s %-36s %6s %5s %9s %5s %6s';  CARD_NF_1=7; CARD_FOLD_1=1 ;;
+      # A COUNT STARTS UNDER ITS LABEL: the header puts each label at its field's first column,
+      # so a count padded on the left would end under the label's end and read as off by its own width.
+      CARD_FMT_1='    %-8s %-36s %-6s %-5s %-9s %-5s %-6s';  CARD_NF_1=7; CARD_FOLD_1=1 ;;
     task)
       CARD_SECTION="Tasks"
       CARD_HDRCOLS="2:serves 3:kind 4:depends 5:agent"
