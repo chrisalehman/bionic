@@ -361,14 +361,38 @@ wall_ruling_unread() {  # <event> -> 0 nothing · 2 block
   ruling_unread_refusal "$BIONIC_RULINGS_WRITER" "$BIONIC_RULINGS_UNREAD"
 }
 
+# _bw_runs_ack — 0 when one expanded segment (one argv, its words joined by GIT_ARGV_US) runs `session-poker.sh
+# ruling-ack`, the runner and the script read the way `_wall_poker_contract_verb` reads them. It reads the segment as
+# it stands, never expanding it again: the expansion lists a `bash -c` string's inner segments as segments of their own
+# beside the wrapper, and a second read of the wrapper would count each of them twice.
+_bw_runs_ack() {  # <segment> -> 0 runs the verb · 1 does not
+  local _oldifs="$IFS" _hadf=0
+  _git_argv_skip "$1"
+  [ -n "$GIT_ARGV_REST" ] || return 1
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f; IFS="$GIT_ARGV_US"
+  # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+  set -- $GIT_ARGV_REST
+  IFS="$_oldifs"; [ "$_hadf" -eq 1 ] || set +f
+  [ $# -gt 0 ] || return 1
+  cmd_word_fold "${1##*/}"
+  case "$CMD_WORD_FOLDED" in
+    bash|sh|zsh|dash|ksh|.|source)
+      shift
+      while [ $# -gt 0 ]; do case "$1" in -*) shift ;; *) break ;; esac; done ;;
+  esac
+  [ "${1##*/}" = session-poker.sh ] && [ "${2:-}" = ruling-ack ]
+}
+
 # THE TWO FACTS OF AN ACKNOWLEDGEMENT, gathered for `wall_ruling_ack` (wave-34 T5; REQ-4 AC-4.3, D9 "1"). `ruling-ack
 # <id>` marks a ruling read, and only the writer it is addressed to has read it: an ack from the main thread or from
 # another writer would mark it shown while its writer never saw it (walk.md §8). The verb cannot see its caller, so
 # for a call that runs the verb (`_wall_poker_contract_verb`'s argv, asked for this one verb) this reads the ruling's
 # writer off the session's roster (lib/roster.sh `ruling_fold`) and the caller's roster name off the payload's
-# `agent_id` (`roster_row_for_id`, empty for the main thread or an agent no row names), and counts the call's segments:
-# the ack is admitted alone in one call. An id no ruling carries gathers nothing; the verb refuses it.
-BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_ALONE=0
+# `agent_id` (`roster_row_for_id`, empty for the main thread or an agent no row names), and counts the acknowledgements
+# the call runs (`_bw_runs_ack`): the call is admitted when it holds exactly one, which is the one checked here. A second
+# could name another writer's ruling that nothing here read; every other segment is left to the other walls. An id no ruling carries gathers nothing; the verb refuses it.
+BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_COUNT=0
 case "$COMMAND" in
   *ruling-ack*)
     if _wall_poker_contract_verb "$COMMAND" ruling-ack && [ -r "$BIONIC_LIB/roster.sh" ] \
@@ -382,18 +406,20 @@ case "$COMMAND" in
       if [ -n "$BIONIC_ACK_AGENT" ] && _bw_row="$(roster_row_for_id "$_bw_roster" "$BIONIC_ACK_AGENT")"; then
         BIONIC_ACK_CALLER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
       fi
-      _bw_n=0
-      while IFS= read -r _bw_l; do [ -z "$_bw_l" ] || _bw_n=$((_bw_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
-      [ "$_bw_n" -ne 1 ] || BIONIC_ACK_ALONE=1
+      while IFS= read -r _bw_l; do
+        [ -z "$_bw_l" ] || ! _bw_runs_ack "$_bw_l" || BIONIC_ACK_COUNT=$((BIONIC_ACK_COUNT + 1))
+      done <<< "$(git_argv_expand "$COMMAND")"
+      # The whole-call match above found one; a segment this read cannot match still counts as that one.
+      [ "$BIONIC_ACK_COUNT" -ge 1 ] || BIONIC_ACK_COUNT=1
     fi ;;
 esac
 
-# wall_ruling_ack — an acknowledgement from anyone but the ruling's writer, or not alone in its call, is refused naming
+# wall_ruling_ack — an acknowledgement from anyone but the ruling's writer, or in a call holding two, is refused naming
 # the writer it needs, and the ruling stays unread. The facts are gathered above (the freeze); the words and the
 # decision are lib/roster.sh `ruling_ack_refusal`'s, defined only when the gathering loaded that library.
 wall_ruling_ack() {  # <event> -> 0 nothing · 2 block
   declare -F ruling_ack_refusal >/dev/null 2>&1 || return 0
-  ruling_ack_refusal "$BIONIC_ACK_ID" "$BIONIC_ACK_WRITER" "$BIONIC_ACK_CALLER" "$BIONIC_ACK_AGENT" "$BIONIC_ACK_ALONE"
+  ruling_ack_refusal "$BIONIC_ACK_ID" "$BIONIC_ACK_WRITER" "$BIONIC_ACK_CALLER" "$BIONIC_ACK_AGENT" "$BIONIC_ACK_COUNT"
 }
 
 bionic_fold "$EVENT" \

@@ -1149,7 +1149,7 @@ RULING_FOLD
 
 # THE WALL'S TWO REFUSALS OF A RULING, words and decision, over facts the Bash wall gathers itself: the
 # writer's commit with a ruling unread, and an acknowledgement from anyone but the ruling's writer or
-# not alone in its call. Each stages its refusal with `fold_block` and returns 2, or returns 0 and
+# in a call holding two. Each stages its refusal with `fold_block` and returns 2, or returns 0 and
 # says nothing, so its caller has loaded lib/fold.sh and folds the call; nothing here reads a payload.
 
 # The commit carries the unread rulings, already shown by `ruling_take_unread`: the refusal is the
@@ -1164,15 +1164,15 @@ $2"
 
 # An acknowledgement is the writer's receipt that it read the ruling, so one from the main thread or
 # another writer would mark it shown while its writer never saw it. <caller> is the calling agent's
-# roster name and <agent> its id, both empty for the main thread; <alone> is 1 when the ack is the
-# call's one segment. No writer is an id no ruling carries, which the verb itself refuses.
-ruling_ack_refusal() {  # <id> <writer> <caller> <agent> <alone> -> 0 nothing · 2 block
+# roster name and <agent> its id, both empty for the main thread; <acks> is how many acknowledgements the
+# call runs: one is admitted, whatever else the call holds. No writer is an id no ruling carries, which the verb itself refuses.
+ruling_ack_refusal() {  # <id> <writer> <caller> <agent> <acks> -> 0 nothing · 2 block
   local id="${1:-}" w="${2:-}" who="the main thread"
   [ -n "$w" ] || return 0
   if [ "${3:-}" = "$w" ]; then
     [ "${5:-}" = 1 ] && return 0
-    fold_block exit2 ruling-ack "an acknowledgement goes alone in its call" "run the ack by itself" \
-      "ruling $id is yours, $w, and the wall reads one acknowledgement per call. Run it alone:
+    fold_block exit2 ruling-ack "one acknowledgement a call" "run each ack alone" \
+      "ruling $id is yours, $w, and this call runs ${5:-more than one} acknowledgements; the wall reads one a call. Run each by itself:
     bash <plugin>/hooks/session-poker.sh ruling-ack $id"
     return 2
   fi
