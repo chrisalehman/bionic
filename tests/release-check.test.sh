@@ -837,7 +837,9 @@ section "§RELEASE — two landings through the runner: code deleted during a re
 # check is declared by its path in this suite's tree, outside the fixture, so the runner runs this copy whatever the
 # judge holds; which copy judges is §JUDGE's. One character of room at the release: 49 test characters against 40.
 RL="$TMP/release"; fx_ratio "$RL" 49 40; RL_B="$(git -C "$RL" rev-parse HEAD)"
-mkdir -p "$RL/.bionic/docs/plans" && printf '.bionic/\n' >> "$RL/.git/info/exclude"
+mkdir -p "$RL/.bionic/docs/plans" "$RL/.git/info" && printf '.bionic/\n' >> "$RL/.git/info/exclude"
+expect_eq "(rl0) the fixture's exclude file holds the line written into it: init --template= made no .git/info, so the section makes it" \
+  ".bionic/" "$(cat "$RL/.git/info/exclude" 2>&1)"
 printf 'release-check: bash %s %s\n' "$CHECK" "$LIST" > "$RL/.bionic/config.yaml"
 RL_PLAN="$RL/.bionic/docs/plans/x.plan.md"
 printf -- '---\nbase-sha: %s\nintegration-branch: main\n---\n# plan\n' "$RL_B" > "$RL_PLAN"

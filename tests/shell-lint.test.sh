@@ -59,6 +59,7 @@
 #   §CENSUS-COMPLETE-1   a section with no census line, a suite with no heading and a suite with no line are refused.
 #   §CENSUS-COMPLETE-2   a verdict outside the five words, and a rule line marked as a cull, are refused.
 #   §CENSUS-COMPLETE-3   the census covers every suite and every section of the real tests tree.
+#   §CENSUS-ROWS         a row id the census cites that its suite does not hold is refused naming the suite, the section and the id.
 #   §CENSUS-1            a section the census culls that is still in its suite is refused.
 #   §CENSUS-2            a kept section gone from its suite, or a baseline one gone with no culled line, is refused.
 #   §CENSUS-3            a culled-list line that culls a keep or a rule pin is refused.
@@ -1334,6 +1335,33 @@ census_refusals() {
       for (key in need) { split(key, p, SUBSEP); if (have[key] < need[key]) print "no verdict: " p[1] " §" p[2] }
     }' | LC_ALL=C sort
 }
+# census_row_refusals <tests dir> <census file> -> `unheld row: <suite> §<key> <id>` per labelled row id a record
+# line cites in its defect cell, inside a parenthesis, that its suite does not hold. A labelled id is NAME-n, an
+# upper-case stem of two letters or more, a hyphen, then a digit (`RV-3`, `AW-5-0`); the plain `7a` of a suite that
+# numbers its rows by position has nothing to be held against, and `AC-n` names a criterion, not a row. A suite holds
+# an id as a whole token in its own file or in a tests/lib file its text names.
+census_row_refusals() {
+  local s f lib libs pairs="$(mktemp "${TMPDIR:-/tmp}/cr.XXXXXX")"
+  census_records "$2" | awk -F'\t' '{
+    t = $5
+    while (match(t, /\([^()]*\)/)) {
+      g = substr(t, RSTART + 1, RLENGTH - 2); t = substr(t, RSTART + RLENGTH)
+      n = split(g, a, ", ")
+      for (i = 1; i <= n; i++)
+        if (a[i] ~ /^[A-Z][A-Z]+-[0-9][A-Za-z0-9]*(-[0-9A-Za-z]+)*$/ && a[i] !~ /^AC-/) print $2 "\t" $3 "\t" a[i]
+    }
+  }' | LC_ALL=C sort -u > "$pairs"
+  for s in $(cut -f1 "$pairs" | LC_ALL=C sort -u); do
+    f="$1/$s"; [ -f "$f" ] || continue
+    libs=("$f")
+    for lib in "$1"/lib/*.sh; do [ -f "$lib" ] && /usr/bin/grep -q -F "${lib##*/}" "$f" && libs+=("$lib"); done
+    # the suite's tokens, a token being a run of letters, digits and hyphens; an id is held when it is one of them
+    awk -F'\t' -v s="$s" '$1 == s { print $3 "\t" $2 }' "$pairs" | LC_ALL=C sort > "$pairs.s"
+    /usr/bin/grep -h -o -E '[A-Za-z0-9-]+' "${libs[@]}" | LC_ALL=C sort -u > "$pairs.t"
+    LC_ALL=C join -t "$(printf '\t')" -v 1 "$pairs.s" "$pairs.t" | awk -F'\t' -v s="$s" '{ printf "unheld row: %s §%s %s\n", s, $2, $1 }'
+  done | LC_ALL=C sort -u
+  rm -f "$pairs" "$pairs.s" "$pairs.t"
+}
 # census_scratch <dir> -> a tests tree of three suites: x with two sections, y with none, z holding a
 # section call only inside a heredoc body that writes a scratch suite.
 census_scratch() {
@@ -1410,6 +1438,29 @@ expect_eq "the census file is there, with a heading for this suite" "yes" \
 expect_eq "the census path comes from the registry constant: the product's names tests/CENSUS.md, a scratch copy's another file" \
   "$TESTS_DIR/CENSUS.md|tests/OTHER.md" "$CENSUS_MD|$(census_registry <(echo 'REGISTRY_FILES="tests/OTHER.md"'))"
 expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(census_refusals "$TESTS_DIR" "$CENSUS_MD")"
+
+# ============================================================
+section "CENSUS-ROWS: a row id the census cites that its suite does not hold is refused by suite, section and id"
+# ============================================================
+# fails-when: a record line cites a labelled row (NAME-n) that neither its suite nor a tests/lib file the suite names
+# holds, and the sweep over the real census prints nothing for it.
+CR="$TMP/cr"; census_scratch "$CR"
+printf '%s\n' 'expect_eq "RV-1: the first row" 1 1' 'expect_eq "RV-1b: its second" 1 1' > "$CR/tests/x.test.sh.rows"
+cat "$CR/tests/x.test.sh.rows" >> "$CR/tests/x.test.sh"; rm -f "$CR/tests/x.test.sh.rows"
+mkdir -p "$CR/tests/lib"; printf '%s\n' 'expect_eq "LB-2: a row a library holds" 1 1' > "$CR/tests/lib/rows.sh"
+printf '%s\n' '. "$TESTS_DIR/lib/rows.sh"' >> "$CR/tests/x.test.sh"
+census_file "$CR/held.md" 'x.test.sh | §ONE | keep | lib/x.sh: an arm deleted (RV-1, RV-1b, LB-2, AC-9, 7a) | none (searched x in tests/)' "$CS_TWO"
+expect_eq "control: ids the suite holds, one in a library it names, a criterion id and a positional id are refused for nothing" "" \
+  "$(census_row_refusals "$CR/tests" "$CR/held.md")"
+census_file "$CR/lack.md" 'x.test.sh | §ONE | keep | lib/x.sh: an arm deleted (RV-1, RV-3, RV-3b, RV-1bb) | none (searched x in tests/)' "$CS_TWO"
+expect_eq "a cited id the suite lacks is refused by suite, section and id; a longer id does not stand in for a shorter one" \
+  "unheld row: x.test.sh §ONE RV-1bb|unheld row: x.test.sh §ONE RV-3|unheld row: x.test.sh §ONE RV-3b" \
+  "$(census_row_refusals "$CR/tests" "$CR/lack.md" | paste -sd'|' -)"
+census_file "$CR/other.md" 'x.test.sh | §ONE | keep | lib/x.sh: an arm deleted | none (searched x in tests/; y.test.sh §Q (RV-9))' "$CS_TWO"
+expect_eq "an id cited only in the catcher cell names another suite's row and is not read" "" \
+  "$(census_row_refusals "$CR/tests" "$CR/other.md")"
+CR_REAL="$(census_row_refusals "$TESTS_DIR" "$CENSUS_MD")"
+expect_eq "the real census cites only rows its suites hold" "" "$CR_REAL"
 
 
 # ── the cut ──────────────────────────────────────────────────────────────────
