@@ -11,6 +11,8 @@
 #            file names is listed; a section naming no verb, or typing a contract label, is refused with
 #            nothing written; a brief this verb did not render is never rewritten.
 #   §BAR     a suite promised over the landing bar leaves Lands-on, stays in Suites and is named; a sole suite stays.
+#   §LANDS-ONE a review-born row is born naming the suites its brief lands on: one reader of a row's suites serves the
+#            brief and the birth line, over a table that carries no lands-on column.
 #   §NAMES   the dispatch wall: a dispatch that binds a plan row names its row's rendered brief file on the
 #            prompt's first line, or is refused with the render to run; the file's path and sum go on the
 #            roster row; a read-only dispatch that binds no row needs no file.
@@ -157,6 +159,63 @@ expect_eq "B8 a suite over the bar at a quiet load is left out at load 5" "Lands
 expect_eq "B8b …and at load 0, the same" "Lands-on: a.test.sh" "$(grep '^Lands-on:' "$BD/bar-calmo-T1.md")"
 expect_contains "B8c …named with its promise at load 5" "shared.test.sh promises 1000s, over the landing bar of 600s" "$(cat "$BD/bar-busyo-T1.md")"
 expect_contains "B8d …and at load 0 the same line" "shared.test.sh promises 1000s, over the landing bar of 600s" "$(cat "$BD/bar-calmo-T1.md")"
+
+section "§LANDS-ONE: a review-born row is born naming the suites its brief lands on (AC-3.1)"
+# One reader of a row's suites answers both prints. The fixture is a version-15 table, which has no lands-on column, so the
+# birth's old read of one was always empty and every review-born row was born saying it lands none.
+LR="$(make_repo lands-one)"; git -C "$LR" config user.name "Dana Fixture"; git -C "$LR" config user.email d@example.com
+( cd "$LR" && git checkout -q -b wave/01-fixture && git commit -q --allow-empty -m base )
+LREC="$LR/.bionic/docs/record/wave-01-fixture"; LBD="$LREC/briefs"; mkdir -p "$LBD"
+LP="$LR/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"; mkdir -p "${LP%/*}"
+{ printf -- '---\ncanonical_sdlc_version: 15\nrigor: double\nscale: wave\nworking-branch: wave/01-fixture\n---\n\n# fixture\n\n'
+  printf '## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the first build | — | 30 | REQ-1 | lib/a.sh, tests/a.test.sh | — |\n\n'
+  printf '## T11 — a fix whose section names suites\n\nsuites: x.test.sh, y.test.sh\nlands-on: x.test.sh, y.test.sh\n\n'
+  printf '## T14 — a fix whose section names a suite the gate promises long\n\nsuites: x.test.sh, y.test.sh\n\n'
+  printf '## T12 — a fix whose section names none\n\nRulings: the Files name the suite.\n\n'
+  printf '## T13 — a fix with no suite anywhere\n\nRulings: none.\n'
+} > "$LP"
+bind_marker "$LR" "$LP"
+for n in 1 2 3 4; do printf 'run/v1|ev=step|n=%s|at=2026-11-01T00:0%s:00Z\n' "$n" "$n"; done > "$LREC/run.log"
+printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-11-01T00:05:00Z\n' >> "$LREC/run.log"
+LPK="$(cd "$LR" && . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/gate.sh" 2>/dev/null && _gate_project)"
+lo_cost() { printf '%s:%s\n' "$2" "$(date +%s)" > "$BIONIC_GATE_DIR/cost/${LPK}%$1"; }
+lo_born() { printf '%s\n' "$LO_OUT" | /usr/bin/grep "task-add — $1 lands" | sed 's/^poker: //' || :; }
+lo_lands() { grep '^Lands-on:' "$LBD/$1.md"; }
+lo_cost x.test.sh 5; lo_cost y.test.sh 5
+# The findings a row is born of: a review's record, one finding for each row (a rating alone prints no landing line).
+LO_REC="record/wave-01-fixture/critic.md"; LH="$(git -C "$LR" rev-parse HEAD)"
+printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nfindings: 4\n' "$LH" "$LH" > "$LR/.bionic/docs/$LO_REC"
+for n in "1 1" "2 4" "3 2" "4 3"; do set -- $n; printf 'finding: %s S2 on lib/l%s.sh:1 a defect\n' "$1" "$2" >> "$LR/.bionic/docs/$LO_REC"; done
+printf 'run/v1|ev=proof|kind=review|head=%s|evidence=%s|question=adversarial|reader=lo-adv|result=fail|scope=piece|at=2026-11-01T00:06:00Z\n' "$LH" "$LO_REC" >> "$LREC/run.log"
+for n in "1 1" "2 4" "3 2" "4 3"; do set -- $n; printf 'shown: %s cat lib/l%s.sh\n' "$1" "$2" >> "$LR/.bionic/docs/$LO_REC"; done
+
+ta_add "$LR" T11 4 build "Fix T11. The defect is gone." bionic:implementor '—' 30 REQ-1 "lib/l1.sh" --born "$LO_REC#1"
+LO_OUT="$OUT"
+expect_eq "LO0 setup: the row is born (exit 0)" "0" "$RC"
+poke "$LR" brief T11 lo-T11
+expect_eq "LO1 AC-3.1 the brief of a row whose section names suites lands on them" "Lands-on: x.test.sh, y.test.sh" "$(lo_lands lo-T11)"
+expect_eq "LO1b …and its birth names the same suites, not none" "task-add — T11 lands on x.test.sh, y.test.sh." "$(lo_born T11)"
+expect_absent "LO1c …and does not say it lands none (beside LO1b, the same line)" "lands none" "$(lo_born T11)"
+
+lo_cost y.test.sh 700
+ta_add "$LR" T14 4 build "Fix T14. The defect is gone." bionic:implementor '—' 30 REQ-1 "lib/l4.sh" --born "$LO_REC#2"
+LO_OUT="$OUT"
+poke "$LR" brief T14 lo-T14
+expect_eq "LO2 a suite over the landing bar leaves the brief's Lands-on" "Lands-on: x.test.sh" "$(lo_lands lo-T14)"
+expect_contains "LO2b …and the birth names the same set" "task-add — T14 lands on x.test.sh." "$(lo_born T14)"
+expect_contains "LO2c …and says the suite left out for the bar, as the brief does" "y.test.sh promises 700s, over the landing bar of 600s" "$(lo_born T14)"
+
+ta_add "$LR" T12 4 build "Fix T12. The defect is gone." bionic:implementor '—' 30 REQ-1 "lib/l2.sh, tests/f.test.sh" --born "$LO_REC#3"
+LO_OUT="$OUT"
+poke "$LR" brief T12 lo-T12
+expect_eq "LO3 a section naming none falls back on the Files cell's suite in the brief" "Lands-on: f.test.sh" "$(lo_lands lo-T12)"
+expect_eq "LO3b …and the birth says the same" "task-add — T12 lands on f.test.sh." "$(lo_born T12)"
+
+ta_add "$LR" T13 4 build "Fix T13. The defect is gone." bionic:implementor '—' 30 REQ-1 "lib/l3.sh" --born "$LO_REC#4"
+LO_OUT="$OUT"
+[ "$RC" = 0 ] || printf "   said: %s\n" "$OUT"
+expect_contains "LO4 a code row that names no suite anywhere is still born saying it lands none" "task-add — T13 lands none — counts on the next green regression" "$(lo_born T13)"
 
 section "§NAMES: a dispatch that binds a plan row names its row's rendered brief file (AC-6.1)"
 # The real dispatch wall over a bound, approved, armed session; each drive starts on an empty roster.
