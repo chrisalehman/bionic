@@ -125,6 +125,23 @@ BIONIC_LOADER_REFUSE
 }
 # --- bionic-loader/v2 END
 
+# bionic_need <lib> <marker> -> 0 once the function <marker> is defined, sourcing <lib> if it is not. The library
+# folder a hook resolved (BIONIC_LIB) is tried first and this file's own folder second, so a library loaded late takes
+# the folder its hook found and a caller with no hook still finds its siblings. It returns a status and prints
+# nothing: each caller keeps its own way of failing. Sourcing this file must still run nothing, so it assigns nothing
+# at the top level.
+bionic_need() {
+  local _bn_d
+  declare -F "$2" >/dev/null 2>&1 && return 0
+  for _bn_d in "${BIONIC_LIB:-}" "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"; do
+    [ -n "$_bn_d" ] && [ -f "$_bn_d/$1" ] || continue
+    # shellcheck source=/dev/null
+    . "$_bn_d/$1" >/dev/null 2>&1
+    declare -F "$2" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 # The stub, printed for a hook to carry and for a probe to run with "$0" set to a hook's path. Without
 # this file beside the hook the stub sets what the loader would have set with nothing found, and defines
 # the two calls with the loader's own words, so a hook alone answers as one whose library is gone.

@@ -899,7 +899,7 @@ log.test.sh | §SEAL | keep | payload/scripts/lib/log.sh _log_put: the line writ
 
 ## loader.test.sh
 
-loader.test.sh | — | — | no section | —
+loader.test.sh | §NEED | keep | payload/scripts/lib/loader.sh bionic_need: the loader's own folder tried before BIONIC_LIB, so a hook's resolved library is shadowed (NEED.2); or the marker check before the source dropped, so a defined marker is sourced over (NEED.5); or a missing library or a library lacking its marker answering 0 (NEED.6, NEED.7) | none (searched 'bionic_need' in tests/)
 
 ## name-scan.test.sh
 
