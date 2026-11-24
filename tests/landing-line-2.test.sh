@@ -428,7 +428,7 @@ FKR='tests/x.test.sh: fork: Resource temporarily unavailable'; lf_v() { printf '
 expect_eq "(fk1) refused, rc 1: none · rc 1 without it: red · refused, rc 0: green · quoted: red · bash 5's retry: none" "none red green red none" "$(lf_v 1 "$FKR") $(lf_v 1 'FAIL: x') $(lf_v 0 "$FKR") $(lf_v 1 "missing 'y' in: $FKR") $(lf_v 1 "${FKR/fork:/fork: retry:}")"
 FK="$(ll_world)"; ll_launch "$FK" T1 x; ll_commit_suite "$FK" T1 x "echo run >> \"\$LL_SIG/fk.runs\"; echo '$FKR' >&2; echo 'x.test.sh: 0/1 passed, 1 failed  sections=1 setup=0'; exit 1"
 ll_verb "$FK" T1; KFK="$(ll_last_cand "$FK" T1)"; LFK="$FK/.bionic/docs/record/wave-x/line/T1-x-${KFK:0:12}"
-expect_eq "(fk2) refused on every run: run twice, none and none, then STALLED naming both logs (exit 70), never RED" "70 2 none none STALLED T1 $LFK.log,$LFK-2.log" "$LL_RC $(ll_lines "$LL_SIG/fk.runs") $(ll_results "$FK" T1 "$KFK") $(printf '%s\n' "$LL_OUT" | grep '^STALLED ')"
+expect_eq "(fk2) refused on every run: run twice, none and none, then STALLED naming both logs (exit 70), never RED" "70 2 none none STALLED T1 $LFK.log,$LFK-2.log — neither log holds the end line ready reads: \"x.test.sh: <p>/<t> passed, <f> failed\"" "$LL_RC $(ll_lines "$LL_SIG/fk.runs") $(ll_results "$FK" T1 "$KFK") $(printf '%s\n' "$LL_OUT" | grep '^STALLED ')"
 # ---------------------------------------------------------------------------
 section "§DRAIN: a landing drains its suites at most J at once, J the gate's answer; one tree per candidate, the red judge in another (wave-37 T1; D3, REQ-1 AC-1.1; wave-38 T6, D21)"
 #
@@ -726,7 +726,7 @@ LS1="$RS/.bionic/docs/record/wave-x/line/T1-c-${KS:0:12}.log"; LS2="$RS/.bionic/
 expect_eq "(st1) three bounded readies with no progress: WAITING, WAITING, then STALLED on the third" "75 75 70" "$ST1 $ST2 $ST3"
 expect_eq "(st1) …the first started nothing (600 s promised, 500 left); the second and third ran once each, both none" "2 none none" \
   "$(ll_lines "$LL_SIG/st.runs") $(ll_results "$RS" T1 "$KS")"
-expect_eq "(st1) …the stall names the two runs' logs, one from each call" "STALLED T1 ${LS1},${LS2}" "$(printf '%s\n' "$ST3_OUT" | grep '^STALLED ')"
+expect_eq "(st1) …the stall names the two runs' logs, one from each call" "STALLED T1 ${LS1},${LS2} — neither log holds the end line ready reads: \"c.test.sh: <p>/<t> passed, <f> failed\"" "$(printf '%s\n' "$ST3_OUT" | grep '^STALLED ')"
 # MUTANT: the count reset at every ready, as before. Each call starts from nothing, and the stall never fires.
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-stm"
 RSM="$(ll_stall_world stm)"

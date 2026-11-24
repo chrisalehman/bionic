@@ -1005,7 +1005,8 @@ ll_verb "$RT" T1
 KT="$(ll_last_cand "$RT" T1)"
 LT1="$RT/.bionic/docs/record/wave-x/line/T1-a-${KT:0:12}.log"; LT2="$RT/.bionic/docs/record/wave-x/line/T1-a-${KT:0:12}-2.log"
 expect_eq "(t1) two runs with no end line: ready exits 70" "70" "$LL_RC"
-expect_eq "(t1) …printing STALLED and both logs" "STALLED T1 ${LT1},${LT2}" "$LL_OUT"
+expect_eq "(t1) …printing STALLED, both logs and the end line it read for" \
+  "STALLED T1 ${LT1},${LT2} — neither log holds the end line ready reads: \"a.test.sh: <p>/<t> passed, <f> failed\"" "$LL_OUT"
 expect_regex "(t1) …one stalled event naming both logs" "^run/v1\\|ev=stalled\\|row=T1\\|logs=${LT1},${LT2}\\|at=[0-9T:-]+Z$" "$(ll_ev "$RT" stalled)"
 expect_eq "(t1) …two runs, no third" "none none" "$(ll_results "$RT" T1 "$KT")"
 expect_eq "(t1) …the entry kept on the line, stalled, nothing returned or published" "T1 stalled||$HT" \
@@ -1044,6 +1045,22 @@ LL_MUTANT='s/-ge 2 \]/-ge 99 ]/' LL_MUTANT_FN=_line_carry ll_drive "$RT6" T1 "$W
 i=0; while [ "$i" -lt 300 ] && [ "$(ll_ev "$RT6" verdict | grep -c 'result=none')" -lt 3 ]; do sleep 0.1; i=$((i + 1)); done
 ll_kill_bg "$T6_BG"
 expect_eq "(t6m) …and no stalled event" "" "$(ll_ev "$RT6" stalled)"
+
+# ---------------------------------------------------------------------------
+section "§STALL-LINE: a stall says which end line the suite's log lacks (AC-25.1)"
+# A suite that exits 0 and prints no end line is no verdict, so the entry stalls on its second run. The stall used to
+# name the two logs and no more, and a writer could not tell a suite that died from one that never printed its summary.
+# The line names the end line `ready` reads, `<suite>: <p>/<t> passed, <f> failed`, and the suite it read it for.
+RSL="$(ll_rworld)"
+( cd "$RSL/.worktrees/T1" && world_suite a none >/dev/null ) && git -C "$RSL/.worktrees/T1" commit -qam "T1: a prints no end line"
+ll_verb "$RSL" T1
+KSL="$(ll_last_cand "$RSL" T1)"
+LSL1="$RSL/.bionic/docs/record/wave-x/line/T1-a-${KSL:0:12}.log"; LSL2="$RSL/.bionic/docs/record/wave-x/line/T1-a-${KSL:0:12}-2.log"
+expect_eq "(sl0) precondition: the suite exited 0, both logs hold its output and neither holds an end line" "70|PASS: a ran|PASS: a ran|0" \
+  "$LL_RC|$(head -n1 "$LSL1")|$(head -n1 "$LSL2")|$(cat "$LSL1" "$LSL2" | grep -Ec '^[^ ]+: [0-9]+/[0-9]+ passed, [0-9]+ failed' || true)"
+expect_contains "(sl1) the stall names the end line ready reads" "neither log holds the end line ready reads" "$LL_OUT"
+expect_contains "(sl2) …in the shape the harness prints it, for the suite that lacks it" "\"a.test.sh: <p>/<t> passed, <f> failed\"" "$LL_OUT"
+expect_contains "(sl3) …and still names both logs, as a writer reads them first" "${LSL1},${LSL2}" "$LL_OUT"
 
 # ---------------------------------------------------------------------------
 section "§WINDOW: the hand-holds count is read over a window, every source by its own time"
@@ -1138,7 +1155,7 @@ RW4="$(ll_world)"; WW_RD4="$(dirname "$(ll_log "$RW4")")"
 ww_dec 2026-10-20T10:00:00Z decline >> "$WW_RD4/run.log"
 ww_times() { printf '%s\n' "$1" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{5,8}Z' | paste -sd' ' -; }   # <ends line> -> its times
 WW_E4="$(ww_ends "$RW4")"
-expect_contains "WINDOW-3 with no delivered: time the ends line runs the window to now" "until now: the plan names no delivered: time" "$WW_E4"
+expect_contains "WINDOW-3 with no delivered: time the ends line runs the window to now" "until now: the run's log holds no delivery yet" "$WW_E4"
 expect_eq "WINDOW-3a …and prints one time, the start: the last build row's landing, never an end" \
   "2026-10-20T11:00:00Z" "$(ww_times "$WW_E4")"
 expect_contains "WINDOW-3b …and the counts read from that landing to now: the later hand landing of a row that is no build row counts, the earlier decline does not" \

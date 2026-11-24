@@ -653,7 +653,7 @@ hand_holds_verb() {
   if [ -n "$s" ] || [ -n "$u" ]; then hand_holds_report "$rec" "$root" "$plan" ${s:+--since "$s"} ${u:+--until "$u"}
   else hand_holds_report "$rec" "$root" "$plan"; fi || { printf '%s\n' "$no"; return 2; }
   if [ -n "$s" ]; then sw="since $s (the last build landing, $row)"; else sw="since the first line (no build row has landed)"; fi
-  if [ "$st" = delivered ]; then uw="until $u (delivered:)"; else uw="until now: the plan names no delivered: time"; fi
+  if [ "$st" = delivered ]; then uw="until $u (delivered:)"; else uw="until now: the run's log holds no delivery yet"; fi
   printf 'hand-holds window: %s · %s\n' "$sw" "$uw"
   return 0
 }
