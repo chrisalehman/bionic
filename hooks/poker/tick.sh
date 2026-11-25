@@ -29,7 +29,7 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # `gate_raised=` is the set of gate requests already raised (below). `change=` is the fingerprint of the plan's
 # `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
 # it moved, so the first tick of a session compares against nothing.
-write_tick_digest() {  # <session-id> <digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state> [<reconcile cause>]]]]]] -> 0 written, 1 not
+write_tick_digest() {  # <session-id> <digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state> [<reconcile cause> [<plan ids>]]]]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -72,6 +72,11 @@ write_tick_digest() {  # <session-id> <digest> <since> <decision> <duty> [<gate 
     # turn-end wall (lib/stop.sh `stop_turn_facts`) so its refusal gives the tick's own cause.
     if [ -n "${12:-}" ]; then
       printf 'reconcile=%s\n' "${12}"
+    fi
+    # THE TABLE'S IDS, comma-joined in table order: the row count says the table grew, the ids say which row is new
+    # wherever it sits, so the reconcile line names that row and not the one at the table's end.
+    if [ -n "${13:-}" ]; then
+      printf 'plan_ids=%s\n' "${13}"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -928,7 +933,7 @@ tick_watch_facts() {  # <file>
     # regression state in (lib/units.sh `_units_floor_state`), so a tick runs `proof_state` once.
     [ -z "$TICK_BUF" ] || _UNITS_MEMO_FLOOR="$TICK_BUF.floor"
     TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""; TICK_CHANGE_STORE=""
-    TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""
+    TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""; TICK_PLAN_IDS=""
     TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""; TICK_LANDINGS=""; TICK_RUNS_LINES=""; TICK_RUNS_KEY=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     # ONE RESTART LINE, FROM DOCTOR'S READER (wave-35 T5; REQ-4 AC-4.5; D13). The CLI holds hooks.json,
@@ -976,7 +981,7 @@ tick_watch_facts() {  # <file>
       fi
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
+        write_tick_digest "$SESSION_ID" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" "$TICK_PLAN_IDS" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       [ -z "$TICK_RUN_ROOT" ] || tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"
@@ -1035,15 +1040,19 @@ tick_watch_facts() {  # <file>
       [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ] || return 1
       TICK_RECONCILE=grew
     }
-    # THE LIST ONLY APPENDS: a row added after the last tick owes its own entry at the end, and the rows past
-    # the count the digest holds are the rows added, since task-add writes at the end of the table. The tick
-    # reads the plan and its digest and never the platform's list.
+    # THE LIST ONLY APPENDS: a row added after the last tick owes its own entry at the end of the task list, and
+    # the rows added are the ids the digest does not hold, wherever the plan's table puts them. A digest from
+    # before it kept the ids holds none: the rows past its count stand in, as task-add writes at the table's end.
+    # The tick reads the plan and its digest and never the platform's list.
     tick_grown_entries() {
-      local n id step task e="" k=0
+      local n id step task e="" k=0 seen
+      seen="$(tick_digest_field "$TICK_DIGEST_FILE" plan_ids)"
       n=$(( TICK_PLAN_ROWS - $(tick_digest_field "$TICK_DIGEST_FILE" plan_rows) ))
       while IFS=$'\t' read -r id step _ task _; do
         e="${e:+$e; }$step/$id: $(clean_whole "$(plan_task_title "$task")")"; k=$((k + 1))
-      done <<< "$(units_rows "$SCHED_PLAN" 2>/dev/null | tail -n "$n")"
+      done <<< "$(units_rows "$SCHED_PLAN" 2>/dev/null | if [ -n "$seen" ]; then
+        awk -F'\t' -v seen=",$seen," 'index(seen, "," $1 ",") == 0'
+      else tail -n "$n"; fi)"
       say "RECONCILE — the ## Tasks table grew since the last tick: add the task-list $([ "$k" -gt 1 ] && echo entries || echo entry) $e at the end of the list"
     }
     tick_conclude() {  # <decision before the gate>
@@ -1060,6 +1069,7 @@ tick_watch_facts() {  # <file>
         TICK_CHANGE="$(tick_plan_memoised tick_change_rows | cksum | awk '{ print $1 "-" $2 }')"
         TICK_PLAN_CUR="$(sched_plan_current "$SCHED_PLAN")"
         TICK_PLAN_ROWS="$(tick_plan_memoised tick_change_rows | grep -vc '^ready=')"
+        TICK_PLAN_IDS="$(tick_plan_memoised tick_change_rows | grep -v '^ready=' | cut -d'|' -f1 | paste -sd, -)"
       fi
       if [ -n "$TICK_BUF" ]; then
         TICK_DIGEST="$( {
