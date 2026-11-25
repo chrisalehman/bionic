@@ -1193,6 +1193,52 @@ poke "$TI" tick
 expect_eq "TL-16 on a page at 15 the tick lands the orchestrator's integrate row whose reviews stand: one published event of the record kind" \
   "1|1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c "^poker: LANDED T5 — the orchestrator's integrate row")|$(TI_PUB)"
 
+# A WRITER WITH A TREE LANDS THROUGH `ready`, and the tick names one that has met its record and committed but has not
+# landed: its writer ends with its contract met before `ready`, and no line of the tick said so. FIXTURE FIDELITY: the
+# task-scale plan at 15 of §TICK-LANDS (`vc_15`), each build row active under its writer, its tree a linked worktree on
+# its own branch at the working head (`git worktree add`, the `tree` event the row's launch writes), its roster row MET
+# (the record in the tree, the agent's done marker); T31 holds a commit past the head, T32 none, T33 a commit and no
+# record, T34 a commit and a tracked edit left uncommitted.
+# fails-when: the committed writer is on no line, or its line names no landing command, or it is told at every tick,
+# or a writer with no commit, no record or an unfinished edit is named.
+UL="$(make_repo tick-unlanded)"; ( cd "$UL" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
+git -C "$UL" config user.name "Dana Fixture"
+UL_RD="record/wave-01-fixture"; UL_D=".bionic/docs/$UL_RD"
+UL_P="$(vc_plan "$UL" \
+  "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |" \
+  "| T31 | 4 | build | the committed writer | w-T31 | — | 30 | REQ-1 | lib/z31.sh, $UL_D/T31.md | active | — | $UL_D/T31.md |" \
+  "| T32 | 4 | build | the writer with no commit | w-T32 | — | 30 | REQ-1 | lib/z32.sh, $UL_D/T32.md | active | — | $UL_D/T32.md |" \
+  "| T33 | 4 | build | the writer with no record | w-T33 | — | 30 | REQ-1 | lib/z33.sh, $UL_D/T33.md | active | — | $UL_D/T33.md |" \
+  "| T34 | 4 | build | the writer with an edit under way | w-T34 | — | 30 | REQ-1 | lib/z34.sh, $UL_D/T34.md | active | — | $UL_D/T34.md |")"
+vc_15 "$UL" "$UL_P"; sed "s/^base-sha: abc1234$/base-sha: $(git -C "$UL" rev-parse main)/" "$UL_P" > "$UL_P.t" && mv "$UL_P.t" "$UL_P"
+( cd "$UL" && git add -f "$UL_P" && git commit -qm base ) >/dev/null 2>&1; new_roster "$UL"
+UL_LOG="$(plan_fixture_log "$UL_P")"; UL_RC_DIR="$UL/.bionic/tmp/ul-done"; mkdir -p "$UL_RC_DIR"
+for ul_t in T31 T32 T33 T34; do
+  git -C "$UL" worktree add -q -b "wt/$ul_t" "$UL/.worktrees/01-$ul_t" main >/dev/null 2>&1
+  printf 'run/v1|ev=tree|row=%s|path=.worktrees/01-%s|at=2026-10-04T01:%02d:00Z\n' "$ul_t" "$ul_t" "${ul_t#T}" >> "$UL_LOG"
+  mkdir -p "$UL/.worktrees/01-$ul_t/$UL_D"
+  [ "$ul_t" = T33 ] || printf 'record of %s\n' "$ul_t" > "$UL/.worktrees/01-$ul_t/$UL_D/$ul_t.md"
+  add_row "$UL" name="w-$ul_t" deliverable="$UL/.worktrees/01-$ul_t/$UL_D/$ul_t.md" duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$UL_RC_DIR" "w-$ul_t")"
+done
+seal_fixture "$UL_P" "$UL_LOG"
+ul_said() { printf '%s\n' "$OUT" | /usr/bin/grep "NOT-LANDED $1 "; }
+poke "$UL" tick
+expect_eq "UL-0 precondition: no tree holds a commit past the head yet, so no writer is named" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T3[1-4] ')"
+for ul_t in T31 T33 T34; do ( cd "$UL/.worktrees/01-$ul_t" && printf 'code\n' > "lib-$ul_t.sh" && git add . && git commit -qm "code of $ul_t" ) >/dev/null 2>&1; done
+( cd "$UL/.worktrees/01-T34" && printf 'more\n' >> "lib-T34.sh" ) >/dev/null 2>&1
+poke "$UL" tick
+expect_contains "UL-1 a MET writer whose tree holds its record and a commit past the head is named once, the line naming its row and its writer" "NOT-LANDED T31 — w-T31" "$(ul_said T31)"
+expect_contains "UL-2 …and giving the landing command: ready, from its tree" "spawn-worktree.sh ready --within" "$(ul_said T31)"
+expect_contains "UL-2b …naming the commit that is past the head" "$(git -C "$UL/.worktrees/01-T31" rev-parse --short=12 HEAD)" "$(ul_said T31)"
+expect_eq "UL-3 a MET writer whose tree holds no commit past the head is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T32 ')"
+expect_eq "UL-4 a committed writer whose tree holds no record is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T33 ')"
+expect_eq "UL-5 a committed writer with a tracked edit uncommitted is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T34 ')"
+poke "$UL" tick
+expect_eq "UL-6 a second tick over the same tree head names it again nowhere" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T31 ')"
+( cd "$UL/.worktrees/01-T31" && printf 'again\n' >> "lib-T31.sh" && git add . && git commit -qm "a second commit" ) >/dev/null 2>&1
+poke "$UL" tick
+expect_contains "UL-7 a new commit is a new tree head: the writer is told again" "NOT-LANDED T31 — w-T31" "$(ul_said T31)"
+
 # ============================================================
 section "§STACK: the regression's health is the judge's rendering, and no verb writes it into the plan"
 # ============================================================

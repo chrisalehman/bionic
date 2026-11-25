@@ -572,17 +572,43 @@ tick_told_once() {
   return 0
 }
 
-# tick_record_stands <row> <Files cell> -> 0 when a record its Files or its artifact cell (the plan-read library's cell
-# of the row) names stands as a file: a path from the docs root (TICK_DOCS, for `record/…`) or from the repository, a
-# leading `./` or `!` not part of it.
+# tick_record_stands <row> <Files cell> [<root>] -> 0 when a record its Files or its artifact cell (the plan-read
+# library's cell of the row) names stands as a file: a path from the docs root (`record/…`) or from the root, a leading
+# `./` or `!` not part of it. The root is the repository, or a row's tree when the record is the one its writer holds.
 tick_record_stands() {
-  local e art
+  local e art root="${3:-$REPO_REAL}" docs="${TICK_DOCS:-}"
+  [ "$root" = "$REPO_REAL" ] || docs="$(docs_root "$root" 2>/dev/null)"
   art="$(plan_read_row "$POKER_RUN_PLAN" Tasks id "$1" 2>/dev/null | sed -n 's/^artifact=//p')"
   while IFS= read -r e; do
     e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
-    case "$e" in record/*) [ -n "$TICK_DOCS" ] && [ -f "$TICK_DOCS/$e" ] && return 0 ;; *[A-Za-z0-9]*) [ -f "$REPO_REAL/$e" ] && return 0 ;; esac
+    case "$e" in record/*) [ -n "$docs" ] && [ -f "$docs/$e" ] && return 0 ;; *[A-Za-z0-9]*) [ -f "$root/$e" ] && return 0 ;; esac
   done <<< "$(printf '%s,%s\n' "${2:-}" "$art" | tr ',' '\n')"
   return 1
+}
+
+# tick_unlanded_tree <row> <writer> <Files cell> <tree> -> says one NOT-LANDED line for a writer that has met its record
+# and committed in its tree and has not landed, naming the commit and the landing command. A row with a tree lands
+# through `ready`, from that tree, and a writer's record is the first file it writes, so MET alone finds one still at
+# work: the line waits for what only a finished writer holds, a record in its tree, a commit past the working head and
+# no tracked edit left over. A writer whose landing carrier lives is landing and is not named. Told once for each tree
+# head, so a further commit is told again and the same head never is.
+tick_unlanded_tree() {
+  local id="$1" writer="$2" tree="$4" recs th wh n sw
+  case "$tree" in /*) ;; *) tree="$REPO_REAL/${tree#./}" ;; esac
+  [ -d "$tree" ] && [ ! -L "$tree" ] || return 0
+  recs="$(printf '%s\n' "$3" | tr ',' '\n' | /usr/bin/grep 'record/' | paste -sd, -)"
+  tick_record_stands "$id" "$recs" "$tree" || return 0
+  th="$(git -C "$tree" rev-parse --verify -q HEAD 2>/dev/null)" || return 0
+  { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
+  declare -F proof_branch_head >/dev/null 2>&1 || return 0
+  wh="$(proof_branch_head "$POKER_RUN_PLAN" "$REPO_REAL" 2>/dev/null)" && [ -n "$wh" ] || return 0
+  n="$(git -C "$tree" rev-list --count "$wh..$th" 2>/dev/null)"
+  case "$n" in ''|*[!0-9]*|0) return 0 ;; esac
+  [ -z "$(git -C "$tree" status --porcelain --untracked-files=no 2>/dev/null)" ] || return 0
+  landing_carrier_names "$POKER_RUN_PLAN" | /usr/bin/grep -qxF -- "$writer" && return 0
+  tick_told_once "unlanded:$id" "$th" || return 0
+  sw="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
+  say "NOT-LANDED $id — $(clean "$writer") met its record and committed ${th:0:12} in $(clean "$tree"), and has not landed: its last act, from that tree, is bash $sw ready --within <seconds under its Bash timeout>"
 }
 
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
@@ -1552,8 +1578,9 @@ EOF
     # launch, `units_rows`), and the tick lands it (hooks/poker/line.sh `record_row_land`, in a subshell, so each of
     # its checks stands): one `published` event at the working head. A row whose checks fail (no record, a review not
     # yet registered) is left active and told once per reason, and asked again at the next tick. Only a row with no
-    # tree whose Files write nothing the head carries is asked; a row with a tree lands through `ready`. MET is read
-    # off this tick's one verdict read, acked or not: the ack closes the agent, never the row.
+    # tree whose Files write nothing the head carries is asked; a row with a tree lands through `ready`, and the tick
+    # only names its writer once its tree holds the work (`tick_unlanded_tree`). MET is read off this tick's one
+    # verdict read, acked or not: the ack closes the agent, never the row.
     if [ "${POKER_RUN_OPEN:-}" = yes ] && [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ]; then
       TICK_MET="$(printf '%s\n' "$VERDICT_OUT" | awk -F'|' '$1 == "landing-verdict/v1" { n = ""; s = ""
           for (i = 2; i <= NF; i++) { if ($i ~ /^name=/) n = substr($i, 6); else if ($i ~ /^state=/) s = substr($i, 7) }
@@ -1563,7 +1590,7 @@ EOF
         # An empty cell is printed `-`: a tab is white space to `read`, so two in a row would shift a field.
         while IFS=$'\t' read -r BS_ID BS_AGENT BS_FILES BS_WT; do
           [ -n "$BS_ID" ] || continue
-          case "$BS_WT" in *[A-Za-z0-9]*) continue ;; esac
+          case "$BS_WT" in *[A-Za-z0-9]*) tick_unlanded_tree "$BS_ID" "$BS_AGENT" "$BS_FILES" "$BS_WT"; continue ;; esac
           ! units_writes_head "$BS_FILES" || continue
           # AN UNREAD RULING HOLDS THE ROW AND PAGES THE PERSON (wave-34 T4; REQ-3 AC-3.1, AC-3.2; D13, D4
           # option 1). The writer has ended, so a ruling it never read is read by nobody here: the backstop
