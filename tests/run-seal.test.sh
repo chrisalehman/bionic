@@ -461,7 +461,7 @@ the plan edited|PC|printf "| T9 | x |\n" >> "$GP"
 a line of the log rewritten|LC|sed -i.bak "1s/n=1/n=7/" "$GL"
 ROWS
 section "CHANGED-WORDS"
-# AC-22.1: the refusal asks the person for a plain message and names the verb as the orchestrator's act; it
+# The refusal asks the person for a plain message and names the verb as the orchestrator's act; it
 # never offers a command behind a shell escape, which the verb refuses when typed (lib/said.sh `user_said`).
 world; eval 'rm "$GL"'; gate "git commit -m x"; E="$(cat "$SB/gate.err")"
 expect_status "the changed-run refusal: refused" 2 "$GRC"
