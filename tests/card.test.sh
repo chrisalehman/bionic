@@ -42,9 +42,9 @@ WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
 # ── the two formats card.sh owns that this suite renders by hand ──
 # The decision row gives its title cell 30 columns, a title being at most 30 characters
-# on every card; the eval-design format is the one the cards first stated.
+# on every card; the eval-design format starts each count at its label's column.
 OLD_FMT_DEC='    %-4s %-30s %-14s %s'
-OLD_FMT_EVAL='    %-8s %-36s %6s %5s %9s %5s %6s'
+OLD_FMT_EVAL='    %-8s %-36s %-6s %-5s %-9s %-5s %-6s'
 
 section "Section 1: the renderer is there, and it refuses what it cannot render"
 
@@ -154,15 +154,26 @@ card() {  # <kind> — TSV rows on stdin
 EVAL_VALS1=("REQ-<id>" "<how it is proven, one line>" "2" "1" "3" "0" "1")
 EVAL_VALS2=("REQ-<id>" "<how it is proven, one line>" "1" "0" "2" "1" "0")
 EVAL_VALS_T=("total" "" "3" "1" "5" "1" "1")
+# A row's last field pads on the left-aligned format and the card trims the line's end, so the hand-built rows trim theirs.
 EVAL_WANT="$(printf '%s\n' \
   "$(hdr_build "Eval design" "$OLD_FMT_EVAL" "2:static" "3:unit" "4:hermetic" "5:live" "6:human")" \
   "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS1[@]}")" \
   "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS2[@]}")" \
-  "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS_T[@]}")")"
+  "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS_T[@]}")" | sed -e 's/ *$//')"
 EVAL_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS1[@]}"
                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS2[@]}"
                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS_T[@]}"; } | card eval-design)"
 expect_eq "9: the eval-design kind renders the card's own header and three rows" "$EVAL_WANT" "$EVAL_GOT"
+# THE COUNT STARTS UNDER ITS LABEL. Row 9 holds the format against itself; this row reads the
+# printed card, so a count right-aligned in its column, which ends under the label's end, goes red.
+EVAL_START_GOT="$(printf '%s\n' "$EVAL_GOT" | awk '
+  NR == 1 { n = split("static unit hermetic live human", L, " "); for (i = 1; i <= n; i++) start[i] = index($0, L[i]); next }
+  NF > 0 && $1 != "total" {
+    out = ""; line = $0
+    for (i = 1; i <= n; i++) { out = out (out == "" ? "" : ",") (substr(line, start[i], 1) ~ /[0-9]/ && substr(line, start[i] - 1, 1) == " " ? "ok" : "off") }
+    print out }')"
+expect_eq "9b: each count of the eval-design rows starts at the first column of its type's label" \
+  "$(printf 'ok,ok,ok,ok,ok\nok,ok,ok,ok,ok')" "$EVAL_START_GOT"
 
 section "Section 5: the edges"
 
