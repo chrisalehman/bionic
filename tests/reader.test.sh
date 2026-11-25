@@ -18,6 +18,9 @@
 #   §HEADER     the plan's header keys, its body never read as one, CR-only line ends too.
 #   §ROW        a Tasks row is its nine authored cells, named by the table's header.
 #   §CRITERION  a criterion is its Eval design row, an escaped bar kept as a bar.
+#   §NEW-WORDS  a plan whose criteria table is headed Test design, with Test type and Test, answers every reader of
+#               the table, each criterion with its type, and the Step 2 card draws its spec.
+#   §OLD-WORDS  the same plan under Eval design, with Eval type and Eval, gives every one of those answers unchanged.
 #   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it; at 15 its
 #               verdict is the one an untimed proof the act wrote carries, else the evidence review at the head.
 #   §JOIN       a plan's log is found by its name; a header key pointing elsewhere is only words.
@@ -368,8 +371,118 @@ ask row; expect_status "row with no id is refused" 2 "$?"
 
 section "CRITERION"
 W=new; expect_eq "a criterion is its Eval design row, an escaped bar read as a bar" \
-  "requirement=REQ-7 approach=planted criterion=AC-7.1 eval-type=unit eval=\`cell\` | \`row\` fails-when=none" "$(flat criterion AC-7.1)"
+  "requirement=REQ-7 approach=planted criterion=AC-7.1 test-type=unit test=\`cell\` | \`row\` fails-when=none" "$(flat criterion AC-7.1)"
 ask criterion AC-9.9; expect_status "a criterion the Eval design lacks answers no" 1 "$?"
+
+# One plan, written in the new words and in the old: the criteria table under `## Test design` with the columns
+# `Test type` and `Test`, or under `## Eval design` with `Eval type` and `Eval`. The readers of that table are the
+# reader's answer and its tiers, the fails-when wall, the stale check's sums and the close's row, and each is asked here.
+words_plan() {  # <wave> <heading> <type column> <test column> -> the plan in those words, its log empty
+  mkdir -p "$D/plans/epic-x" "$D/record/$1"; : > "$D/record/$1/run.log"
+  cat > "$D/plans/epic-x/$1.plan.md" <<EOF
+---
+canonical_sdlc_version: 15
+rigor: double
+scale: wave
+---
+
+## Goal
+
+One plan, written in two spellings.
+
+## Tasks
+
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | — | 30 | REQ-1 | a.sh | — |
+| T9 | 9 | close | the close | — | 10 | REQ-1 | — | — |
+
+## $2
+
+| Requirement | Approach | Criterion | $3 | $4 | Fails when | Task |
+|---|---|---|---|---|---|---|
+| REQ-1 | a suite | AC-1.1 | unit | \`tests/x.test.sh §ONE\` | it reds | T1 |
+| REQ-1 | a suite | AC-1.2 | live | \`bash payload/hooks/session-poker.sh landing-report --hand-holds\` at the close | above zero | 9 |
+| REQ-1 | a suite | AC-1.3 | static | "the quoted words" | — | T1 |
+EOF
+}
+words_spec() {  # <dir> <heading> <type column> <test column> -> a wave spec in those words, for the Step 2 card
+  mkdir -p "$1"
+  cat > "$1/wave-98-words.spec.md" <<EOF
+---
+sdlc-step: 2
+---
+
+# words · spec
+
+## Goal
+
+Read one table in two spellings.
+
+## Design
+
+- **\`lib/words.sh\`** The one reader. (D1; REQ-1)
+
+## $2
+
+| Requirement | Approach | Criterion | $3 | $4 | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | a suite | AC-1.1 the first | unit | \`bash tests/x.test.sh\` | it reds |
+| REQ-1 | a suite | AC-1.2 the second | live | \`bash tests/y.test.sh\` | it reds |
+EOF
+}
+# The walls' readers, loaded as hooks/poker/judge.sh loads them.
+words_wall() {  # <plan> <function> [args…] -> what the function prints
+  bash -c 'L="$1"; shift; . "$L/root.sh" && . "$L/run.sh" && . "$L/units.sh" && . "$L/walls.sh" >/dev/null 2>&1 || exit 9
+    PLAN="$1"; RIGOR="$(plan_frontmatter_get "$1" rigor)"; shift; "$@"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$@"
+}
+words() {  # <wave> -> each reader's answer over its plan, one labelled line each
+  local p="$D/plans/epic-x/$1.plan.md"
+  printf 'criterion %s\n' "$(W=$1 flat criterion AC-1.1)" "$(W=$1 flat criterion AC-1.2)"
+  printf 'tiers %s\n' "$( ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" && reader_cells "$p" ) | awk -F'\037' '{ printf "%s:%s ", $1, $4 }')"
+  printf 'fails-when %s\n' "$(words_wall "$p" matrix_fails_when_missing "$p")"
+  printf 'sums %s\n' "$( ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_criterion_sums "$p" test ) | tr '\t\n' ':;')"
+  printf 'close %s\n' "$(words_wall "$p" matrix_close_rows "$p" | paste -sd' ' -)"
+}
+words_card() {  # <dir> -> the Step 2 card drawn from its spec, the line naming the spec's path left out, then its exit
+  local o rc
+  o="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/card.sh" step2 "$1/wave-98-words.spec.md" 2>&1)"; rc=$?
+  printf '%s\nrc=%s\n' "$(printf '%s\n' "$o" | /usr/bin/grep -v 'wave-98-words.spec.md')" "$rc"
+}
+words_plan words-new 'Test design' 'Test type' Test
+words_plan words-old 'Eval design' 'Eval type' Eval
+WS="$(mktemp -d)"; words_spec "$WS/new" 'Test design' 'Test type' Test; words_spec "$WS/old" 'Eval design' 'Eval type' Eval
+WORDS_NEW="$(words words-new)"; WORDS_OLD="$(words words-old)"
+word() { printf '%s\n' "$2" | sed -n "s/^$1 //p" | paste -sd'|' -; }  # <label> <answers> -> that reader's answer
+
+section "NEW-WORDS"
+# fails-when: a plan whose table is headed Test design, with Test type and Test, reads as holding no criteria, a type
+# reads empty, a wall is handed no rows, or the Step 2 card refuses its spec.
+expect_eq "NW-1 a criterion under Test design is its row, its type and its test under the keys test-type and test" \
+  "requirement=REQ-1 approach=a suite criterion=AC-1.1 test-type=unit test=\`tests/x.test.sh §ONE\` fails-when=it reds task=T1" \
+  "$(W=words-new flat criterion AC-1.1)"
+expect_eq "NW-2 every criterion has its tier from its Test type" "AC-1.1:T1 AC-1.2:T3 AC-1.3:T0 " "$(word tiers "$WORDS_NEW")"
+expect_eq "NW-3 the fails-when wall is handed the rows, and names the one with none" "AC-1.3" "$(word fails-when "$WORDS_NEW")"
+expect_eq "NW-4 the stale check sums each criterion and reads its Test cell" \
+  "AC-1.1:#:\`tests/x.test.sh §ONE\`;AC-1.2:#:\`bash payload/hooks/session-poker.sh landing-report --hand-holds\` at the close;AC-1.3:#:\"the quoted words\";" \
+  "$(word sums "$WORDS_NEW" | sed -E 's/:[0-9]+:/:#:/g')"
+expect_eq "NW-5 the close's row is the criterion owed at 9 whose Test is its measure" "AC-1.2" "$(word close "$WORDS_NEW")"
+WC_NEW="$(words_card "$WS/new")"
+expect_eq "NW-6 the Step 2 card draws a spec headed Test design, its two criteria counted" "rc=0|1" \
+  "$(printf '%s\n' "$WC_NEW" | tail -1)|$(printf '%s\n' "$WC_NEW" | awk '$1 == "REQ-1" && $(NF - 1) == 1 && $(NF - 3) == 1 { n++ } END { print n + 0 }')"
+
+section "OLD-WORDS"
+# fails-when: the same plan under the old heading and columns gives another answer from any reader, or a wall is handed
+# no rows; the card refuses the old spec or draws it otherwise.
+expect_eq "OW-1 the old plan's criterion reads its type and its test under the same keys" "test-type=unit|test=\`tests/x.test.sh §ONE\`" \
+  "$(W=words-old ask criterion AC-1.1 | /usr/bin/grep -e '^test-type=' -e '^test=' | paste -sd'|' -)"
+expect_eq "OW-2 each reader answers the old plan as it answers the new: the reader, its tiers, the fails-when wall, the sums, the close's row" \
+  "$WORDS_NEW" "$WORDS_OLD"
+expect_eq "OW-3 the Step 2 card draws the old spec as it draws the new" "$WC_NEW" "$(words_card "$WS/old")"
+# The sum is a dispatch's contract, compared at the landing by whatever reader is installed then: the old plan's sum is
+# the one the reader before the new words gave this row (3503496114, the sum that reader printed).
+expect_eq "OW-4 the old row sums as it did before the new words, so a sum a dispatch recorded still holds its cites" \
+  "AC-1.1:3503496114:" "$(word sums "$WORDS_OLD" | cut -d';' -f1 | cut -d: -f1-2):"
 
 section "CELL"
 W=new; cat > "$D/record/new/run.log" <<EOF

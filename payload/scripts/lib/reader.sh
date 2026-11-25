@@ -590,9 +590,9 @@ reader_q_row() {  # <plan> <id> -> the row's nine authored cells as key=value, i
 }
 
 reader_question criterion value reader_q_criterion
-reader_q_criterion() {  # <plan> <id> -> its Eval design row as key=value, one per column; 1 no such criterion
+reader_q_criterion() {  # <plan> <id> -> its criteria table row as key=value, one per column; 1 no such criterion
   _reader_needs criterion '<id>' "${2:-}" || return 2
-  plan_read_row "$1" 'Eval design' Criterion "$2"
+  plan_read_row "$1" "$PLAN_READ_CRITERIA" Criterion "$2"
 }
 
 reader_question cell value reader_q_cell
@@ -628,14 +628,14 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 reader_cells() {
   # Its names are its own: a caller that hands it the facts names its copy `facts`, which a local of that name would hide.
   local _rc_plan="$1" _rc_head="${2:-}" _rc_eval _rc_facts
-  _rc_eval="$(plan_read_rows "$_rc_plan" 'Eval design' criterion 2>/dev/null)" || _rc_eval=""
+  _rc_eval="$(plan_read_rows "$_rc_plan" "$PLAN_READ_CRITERIA" criterion 2>/dev/null)" || _rc_eval=""
   [ -n "$_rc_eval" ] || return 1
   _rc_facts="$(reader_facts "$_rc_plan")" || return
   printf 'E\n%s\nF\n%s\n' "$_rc_eval" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
     function cell(s, k,   n, i, c) { n = split(s, c, "\t"); for (i = 1; i <= n; i++) if (index(c[i], k "=") == 1) return substr(c[i], length(k) + 2); return "" }
     $0 == "E" || $0 == "F" { part = $0; next }
     $0 == "" { next }
-    part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "eval-type")); req[c] = cell($0, "requirement"); next }
+    part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "test-type")); req[c] = cell($0, "requirement"); next }
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }

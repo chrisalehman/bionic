@@ -438,7 +438,7 @@ section "§LIVE: the run's live criterion is owed at the close, passes every gat
 # with the continuation as its evidence.
 if cr_reached "LV-0"; then
   expect_eq "LV-1 the plan's live criterion is the planner's: its Eval design row names the close row in its Task cell, its eval the hand-holds line" "yes|yes" \
-    "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -qx 'task=T9' && echo yes)|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -q '^eval=.*landing-report --hand-holds' && echo yes)"
+    "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -qx 'task=T9' && echo yes)|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -q '^test=.*landing-report --hand-holds' && echo yes)"
   expect_eq "LV-2 each advance past the Verify gate exits 0 with the row pending" "0|0|0" \
     "$(cr_rc 'enter Step 6' | tail -1)|$(cr_rc 'enter Step 7' | tail -1)|$(cr_rc 'enter Step 8' | tail -1)"
   LV_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null)"

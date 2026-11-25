@@ -1607,7 +1607,7 @@ _matrix_urows() {
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_fails_when_missing() {
   declare -F reader_criteria >/dev/null 2>&1 || _proof_reader_load >/dev/null 2>&1 || return 0
-  { reader_criteria "$1" 2>/dev/null; printf '\034\n'; plan_read_rows "$1" 'Eval design' criterion 2>/dev/null; } | awk -F'\t' '
+  { reader_criteria "$1" 2>/dev/null; printf '\034\n'; plan_read_rows "$1" "$PLAN_READ_CRITERIA" criterion 2>/dev/null; } | awk -F'\t' '
     $0 == "\034" { part++; next }
     !part { if ($0 != "") ord[++n] = $0; next }
     { c = ""; f = ""; for (i = 1; i <= NF; i++) { if (index($i, "criterion=") == 1) c = substr($i, 11); if (index($i, "fails-when=") == 1) f = substr($i, 12) }
@@ -1807,7 +1807,7 @@ matrix_close_rows() {
     [ -n "$ac" ] && [ "$status" = pending ] || continue
     _matrix_owing "$PLAN" "$ac"
     [ "$_MO_STEP" = 9 ] || continue
-    matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
+    matrix_close_eval "$(plan_read_row "$PLAN" "$PLAN_READ_CRITERIA" Criterion "$ac" 2>/dev/null | grep '^test=')" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)

@@ -25,6 +25,12 @@
 # name is printed lowercased with each run of spaces as one `-` (`Fails when` is `fails-when`), so
 # every answer is a `key=value` line. An escaped `\|` inside a cell is a `|` in its value.
 #
+# THE CRITERIA TABLE HAS TWO SPELLINGS and one set of keys. A page heads it `## Test design` with the columns `Test type`
+# and `Test`, or, written before that, `## Eval design` with `Eval type` and `Eval`; every page on disk must read as it
+# did. The heading is asked for by PLAN_READ_CRITERIA, both names, and the old columns become the new keys where a
+# header becomes a key, in name(): `Eval type` is `test-type` and `Eval` is `test`, so no reader of a cell knows the
+# old words.
+#
 # WHERE A TABLE IS, five rules, because a table read in the wrong place is a schedule nobody wrote:
 #   - a fenced block is prose: a table or a heading inside ``` is an example about the plan, not of it, and every
 #     reader here, of a table, a heading or a section, asks `fenced()` and keeps no rule of its own;
@@ -38,6 +44,8 @@
 # Both exit 0 with an answer, 1 when there is none, 2 when the plan is not a file.
 #
 # bash 3.2 (ADR-001).
+
+PLAN_READ_CRITERIA='Test design|Eval design'
 
 # A plan's line ends translated, never deleted: `eol(record, out)` splits one input record into the lines it
 # holds, a trailing CR dropped (CRLF) and each lone CR ending a line, and returns how many. Deleted, a
@@ -81,7 +89,8 @@ _plan_read_lines() {
 # done, never exiting early: its input is a pipe, and a writer cut short fails the pipeline under pipefail.
 # NO APOSTROPHE inside it: it is single-quoted.
 # A section is named by its heading the one way: `## ` and the name, its first letter in either case, going on
-# only after a blank, so `## Design — v2` is the Design section and `## Designer notes` is not. `sec` is the name.
+# only after a blank, so `## Design — v2` is the Design section and `## Designer notes` is not. `sec` is the name, or
+# several joined by `|`, any of which names it, so a section a page may head in two spellings is asked for once.
 # What a fence is, said once for every reader and writer of a heading, so none ends a section at an example's line:
 # `fenced(s)` is 1 on a ``` line, which opens or closes the block, and on each line inside one. It keeps the block in
 # `fence`, so a reader calls it on every line, in order, from the file's first.
@@ -89,7 +98,8 @@ _PLAN_READ_FENCE='
     function fenced(s) { if (s !~ /^[ \t]*```/) return fence; fence = !fence; return 1 }'
 _PLAN_READ_NAMED="$_PLAN_READ_FENCE"'
     function cap(s) { return tolower(substr(s, 1, 1)) substr(s, 2) }
-    function named(h,   l) { l = length(sec); return (cap(substr(h, 1, l)) == cap(sec) && (length(h) == l || substr(h, l + 1, 1) ~ /[ \t]/)) }'
+    function named1(h, n,   l) { l = length(n); return (cap(substr(h, 1, l)) == cap(n) && (length(h) == l || substr(h, l + 1, 1) ~ /[ \t]/)) }
+    function named(h,   m, i, a) { m = split(sec, a, "|"); for (i = 1; i <= m; i++) if (named1(h, a[i])) return 1; return 0 }'
 _PLAN_READ_TABLE="$_PLAN_READ_NAMED"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
@@ -97,7 +107,7 @@ _PLAN_READ_TABLE="$_PLAN_READ_NAMED"'
       for (i = 1; i <= n; i++) { gsub(/^[ \t]+|[ \t]+$/, "", out[i]); gsub(/\001/, "|", out[i]) }
       return n
     }
-    function name(i,   k) { k = tolower(head[i]); gsub(/[ \t]+/, "-", k); return k }
+    function name(i,   k) { k = tolower(head[i]); gsub(/[ \t]+/, "-", k); return (k == "eval-type") ? "test-type" : (k == "eval") ? "test" : k }
     function line(   i, o, v) { o = ""; for (i = 1; i <= nh; i++) { v = r[i]; gsub(/\t/, " ", v); o = o (i > 1 ? "\t" : "") name(i) "=" v }; return o }
     { sub(/\r$/, "") }
     stop { next }
@@ -140,27 +150,30 @@ plan_read_table() {
     function row() { print line(); if (rn > nh) printf "#\tover\t%s\t%d\n", r[kc], rn }'"$_PLAN_READ_TABLE"
 }
 
-# plan_read_criterion_sums <plan> [eval] -> `<criterion><TAB><sum>` per criterion, file order, and its `Eval` cell as a
-# third field when a second argument is given. The sum is of the first `## Eval design` row naming it, its cells as the
+# plan_read_criterion_sums <plan> [test] -> `<criterion><TAB><sum>` per criterion, file order, and its `test` cell as a
+# third field when a second argument is given. The sum is of the first criteria table row naming it, its cells as the
 # table reader reads them, so a row reads as restated exactly when a cell's words change and never for its spacing: a
-# 32-bit string hash over bytes, the same on every awk. Only a criterion id of letters, digits, `.`, `_` and `-` is
+# 32-bit string hash over bytes, the same on every awk. The hashed row spells its keys in the table's old words
+# (`eval-type=`, `eval=`): a sum is recorded at a dispatch and compared at the landing, maybe by a later reader, so a
+# page reads the same sum under either reader and in either spelling. Only a criterion id of letters, digits, `.`, `_` and `-` is
 # summed, so a sum always fits a log field. 1 none, 2 no plan.
 plan_read_criterion_sums() {
   [ -f "${1:-}" ] || return 2
-  plan_read_rows "$1" 'Eval design' criterion 2>/dev/null | LC_ALL=C awk -F'\t' -v ev="${2:-}" '
+  plan_read_rows "$1" "$PLAN_READ_CRITERIA" criterion 2>/dev/null | LC_ALL=C awk -F'\t' -v ev="${2:-}" '
     BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
     { c = ""; e = ""
       for (i = 1; i <= NF; i++) { k = index($i, "="); f = substr($i, 1, k - 1)
-        if (f == "criterion") c = substr($i, k + 1); else if (f == "eval") e = substr($i, k + 1) }
+        if (f == "criterion") c = substr($i, k + 1); else if (f == "test") e = substr($i, k + 1) }
       if (c !~ /^[A-Za-z0-9._-]+$/ || (c in seen)) next; seen[c] = 1
-      h = 5381; for (i = 1; i <= length($0); i++) h = (h * 33 + ord[substr($0, i, 1)]) % 4294967296
+      s = "\t" $0; gsub(/\ttest-type=/, "\teval-type=", s); gsub(/\ttest=/, "\teval=", s); s = substr(s, 2)
+      h = 5381; for (i = 1; i <= length(s); i++) h = (h * 33 + ord[substr(s, i, 1)]) % 4294967296
       printf "%s\t%.0f%s\n", c, h, (ev != "" ? "\t" e : ""); n++ }
     END { exit !n }'
 }
 
 # plan_read_criterion_task <plan> [<criterion>] -> `<criterion><TAB><value>` per criterion that names the task proving it,
 # file order: one task id, several joined by commas, or `9` alone, the close's step. The value is the criterion's cell
-# in the `Task` column of its `## Eval design` row (the first row naming it), a cell holding no letter or digit naming
+# in the `Task` column of its criteria table row (the first row naming it), a cell holding no letter or digit naming
 # none, on a page at 15; a page at any other version names none. The person writes it; nothing derives it. 1 none, 2
 # no plan.
 plan_read_criterion_task() {
@@ -168,7 +181,7 @@ plan_read_criterion_task() {
   local v
   v="$(plan_read_header "$1" canonical_sdlc_version 2>/dev/null)" || v=""
   [ "${v#*=}" = 15 ] || return 1
-  plan_read_rows "$1" 'Eval design' criterion 2>/dev/null | awk -F'\t' -v want="${2:-}" '
+  plan_read_rows "$1" "$PLAN_READ_CRITERIA" criterion 2>/dev/null | awk -F'\t' -v want="${2:-}" '
     { c = ""; t = ""
       for (i = 1; i <= NF; i++) { e = index($i, "="); k = substr($i, 1, e - 1); if (k == "criterion") c = substr($i, e + 1); else if (k == "task") t = substr($i, e + 1) }
       if (c == "" || (c in seen)) next; seen[c] = 1
