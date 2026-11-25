@@ -732,13 +732,30 @@ wo_digest() { sed -n 's/^digest=//p' "$(digest_of "$RO")" 2>/dev/null | head -1;
 WO_D1="$(wo_digest)"
 add_row "$RO" name=w2 deliverable="$RO/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
 plant_answer "$WP_TR" fresh "w1:running" "w2:running"
-wh_start "$RO" Stop; wh_wait 4
+wh_start "$RO" Stop
+# THE PASS, NOT A CLOCK: a pass takes as long as the machine makes it (tens of seconds under load), so a fixed wait either
+# ends before any pass has read the print (nothing could have woken: ON2 would hold for nothing) or lands mid-pass. Wait
+# for the digest to move off the first one, then for the stamp to be written once more: a pass that read the moved print
+# in full has ended, and it stayed silent.
+wo_until() {  # <test command...>: true within WH_BOUND, or the watcher ended first
+  local i=0
+  while ! "$@" && kill -0 "$WH_PID" 2>/dev/null && [ "$i" -lt $(( WH_BOUND * 10 )) ]; do sleep 0.1; i=$((i + 1)); done
+}
+wo_moved() { [ -n "$(wo_digest)" ] && [ "$(wo_digest)" != "$WO_D1" ]; }
+wo_unmoved_at() { [ "$(wp_stamp_at "$RO")" != "$WO_AT" ]; }
+wo_until wo_moved; WO_AT="$(wp_stamp_at "$RO")"; wo_until wo_unmoved_at
+wh_wait 0
 expect_eq "ON2 the next turn end's watcher, the print moved by another row, does not say the same cause again" "124|" "$WH_RC|$WH_ERR"
 expect_true "ON2.a …though the pass behind it read a print in full: the digest moved off $WO_D1" \
   test -n "$WO_D1" -a "$(wo_digest)" != "$WO_D1"
-printf 'more\n' >> "$RO/progress-w1.md"; wh_passes "$RO" 2
+# The watcher ends before the row writes: a stamp planted under a pass in flight holds no `change=`, and a pass that reads
+# it prints RECONCILE, which wakes on its own and is no cause of w1's. wh_kill returns once the pass in flight has ended;
+# the told causes cross to the next watcher on the record's `woke=`, which is what ON3 tests.
+wh_kill
+printf 'more\n' >> "$RO/progress-w1.md"; wh_start "$RO" Stop; wh_passes "$RO" 2
 backdate "$RO/progress-w1.md" 2400; wh_wait
 expect_eq "ON3 the row wrote and went quiet again: the cause is new, and said" "$WP_WAKE|NOTIFY w1" "$(wo_said 'NOTIFY w1')"
+[ "$(wo_said 'NOTIFY w1')" = "$WP_WAKE|NOTIFY w1" ] || printf '  ON3 watcher stderr (rc=%s): %s\n' "$WH_RC" "$WH_ERR"
 sed '/name=w1|/s/duration=4 hours/duration=1 minute/' "$(roster_of "$RO")" > "$TMPROOT/once.roster" && cat "$TMPROOT/once.roster" > "$(roster_of "$RO")"
 wh_start "$RO" Stop; wh_wait
 expect_eq "ON4 a different arm names the same row: said" "$WP_WAKE|NOTIFY w1 - past its duration" "$(wo_said 'NOTIFY w1 - past its duration')"
