@@ -177,9 +177,14 @@ section "LOCK"
 base
 mkdir "$HOME_DIR/.reap"; printf '%s\n' "$$" > "$HOME_DIR/.reap/pid"
 expect_true "a live holder's lock stands" test -d "$HOME_DIR/.reap"
+# The wait is counted in the lock's own tries (one `sleep` between tries, at most 100 of them), not timed against a
+# clock: a slow machine stretches each try, never their number. The wrapper only counts, then sleeps as before.
+tries=0; sleep() { tries=$((tries + 1)); command sleep "$@"; }
 t0=$SECONDS; seal_write "$P" "$L" sh -c ': > "$1"' _ "$SB/held"; rc=$?; waited=$((SECONDS - t0))
+unset -f sleep
 expect_status "a write meets a held lock and exits 75" 75 "$rc"
-expect_true "it waited, then gave up well under ten seconds ($waited s)" test "$waited" -ge 1 -a "$waited" -le 4
+expect_true "it waited at least a second, then gave up by itself within the lock's 100 tries ($tries tries, $waited s)" \
+  test "$waited" -ge 1 -a "$tries" -ge 1 -a "$tries" -le 100
 expect_false "and ran nothing" test -f "$SB/held"
 out="$(seal_verify "$P")"; rc=$?
 expect_eq "verify meets it too and says busy" busy "$out"
