@@ -339,6 +339,49 @@ poker_brief_suites() {
     print out }'
 }
 
+# poker_row_suites <plan> <row id> <Files cell> <repo> -> the row's suites and what it lands on, in PRS_SUITES, PRS_LANDS,
+# PRS_SLOT, PRS_NAMES and PRS_BAR. THE ONE READER OF A ROW'S SUITES: the brief renders its Suites: and Lands-on: from
+# it and the birth line of a row born of findings names its landing from it, so the two cannot differ. The suites are the
+# task section's `suites:` lines, else the Files cell's *.test.sh entries; a row that writes code and names none gets the
+# slot, since `none` is a waiver nobody chose for it. Lands-on is the section's `lands-on:` line, else the suites. A suite the
+# gate promises over LINE_SUITE_BAR leaves Lands-on, stays in Suites and is named in PRS_BAR; when it would leave the set
+# empty it stays, since `none` is refused for a row that writes code. PRS_LANDS is what the brief prints (the slot, or a
+# sentence saying none, when no suite lands); PRS_NAMES is the suites that land, empty when none does.
+poker_row_suites() {
+  local plan="$1" id="$2" files="$3" repo="$4" kept="" e p
+  PRS_SUITES="$(plan_read_section "$plan" "$id" suites)"
+  PRS_LANDS="$(plan_read_section "$plan" "$id" lands-on)"
+  PRS_SLOT=""; PRS_NAMES=""; PRS_BAR=""
+  poker_brief_none "$PRS_SUITES" && PRS_SUITES="$(poker_brief_suites "$files")"
+  if units_writes_head "$files"; then
+    [ -n "$PRS_SUITES" ] || PRS_SLOT="<ORCHESTRATOR: the row names no suite; write the suites that pin its Files>"
+    case "$PRS_LANDS" in none|none[[:space:]]*) PRS_LANDS="" ;; esac
+  fi
+  if poker_brief_none "$PRS_LANDS"; then
+    PRS_LANDS="$PRS_SUITES"
+    [ -n "$PRS_LANDS" ] || PRS_LANDS="$PRS_SLOT"
+    [ -n "$PRS_LANDS" ] || PRS_LANDS="none the row's Files name no suite"
+  fi
+  [ -n "$PRS_SUITES" ] || PRS_SUITES="${PRS_SLOT:-none}"
+
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  if declare -F _line_bar_seconds >/dev/null && _gate_store >/dev/null 2>&1; then
+    while IFS= read -r e; do
+      e="${e#"${e%%[![:space:]]*}"}"; [ -n "$e" ] || continue
+      p="$(_line_bar_seconds "$(_line_gate_key "$e")" "$repo")"
+      case "$p" in ''|*[!0-9]*) p=0 ;; esac
+      if [ "$p" -gt "$LINE_SUITE_BAR" ]; then
+        PRS_BAR="${PRS_BAR:+$PRS_BAR }$e promises ${p}s, over the landing bar of ${LINE_SUITE_BAR}s, so it is left out of Lands-on and stays in Suites to run in your tree."
+      else kept="${kept:+$kept, }$e"; fi
+    done <<PRS_EOF
+$(printf '%s\n' "$PRS_LANDS" | tr ',' '\n')
+PRS_EOF
+    if [ -z "$kept" ]; then PRS_BAR=""; else PRS_LANDS="$kept"; fi
+  fi
+  case "$PRS_LANDS" in none|none[[:space:]]*|"$PRS_SLOT") ;; *) PRS_NAMES="$PRS_LANDS" ;; esac
+  [ -n "$PRS_LANDS" ] || PRS_NAMES=""
+}
+
 # poker_brief_record_entry <Files cell> <artifact|progress|named> <row id> -> an entry under record/ for the row; nothing
 # when none. THE ONE RULE FOR A ROW'S RECORD, read by `brief`: `named` is the entry whose basename is <row>.md or starts <row>- (never a progress file);
 # `artifact` is the named entry, else the first entry that is neither a progress file nor assumptions.md; `progress`
@@ -1112,14 +1155,17 @@ EOF
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
       say "task-add — $TA_ID answers $(clean "$TA_BID")"
     done
-    # A ROW THAT LANDS ON NOTHING IS FIXED BY THE REGRESSION (wave-39 T19; REQ-14 AC-14.2, D9): a row whose lands-on cell is
-    # none or absent writes no verdict at its landing, so lib/proof.sh `proof_fixed` counts its findings fixed only once a
-    # green regression stands at a head past its landing. Said at the row's birth, where the author can still name a suite.
+    # A ROW THAT LANDS ON NOTHING IS FIXED BY THE REGRESSION: a row that lands on no suite
+    # writes no verdict at its landing, so lib/proof.sh `proof_fixed` counts its findings fixed only once a green regression
+    # stands at a head past its landing. Said at the row's birth, where the author can still name a suite. What the row lands
+    # on is the brief's own answer (`poker_row_suites`): the table carries no lands-on column, the section and the Files do.
     if [ -n "$TA_BORN_IDS" ]; then
-      TA_LANDS="$(poker_brief_cell "$TA_PLAN" Tasks "$TA_ID" lands-on)" || TA_LANDS=""
-      case "$TA_LANDS" in none|none[[:space:]]*) TA_LANDS="" ;; esac
-      ! poker_brief_none "$TA_LANDS" \
-        || say "task-add — $TA_ID lands none — counts on the next green regression: no landing verdict will name it, so its findings are fixed once a green regression stands at a head past its landing (D9)."
+      poker_row_suites "$TA_PLAN" "$TA_ID" "$TA_FILES" "$REPO_REAL"
+      if [ -n "$PRS_NAMES" ]; then
+        say "task-add — $TA_ID lands on ${PRS_NAMES}.${PRS_BAR:+ $PRS_BAR}"
+      else
+        say "task-add — $TA_ID lands none — counts on the next green regression: no landing verdict will name it, so its findings are fixed once a green regression stands at a head past its landing (D9)."
+      fi
     fi
     # WHAT THE TURN NOW OWES, SAID AT THE ACT: the harness's task list lacks the row, and it owes that one entry, added
     # at the end, since the list only appends and the entries after it stand as they are. The entry is named as the task
@@ -1245,43 +1291,9 @@ EOF
       if [ -n "$BRF_SHA" ]; then BRF_HEAD="$BRF_SHA ($(clean "$BRF_WB"))"; else BRF_HEAD="(no branch $(clean "$BRF_WB") in this repository)"; fi
     fi
 
-    # THE SUITES AND WHAT THE ROW LANDS ON: its section's lines, else its Files' *.test.sh entries, in order; else, for
-    # a row that writes code, the slot: `none` is a waiver nobody chose for it.
-    BRF_SUITES="$(plan_read_section "$PV_PLAN" "$BRF_ID" suites)"
-    BRF_LANDS="$(plan_read_section "$PV_PLAN" "$BRF_ID" lands-on)"
-    BRF_SUITE_SLOT=""
-    poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
-    if units_writes_head "$BRF_FILES"; then
-      # A ROW THAT WRITES CODE NAMES ITS SUITES: `none` is a waiver nobody chose, so the slot is the orchestrator's to
-      # fill. A `none` Lands-on cell is the dispatch wall's refusal for such a row, so it is not carried.
-      [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: the row names no suite; write the suites that pin its Files>"
-      case "$BRF_LANDS" in none|none[[:space:]]*) BRF_LANDS="" ;; esac
-    fi
-    if poker_brief_none "$BRF_LANDS"; then
-      BRF_LANDS="$BRF_SUITES"
-      [ -n "$BRF_LANDS" ] || BRF_LANDS="$BRF_SUITE_SLOT"
-      [ -n "$BRF_LANDS" ] || BRF_LANDS="none the row's Files name no suite"
-    fi
-    [ -n "$BRF_SUITES" ] || BRF_SUITES="${BRF_SUITE_SLOT:-none}"
-
-    # THE LANDING BAR: a suite the gate promises over LINE_SUITE_BAR is refused by the landing as too long, so it is left
-    # out of Lands-on here, stays in Suites (the writer runs it in the tree) and is named. When it would leave the set
-    # empty it stays: `none` is refused for a row that writes code, and the landing says the rest.
-    BRF_BAR=""
-    if declare -F _line_bar_seconds >/dev/null && _gate_store >/dev/null 2>&1; then
-      BRF_KEPT=""
-      while IFS= read -r BRF_E; do
-        BRF_E="${BRF_E#"${BRF_E%%[![:space:]]*}"}"; [ -n "$BRF_E" ] || continue
-        BRF_P="$(_line_bar_seconds "$(_line_gate_key "$BRF_E")" "$PV_REPO")"
-        case "$BRF_P" in ''|*[!0-9]*) BRF_P=0 ;; esac
-        if [ "$BRF_P" -gt "$LINE_SUITE_BAR" ]; then
-          BRF_BAR="${BRF_BAR:+$BRF_BAR }$BRF_E promises ${BRF_P}s, over the landing bar of ${LINE_SUITE_BAR}s, so it is left out of Lands-on and stays in Suites to run in your tree."
-        else BRF_KEPT="${BRF_KEPT:+$BRF_KEPT, }$BRF_E"; fi
-      done <<BRF_EOF
-$(printf '%s\n' "$BRF_LANDS" | tr ',' '\n')
-BRF_EOF
-      if [ -z "$BRF_KEPT" ]; then BRF_BAR=""; else BRF_LANDS="$BRF_KEPT"; fi
-    fi
+    # THE SUITES AND WHAT THE ROW LANDS ON are the one reader's answer, the one the birth line asks.
+    poker_row_suites "$PV_PLAN" "$BRF_ID" "$BRF_FILES" "$PV_REPO"
+    BRF_SUITES="$PRS_SUITES"; BRF_LANDS="$PRS_LANDS"; BRF_SUITE_SLOT="$PRS_SLOT"; BRF_BAR="$PRS_BAR"
 
     # WHAT A RULING GRANTED THE ROW rides every later brief of it, so a successor is born holding its predecessor's
     # grants; Lands-on stays the row's, as a grant widens a running set and not the landing's.
