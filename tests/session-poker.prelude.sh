@@ -310,6 +310,8 @@ poke() {  # <repo> <args...> -> sets OUT, RC; POKE_BASH names the interpreter (d
   if kill -0 "$p" 2>/dev/null; then
     kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null
     RC=124
+    # A killed tick prints nothing (its output leaves from an exit trap), so say it here: a timeout, not missing text.
+    printf 'poke: killed %s at the bound (POKE_BOUND=%s, RC=124)\n' "${1:-the poker}" "$POKE_BOUND" >&2
   else
     wait "$p" 2>/dev/null; RC=$?
   fi

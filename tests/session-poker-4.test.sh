@@ -1077,6 +1077,9 @@ section "§TICK-LANDS: the tick lands a record row on the registration its kind 
 # run's log (`sp_fact`).
 # fails-when: a row lands on its file alone, a landing writes a cell or a step line, a reason is told at every tick,
 # a refusal names no fix, or a row that waits on a landed row stays unready.
+# The tick prints only from its exit trap, so a tick the watchdog kills at the bound prints nothing and every row that reads
+# its output goes red as missing text; the sections that tick a run use the wide bound so a slow machine does not kill it.
+TL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 TL="$(make_repo tick-lands)"; ( cd "$TL" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
 git -C "$TL" config user.name "Dana Fixture"
 TL_RD="record/wave-01-fixture"; TL_D=".bionic/docs/$TL_RD"
@@ -1192,6 +1195,7 @@ expect_eq "TL-15 precondition: the page is at 15, its integrate row pending and 
 poke "$TI" tick
 expect_eq "TL-16 on a page at 15 the tick lands the orchestrator's integrate row whose reviews stand: one published event of the record kind" \
   "1|1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c "^poker: LANDED T5 — the orchestrator's integrate row")|$(TI_PUB)"
+POKE_BOUND="$TL_BOUND_WAS"
 
 # ============================================================
 section "§STACK: the regression's health is the judge's rendering, and no verb writes it into the plan"
