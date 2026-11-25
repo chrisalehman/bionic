@@ -1155,7 +1155,7 @@ EOF
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
       say "task-add — $TA_ID answers $(clean "$TA_BID")"
     done
-    # A ROW THAT LANDS ON NOTHING IS FIXED BY THE REGRESSION (wave-39 T19; REQ-14 AC-14.2, D9): a row that lands on no suite
+    # A ROW THAT LANDS ON NOTHING IS FIXED BY THE REGRESSION: a row that lands on no suite
     # writes no verdict at its landing, so lib/proof.sh `proof_fixed` counts its findings fixed only once a green regression
     # stands at a head past its landing. Said at the row's birth, where the author can still name a suite. What the row lands
     # on is the brief's own answer (`poker_row_suites`): the table carries no lands-on column, the section and the Files do.
