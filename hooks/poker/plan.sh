@@ -2264,6 +2264,7 @@ RR_AGAINST_EOF
   }
 
   poker_verb_reply() {
+    ! declare -F poker_one_line >/dev/null 2>&1 || RP_TEXT="$(poker_one_line "$RP_TEXT")"
     case "$RP_TEXT" in
       *$'\n'*|*$'\r'*) die "REFUSED — a reply is one line, and this one carries a line break; the plan is unchanged."; exit 1 ;;
     esac
@@ -2311,7 +2312,14 @@ RR_AGAINST_EOF
         "bash ${HOOK_DIR}/session-poker.sh finding-move $(clean "$RP_X") stated '<its sentence>'"
       exit 1
     done <<< "$RP_TABLE"
+    # A SHORT REPLY AFTER ITS CARD. "all default" is two words, and the person writes around it ("Re: release card: all
+    # default"). Too short as the rule with no instant reads it (rc 3), it is asked again with this card's instant, the
+    # one its header names: typed after the card was drawn, the words are theirs on this card. A whole prompt stays
+    # their word as it was.
     user_said "$RP_TEXT" "$PV_PLAN"; RP_SAID=$?
+    RP_AFTER="${RP_HDR#*|at=}"; RP_AFTER="${RP_AFTER%%|*}"
+    case "$RP_AFTER" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;; *) RP_AFTER="" ;; esac
+    [ "$RP_SAID" -ne 3 ] || [ -z "$RP_AFTER" ] || { user_said "$RP_TEXT" "$PV_PLAN" "$RP_AFTER"; RP_SAID=$?; }
     if [ "$RP_SAID" -ne 0 ]; then
       said_refuse "$RP_SAID" "$(said_fold "$RP_TEXT")" "a reply to the release approval card"
       exit 1
@@ -2473,6 +2481,7 @@ RP_TABLE
   # later landing can have written.
   poker_verb_check_from() {
     local head jc who rc
+    ! declare -F poker_one_line >/dev/null 2>&1 || CF_WORDS="$(poker_one_line "$CF_WORDS")"
     plan_verb_value_ok "$CF_WORDS" || { die "REFUSED — the words are one field of the run's log, and they carry a line break, a tab or a '|'; nothing was written. run again: session-poker.sh check-from '<their words, on one line, with no |>'"; exit 1; }
     plan_verb_open check-from
     declare -F proof_approval_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1; }

@@ -19,6 +19,16 @@ deferral_fold() {  # <text> -> its white space and control characters folded to 
   declare -F said_fold >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/said.sh" ] && . "$BIONIC_LIB/said.sh"; }
   said_fold "$1"
 }
+# A PERSON'S MESSAGE QUOTED WHOLE is one field of the run's log only once its line breaks are gone, and lib/said.sh
+# matches it through that same fold, so a verb taking the person's words folds a quote that carries a CR or LF before
+# its shape check, which still refuses a `|`. A text with neither is printed as given; when the fold cannot be made (no
+# jq) or leaves nothing, the text is printed as given, so the caller's line-break refusal still stands.
+poker_one_line() {  # <text> -> the text, its line breaks folded by lib/said.sh's one fold
+  local f
+  case "${1:-}" in *$'\n'*|*$'\r'*) ;; *) printf '%s' "${1:-}"; return 0 ;; esac
+  f="$(deferral_fold "$1")" && [ -n "$f" ] || f="$1"
+  printf '%s' "$f"
+}
 deferral_escape() {  # <folded sentence> -> as the plan holds it: \ for a backslash, \" for a quote
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
@@ -273,8 +283,8 @@ whole_run_at_head() {
   #
   #   approval  key=<name> by=<who> [head=<40-hex>] said=<the reply> [why=<why>]
   #
-  # <who> is the project's git user name, the reply the user's own words; each is one field of the log, so a line break
-  # or a `|` is refused. Four kinds of name:
+  # <who> is the project's git user name, the reply the user's own words; each is one field of the log, so a `|` is
+  # refused and the reply's line breaks are folded away (`poker_one_line`). Four kinds of name:
   #   plan         the plan's approval at Step 3, keyed step3; given once, a
   #                placeholder refused. Its instant is the one the plan's and the step cards' asks close at: a step card
   #                left open until a later card or the Stop closed it would read as a stop the run made after its approval.
@@ -295,6 +305,7 @@ whole_run_at_head() {
   poker_verb_approve() {
     # Whether an approval already stands is read from the run's log, never the kept facts (lib/proof.sh `_PROOF_FRESH`).
     local _PROOF_FRESH=1
+    AP_REPLY="$(poker_one_line "$AP_REPLY")"
     case "$AP_REPLY$AP_WHY" in
       *$'\n'*|*$'\r'*|*'|'*)
         die "REFUSED — an approval is one field of the run's log, and the reply carries a line break or a '|'; give it without one. Nothing was appended."
@@ -367,7 +378,19 @@ whole_run_at_head() {
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended."
       exit 2
     fi
+    # A SHORT WORD AFTER ITS ASK. The person often answers an ask with one word and goes on ("approved — and …"). Too
+    # short as the rule with no instant reads it (rc 3), it is asked again with the instant the ask's open round names
+    # in the run's log (lib/owed.sh `owed_rounds`): typed after the ask was opened, the word is theirs on it. A whole
+    # prompt stays their word as it was, and a name with no open ask keeps the rule with none.
     user_said "$AP_REPLY" "$PV_PLAN"; AP_SAID=$?
+    AP_AFTER=""
+    if [ "$AP_SAID" -eq 3 ] && declare -F owed_rounds >/dev/null 2>&1 && declare -F owed_key >/dev/null 2>&1; then
+      AP_OK="$(owed_key "approve:$AP_NAME" 2>/dev/null)" || AP_OK=""
+      [ -z "$AP_OK" ] || AP_AFTER="$(owed_rounds "${AP_OK//./\\.}" "$PV_PLAN" "$PV_REPO" 2>/dev/null \
+        | awk -F'\t' '$3 == "open" { a = $4 } END { print a }')"
+    fi
+    case "$AP_AFTER" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;; *) AP_AFTER="" ;; esac
+    [ -z "$AP_AFTER" ] || { user_said "$AP_REPLY" "$PV_PLAN" "$AP_AFTER"; AP_SAID=$?; }
     AP_ACT="an approval"; [ -z "$AP_TIER" ] || AP_ACT="a confirmation"
     [ "$AP_SAID" -eq 0 ] || { said_refuse "$AP_SAID" "$(said_fold "$AP_REPLY")" "$AP_ACT"; exit 1; }
     if ! LOG_AT="$AP_AT" proof_approval_event "$PV_PLAN" "$AP_KEY" "by=$AP_WHO" ${AP_HEAD:+"head=$AP_HEAD"} "said=$AP_REPLY" ${AP_WHY:+"why=$AP_WHY"}; then
@@ -1063,6 +1086,7 @@ PF_PAIRS_LIST
       return 1
     fi
     why="$(deferral_fold "$WV_WHY_RAW")"
+    WV_REPLY="$(poker_one_line "$WV_REPLY")"
     case "$WV_REPLY$why" in
       *'|'*|*$'\n'*|*$'\r'*)
         die "REFUSED — a waiver's words and why are fields of the run's log, which a '|' or a line break would split; give them without one. Nothing is written."
@@ -1109,6 +1133,7 @@ PF_PAIRS_LIST
       exit $?
     fi
     WV_QS="$WV_Q"; [ "$WV_Q" != all ] || WV_QS="$PROOF_QUESTIONS"
+    WV_REPLY="$(poker_one_line "$WV_REPLY")"
     case "$WV_REPLY" in
       *$'\n'*|*$'\r'*)
         die "REFUSED — a waiver is one line, and the reply carries a line break; nothing is written."

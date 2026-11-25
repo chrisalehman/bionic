@@ -776,6 +776,66 @@ rs_page "key=row:AC-9.1|default=waive AC-9.1|${RS_ROW/pick=default/pick=other}" 
 poke "$RVG" reply 'all recommended'
 expect_eq "RS-4 AC-13.3 'all recommended' takes the orchestrator's choice on each, in order (exit 0)" \
   "0|withheld: row:AC-9.1|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+
+# ---------- §REPLY-SEQ, a short reply after its card or its ask, and a reply quoted with its line breaks ----------
+# The person writes around a short reply ("Re: release card: all default", "approved — and …"), so its words are not
+# their whole prompt. Typed after the card was drawn (its header's at=) or the ask was opened (its round's at=), they
+# are their word on it; the same words typed only before it are not (the controls). The transcript is begun again so no
+# earlier whole prompt holds the words. A reply quoted whole, with its line breaks, is folded to the words it holds.
+# fails-when: a short reply typed after its instant is refused as too short; one typed only before it is taken; a reply
+# quoted with its line breaks is refused for its shape.
+rs_typed() {  # <ISO stamp> <prompt> -> the prompt, typed at that instant, appended to this section's transcript
+  jq -c --arg t "$2" --arg at "$1" '.message.content = $t | .timestamp = $at' "$RS_FX/typed.jsonl" >> "$RS_TX"
+}
+rs_approval() { /usr/bin/grep -F "|ev=approval|key=$1|" "$VG_DIR/run.log"; }  # <key> -> the run's approval lines of it
+cat "$RS_FX/frame.jsonl" > "$RS_TX"
+RS_CARRY="${RS_FIND/pick=other/pick=default}"
+rs_page "$RS_CARRY"
+rs_typed 2026-10-19T23:59:00.000Z 'Re: release card: all default'
+poke "$RVG" reply 'all default'
+expect_eq "RS-5 control: 'all default' typed only before the card was drawn is refused as too short, nothing recorded" \
+  "1|1|" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -c 'too short')|$(rs_done)"
+rs_typed 2026-10-20T00:00:30.000Z 'Re: release card: all default'
+poke "$RVG" reply 'all default'
+expect_eq "RS-5b AC-18.1 'all default' typed after the card was drawn, inside a longer prompt, is applied (exit 0)" \
+  "0|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+rs_page "$RS_CARRY"
+rs_typed 2026-10-20T00:01:00.000Z 'Re: release card: all recommended'
+poke "$RVG" reply 'all recommended'
+expect_eq "RS-6 AC-18.1 'all recommended' typed after the card was drawn, inside a longer prompt, is applied (exit 0)" \
+  "0|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+rs_page "$RS_CARRY"
+poke "$RVG" reply $'all default\n'
+expect_eq "RS-7 AC-18.3 a reply quoted with its line break is folded and applied, its words recorded on one line (exit 0)" \
+  "0|applied: finding:$RS_F carried|1" "$RC|$(rs_done)|$(/usr/bin/grep -c '^replied: .* words="all default"$' "$RS_P")"
+# The ask is opened by its one writer (lib/owed.sh `owed_open`) at a fixed instant, 2026-10-21T00:00:00Z.
+bash -c '. "$1/owed.sh" && OWED_ROOT="$2" OWED_PLAN="$3" OWED_SID="$4" BIONIC_NOW_EPOCH=1792540800 owed_open approve:step0 "Step 0" "approve step0"' \
+  _ "${S46_LIB%/*}" "$RVG" "$PVG" "$SID"
+expect_eq "RS-8a precondition: the ask approve:step0 stands open in the run's log at its instant" "1" \
+  "$(/usr/bin/grep -c '|ev=ask|key=approve:step0|.*|at=2026-10-21T00:00:00Z$' "$VG_DIR/run.log")"
+rs_typed 2026-10-20T23:00:00.000Z 'approved, and keep the scope as written'
+poke "$RVG" approve step0 'approved'
+expect_eq "RS-8 control: 'approved' typed only before its ask was opened is refused as too short, no approval written" \
+  "1|1|" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -c 'too short')|$(rs_approval step0)"
+rs_typed 2026-10-21T00:00:30.000Z 'approved — and the second requirement can wait for the next wave'
+poke "$RVG" approve step0 'approved'
+expect_eq "RS-8b AC-18.2 'approved' opening a longer message typed after its ask was opened is recorded (exit 0)" \
+  "0|1" "$RC|$(rs_approval step0 | /usr/bin/grep -c '|said=approved|')"
+RS_TWO=$'approved for step one.\nThe second requirement can wait.'
+rs_typed 2026-10-21T00:01:00.000Z "$RS_TWO"
+poke "$RVG" approve step1 "$RS_TWO"
+expect_eq "RS-9 AC-18.3 the person's whole message, quoted with its line break, is recorded folded to one line (exit 0)" \
+  "0|1" "$RC|$(rs_approval step1 | /usr/bin/grep -c '|said=approved for step one. The second requirement can wait.|')"
+RS_TWOW=$'I waive the readings here.\nThey were read at the last head.'
+rs_typed 2026-10-21T00:02:00.000Z "$RS_TWOW"
+poke "$RVG" waive structure "$RS_TWOW"
+expect_eq "RS-9b AC-18.3 a question's waiver quoted with its line break is written folded (exit 0)" "0|1" \
+  "$RC|$(/usr/bin/grep -c '|ev=waiver|question=structure|.*|said=I waive the readings here. They were read at the last head.|' "$VG_DIR/run.log")"
+RS_TWOJ=$'judge from this head on.\nIts copy of the check is the one.'
+rs_typed 2026-10-21T00:03:00.000Z "$RS_TWOJ"
+poke "$RVG" check-from "$RS_TWOJ"
+expect_eq "RS-9c AC-18.3 the judge moved on words quoted with their line break, recorded folded (exit 0)" "0|1" \
+  "$RC|$(rs_approval judge | /usr/bin/grep -c '|said=judge from this head on. Its copy of the check is the one.|')"
 export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
