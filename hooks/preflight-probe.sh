@@ -307,11 +307,13 @@ fail_probe() {  # <message>
 }
 pass_probe() { printf 'preflight: ok    %s\n' "$1"; }
 
-# 1. credential present (presence only). Three sources, cheapest first. Nothing here ever
+# 1. credential present (presence only). Four sources, cheapest first. Nothing here ever
 #    reads or prints credential material — only its existence.
 CRED_SOURCE=""
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   CRED_SOURCE="environment"
+elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  CRED_SOURCE="environment token"
 elif [ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]; then
   CRED_SOURCE="credentials file"
 elif command -v security >/dev/null 2>&1 &&
@@ -321,7 +323,7 @@ fi
 if [ -n "$CRED_SOURCE" ]; then
   pass_probe "credential present ($CRED_SOURCE)"
 else
-  fail_probe "credential absent — no ANTHROPIC_API_KEY, no credentials file, no keychain entry"
+  fail_probe "credential absent — no ANTHROPIC_API_KEY, no CLAUDE_CODE_OAUTH_TOKEN, no credentials file, no keychain entry"
 fi
 
 # 2. repo writable — proven by writing, not by mode bits

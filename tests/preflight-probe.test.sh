@@ -114,7 +114,7 @@ live_b() {
 
 run_probe() {  # <sandbox> [KEY=VAL ...] -> echoes exit code; stdout/stderr in $OUT/$ERR
   local sbx="$1"; shift
-  ( cd "$sbx/repo" && env -u ANTHROPIC_API_KEY \
+  ( cd "$sbx/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN \
       HOME="$sbx/home" \
       CLAUDE_CONFIG_DIR="$sbx/config" \
       CLAUDE_CODE_SESSION_ID="$SESSION_A" \
@@ -172,6 +172,21 @@ expect_eq "state lock released on the success path" "" "$_lock"
 SBX2="$(mk_sandbox)"; rm -f "$SBX2/config/.credentials.json"
 rc="$(run_probe "$SBX2" PATH="$(stub_dir "$SBX2" 1)" ANTHROPIC_API_KEY=sk-fixture-marker-0001)"
 expect_eq "credential satisfied by ANTHROPIC_API_KEY alone" "0" "$rc"
+
+# credential source 2: a login by token — the token variable alone, by presence only
+SBX2T="$(mk_sandbox)"; rm -f "$SBX2T/config/.credentials.json"
+rc="$(run_probe "$SBX2T" PATH="$(stub_dir "$SBX2T" 1)" CLAUDE_CODE_OAUTH_TOKEN=fixture-token-not-real-0002)"
+expect_eq "credential satisfied by CLAUDE_CODE_OAUTH_TOKEN alone" "0" "$rc"
+expect_file_regex "the token login is named as the source" 'credential present \(environment token\)' "$OUT"
+expect_file_no_regex "the token's value is absent from stdout" 'fixture-token-not-real-0002' "$OUT"
+expect_file_no_regex "the token's value is absent from stderr" 'fixture-token-not-real-0002' "$ERR"
+expect_file_no_regex "the token's value is absent from the attestation" 'fixture-token-not-real-0002' "$SBX2T/repo/$STATE_REL"
+
+# an empty token is no login: no source left, so the probe still refuses
+SBX2E="$(mk_sandbox)"; rm -f "$SBX2E/config/.credentials.json"
+rc="$(run_probe "$SBX2E" PATH="$(stub_dir "$SBX2E" 1)" CLAUDE_CODE_OAUTH_TOKEN=)"
+expect_eq "an empty CLAUDE_CODE_OAUTH_TOKEN is not a credential" "1" "$rc"
+expect_file_regex "the refusal names the token variable" 'credential absent.*CLAUDE_CODE_OAUTH_TOKEN' "$OUT"
 
 # credential source 3: the macOS keychain, via a substituted `security`
 SBX3="$(mk_sandbox)"; rm -f "$SBX3/config/.credentials.json"
@@ -345,10 +360,10 @@ rmdir "$SBX/repo/.bionic/tmp/.preflight.lock"
 # twice at once) still serializes through the shared lock and is covered by the
 # single-writer interleaving pin below.
 SBX="$(mk_sandbox)"
-( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
+( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
     CLAUDE_CODE_SESSION_ID="$SESSION_A" bash "$PROBE" ) >/dev/null 2>&1 &
 p1=$!
-( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
+( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
     CLAUDE_CODE_SESSION_ID="$SESSION_B" bash "$PROBE" ) >/dev/null 2>&1 &
 p2=$!
 wait $p1; wait $p2
@@ -543,7 +558,7 @@ else
   SBX="$(mk_sandbox)"
   rc="$(run_probe "$SBX")"
   expect_eq "prior attestation established for the write-failure proof" "0" "$rc"
-  rc="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" \
+  rc="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" \
             CLAUDE_CONFIG_DIR="$SBX/config" CLAUDE_CODE_SESSION_ID="$SESSION_A" \
             bash "$MUT" ) >"$OUT" 2>"$ERR"; echo $?)"
   expect_eq "write failure exits 2, never 1 (A5 doc/behavior split)" "2" "$rc"
@@ -560,10 +575,10 @@ if [ -z "$MUT" ]; then
   no "mutation 'showtmp' changed the script" "awk matched nothing — the mktemp step moved"
 else
   SBX="$(mk_sandbox)"
-  n1="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" \
+  n1="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" \
             CLAUDE_CONFIG_DIR="$SBX/config" CLAUDE_CODE_SESSION_ID="$SESSION_A" \
             bash "$MUT" ) 2>&1 >/dev/null | grep '^TMPNAME=' | head -1)"
-  n2="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" \
+  n2="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" \
             CLAUDE_CONFIG_DIR="$SBX/config" CLAUDE_CODE_SESSION_ID="$SESSION_A" \
             bash "$MUT" ) 2>&1 >/dev/null | grep '^TMPNAME=' | head -1)"
   expect_true "temp name captured on run 1" [ -n "$n1" ]
@@ -677,7 +692,7 @@ mk_committed_sandbox() {  # a sandbox whose repo has a commit, so worktrees can 
 
 run_probe_in() {  # <sandbox> <cwd> [KEY=VAL ...] -> echoes exit code
   local sbx="$1" where="$2"; shift 2
-  ( cd "$where" && env -u ANTHROPIC_API_KEY \
+  ( cd "$where" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN \
       HOME="$sbx/home" \
       CLAUDE_CONFIG_DIR="$sbx/config" \
       CLAUDE_CODE_SESSION_ID="$SESSION_A" \
