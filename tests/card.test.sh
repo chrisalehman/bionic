@@ -164,7 +164,7 @@ EVAL_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS1[@]}"
                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS2[@]}"
                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS_T[@]}"; } | card eval-design)"
 expect_eq "9: the eval-design kind renders the card's own header and three rows" "$EVAL_WANT" "$EVAL_GOT"
-# THE COUNT STARTS UNDER ITS LABEL (AC-31.1). Row 9 holds the format against itself; this row reads the
+# THE COUNT STARTS UNDER ITS LABEL. Row 9 holds the format against itself; this row reads the
 # printed card, so a count right-aligned in its column, which ends under the label's end, goes red.
 EVAL_START_GOT="$(printf '%s\n' "$EVAL_GOT" | awk '
   NR == 1 { n = split("static unit hermetic live human", L, " "); for (i = 1; i <= n; i++) start[i] = index($0, L[i]); next }
