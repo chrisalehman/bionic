@@ -725,7 +725,7 @@ watch_wake_line() {  # <tick print file> [<told file>]
   [ -f "${1:-}" ] || return 1
   local line tf="${2:-}"
   { [ -n "$tf" ] && [ -f "$tf" ] && [ ! -L "$tf" ]; } || tf=""
-  line="$(LC_ALL=C awk -v em="—" -v max="$WATCH_LINE_MAX" -v tf="$tf" '
+  line="$(LC_ALL=C awk -v em="—" -v max="$WATCH_LINE_MAX" -v tf="$tf" "$_LINE_FIELDS_AWK"'
     BEGIN { if (tf != "") { while ((getline l < tf) > 0) told[l] = 1; close(tf) } }
     function cause(k) { have[k] = 1; return !(k in told) }
     function ascii(s) { gsub(/[^ -~]+/, "?", s); return s }
@@ -746,11 +746,8 @@ watch_wake_line() {  # <tick print file> [<told file>]
     }
     /^poker: unchanged since / { unchanged = 1 }
     /^[a-z-]+\/v[0-9]+[|]/ && index($0, "|decision=") {
-      c = split($0, f, "|")
-      for (i = 1; i <= c; i++) {
-        if (index(f[i], "fill=") == 1) fill = substr(f[i], 6)
-        else if (index(f[i], "rows=") == 1) rows = substr(f[i], 6)
-      }
+      if ((v = line_kv_of($0, "fill")) != "") fill = v
+      if ((v = line_kv_of($0, "rows")) != "") rows = v
       next
     }
     $1 != "poker:" { next }

@@ -302,7 +302,8 @@ plan_goal_slug() {
 # median is the middle value, the mean of the middle two for an even count. A task of more files moves nothing here.
 plan_one_file_median() {
   local plan="${1:-}" rep="${2:-}"
-  { printf '%s\n' "$rep" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") print "L\t" $1 "\t" substr($i, 9) }'
+  bionic_need fields.sh line_field_v
+  { printf '%s\n' "$rep" | awk "$_LINE_FIELDS_AWK"'NR > 1 && $2 == "queue" && (m = line_kv("minutes")) != "" && m != "-" { print "L\t" $1 "\t" m }'
     declare -F units_rows >/dev/null 2>&1 && units_rows "$plan" 2>/dev/null | awk -F'\t' '{ print "R\t" $1 "\t" $9 }'
   } | awk -F'\t' '
     $1 == "R" { n = split($3, a, ","); c = 0
@@ -423,6 +424,7 @@ plan_task_title() {
 # Always rc 0.
 plan_goals_read() {
   local plan="${1:-}" rec="${2:-}" rep="${3:-}" recdir docs t m r st rd tgt v n line ev f h s hs hrow hu hst
+  bionic_need fields.sh line_field_v
   recdir="${rec%/*}"; docs="${recdir%/*}"; docs="${docs%/*}"
   _plan_theme_reads "$plan"
   while IFS='	' read -r t m r; do
@@ -447,7 +449,7 @@ plan_goals_read() {
           IFS='	' read -r hs hrow hu hst <<< "$v"
           [ "$hs" != - ] || hs=""
           [ "$hst" = delivered ] || hu=""
-          v="$(hand_holds_report "$rec" "$h" "$plan" ${hs:+--since "$hs"} ${hu:+--until "$hu"} | awk '{ for (i = 1; i <= NF; i++) if (index($i, "total=") == 1) { print substr($i, 7) + 0; exit } }')"
+          v="$(hand_holds_report "$rec" "$h" "$plan" ${hs:+--since "$hs"} ${hu:+--until "$hu"} | awk "$_LINE_FIELDS_AWK"'(t = line_kv("total")) != "" { print t + 0; exit }')"
           if [ -z "$v" ]; then rd="the hand-holds report printed no total"
           else
             st="$(awk -v a="$v" -v b="$tgt" 'BEGIN { print (a + 0 <= b + 0) ? "reached" : "missed" }')"
@@ -460,7 +462,7 @@ plan_goals_read() {
         else
           case "$m" in
             *one-file*) v="$(plan_one_file_median "$plan" "$rep")"; s="one-file " ;;
-            *) v="$(printf '%s\n' "$rep" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") { n++; x[n] = substr($i, 9) + 0 } }
+            *) v="$(printf '%s\n' "$rep" | awk "$_LINE_FIELDS_AWK"'NR > 1 && $2 == "queue" && (m = line_kv("minutes")) != "" && m != "-" { n++; x[n] = m + 0 }
                  END { if (!n) exit; for (i = 2; i <= n; i++) { t = x[i]; for (j = i - 1; j >= 1 && x[j] > t; j--) x[j + 1] = x[j]; x[j + 1] = t }
                        printf "%.1f\t%d\n", (n % 2) ? x[(n + 1) / 2] : (x[n / 2] + x[n / 2 + 1]) / 2, n }')"; s="" ;;
           esac

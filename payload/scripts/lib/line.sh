@@ -1493,11 +1493,11 @@ _line_current_row() {  # <roster> <name> -> the row the walls read for that agen
   local roster="${1:-}" name="${2:-}" id
   { [ -n "$name" ] && [ -f "$roster" ] && [ ! -L "$roster" ]; } || return 1
   bionic_need roster.sh roster_row_for_id || return 1
-  id="$(awk -F'|' -v k="|name=${name}|" '
+  id="$(awk -F'|' -v k="|name=${name}|" "$_LINE_FIELDS_AWK"'
     index($0, "roster-state/") != 1 || !index($0 "|", k) { next }
     index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|extended=") \
       && !index($0, "|held=") && !index($0, "|adopted_from=") { id = "" }
-    { for (i = 2; i <= NF; i++) if (index($i, "agent_id=") == 1) { if (length($i) > 9) id = substr($i, 10); break } }
+    (v = line_kv("agent_id")) != "" { id = v }
     END { print id }' "$roster" 2>/dev/null)"
   [ -n "$id" ] || return 1
   roster_row_for_id "$roster" "$id"

@@ -315,9 +315,9 @@ bind_sessions() {  # <plan> [<root>]
 # with the run's place (lib/proof.sh `proof_sessions_held`, beside this file), since every engagement asks it; nothing
 # when it cannot be loaded or cannot answer.
 _bind_session_ids() {
-  bionic_need proof.sh proof_sessions_held || return 0
-  proof_sessions_held "$1" 2>/dev/null | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) {
-    s = substr($i, 9); if (s ~ /^[A-Za-z0-9_-]+$/ && s != "unknown" && !(s in got)) { got[s] = 1; print s } } }'
+  bionic_need proof.sh proof_sessions_held && bionic_need fields.sh line_field_v || return 0
+  proof_sessions_held "$1" 2>/dev/null | awk -F'|' "$_LINE_FIELDS_AWK"'
+    { s = line_kv("session") } s ~ /^[A-Za-z0-9_-]+$/ && s != "unknown" && !(s in got) { got[s] = 1; print s }'
 }
 
 # bind_record_session <plan> <sid> <act> -> the session's bind event appended to the run's log, once.

@@ -1500,7 +1500,7 @@ BRF_EOF
         ST_N="$(proof_plan_slug "$PV_PLAN")"; case "$ST_N" in wave-[0-9]*) ST_N="${ST_N#wave-}"; ST_N="${ST_N%%-*}" ;; esac
         ST_BRANCH="wt/$ST_N-$ST_ID"
         ST_OK="$(cd "$PV_REPO" && bash "$ST_SW" create "$ST_BASE" "$ST_BRANCH" --for "$ST_NAME" 2>&1)"
-        ST_TREE="$(printf '%s\n' "$ST_OK" | awk '/^spawn-worktree: OK / { for (i = 3; i <= NF; i++) if (index($i, "path=") == 1) { print substr($i, 6); exit } }')"
+        ST_TREE="$(printf '%s\n' "$ST_OK" | awk "$_LINE_FIELDS_AWK"'/^spawn-worktree: OK / && (p = line_kv("path")) != "" { print p; exit }')"
       fi
       case "$ST_OK" in
         'spawn-worktree: OK '*) : ;;

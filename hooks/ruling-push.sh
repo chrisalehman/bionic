@@ -63,8 +63,8 @@ _rp_flag="$(ruling_pending_flag "$_rp_roster")" || exit 0
 [ -e "$_rp_flag" ] || exit 0
 
 _rp_name=""
-if _rp_row="$(roster_row_for_id "$_rp_roster" "$_rp_aid")"; then
-  _rp_name="$(printf '%s\n' "$_rp_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
+if _rp_row="$(roster_row_for_id "$_rp_roster" "$_rp_aid")" && bionic_need fields.sh line_value 2>/dev/null; then
+  _rp_name="$(line_value "$_rp_row" name)"
 fi
 # A call the payload names no id for gets one made from this process's own pid (lib/root.sh `bionic_id`, loaded
 # through roster.sh's loader); with no id to claim by, nothing is pushed.
