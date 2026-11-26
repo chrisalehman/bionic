@@ -911,14 +911,28 @@ fi
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 CONTENT=$(printf '%s' "$CONTENT" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }')
 
-# Extract the leading YAML frontmatter block (between the first two `---`
-# lines at column 0). If absent, block.
+# THE ARTIFACT AS THE PARSER READS IT. The parser reads a path, and the text judged here is the
+# posted body or the Edit applied, which no file holds yet: so it is written once to a temporary
+# file, removed on every way out, and every read below is of that one copy. The header is read
+# once; `yaml_get` and `gs_has_key` answer from that reading with no further process. The copy is
+# made only for text that opens on a header, so an ordinary file outside the docs home costs no
+# temporary file. A header is the leading `---` block: its first line says whether there is one,
+# and the parser says what it holds.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-FRONTMATTER=$(echo "$CONTENT" | awk '
-  NR == 1 && $0 == "---" { inside = 1; next }
-  inside && $0 == "---" { exit }
-  inside { print }
-')
+GS_PAGE=""; GS_HEADER=""; GS_HEADED=0
+case "$CONTENT" in ---|---$'\n'*) GS_HEADED=1 ;; esac
+_gs_page() {
+  [ -z "$GS_PAGE" ] || return 0
+  GS_PAGE="$(mktemp "${TMPDIR:-/tmp}/bionic-page.XXXXXX")" || GS_PAGE=""
+  [ -n "$GS_PAGE" ] || _gs_refuse no-temp-file
+  trap 'rm -f "$GS_PAGE"' EXIT
+  printf '%s\n' "$CONTENT" > "$GS_PAGE"
+  GS_HEADER="$(plan_read_header "$GS_PAGE")" || GS_HEADER=""
+}
+# yaml_get <key> -> the header's value for <key>, empty when it is absent.
+yaml_get() { plan_header_value "$GS_HEADER" "$1" || :; }
+# gs_has_key <key> -> 0 when the header holds <key>, its value empty or not.
+gs_has_key() { plan_header_value "$GS_HEADER" "$1" >/dev/null; }
 
 # The misplacement verdict, now that the frontmatter is in hand.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
@@ -935,7 +949,8 @@ FRONTMATTER=$(echo "$CONTENT" | awk '
 # business, wherever it lives — which is why an ordinary file in an ordinary
 # project, in a project with no `.bionic/` at all, passes untouched.
 if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
-  if grep -qE '^[[:space:]]*(canonical_sdlc_version[[:space:]]*:|governing-skill[[:space:]]*:[[:space:]]*canonical-sdlc[[:space:]]*$)' <<< "$FRONTMATTER"; then
+  [ "$GS_HEADED" = 0 ] || _gs_page
+  if gs_has_key canonical_sdlc_version || [ "$(yaml_get governing-skill)" = canonical-sdlc ]; then
     case "$BASENAME" in
       *.spec.md|*.requirements.md) MISPLACED_SUBDIR=specs ;;
       adr-*.md)                    MISPLACED_SUBDIR=adrs ;;
@@ -963,35 +978,14 @@ fi
 
 # The hint names the version the artifact is written at: a plan's is 15, and a document that is no plan may declare
 # 14 or 15, as the version arms below admit.
-if [ -z "$FRONTMATTER" ]; then
+if [ "$GS_HEADED" = 0 ]; then
   case "$BASENAME" in
     *.plan.md) _gs_refuse no-frontmatter 15 ;;
     *) _gs_refuse no-frontmatter "15   # a document that is no plan may declare 14 or 15" ;;
   esac
 fi
 
-# THE ARTIFACT AS THE PARSER READS IT. The parser reads a path, and the text judged here is the
-# posted body or the Edit applied, which no file holds yet: so it is written once to a temporary
-# file, removed on every way out, and every read below is of that one copy. The header is read
-# once; `yaml_get` and `gs_has_key` answer from that reading with no further process.
-GS_PAGE="$(mktemp "${TMPDIR:-/tmp}/bionic-page.XXXXXX")" || GS_PAGE=""
-[ -n "$GS_PAGE" ] || _gs_refuse no-temp-file
-trap 'rm -f "$GS_PAGE"' EXIT
-printf '%s\n' "$CONTENT" > "$GS_PAGE"
-GS_HEADER="$(plan_read_header "$GS_PAGE")" || GS_HEADER=""
-
-# yaml_get <key> -> the header's value for <key>, empty when it is absent.
-yaml_get() {
-  local l
-  while IFS= read -r l; do
-    case "$l" in "$1="*) printf '%s\n' "${l#*=}"; return 0 ;; esac
-  done <<GS_HEADER_LINES
-$GS_HEADER
-GS_HEADER_LINES
-  return 0
-}
-# gs_has_key <key> -> 0 when the header holds <key>, its value empty or not.
-gs_has_key() { case $'\n'"$GS_HEADER" in *$'\n'"$1="*) return 0 ;; esac; return 1; }
+_gs_page
 
 # Enforce presence of the governing-skill field with a non-empty value.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]

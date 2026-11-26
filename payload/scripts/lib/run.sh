@@ -139,31 +139,14 @@ plan_frontmatter_get() {
   return 0
 }
 
-# frontmatter_value_v <var> <frontmatter text> <key> -> rc 0 and the value in <var> when a line
-# carries the key, rc 1 and an empty <var> when none does. THE HEADER PARSER'S GRAMMAR, IN BUILTINS:
-# the first line that is `<key>` between optional whitespace and a `:`, the text after the
-# colon with its surrounding whitespace trimmed, then one leading and one trailing quote of either
-# kind dropped — what `grep | head -1 | sed | sed | sed` used to say with five processes. The key is
-# matched as text, which is what every key a caller names (`rigor`, `working-branch`) already was
-# to the regex. Its one caller is walls.sh's `frontmatter_get`, over the evidence gate's FRONTMATTER
-# text, which it holds already captured and so cannot hand the parser as a file.
-frontmatter_value_v() {
-  local _fv_rest="${2}"$'\n' _fv_l
-  printf -v "$1" '%s' ''
-  while [ -n "$_fv_rest" ]; do
-    _fv_l="${_fv_rest%%$'\n'*}"; _fv_rest="${_fv_rest#*$'\n'}"
-    _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
-    case "$_fv_l" in "$3"*) ;; *) continue ;; esac
-    _fv_l="${_fv_l#"$3"}"; _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
-    case "$_fv_l" in :*) ;; *) continue ;; esac
-    _fv_l="${_fv_l#:}"; _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
-    _fv_l="${_fv_l%"${_fv_l##*[![:space:]]}"}"
-    case "$_fv_l" in [\'\"]*) _fv_l="${_fv_l#?}" ;; esac
-    case "$_fv_l" in *[\'\"]) _fv_l="${_fv_l%?}" ;; esac
-    printf -v "$1" '%s' "$_fv_l"
-    return 0
-  done
-  return 1
+# plan_header_value <header> <key> -> the value of <key> and rc 0, or nothing and rc 1 when no line names it. The
+# header is the `key=value` lines `plan_read_header` printed, already read: a gate that asks for many keys reads the
+# plan once and answers each from that reading in builtins, and the governing hook's text, which no file holds until
+# it writes one, is read the same way. The parser printed each key once, so the one line that names it answers.
+plan_header_value() {
+  local v=$'\n'"$1"
+  case "$v" in *$'\n'"$2="*) ;; *) return 1 ;; esac
+  v="${v#*$'\n'"$2="}"; printf '%s\n' "${v%%$'\n'*}"
 }
 
 # plan_regression <plan> -> `no` when the plan's leading frontmatter says exactly `regression: no`,
@@ -220,7 +203,7 @@ plan_regression() {
 #
 # TEXT, NOT A FILE, because one reader has no file: the governing-skill hook judges the
 # content of a Write before it lands. The text is the frontmatter block's lines, without the
-# `---` delimiters — the shape that hook already holds as `$FRONTMATTER`.
+# `---` delimiters.
 budget_line_of() {  # <frontmatter text> -> the budget line's value, or empty
   awk '
     /^parallel-budget:/ { sub(/^parallel-budget:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }
