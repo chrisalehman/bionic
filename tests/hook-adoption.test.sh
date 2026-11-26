@@ -197,7 +197,10 @@ while IFS='|' read -r name class scoped; do
       fi
       continue ;;
   esac
-  if grep -qE '=\$\(project_root |=\$\(project_root$|project_root "' "$f"; then
+  # The refusing reader (`project_root_or_refuse`) is the library's own root reader and
+  # wraps `project_root`; it is accepted only as the command a substitution runs, so a
+  # hook that walks for its root by itself still matches none of the three.
+  if grep -qE '=\$\(project_root(_or_refuse)? |=\$\(project_root$|project_root "' "$f"; then
     ok "$name resolves its root through the library"
   else
     no "$name resolves its root through the library" "no project_root call in $f"
