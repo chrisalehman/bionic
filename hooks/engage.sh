@@ -411,8 +411,7 @@ if [ "$ROOT_MODE" -eq 0 ]; then
     *)  ENGAGE_FILE="$REPO/${ENGAGE_ARG#./}" ;;
   esac
   ENGAGE_POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-poker.sh" || ENGAGE_POKER=""
-  if [ -n "$ENGAGE_FILE" ] && [ -f "$ENGAGE_FILE" ] && [ ! -L "$ENGAGE_FILE" ] \
-     && [ "$(head -n 1 "$ENGAGE_FILE" 2>/dev/null)" = "bionic-handoff/v1" ] \
+  if [ -n "$ENGAGE_FILE" ] && bionic_need handoff.sh handoff_is_one && handoff_is_one "$ENGAGE_FILE" no-link \
      && [ -n "$ENGAGE_POKER" ] && [ -f "$ENGAGE_POKER" ]; then
     ENGAGE_CTX="${ENGAGE_CTX:+$ENGAGE_CTX
 }bionic: resume this run with this one command, as written: bash $(_engage_word "$ENGAGE_POKER") resume $(_engage_word "$ENGAGE_FILE")"

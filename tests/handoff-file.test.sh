@@ -13,7 +13,8 @@
 # the file, the plan as it was, and the last line is `/bionic:canonical-sdlc <path>`; with no run, it says to read the
 # file and do Next 1.
 #
-# Sections: §NO-RUN §ONE-LINE §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §POINTER-AGREE.
+# Sections: §NO-RUN §ONE-LINE §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §POINTER-AGREE (which
+# also holds the one test of a handoff, lib/handoff.sh handoff_is_one, and the four doors that ask it).
 #
 # FIXTURE FIDELITY (HERMETIC). The session-poker prelude's sandbox, pins and gate-admitted plan (`s42_plan`), one
 # repository per world; a no-run world is a bare `git init` with no bionic folder at all. A running process is a
@@ -673,6 +674,64 @@ hf_world pointer-agree no
 expect_eq "PA0 with no pointer, close-out check names today's handoffs file, the one the verb writes" "$HF_DOOR" "$(pa_check_file)"
 poke "$HF_R" handoff
 expect_eq "PA4 the verb exits 0" "0" "$RC"
+
+# ONE TEST OF A HANDOFF. lib/handoff.sh handoff_is_one answers whether a file is a handoff: a regular file whose first
+# line is the kind line. Four doors ask it, and the two that read a path they are handed (the engage hook and the
+# session-start door) refuse a link in the same call, while the resume verb and close-out's writer have refused a link
+# before they ask, in their own words, so they say `link-ok`. Each case is read through the shell the callers run in,
+# and a handoff is asked beside every refusal so a predicate that says no to all of them fails here.
+# fails-when: the predicate takes a link, a directory, an empty file, a file with another first line or a missing path
+# for a handoff, or refuses a handoff; or a door restates the kind-line test instead of asking.
+PI_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/handoff.sh"
+PI_D="$(mktemp -d)"
+printf 'bionic-handoff/v1\nHandoff · fixture\n\nSummary\n' > "$PI_D/doc.md"
+printf 'bionic-handoff/v1' > "$PI_D/bare.md"
+printf 'bionic-handoff/v1\r\nHandoff\n' > "$PI_D/crlf.md"
+printf 'Handoff · fixture\nbionic-handoff/v1\n' > "$PI_D/second.md"
+printf '# a note\n' > "$PI_D/note.md"
+: > "$PI_D/empty.md"
+mkdir "$PI_D/dir.md"
+mkfifo "$PI_D/pipe.md"
+( while :; do printf 'bionic-handoff/v1\n' > "$PI_D/pipe.md"; done ) 2>/dev/null &
+PI_WRITER=$!
+ln -s doc.md "$PI_D/link.md"
+ln -s note.md "$PI_D/linknote.md"
+pi_ask() {  # <file> [<mode>] -> yes when handoff_is_one says so, no when not
+  ( . "$PI_LIB" >/dev/null 2>&1; if handoff_is_one "$@"; then echo yes; else echo no; fi )
+}
+expect_eq "PI0 precondition: the predicate is defined by the library" "yes" \
+  "$( . "$PI_LIB" >/dev/null 2>&1; if declare -F handoff_is_one >/dev/null; then echo yes; else echo no; fi )"
+for pi_mode in no-link link-ok; do
+  expect_eq "PI1 $pi_mode: a handoff is one" "yes" "$(pi_ask "$PI_D/doc.md" $pi_mode)"
+  expect_eq "PI2 $pi_mode: a handoff with no line end is one" "yes" "$(pi_ask "$PI_D/bare.md" $pi_mode)"
+  expect_eq "PI3 $pi_mode: a first line with a carriage return is not the kind line" "no" "$(pi_ask "$PI_D/crlf.md" $pi_mode)"
+  expect_eq "PI4 $pi_mode: the kind line on the second line is not one" "no" "$(pi_ask "$PI_D/second.md" $pi_mode)"
+  expect_eq "PI5 $pi_mode: a file with another first line is not one" "no" "$(pi_ask "$PI_D/note.md" $pi_mode)"
+  expect_eq "PI6 $pi_mode: an empty file is not one" "no" "$(pi_ask "$PI_D/empty.md" $pi_mode)"
+  expect_eq "PI7 $pi_mode: a directory is not one" "no" "$(pi_ask "$PI_D/dir.md" $pi_mode)"
+  expect_eq "PI7b $pi_mode: a named pipe that is fed a kind line is not one, and is not read" "no" "$(pi_ask "$PI_D/pipe.md" $pi_mode)"
+  expect_eq "PI8 $pi_mode: a path to nothing is not one" "no" "$(pi_ask "$PI_D/none.md" $pi_mode)"
+  expect_eq "PI9 $pi_mode: no path is not one" "no" "$(pi_ask "" $pi_mode)"
+  expect_eq "PI10 $pi_mode: a link to a file that is no handoff is not one" "no" "$(pi_ask "$PI_D/linknote.md" $pi_mode)"
+done
+expect_eq "PI11 no-link: a link to a handoff is refused" "no" "$(pi_ask "$PI_D/link.md" no-link)"
+expect_eq "PI12 link-ok: a link to a handoff is one" "yes" "$(pi_ask "$PI_D/link.md" link-ok)"
+expect_eq "PI13 no mode says no-link: a link to a handoff is refused" "no" "$(pi_ask "$PI_D/link.md")"
+kill "$PI_WRITER" 2>/dev/null || true
+rm -rf "$PI_D"
+
+# The four doors ask the predicate and restate nothing: no door compares a first line with the kind line, each calls
+# handoff_is_one once, two with `no-link` (the hooks) and two with `link-ok` (the resume verb and close-out).
+PI_DOORS="$BIONIC_HOOKS_DIR/engage.sh $BIONIC_HOOKS_DIR/session-start.sh $BIONIC_HOOKS_DIR/poker/sitrep.sh $BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh"
+# shellcheck disable=SC2086
+PI_TEXT="$(cat $PI_DOORS)"
+expect_contains "PI14 the doors are read: the engage hook's file is in the text" "ENGAGE_FILE" "$PI_TEXT"
+expect_contains "PI14b the doors are read: close-out's handoff file is in the text" "CO_HO_FILE" "$PI_TEXT"
+expect_eq "PI15 no door compares a first line with the kind line" "0" \
+  "$(printf '%s\n' "$PI_TEXT" | grep -c -E '=[ ]*"bionic-handoff/v1"' || true)"
+expect_eq "PI16 four calls of the predicate, one at each door" "4" "$(printf '%s\n' "$PI_TEXT" | grep -c 'handoff_is_one "')"
+expect_eq "PI17 two doors refuse a link" "2" "$(printf '%s\n' "$PI_TEXT" | grep -c 'handoff_is_one "[^"]*" no-link')"
+expect_eq "PI18 two doors leave a link to their own refusal" "2" "$(printf '%s\n' "$PI_TEXT" | grep -c 'handoff_is_one "[^"]*" link-ok')"
 
 
 finish

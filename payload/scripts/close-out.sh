@@ -1973,7 +1973,7 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
   co_handoff_where
   mkdir -p "${CO_HO_FILE%/*}" 2>/dev/null || return 1
   [ ! -L "$CO_HO_FILE" ] || return 1
-  if [ -f "$CO_HO_FILE" ] && [ "$(sed -n 1p "$CO_HO_FILE" 2>/dev/null)" = "bionic-handoff/v1" ]; then
+  if handoff_is_one "$CO_HO_FILE" link-ok; then
     title="$(sed -n '2{/^Handoff · /p;}' "$CO_HO_FILE" 2>/dev/null)"
     src="$CO_HO_FILE"
     [ -n "$title" ] || old=1
