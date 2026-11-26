@@ -5,7 +5,7 @@
 Step 1 is interactive Q&A and is never skipped. It authors ONE kind of knowledge — what is
 wanted, in the user's terms — and lands it in ONE artifact: `wave-NN-<slug>.requirements.md`,
 beside the spec under `specs/epic-NN-<slug>/`. Numbered requirements, each with its
-`provenance:` and its acceptance criteria; then "Not Doing". No design, no tasks, no evals.
+`provenance:` and its acceptance criteria; then "Not Doing". No design, no tasks, no tests.
 
 **At wave and epic scale the requirements sit under their themes.** Three to six `## <theme>`
 sections, each opening on one sentence that says what the run is for in that respect, with the
@@ -16,8 +16,8 @@ into the plan's `goals:` line, which carries measured goals only. The `## Goal` 
 the themes, so the card's Purpose lists them.
 
 **Write every criterion so a "fails when" is nameable.** Step 2 has to be able to say what
-planted defect would turn each criterion's eval red; a criterion that admits no such sentence
-("the code is clean", "performance is good") cannot be evaluated and is rewritten here, where
+planted defect would turn each criterion's test red; a criterion that admits no such sentence
+("the code is clean", "performance is good") cannot be tested and is rewritten here, where
 it is still cheap. That is a Step-1 quality bar, not a Step-2 discovery.
 
 **Titles.** A `### REQ-<n> — <title>` heading and a `## Not Doing` item (`<title>: <reason>`) open on a title of at most 30 characters; a longer one is refused, never cut.

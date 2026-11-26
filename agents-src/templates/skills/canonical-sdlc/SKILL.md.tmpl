@@ -127,13 +127,14 @@ only by citing a path. That is the whole distinction, and it is the boundary tes
 this tree: growth in the gated dirs is governed, growth in the operational ones is free.
 
 **Three artifacts, three steps** — Steps 1–3 write exactly one
-artifact apiece, chained requirement → criterion → design decision → eval → evidence. Step 1
-writes `wave-NN-<slug>.requirements.md`: numbered requirements/user stories, each with
+artifact apiece, chained requirement → criterion → design decision → test → evidence.
+A test is deterministic: unit, integration, hermetic or end to end; an eval tests a model, which is not, so it passes by reaching a stated threshold a stated share of the time.
+Step 1 writes `wave-NN-<slug>.requirements.md`: numbered requirements/user stories, each with
 provenance and acceptance criteria written so a "fails when" is nameable, plus Not Doing. Step
 2 writes `wave-NN-<slug>.spec.md`: the technical design (domain model, architecture, ownership
-table, rejected alternatives), the Eval design table, and ADR pointers. Step 3 writes
+table, rejected alternatives), the Test design table, and ADR pointers. Step 3 writes
 `wave-NN-<slug>.plan.md`: tasks, sequencing and one section per task; its criteria are Step 2's
-Eval design rows, read in place. Requirements live beside the spec, both under
+Test design rows, read in place. Requirements live beside the spec, both under
 `specs/epic-NN-<slug>/` — the governing-skill hook validates `*.requirements.md` frontmatter the
 same way it validates `*.spec.md`, minus the design three-way rule (that stays spec-only). Each
 of the three opens with a `## Goal` section — one concise paragraph, first after the title — and a governing-skill arm at `scale: wave` or `scale: epic` refuses a
@@ -155,7 +156,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 |---|---|---|---|
 | 0 Configure | `steps/0.md` | `canonical-sdlc` | Frontmatter complete, matrix derived, user confirmed, task list created |
 | 1 Scope | `steps/1.md` | `agent-skills:idea-refine` | Refined idea + explicit "Not Doing" + alternatives lens cites prior art; writes `wave-NN-<slug>.requirements.md` — numbered requirements/user stories with provenance and acceptance criteria, plus Not Doing |
-| 2 Design | `steps/2.md` | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design; writes `wave-NN-<slug>.spec.md` — the technical design, ownership table, and the Eval design table |
+| 2 Design | `steps/2.md` | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design; writes `wave-NN-<slug>.spec.md` — the technical design, ownership table, and the Test design table |
 | 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; wave shape locked; tasks tagged; user approved; writes `wave-NN-<slug>.plan.md` — its header, `## Goal`, `## Tasks` and a section per row |
 | 4 Implement | `steps/4.md` | `agent-skills:incremental-implementation` | Every task RED before GREEN; assumptions logged |
 | 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; every matrix row discharged at tier or waived; auditor CONFIRMED; regression run once |
@@ -190,7 +191,7 @@ A step's evidence is events in the run's log and the header a person wrote; `rea
 | 8 | the integrate row's landing, every tree gone, and step 8's `cleanup`, `tmp-wiped`, `tasks-completed` from close-out |
 | 9 | the delivery: step 9's `delivered` from close-out, closing the run, with `archived`; plus `deployed`, `verified`, `monitored` when `deploy_target` names a live surface |
 
-**The matrix** is a view: a criterion is its Eval design row, its state the log's (`reader.sh <plan> cell <AC>`).
+**The matrix** is a view: a criterion is its Test design row, its state the log's (`reader.sh <plan> cell <AC>`).
 
 **Placeholder ban.** These exact values are rejected anywhere evidence is required: `todo`, `pending`, `in progress`, `inprogress`, `xxx`, `tbd`, `placeholder`.
 

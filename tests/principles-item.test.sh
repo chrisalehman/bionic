@@ -945,7 +945,7 @@ for T51_SH in $T51_BASHES; do
 done
 
 # ---------------------------------------------------------------------------
-section "§T51-COPIES: remove.sh's standalone copies are the library's, body for body"
+section "§T51-COPIES: the copies kept by name are their originals', body for body"
 # ---------------------------------------------------------------------------
 
 # The body of a top-level function: every line after its `name() {` line up to
@@ -1001,6 +1001,82 @@ sed "s/tr -d '\\\\000' < \"\$1\" | cmp -s - \"\$1\"/tr -d '\\\\000' < \"\$1\" | 
 expect_true "COPIES: the NUL mutant still parses" bash -n "$TMP/remove-mutant-nul.sh"
 expect_ne "COPIES: …and its NUL test no longer matches (the pin can go red)" \
   "$LIB_NUL" "$(nul_line "$(fn_body "$TMP/remove-mutant-nul.sh" _rm_regular)")"
+
+# THE REST OF THE REMOVER'S COPIES. It runs curl-fetched with no lib/ beside it, so each of these stays a copy of the
+# library function of the same name. One loop holds each body equal to its original's; the list is each name and the
+# library that owns it.
+COPY_LIST="rc_default env.sh
+rc_earlier env.sh
+bionic_rc_line_bare detect.sh
+bionic_legacy_alias_ours detect.sh
+bionic_block_body detect.sh
+bionic_todo_export_ours detect.sh
+bionic_legacy_alias_lines detect.sh
+bionic_todo_export_lines detect.sh
+bionic_rc_left_reason detect.sh
+bionic_line_numbers_words detect.sh
+bionic_rc_shell shell.sh
+bionic_rc_candidates markers.sh
+bionic_rc_lines markers.sh
+bionic_rc_staged markers.sh
+bionic_rc_block_alone markers.sh
+bionic_rc_block_staged markers.sh
+bionic_rc_try markers.sh
+bionic_rc_parses markers.sh"
+expect_nonempty "COPIES: the list of the remover's other copies is not empty" "$COPY_LIST"
+while read -r cp_fn cp_lib; do
+  [ -n "$cp_fn" ] || continue
+  expect_nonempty "COPIES: $cp_fn's body reads out of $cp_lib" "$(fn_body "${PAYLOAD}/scripts/lib/${cp_lib}" "$cp_fn")"
+  expect_eq "COPIES: remove.sh's $cp_fn is ${cp_lib}'s" \
+    "$(fn_body "${PAYLOAD}/scripts/lib/${cp_lib}" "$cp_fn")" "$(fn_body "$REMOVE_SH" "$cp_fn")"
+done <<EOF
+$COPY_LIST
+EOF
+# The loop can fail: a no-op line put first in one copy's body moves it.
+awk '{ print } /^bionic_rc_try\(\) \{/ { print "  :" }' "$REMOVE_SH" > "$TMP/remove-mutant-loop.sh"
+expect_true "COPIES: the loop's mutant still parses" bash -n "$TMP/remove-mutant-loop.sh"
+expect_nonempty "COPIES: …its copy of bionic_rc_try reads out" "$(fn_body "$TMP/remove-mutant-loop.sh" bionic_rc_try)"
+expect_ne "COPIES: …and bionic_rc_try no longer matches markers.sh's (the loop can go red)" \
+  "$(fn_body "${PAYLOAD}/scripts/lib/markers.sh" bionic_rc_try)" "$(fn_body "$TMP/remove-mutant-loop.sh" bionic_rc_try)"
+# The mode reader has another name in the library.
+LIB_MODE="$(fn_body "$MARKERS_SH" _markers_file_mode)"
+expect_nonempty "COPIES: _markers_file_mode's body reads out of markers.sh" "$LIB_MODE"
+expect_eq "COPIES: remove.sh's _rm_mode_of is markers.sh's _markers_file_mode" "$LIB_MODE" "$(fn_body "$REMOVE_SH" _rm_mode_of)"
+sed 's/%Lp/%p/' "$REMOVE_SH" > "$TMP/remove-mutant-mode.sh"
+expect_true "COPIES: the mode mutant still parses" bash -n "$TMP/remove-mutant-mode.sh"
+expect_ne "COPIES: …and its _rm_mode_of no longer matches (the pin can go red)" \
+  "$LIB_MODE" "$(fn_body "$TMP/remove-mutant-mode.sh" _rm_mode_of)"
+
+# THE SESSION START'S KILL-TREE PAIR. The hook wants only the libraries its report reads, so it keeps its own pair of
+# the detect library's bounded-kill functions under another prefix. The code is held equal with comment lines left
+# out, since the two files wrap their comments apart, and with the one callee name mapped.
+SESSION_START_SH="${BIONIC_HOOKS_DIR}/session-start.sh"
+code_of() { printf '%s\n' "$1" | /usr/bin/grep -v '^[[:space:]]*#' || true; }
+expect_nonempty "COPIES: session-start's ss_bound_kill_tree reads out" "$(fn_body "$SESSION_START_SH" ss_bound_kill_tree)"
+expect_nonempty "COPIES: detect.sh's _detect_bound_kill_tree reads out" "$(fn_body "$DETECT_SH" _detect_bound_kill_tree)"
+expect_eq "COPIES: ss_bound_kill_tree's code is _detect_bound_kill_tree's" \
+  "$(code_of "$(fn_body "$DETECT_SH" _detect_bound_kill_tree)")" "$(code_of "$(fn_body "$SESSION_START_SH" ss_bound_kill_tree)")"
+expect_eq "COPIES: ss_bound_kill's code is _detect_bound_kill's" \
+  "$(code_of "$(fn_body "$DETECT_SH" _detect_bound_kill)" | sed 's/_detect_bound_kill_tree/ss_bound_kill_tree/')" \
+  "$(code_of "$(fn_body "$SESSION_START_SH" ss_bound_kill)")"
+sed 's/"\$generations" -lt 16/"$generations" -lt 17/' "$SESSION_START_SH" > "$TMP/ss-mutant-tree.sh"
+expect_true "COPIES: the tree-walk mutant still parses" bash -n "$TMP/ss-mutant-tree.sh"
+expect_ne "COPIES: …and its ss_bound_kill_tree no longer matches (the pin can go red)" \
+  "$(code_of "$(fn_body "$DETECT_SH" _detect_bound_kill_tree)")" "$(code_of "$(fn_body "$TMP/ss-mutant-tree.sh" ss_bound_kill_tree)")"
+sed 's/"\$pgid" = "\$pid"/"$pgid" != "$pid"/' "$SESSION_START_SH" > "$TMP/ss-mutant-kill.sh"
+expect_true "COPIES: the group-kill mutant still parses" bash -n "$TMP/ss-mutant-kill.sh"
+expect_ne "COPIES: …and its ss_bound_kill no longer matches (the pin can go red)" \
+  "$(code_of "$(fn_body "$DETECT_SH" _detect_bound_kill)" | sed 's/_detect_bound_kill_tree/ss_bound_kill_tree/')" \
+  "$(code_of "$(fn_body "$TMP/ss-mutant-kill.sh" ss_bound_kill)")"
+
+# THE LINK RESOLVER'S THIRD COPY. hooks.sh is sourced alone, so it keeps its own of deps.sh's resolver.
+HOOKS_SH="${PAYLOAD}/scripts/lib/hooks.sh"
+expect_nonempty "COPIES: hooks.sh's bionic_link_target reads out" "$(fn_body "$HOOKS_SH" bionic_link_target)"
+expect_eq "COPIES: hooks.sh's bionic_link_target is deps.sh's" "$LIB_LNK" "$(fn_body "$HOOKS_SH" bionic_link_target)"
+sed 's/"\$n" -lt 40/"$n" -lt 41/' "$HOOKS_SH" > "$TMP/hooks-mutant-lnk.sh"
+expect_true "COPIES: the hooks.sh resolver mutant still parses" bash -n "$TMP/hooks-mutant-lnk.sh"
+expect_ne "COPIES: …and its bionic_link_target no longer matches (the pin can go red)" \
+  "$LIB_LNK" "$(fn_body "$TMP/hooks-mutant-lnk.sh" bionic_link_target)"
 
 # ---------------------------------------------------------------------------
 section "§T51-UNREADABLE: a regular file the user cannot read is reported as unreadable (F4)"
