@@ -4089,9 +4089,9 @@ log_finding_quiet() {  # $1=check-id  $2=detail
   return 0
 }
 
-_eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field; asked through _proof_ask
+_eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field, the proof read by lib/proof.sh `proof_fact`; asked through _proof_ask
   local f; f="$(reader_facts "$1")" || return 2
-  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "proof" && line_kv("kind") == "walk" { e = line_kv("environments") } END { print e }'
+  printf '%s\n' "$f" | awk -F'|' "$(proof_fact_awk)"'proof_fact() && PROOF_KIND == "walk" { e = line_kv("environments") } END { print e }'
 }
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure

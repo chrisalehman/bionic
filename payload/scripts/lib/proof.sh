@@ -25,7 +25,7 @@
 # bash 3.2: no associative arrays, no `${var,,}`.
 
 # THE REGRESSION IS KIND `regression` (wave-38 T8; REQ-9, D6). A line 1.20.0 wrote, `kind=floor`, is read as it:
-# proof_fields normalises the kind through lib/alias.sh, the one map of the old spellings.
+# the one reading of a proof's fields (`proof_take`) normalises the kind through lib/alias.sh, the one map of the old spellings.
 # A WHOLE-RUN POINT'S RUN IS KIND `point`, carrying `point=<row>`: a run among the build, never the head's proof, so no
 # reader of the regression reads it.
 PROOF_KINDS="regression review task check walk point"
@@ -40,7 +40,7 @@ bionic_need alias.sh alias_read
 # not loaded. _proof_alias_born -> the born marker's spellings as an ERE alternation, the new one alone without it.
 _proof_alias_norm() { if declare -F alias_awk_norm >/dev/null 2>&1; then alias_awk_norm "$@"; else printf ' '; fi; }
 _proof_alias_born() { if declare -F alias_alt >/dev/null 2>&1; then alias_alt born; else printf 'regression'; fi; }
-# THE KIND'S STATEMENTS ARE WRITTEN ONCE, AT LOAD: proof_awk is pasted into every proof reader, so it costs no process.
+# THE KIND'S STATEMENTS ARE WRITTEN ONCE, AT LOAD: `proof_take` is pasted into every proof reader, so it costs no process.
 _PROOF_KIND_NORM="$(_proof_alias_norm kind PROOF_KIND)"
 # The questions a reading answers, the values its result and scope take, and the answers a
 # structure check takes (the Interfaces table of wave-27).
@@ -1607,34 +1607,28 @@ proof_base_id() {
   [ "${#1}" -ge 7 ] && [ "${#1}" -le 40 ]
 }
 
-# proof_awk -> the awk function `proof_fields(s)`, THE ONE READING OF A PROOF LINE (wave-26 T14;
-# review 7 F6): 1 when <s> is a proof line, its kind in PROOF_KIND and its head in PROOF_HEAD; a
-# reading's four fields in PROOF_QUESTION, PROOF_READER, PROOF_RESULT and PROOF_SCOPE, each empty
-# on a line that carries none (wave-27 T2), and its record in PROOF_EVIDENCE (wave-28 T72: the one
-# `evidence=` reader, where five programs each spelled their own).
-# A proof line starts `proved:` at the first column (a bulleted `- proved:` is prose, not the
-# line the writer writes), and carries `kind=<lower-case word>` and `head=<7 to 40 lower-case
-# hex>` among its space-separated fields (`head=none` is no head). `proof_last` and the
-# readiness program (units.sh) both read through it, so a line one counts the other counts.
-proof_awk() {
-  printf '%s' '
-    function proof_fields(s,   f, m, i) {
-      PROOF_KIND = ""; PROOF_HEAD = ""; PROOF_QUESTION = ""; PROOF_READER = ""; PROOF_RESULT = ""; PROOF_SCOPE = ""; PROOF_EVIDENCE = ""; PROOF_OWED = ""
-      if (s !~ /^proved:[ \t]/) return 0
-      m = split(s, f, /[ \t]+/)
-      for (i = 2; i <= m; i++) {
-        if (f[i] ~ /^kind=/) PROOF_KIND = substr(f[i], 6)
-        else if (f[i] ~ /^head=/) PROOF_HEAD = substr(f[i], 6)
-        else if (f[i] ~ /^question=/) PROOF_QUESTION = substr(f[i], 10)
-        else if (f[i] ~ /^reader=/) PROOF_READER = substr(f[i], 8)
-        else if (f[i] ~ /^result=/) PROOF_RESULT = substr(f[i], 8)
-        else if (f[i] ~ /^scope=/) PROOF_SCOPE = substr(f[i], 7)
-        else if (f[i] ~ /^evidence=/) PROOF_EVIDENCE = substr(f[i], 10)
-        else if (f[i] ~ /^owed=/) PROOF_OWED = substr(f[i], 6)
-      }
+# _PROOF_TAKE_AWK -> the awk function `proof_take(f, m)`, THE ONE READING OF A PROOF'S FIELDS: <f>[2..<m>] are its
+# `<key>=<value>` fields, the first of a key its value as lib/fields.sh `line_kv` reads it. It sets PROOF_KIND (through
+# lib/alias.sh's map) and PROOF_HEAD; a reading's PROOF_QUESTION, PROOF_READER, PROOF_RESULT and PROOF_SCOPE; the record
+# in PROOF_EVIDENCE, PROOF_OWED and a point's row in PROOF_POINT, each empty when absent; 1 when the kind is a
+# lower-case word and the head 7 to 40 lower-case hex (`head=none` is no head). A log fact (`proof_fact`) and a printed
+# line (`proof_fields`) both ask it, so a field one reads the other reads.
+_PROOF_TAKE_AWK='
+    function proof_take(f, m,   i, j, p) {
+      split("", p)
+      for (i = m; i >= 2; i--) if (j = index(f[i], "=")) p[substr(f[i], 1, j - 1)] = substr(f[i], j + 1)
+      PROOF_KIND = p["kind"]; PROOF_HEAD = p["head"]; PROOF_QUESTION = p["question"]; PROOF_READER = p["reader"]; PROOF_RESULT = p["result"]
+      PROOF_SCOPE = p["scope"]; PROOF_EVIDENCE = p["evidence"]; PROOF_OWED = p["owed"]; PROOF_POINT = p["point"]
       '"$_PROOF_KIND_NORM"'
       return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
-    }
+    }'
+# proof_awk -> the awk function `proof_fields(s)`, the view of a printed proof line (`proof_lines`) over the one reading
+# (`proof_take`): 1 when <s> is a proof line, its fields set as a log fact's are. A proof line starts `proved:` at the
+# first column (a bulleted `- proved:` is prose, not the line the writer writes) and carries its fields space-separated,
+# so it reads alike whatever field separator its caller's program splits on.
+proof_awk() {
+  printf '%s' "$_PROOF_TAKE_AWK"'
+    function proof_fields(s,   f) { split("", f); return proof_take(f, s ~ /^proved:[ \t]/ ? split(s, f, /[ \t]+/) : 0) }
   '
 }
 
@@ -2300,20 +2294,14 @@ _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and e
 }
 
 # proof_fact_awk -> awk source over `run/v1` facts, beside lib/line.sh's `line_kv` and the reader's `ev()`: the
-# function `proof_fact()`, 1 when the record is a proof whose kind is a lower-case word and whose head is 7 to 40
-# lower-case hex, as `proof_fields` holds a proof line, with the same PROOF_* fields set and the kind read through
-# lib/alias.sh's map. `proof_fact_line()` prints the fact as the `proved:` line its writer writes, for a caller that
-# quotes the line.
+# function `proof_fact()`, the one reading (`proof_take`) of the record when it is a proof event, 0 for any other.
+# `proof_fact_line()` prints the fact as the `proved:` line its writer writes, for a caller that quotes the line.
 proof_fact_awk() {
   _proof_reader_load
-  printf '%s' "$_READER_AWK"'
-    function proof_fact() {
-      PROOF_KIND = ""; PROOF_HEAD = ""; PROOF_QUESTION = ""; PROOF_READER = ""; PROOF_RESULT = ""; PROOF_SCOPE = ""; PROOF_EVIDENCE = ""; PROOF_OWED = ""
-      if (ev() != "proof") return 0
-      PROOF_KIND = line_kv("kind"); PROOF_HEAD = line_kv("head"); PROOF_QUESTION = line_kv("question"); PROOF_READER = line_kv("reader")
-      PROOF_RESULT = line_kv("result"); PROOF_SCOPE = line_kv("scope"); PROOF_EVIDENCE = line_kv("evidence"); PROOF_OWED = line_kv("owed")
-      '"$_PROOF_KIND_NORM"'
-      return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
+  printf '%s' "$_READER_AWK$_PROOF_TAKE_AWK"'
+    function proof_fact(   f, i, m) {
+      split("", f); if (ev() == "proof") for (m = i = NF; i >= 2; i--) f[i] = $i
+      return proof_take(f, m)
     }
     function proof_fact_line(   l) {
       l = "proved: kind=" line_kv("kind") " head=" PROOF_HEAD " at=" line_kv("at") " evidence=" PROOF_EVIDENCE
@@ -2321,7 +2309,7 @@ proof_fact_awk() {
       else if (PROOF_RESULT != "") l = l " result=" PROOF_RESULT
       if (PROOF_OWED != "") l = l " owed=" PROOF_OWED
       if (line_kv("run") != "") l = l " run=" line_kv("run") " head=" PROOF_HEAD " rc=" line_kv("rc")
-      if (line_kv("point") != "") l = l " point=" line_kv("point")
+      if (PROOF_POINT != "") l = l " point=" PROOF_POINT
       return l
     }
   '
@@ -2367,8 +2355,7 @@ proof_points() {
   local pl
   pl="$(proof_lines "${1:-}")" || return 2
   printf '%s\n' "$pl" | awk "$(proof_awk)"'
-    proof_fields($0) && PROOF_KIND == "point" && match($0, / point=[^ ]+/) {
-      printf "%s\t%s\t%s\t%s\n", substr($0, RSTART + 7, RLENGTH - 7), PROOF_HEAD, PROOF_EVIDENCE, PROOF_OWED }'
+    proof_fields($0) && PROOF_KIND == "point" && PROOF_POINT != "" { printf "%s\t%s\t%s\t%s\n", PROOF_POINT, PROOF_HEAD, PROOF_EVIDENCE, PROOF_OWED }'
 }
 
 # proof_last <plan> <kind> [<question>] -> the head of the NEWEST standing proof of <kind> the reader holds for the
