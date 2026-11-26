@@ -350,8 +350,7 @@ EOF
 # fold, so the tick reads them from the place every other surface does, a fact the run's log alone holds among them.
 tick_ask() {  # <reader question's function> [args] -> its answer over the bound run; rc 1 when no run or no reader
   [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ] && [ "${POKER_RUN_OPEN:-}" != unreadable ] || return 1
-  declare -F _proof_ask >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
-  declare -F _proof_ask >/dev/null 2>&1 || return 1
+  bionic_need proof.sh _proof_ask || return 1
   local q="$1"; shift
   _proof_ask "$POKER_RUN_PLAN" "$q" "$POKER_RUN_PLAN" "$@"
 }
@@ -407,7 +406,7 @@ tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per go
   declare -F owed_open >/dev/null 2>&1 && declare -F plan_goals_read >/dev/null 2>&1 || return 0
   OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_file >/dev/null 2>&1 || return 0
   # the suites a standing debt declares red: the reader's debts admitted on a red verdict, each with an id, none voided
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  bionic_need line.sh line_lines
   reds=" $(tick_ask reader_q_debts | awk -F'|' "${_LINE_FIELDS_AWK:-}"'line_kv("ev") == "admitted" { id = line_kv("id"); s = line_kv("suite")
       sub(/.*\//, "", s); if (id != "" && s != "") print s }' | tr '\n' ' ') "
   while IFS='	' read -r st t m rd; do
@@ -592,7 +591,7 @@ tick_record_stands() {
 tick_point_land() {
   local id="$1" ph ev ow head
   IFS=$'\t' read -r _ ph ev ow <<< "$2"
-  { declare -F line_published_event >/dev/null 2>&1 || . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  bionic_need line.sh line_published_event
   if ! declare -F line_published_event >/dev/null 2>&1 || ! declare -F proof_branch_head >/dev/null 2>&1; then
     printf 'the landing record (lib/line.sh) or the proof record cannot be loaded from %s' "$BIONIC_LIB"; return 1
   fi
@@ -670,8 +669,7 @@ landing_carrier_names() {  # <plan> -> the names of the entries whose landing ca
   local rec
   [ "$TICK_CARRIERS_READ" = yes ] && { printf '%s' "$TICK_CARRIERS"; return 0; }
   TICK_CARRIERS_READ=yes
-  declare -F _line_entries >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F _line_entries >/dev/null 2>&1 || return 0
+  bionic_need line.sh _line_entries || return 0
   rec="$(_wt_proofs_path "$REPO_REAL" "$1" 2>/dev/null)" || rec=""
   [ -n "$rec" ] && line_held "$rec" || return 0
   TICK_CARRIERS="$(_line_entries "$rec" "" 2>/dev/null | awk -F'\t' '$4 == "yes" && $2 != "" { print $2 }')"
@@ -869,10 +867,8 @@ tick_run_delivered() {
 tick_run_pr_open() {
   local pr rc asks
   [ -n "${1:-}" ] && [ -f "$1" ] || return 2
-  declare -F reader_main >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/reader.sh" ] && . "$BIONIC_LIB/reader.sh"; } >/dev/null 2>&1
-  declare -F reader_main >/dev/null 2>&1 || return 2
-  declare -F line_merge_ask_key >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F line_merge_ask_key >/dev/null 2>&1 || return 2
+  bionic_need reader.sh reader_main || return 2
+  bionic_need line.sh line_merge_ask_key || return 2
   pr="$(reader_main "$1" pr 2>/dev/null)"; rc=$?
   [ "$rc" -ne 1 ] || return 1
   [ "$rc" -eq 0 ] || return 2
@@ -1288,8 +1284,7 @@ tick_watch_facts() {  # <file>
     LT_REC=""
     [ -z "$POKER_RUN_PLAN" ] \
       || LT_REC="$(proof_debt_record "$POKER_RUN_PLAN" "$REPO_REAL" 2>/dev/null)" || LT_REC=""
-    [ -z "$LT_REC" ] || declare -F line_lines >/dev/null 2>&1 \
-      || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+    [ -z "$LT_REC" ] || bionic_need line.sh line_lines
     if [ -n "$LT_REC" ] && declare -F line_lines >/dev/null 2>&1 && line_held "$LT_REC" && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}" && declare -F line_value >/dev/null 2>&1; then
       lt_f() { line_value "$LT_EV" "$1"; }   # <key> -> its value in the event
       while IFS= read -r LT_EV; do
@@ -1682,7 +1677,7 @@ BACKSTOP_ROWS
       # is landed by the tick at the working head, one `published` event of the record kind naming the run's log, red or
       # green: a red's suites are owed to the fix rows born of it, never to the point.
       if [ -n "$(units_points "$POKER_RUN_PLAN" 2>/dev/null)" ]; then
-        { declare -F proof_points >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
+        bionic_need proof.sh proof_points
         TICK_PTS="$(proof_points "$POKER_RUN_PLAN" 2>/dev/null)"
         while IFS=$'\t' read -r BS_ID BS_ST; do
           case "$BS_ST" in pending|active) : ;; *) continue ;; esac
@@ -2408,10 +2403,7 @@ EOF
       case "${SCHED_STEP:-}" in ''|*[!0-9]*) return 0 ;; esac
       [ "$SCHED_STEP" -ge 4 ] || return 0
       [ "$(plan_regression "$plan" 2>/dev/null)" != no ] || return 0
-      if ! declare -F proof_branch_head >/dev/null 2>&1; then
-        [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
-      fi
-      declare -F proof_branch_head >/dev/null 2>&1 && declare -F proof_checkout >/dev/null 2>&1 || return 0
+      bionic_need proof.sh proof_branch_head && declare -F proof_checkout >/dev/null 2>&1 || return 0
       head="$(proof_branch_head "$plan" "$REPO_REAL" 2>/dev/null)" || return 0
       case "$head" in [0-9a-f]*) : ;; *) return 0 ;; esac
       # A READY POINT IS RUN BEFORE THE WHOLE RUN IS WEIGHED, by its own rules alone (`tick_point_start`).
@@ -3276,8 +3268,7 @@ EOF
   watch_merge_look() {
     local root="${1:-}" plan="${2:-}" seen co tmp acct rel key sid out
     [ -d "$root" ] && [ -f "$plan" ] || return 0
-    declare -F line_merge_seen >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-    declare -F line_merge_seen >/dev/null 2>&1 || return 0
+    bionic_need line.sh line_merge_seen || return 0
     seen="$(line_merge_seen "$plan" "$root" --fetch 2>/dev/null)" || return 0
     sid="$(printf '%s' "${CLAUDE_CODE_SESSION_ID:-}" | LC_ALL=C tr -cd 'A-Za-z0-9_-' | cut -c1-8)"
     rel=".bionic/tmp/close-${sid:-session}.out"; acct="$root/$rel"
@@ -3310,8 +3301,7 @@ EOF
   # and runs the close on the first pass that finds nobody out. Rows that cannot be read are out: doubt never closes.
   watch_rows_out() {
     local plan="$1" seen="$2" acct="$3" held rc ids="" key word room more=0
-    declare -F patrol_rows_out >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/patrol.sh" ] && . "$BIONIC_LIB/patrol.sh"; } >/dev/null 2>&1
-    if declare -F patrol_rows_out >/dev/null 2>&1; then held="$(patrol_rows_out "$plan" 2>/dev/null)"; rc=$?; else held=""; rc=2; fi
+    if bionic_need patrol.sh patrol_rows_out; then held="$(patrol_rows_out "$plan" 2>/dev/null)"; rc=$?; else held=""; rc=2; fi
     if [ "$rc" -ne 0 ]; then ids=unread; held="the rows or their rosters cannot be read"
     else ids="$(printf '%s\n' "$held" | awk -F'\t' '$1 != "" { printf "%s%s", (n++ ? " " : ""), $1 }')"; fi
     [ -n "$ids" ] || return 1

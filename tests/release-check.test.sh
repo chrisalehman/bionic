@@ -58,6 +58,10 @@
 #                   its code as well as the landing's base.
 #   §HOLD           the project's check, run from inside a held command, is started with no hold, so its facts are
 #                   folded by the reader at the judge and not by the verb's.
+#   §ONE-READER     the copy check runs over the tree at BIONIC_CHECK_HEAD, as the judge's one-reader-check.sh holds it: a
+#                   head with a planted second parser, a second writer of the plan or a copied loader is each refused in
+#                   one line naming the copy, a clean head passes with its counts, a plant in the working files alone is
+#                   not read, and a head with no hooks/ and payload/scripts/ passes saying it holds no copy to count.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -878,5 +882,44 @@ expect_contains "(hl0) the caller held its reads when it ran the check" "caller:
 expect_contains "(hl1) the check ran at the judge and printed what it was handed" "check: held=" "$HL_OUT"
 expect_contains "(hl2) …which is the head it judges, so the line is the check's own" "judge-head=$HL_J" "$HL_OUT"
 expect_contains "(hl3) …and no hold: the project's command is started holding nothing" "check: held=none " "$HL_OUT"
+
+section "§ONE-READER — a planted second parser, plan writer or loader at the head is refused by the check a landing runs"
+
+# A repository whose head holds this checkout's hooks/ and payload/scripts/, so the judge's copy check reads a whole
+# tree; each plant is one commit on that head of its own, judged through BIONIC_CHECK_HEAD.
+OR="$TMP/one-reader"; fx_repo "$OR" 2.3.4 2.3.4
+mkdir -p "$OR/payload" && cp -R "$BIONIC_SCRIPTS_DIR/hooks" "$OR/hooks" && cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$OR/payload/scripts" \
+  && fx_commit "$OR" "the code"; OR_B="$(git -C "$OR" rev-parse HEAD)"
+or_plant() {  # <name> <path> <text> -> the commit holding <text> at <path> on the clean head
+  git -C "$OR" checkout -q -B "plant-$1" "$OR_B" && printf '%s\n' "$3" > "$OR/$2" && fx_commit "$OR" "plant $1" && git -C "$OR" rev-parse HEAD
+}
+or_check() { OUT="$(cd "$OR" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD="$1" bash "$CHECK" "$LIST" 2>&1)"; RC=$?; }
+OR_P="$(or_plant parse payload/scripts/lib/planted-parse.sh "planted_rows() { awk -F'|' '\$2 ~ /^ T[0-9]+ \$/ { print \$2 }' \"\$plan\"; }")"
+OR_W="$(or_plant write payload/scripts/lib/planted-write.sh "planted_line() { printf -- '- %s: landed\\n' \"\$1\" >> \"\$plan\"; }")"
+OR_L="$(or_plant loader hooks/planted-loader.sh "$(printf '#!/bin/bash\n# --- bionic-loader/v2 BEGIN')")"
+git -C "$OR" checkout -q -B main "$OR_B"
+or_check "$OR_B"
+expect_status "(or0) the clean head passes" 0 "$RC"
+expect_regex "(or0) …with one line of its counts" "^one-reader: parsers=0 plan_writers=0 shared_types=0 hook_refusals=0 loader_copies=0 unheard_folds=0 names=0 load_guards=[0-9]+ git_homes=[0-9]+ field_readers=[0-9]+$" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^one-reader: ')"
+or_check "$OR_P"
+expect_eq "(or1) a second parser at the head fails the release in one line naming it" \
+  "1|1|release-check: one-reader-check: refused — parser payload/scripts/lib/planted-parse.sh:1" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check: ')"
+or_check "$OR_W"
+expect_eq "(or2) a second writer of the plan at the head fails it in one line naming it" \
+  "1|1|release-check: one-reader-check: refused — plan-writer payload/scripts/lib/planted-write.sh:1" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check: ')"
+or_check "$OR_L"
+expect_eq "(or3) a copied loader at the head fails it in one line naming it" \
+  "1|1|release-check: one-reader-check: refused — loader hooks/planted-loader.sh:2" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check: ')"
+git -C "$OR" show "$OR_P:payload/scripts/lib/planted-parse.sh" > "$OR/payload/scripts/lib/planted-parse.sh"
+or_check "$OR_B"
+expect_eq "(or4) the parser in the working files alone is not read: the head passes" "0|0" "$RC|$(lines_of "$OUT")"
+rm -f "$OR/payload/scripts/lib/planted-parse.sh"
+run_check "$TMP/agree"
+expect_eq "(or5) a head with no hooks/ and payload/scripts/ passes, saying it holds no copy to count" \
+  "0|one-reader: HEAD holds no hooks/ and payload/scripts/, so no copy to count" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep '^one-reader: ')"
 
 finish

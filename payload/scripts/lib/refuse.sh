@@ -171,8 +171,8 @@
 # (the loader block runs it with stderr closed for exactly that reason), and a wall
 # that cannot format its refusal must not therefore fail open.
 #
-# SOURCED, NEVER EXECUTED. The only top-level command is the soft source of
-# width.sh below, which defines functions and prints nothing.
+# SOURCED, NEVER EXECUTED. The only top-level commands are the loader's bootstrap and
+# the soft source of width.sh below, which define functions and print nothing.
 #
 # [WALL: tests/refuse.test.sh]
 # [WALL: tests/cross-gate-agreement-2.test.sh]
@@ -181,14 +181,8 @@
 # lib/detect.sh for lib/deps.sh. The 100-column budget and the column counter that
 # knows `—` is one column wide already have an owner; a second count of the same
 # thing here is the duplication epic-19 W1 S9 removed.
-_refuse_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-if ! declare -F bionic_cols >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_refuse_self_dir)" && pwd -P)/width.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need width.sh bionic_cols
 
 # THE FIX BUDGET. Six words is REQ-E1/AC-E1.3's number. Forty columns is the same
 # criterion's other half: AC-E1.3's regex is `\(.{1,40}\)$`, so a `fix` wider than
@@ -369,9 +363,8 @@ _refuse_log_need() {
   case "$2" in "needs: "*) ;; *) return 0 ;; esac
   [ -n "${BIONIC_ROOT:-}" ] && [ -n "${BIONIC_SID:-}" ] || return 0
   (
-    lib="${BIONIC_LIB:-$(cd "$(_refuse_self_dir)" && pwd -P)}"
-    declare -F session_plan >/dev/null 2>&1 || . "$lib/run.sh" || exit 0
-    declare -F line_hand_event >/dev/null 2>&1 || . "$lib/line.sh" || exit 0
+    bionic_need run.sh session_plan || exit 0
+    bionic_need line.sh line_hand_event || exit 0
     plan="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID")" || exit 0
     line_hand_event "$plan" refusal "$3 ($2)" needs=person "wall=$1"
   ) >/dev/null 2>&1 || :

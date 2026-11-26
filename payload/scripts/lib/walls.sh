@@ -1493,7 +1493,7 @@ wall_gate_judge_steps() {
 # Per-tier required evidence keys — ONE POINTER PER MATRIX ROW (wave-31 T6; REQ-5, D5). Every tier owes
 # `evidence:`, the AC block's proof path under record/; a T4 row owes `user-confirmed:` as well, the one thing
 # only a user can write. The per-tier readings that used to ride beside the pointer were written by the agent that
-# ran the eval, copied from the record file the pointer already names, and read by nothing but this loop: a key
+# ran the test, copied from the record file the pointer already names, and read by nothing but this loop: a key
 # read by nothing is ceremony. The record file is where the run is shown, and the pointer is checked to name one.
 #
 # AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT. Its name collides with nothing the
@@ -1601,8 +1601,8 @@ _matrix_urows() {
 }
 
 # matrix_fails_when_missing <plan> -> the first criterion, in the reader's order (lib/reader.sh `reader_criteria`, no
-# fold), whose fails-when is empty: the criterion question's answer, its Eval design row's Fails when cell. A criterion
-# the Eval design holds no row for is no finding: there is no row to lack the cell, and the per-tier evidence loop at
+# fold), whose fails-when is empty: the criterion question's answer, its Test design row's Fails when cell. A criterion
+# the Test design holds no row for is no finding: there is no row to lack the cell, and the per-tier evidence loop at
 # the Verify gate owns that gap. Nothing when every criterion names one, or the reader cannot be loaded.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_fails_when_missing() {
@@ -1771,12 +1771,12 @@ matrix_row_deferred() {
 
 # THE LIVE ROW'S EXITS. A pending or blocked row the owing-step rule no longer defers meets the evidence
 # refusals below for the key it lacks, and those refusals say which of three acts settles it: a row the walk
-# proved is discharged by registering the walk's record, a row whose eval cannot fire its fails-when has its
-# Eval design row changed by the person, and any other row is the user's to waive. The first is a verb an agent
+# proved is discharged by registering the walk's record, a row whose test cannot fire its fails-when has its
+# Test design row changed by the person, and any other row is the user's to waive. The first is a verb an agent
 # runs; the other two are a person's, said as such, so the refusal never leaves its reader to guess whose move it is.
 # [WALL: tests/shell-lint.test.sh]
 matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence refusal
-  printf '%s' "the row is live past the step that owes it: if the walk proved it, register its record: session-poker.sh proof-add walk <its record>; if its eval cannot fire, needs: the user — its ## Eval design row changed; otherwise needs: the user — a waiver, in their words: session-poker.sh waive $1 '<their words>' '<why>'."
+  printf '%s' "the row is live past the step that owes it: if the walk proved it, register its record: session-poker.sh proof-add walk <its record>; if its test cannot fire, needs: the user — its ## Test design row changed; otherwise needs: the user — a waiver, in their words: session-poker.sh waive $1 '<their words>' '<why>'."
 }
 
 # matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>\037<confirmed>\037<waiver 1|0>` per
@@ -1792,13 +1792,13 @@ matrix_table_rows() {
   done <<< "$MATRIX_CELLS"
 }
 
-# matrix_close_eval <eval text> -> 0 when the eval names `landing-report --hand-holds`, the measure
+# matrix_close_test <test text> -> 0 when the test names `landing-report --hand-holds`, the measure
 # close-out reads last. The one test of which criterion the close proves: matrix_close_rows and the
-# proof close-out writes both ask it, so no eval reads as the close's to one and not the other.
-matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
+# proof close-out writes both ask it, so no test reads as the close's to one and not the other.
+matrix_close_test() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
 
 # matrix_close_rows <plan> -> the AC id of each pending criterion the close settles, the reader's
-# order: owed at Step 9, and its Eval design row's eval is the close's measure (matrix_close_eval).
+# order: owed at Step 9, and its Test design row's test is the close's measure (matrix_close_test).
 # close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
   local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC MATRIX_OWING MATRIX_OWING_OF _MO_STEP _MO_OPEN ac tier status ev aud conf w
@@ -1807,7 +1807,7 @@ matrix_close_rows() {
     [ -n "$ac" ] && [ "$status" = pending ] || continue
     _matrix_owing "$PLAN" "$ac"
     [ "$_MO_STEP" = 9 ] || continue
-    matrix_close_eval "$(plan_read_row "$PLAN" "$PLAN_READ_CRITERIA" Criterion "$ac" 2>/dev/null | grep '^test=')" || continue
+    matrix_close_test "$(plan_read_row "$PLAN" "$PLAN_READ_CRITERIA" Criterion "$ac" 2>/dev/null | grep '^test=')" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
@@ -2871,16 +2871,16 @@ Fix: on the user's literal 'approved', record that approval of step3 — never o
 
 # ---------- the fails-when arm (AC-K2.3, AC-K2.5) ----------
 #
-# AN EVAL WITH NO NAMEABLE FAILURE IS NOT AN EVAL. A matrix row that cannot say what
+# A TEST WITH NO NAMEABLE FAILURE IS NOT A TEST. A matrix row that cannot say what
 # planted defect it must go red on is a row that will be green whatever the code does,
 # and the gate cannot tell the two apart at discharge time — which is the whole reason
-# the column is authored at Step 2, in the spec's `## Eval design`, and merely RENDERED
+# the column is authored at Step 2, in the spec's `## Test design`, and merely RENDERED
 # into the plan's matrix at Step 3. By Step 4 every AC block has one, or a step was
 # skipped; so this arm is the receipt for that authoring order rather than a new demand.
 #
-# IT JUDGES EVAL DESIGN ROWS. A criterion with no `## Eval design` row is not a
+# IT JUDGES TEST DESIGN ROWS. A criterion with no `## Test design` row is not a
 # fails-when finding: there is no row to lack the cell, and the per-tier evidence loop
-# at the Verify gate is what owns that gap. Nor does a plan with no `## Eval design`
+# at the Verify gate is what owns that gap. Nor does a plan with no `## Test design`
 # at all become one — a Step-4 plan may not have written the section yet, and
 # demanding it here would be the Verify gate's demand moved four steps early.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -2891,9 +2891,9 @@ validate_fails_when() {
   [ "$step" -ge 4 ] || return 0
   ac="$(matrix_fails_when_missing "$PLAN")"
   [ -n "$ac" ] || return 0
-  _eg_detail="canonical-sdlc step ${CURRENT} — criterion '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
+  _eg_detail="canonical-sdlc step ${CURRENT} — criterion '${ac}' names no 'fails-when:'; a test with no nameable failure is not a test.
 Plan: $PLAN
-Fix: write the planted defect this eval must go red on in the criterion's '## Eval design' Fails when cell."
+Fix: write the planted defect this test must go red on in the criterion's '## Test design' Fails when cell."
   refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
   return 0
 }
@@ -2902,7 +2902,7 @@ Fix: write the planted defect this eval must go red on in the criterion's '## Ev
 #
 # A PROTOTYPE NEVER DISCHARGES A MATRIX ROW (design decision D7). Its output is a
 # design ruling written back to the spec, not a shipped behavior — nothing about a
-# throwaway is provable by an eval, so a `kind: prototype` task that also owns a
+# throwaway is provable by a test, so a `kind: prototype` task that also owns a
 # Verification Matrix AC block is a category error the gate can catch structurally:
 # the `## Tasks` table names which tasks are prototypes, and each AC block's own
 # `task:` field names which task discharges it. Reads the matrix the same way
@@ -2945,7 +2945,7 @@ validate_prototype_no_matrix_row() {
     [ -n "$ac" ] && [ -n "$ac_task" ] || continue
     for n in $proto_ids; do
       [ "$ac_task" = "$n" ] || continue
-      fix="repoint the Task cell of '${ac}' in '## Eval design'"
+      fix="repoint the Task cell of '${ac}' in '## Test design'"
       _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names 'task: ${ac_task}', a 'kind: prototype' row in '## Tasks'; a prototype ships nothing and never discharges a matrix row.
 Plan: $PLAN
 Fix: ${fix} to the build task that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
@@ -3673,7 +3673,7 @@ POINTER_STEPS="1 2 3 4"  # Step 6 must reach dispatch for the matrix prefix chec
 # function definitions and nothing else, so no other behaviour moved with it.
 
 # ---------- pre-registered Verification Matrix ----------
-# The Verify gate discharges the run's criteria, each criterion's cells being `matrix_load`'s (the Eval design's rows
+# The Verify gate discharges the run's criteria, each criterion's cells being `matrix_load`'s (the Test design's rows
 # and the run's events); a plan holds no matrix section.
 # validate_matrix walks them, and fires at current: 5 (via the Step-5 validator) and as a
 # prefix check for current: 6..9 (via the dispatcher).
@@ -3774,19 +3774,19 @@ validate_matrix() {
   fi
   if [ -z "$MATRIX_CELLS" ]; then
     block_matrix "this plan has no verification matrix yet" "add one row per criterion" \
-      "the Verify gate requires the plan's criteria: an '## Eval design' row, or a '## Verification Matrix' row, per criterion." \
-      "add the '## Eval design' table, one row per criterion. See canonical-sdlc/SKILL.md Step 5."
+      "the Verify gate requires the plan's criteria: a '## Test design' row, or a '## Verification Matrix' row, per criterion." \
+      "add the '## Test design' table, one row per criterion. See canonical-sdlc/SKILL.md Step 5."
   fi
 
   rows="$(matrix_table_rows)"
   while IFS=$'\037' read -r ac tier status ev aud ucv row_is_waived; do
     [ -n "$ac" ] || continue
     aud="$(placeholder_cell "$aud")"
-    # tier enum: the Eval design's type through the scale profile
+    # tier enum: the Test design's test type through the scale profile
     if ! grep -qE '^T[0-4]$' <<< "$tier"; then
       block_matrix "${ac}'s tier is unknown" "use T0 through T4" \
-        "criterion '${ac}' has an invalid tier '${tier}' (want T0..T4: an Eval design type of static, unit, hermetic, live or human)." \
-        "set the criterion's Eval design type to one of static, unit, hermetic, live, human."
+        "criterion '${ac}' has an invalid tier '${tier}' (want T0..T4: a test type of static, unit, hermetic, live or human)." \
+        "set the criterion's test type to one of static, unit, hermetic, live, human."
     fi
     # A CRITERION HAS NO BLOCK: its evidence is the discharging proof's and its confirmation the approval naming it, so
     # the per-tier keys below are asked of those two facts, written as the keys they stand for.

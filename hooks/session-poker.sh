@@ -178,10 +178,7 @@ fi
 # Sourced softly, beside the want-list rather than in it: a hook copied outside the repo
 # resolves its libraries from a checkout that may not carry gate.sh yet, and the tick then says
 # the gate is unreadable and offers nothing, rather than failing to load at all.
-if ! declare -F gate_room >/dev/null 2>&1 && [ -f "$BIONIC_LIB/gate.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$BIONIC_LIB/gate.sh"
-fi
+bionic_need gate.sh gate_room
 # THE ONE PREDICATE FOR "TOO QUIET" (REQ-10 AC-10.1, D9; ADR-028). `observe_class` classifies
 # a dispatched row `delivered`/`alive`/`idle` from two mtimes against the cadence the row's
 # own brief declared. Both readers in this file — the tick's row loop and `adopt`'s liveness
@@ -207,10 +204,7 @@ POKER_WORD="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
 # it raises, and approve and waive close the item their answer settles. NOT in
 # `BIONIC_LIB_WANT`, and sourced only when readable: a library without it (one older than this wave)
 # leaves every verb and every tick exactly as it was, so the ledger can never refuse a command.
-if ! declare -F owed_send >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$BIONIC_LIB/owed.sh"
-fi
+bionic_need owed.sh owed_send
 # poker_owed_close <root> <key> <by> -> always 0, prints nothing: the answer verb closes the item.
 poker_owed_close() {
   declare -F owed_close >/dev/null 2>&1 || return 0
@@ -1546,10 +1540,7 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD and UNITS_READINGS
   SCHED_LIVE_PLAN="${SCHED_PLAN:-}"
   UNITS_LIVE_HEAD=""; UNITS_READINGS_STATE=""
   [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
-  if ! declare -F proof_branch_head >/dev/null 2>&1; then
-    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
-  fi
-  declare -F proof_branch_head >/dev/null 2>&1 || return 0
+  bionic_need proof.sh proof_branch_head || return 0
   # The review proofs are the run's, read through the kept fold the schedule reads; a fold that fails is no head, and the
   # review waits.
   local pl
@@ -1582,10 +1573,7 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
     covered*) : ;;
     *) UNITS_FACTS_STATE="the reviews are judged once the regression holds"; return 0 ;;
   esac
-  if ! declare -F facts_state >/dev/null 2>&1; then
-    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
-  fi
-  declare -F facts_state >/dev/null 2>&1 || return 0
+  bionic_need proof.sh facts_state || return 0
   # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7), `proof_branch_head`, as `current 7`/`8` and
   # close-out read it: a branch no checkout holds is judged where its ref points.
   head="${UNITS_LIVE_HEAD:-}"
@@ -2079,8 +2067,7 @@ plan_verb_id_ok() {
 finding_read() {
   local plan="$1" repo="$2" id="$3" rec n got
   FR_S=""; FR_R=""; FR_P=""; FR_W=""; FR_T=""; FR_Q=""; FR_H=""; FR_WHY=""
-  if ! { declare -F proof_findings >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F proof_finding_rating >/dev/null 2>&1; then
+  if ! bionic_need proof.sh proof_finding_rating; then
     FR_WHY="the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB"; return 1
   fi
   rec="${id%#*}"; n="${id##*#}"

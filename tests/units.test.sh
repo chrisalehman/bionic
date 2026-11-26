@@ -276,6 +276,14 @@ expect_eq "rows come out in TABLE order — T22 is 21st and T21 is 22nd" "T22 T2
 expect_eq "no separator or prose line is emitted as a row" "" \
   "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' '$1 ~ /^[-: ]*$/ || $1 ~ /Parallel/')"
 
+# THE LIBRARY ALONE LOADS THROUGH THE LOADER. Sourced by itself in a clean shell, units.sh brings lib/loader.sh's
+# `bionic_need` with it and carries no loader of its own: a private copy beside the shared one is a second home for the
+# same rule. One extractor, the shell's own list of defined functions, answers both halves.
+UL_FNS="$(bash -c '. "$1" >/dev/null 2>&1; declare -F | awk "{ print \$3 }"' _ "$LIB" \
+  | /usr/bin/grep -xE 'bionic_need|units_rows|_units_lib|_units_proof_lib|_units_plan_read' | LC_ALL=C sort | paste -sd' ' -)"
+expect_eq "units.sh sourced alone defines the loader's bionic_need and units_rows, and no private loader" \
+  "bionic_need units_rows" "$UL_FNS"
+
 section "2 — units_rows is keyed on header NAMES: reversed columns, identical output (AC-1e.2)"
 
 # THE FIXTURE REALLY IS REORDERED — the positive control, without which the equality below
@@ -1165,7 +1173,7 @@ HD_F2='run/v1|ev=published|row=T1|commit=c1|by=w-T1|at=2026-11-01T00:00:02Z'
 hd_run() {  # <script> -> the child's print; the counters in $HD_C, made empty first
   : > "$HD_C"
   BIONIC_COUNT="$HD_C" HD_P="$HD_P" HD_F1="$HD_F1" HD_F2="$HD_F2" TMPDIR="$SANDBOX" bash -c '. "$1/proof.sh" && . "$1/units.sh" || exit 127
-    _units_lib reader.sh reader_q_statuses || exit 127
+    bionic_need reader.sh reader_q_statuses || exit 127
     hd_st() { _UNITS_FACTS_PLAN="$HD_P" _UNITS_FACTS="$1" _units_statuses "$HD_P" | paste -sd" " -; }
     '"$1" _ "${LIB%/*}" 2>&1
 }

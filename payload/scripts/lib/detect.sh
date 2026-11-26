@@ -71,15 +71,8 @@
 # SOURCED without coreutils is a library that dies on the machine it is most
 # needed on (jq missing, PATH broken, a half-uninstalled box). Bash's own
 # parameter expansion does the same work with no process at all.
-_detect_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-
-if ! declare -F check_dep >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_detect_self_dir)" && pwd -P)/deps.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need deps.sh check_dep
 
 # env.sh, THE SAME SOFT SOURCE, FOR ITS READ HALF ONLY — `rc_state`, `rc_get`, `rc_file`
 # and `rc_default`. Those own the question "is bionic's proxy line inside bionic's
@@ -90,10 +83,7 @@ fi
 # dependency it can only report on. No cycle: env.sh sources deps.sh and nothing
 # else, so this file loads deps.sh, then env.sh over the top of it, and a caller
 # that already has either gets neither again.
-if ! declare -F rc_get >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_detect_self_dir)" && pwd -P)/env.sh"
-fi
+bionic_need env.sh rc_get
 
 # shell.sh, THE SAME SOFT SOURCE, FOR `shell_rc_file` — the one rc-file resolver
 # (L-DETECT/4.4, spec AC-21). `_detect_shell_rc` below used to carry its own copy
@@ -101,20 +91,14 @@ fi
 # byte-identical one. Two owners of one answer is the duplication this file's own
 # header forbids for every other fact it holds, so this fact gets the same
 # single-source treatment as `rc_get`/`rc_file` just above.
-if ! declare -F shell_rc_file >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_detect_self_dir)" && pwd -P)/shell.sh"
-fi
+bionic_need shell.sh shell_rc_file
 
 # roots.sh, THE SAME SOFT SOURCE, FOR `plugin_root` — the one payload-root resolver
 # (epic-22 wave-01, N1). This file carried `_detect_plugin_root` and lib/deps.sh carried
 # `_dep_plugin_root`, byte-identical, each explaining itself by naming the other. Guarded on
 # the function and not on the sibling that usually brings it, because a caller that has
 # check_dep already skips the deps.sh source above.
-if ! declare -F plugin_root >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_detect_self_dir)" && pwd -P)/roots.sh"
-fi
+bionic_need roots.sh plugin_root
 
 
 # A thin caller of shell.sh's one resolver — see the source guard above.
@@ -1168,10 +1152,7 @@ detect_checkout_verdict() {  # <realpath to compare against> [<project root>] ->
 # neighbour running a checkout says nothing about this session. With no session id — a
 # terminal — the newest record of any live session. A link is never a record.
 _detect_live_ids() {
-  if ! declare -F patrol_live_session_ids >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(_detect_self_dir)" && pwd -P)/patrol.sh" 2>/dev/null || return 1
-  fi
+  bionic_need patrol.sh patrol_live_session_ids || return 1
   patrol_live_session_ids 2>/dev/null
 }
 

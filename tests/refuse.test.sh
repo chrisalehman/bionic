@@ -122,6 +122,7 @@ FX_FIX_7="add it to the Suites budget line"
 MUT_DIR="$SANDBOX/lib"
 mkdir -p "$MUT_DIR"
 cp "$LIB_DIR/width.sh" "$MUT_DIR/width.sh"
+cp "$LIB_DIR/loader.sh" "$MUT_DIR/loader.sh"
 
 # mutant <name> <sed-expr> — sets MUT_PATH to a scratch copy of the shipped library with
 # one guard removed. EACH CALL IS PRECEDED BY ITS OWN `anchor file payload/scripts/lib/refuse.sh

@@ -30,6 +30,20 @@ expect_regex "(e2) …as one line in the interface's shape, at= ISO-UTC last" \
 line_event "$PE" verdict row=T1 "commit=$(ll_head "$RE")" "suite=a|b" result=green log=- >/dev/null 2>&1; RCB=$?
 expect_ne "(e4) a value holding | is refused" "0" "$RCB"
 expect_eq "(e5) line_head prints the working branch's head" "$(ll_head "$RE")" "$(line_head "$PE")"
+# THE LANDING LIBRARIES LOAD THROUGH THE LOADER. Each, sourced by itself in a clean shell, brings lib/loader.sh's
+# `bionic_need` and its own entry point, and none keeps a private loader or a function that only names its own folder:
+# a second copy of the loading rule is a second home for it. One extractor, the shell's list of defined functions.
+ll_alone() {  # <lib file> <names, a grep -x alternation> -> those of the names the library defines alone, sorted
+  bash -c '. "$1" >/dev/null 2>&1; declare -F | awk "{ print \$3 }"' _ "$REPO/payload/scripts/lib/$1" \
+    | /usr/bin/grep -xE "$2" | LC_ALL=C sort | paste -sd' ' -
+}
+expect_eq "(e6) line.sh alone: bionic_need and line_head, and of its loaders only _line_load_proof, the poker's" \
+  "_line_load_proof bionic_need line_head" \
+  "$(ll_alone line.sh 'bionic_need|line_head|_line_self_dir|_line_load_[a-z_]+|_line_log_load')"
+expect_eq "(e7) worktree.sh alone: bionic_need and worktree_root, and no private loader" "bionic_need worktree_root" \
+  "$(ll_alone worktree.sh 'bionic_need|worktree_root|_wt_self_dir|_wt_[a-z]+_load|_wt_liveness')"
+expect_eq "(e8) gate.sh alone: bionic_need and gate_ask, and no private loader" "bionic_need gate_ask" \
+  "$(ll_alone gate.sh 'bionic_need|gate_ask|_gate_self_dir|_gate_load_line')"
 
 # ---------------------------------------------------------------------------
 section "§FOLD: line_state prints each open entry in record order, and the base rule"
@@ -638,7 +652,7 @@ section "§HOLDER: the landing runner asks the gate in its own shell, so the run
 # subshell's own scans are charged to the run. Another process holds the gate until the runner's request is filed.
 HD="$WORLD_ROOT/holder"; mkdir -p "$HD"
 (
-  export BIONIC_GATE_DIR="$HD/gate" BIONIC_GATE_POLL=0.3; _line_load_gate || exit 1
+  export BIONIC_GATE_DIR="$HD/gate" BIONIC_GATE_POLL=0.3; bionic_need gate.sh gate_ask || exit 1
   bash -c '. "$1/payload/scripts/lib/gate.sh"; id="$(gate_ask whole blocker)"; i=0
     while [ ! -e "$BIONIC_GATE_DIR/requests/$((id + 1))" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
     sleep 0.5; gate_end "$id" 0' _ "$REPO" >/dev/null 2>&1 &
@@ -904,7 +918,7 @@ expect_eq "(bl3) a suite over the bar at a quiet load is refused at load 5" "too
 expect_eq "(bl4) …and at load 0, the same line" "too-long \`bash%20c.test.sh\` 1000s — split it|bar=1000" \
   "$(bl_ask 0 '`bash%20c.test.sh`' | paste -sd'|' -)"
 expect_contains "(bl5) the brief's bar reads the same quiet seconds, not the gate's promise at the load now" \
-  '_line_bar_seconds "$(_line_gate_key "$BRF_E")"' "$(cat "$REPO/hooks/poker/plan.sh")"
+  '_line_bar_seconds "$(_line_gate_key "$e")"' "$(cat "$REPO/hooks/poker/plan.sh")"
 
 # ---------------------------------------------------------------------------
 section "§GUARD (ready half): a row that commits .bionic is refused before any landing tree (AC-14.1)"
@@ -1216,13 +1230,13 @@ RW8="$(ll_world)"; WW_P8="$(ll_plan "$RW8")"
 awk '{ print } /^\| T2 \| 4 \| build / { print "| D7 | 7 | doc | the release | — | 10 | REQ-1 | CHANGELOG.md | — |" }' \
   "$WW_P8" > "$WW_P8.o" && mv "$WW_P8.o" "$WW_P8"
 ww_order() {  # <root> -> `<units' order, sorted>|<line's landed release row>`
-  ( _wt_units_load || exit 9
+  ( bionic_need units.sh units_rows || exit 9
     printf '%s|%s' "$(_units_publish_order "$(ll_plan "$1")" "$(units_rows "$(ll_plan "$1")")" | tr ' ' '\n' | LC_ALL=C sort | paste -sd' ' -)" \
       "$(_line_release_landed "$(ll_plan "$1")" "$(ll_log "$1")" 2>/dev/null)" )
 }
 { ww_pub D7 queue 2026-10-20T10:00:00Z; ww_pub T2 queue 2026-10-20T11:00:00Z; } > "$(ll_log "$RW8")"
 expect_eq "ORDER-0 precondition: the plan holds the release row D7, a doc row at step 7, landed" "D7	7	doc" \
-  "$( ( _wt_units_load && units_rows "$WW_P8" ) | awk -F'\t' '$1 == "D7" { print $1 "\t" $2 "\t" $3 }')"
+  "$( ( bionic_need units.sh units_rows && units_rows "$WW_P8" ) | awk -F'\t' '$1 == "D7" { print $1 "\t" $2 "\t" $3 }')"
 expect_eq "ORDER-1 both readers read the release row's event as its landing, and units places it before T2's" \
   "D7=1 T2=2|D7" "$(ww_order "$RW8")"
 { ww_pub T2 queue 2026-10-20T09:00:00Z; ww_pub D7 queue 2026-10-20T10:00:00Z; } > "$(ll_log "$RW8")"
@@ -1333,7 +1347,7 @@ ll_verb "$RB" T3
 expect_match "(in1) ready refuses the integrate row (exit 2) by its route: a record row, landed by the tick with no tree" \
   "2 *REFUSED reason=integrate-row row=T3 kind=integrate *" "$LL_RC $LL_OUT"
 expect_absent "(in2) …never told to set the step back" "set the step back" "$LL_OUT"
-in_cell() { ( _wt_units_load && units_rows "$PB" ) | awk -F'\t' '$1 == "T3" { print $3 "|" $11 }'; }
+in_cell() { ( bionic_need units.sh units_rows && units_rows "$PB" ) | awk -F'\t' '$1 == "T3" { print $3 "|" $11 }'; }
 expect_eq "(in3) the fill reads T3's tree while it stands" "integrate|.worktrees/T3" "$(in_cell)"
 ( cd "$RB" && bash "$SPAWN" remove "$RB/.worktrees/T3" >/dev/null 2>&1 )
 expect_eq "(in4) …and none once it is removed, so the tick lands the row's record" "integrate|" "$(in_cell)"

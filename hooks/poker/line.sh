@@ -18,8 +18,7 @@
 # cannot be loaded.
 row_writer() {  # <roster> <plan> <row> <agent cell>
   ROW_WRITER=""
-  declare -F line_row_writer >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F line_row_writer >/dev/null 2>&1 || return 1
+  bionic_need line.sh line_row_writer || return 1
   line_row_writer "$@"
   ROW_WRITER="$LINE_WRITER"
   return 0
@@ -44,8 +43,7 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 deliver_check() {
   local row kind files wt status art docs drel abs real rel e n=0 cands="" call fix wb head sid roster rulings live lrc pl
   call="bash $HOOK_DIR/session-poker.sh"
-  if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F proof_branch_head >/dev/null 2>&1; then
+  if ! bionic_need proof.sh proof_branch_head; then
     die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
@@ -175,8 +173,8 @@ DELIVER_FILES
   # branch, so a part still to render there would never reach it. A part the renderer would change refuses, naming
   # the verb that renders it; nothing to render (no release, entry or registered review) holds nothing back.
   if [ "$kind" = integrate ]; then
-    if ! { declare -F line_reviews_state >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-       || ! declare -F line_reviews_state >/dev/null 2>&1 || ! e="$(mktemp "${TMPDIR:-/tmp}/deliver-reviews.XXXXXX")"; then
+    if ! bionic_need line.sh line_reviews_state \
+       || ! e="$(mktemp "${TMPDIR:-/tmp}/deliver-reviews.XXXXXX")"; then
       die "REFUSED — $PV_ID is the integrate row, and whether the release entry lists the plan's reviews cannot be read (lib/line.sh from $BIONIC_LIB); the plan is unchanged."
       exit 2
     fi
@@ -285,8 +283,7 @@ DELIVER_FILES
 # another kind is not this fold's. A request line the fold does not know (`peak=`, anything newer) is ignored. The
 # gate's lock is not taken: this is a read, and a request the gate is writing reads as it stands.
 _lr_reader() {  # -> 0 once the reader (lib/reader.sh, through lib/proof.sh's loader) is loaded
-  { declare -F _proof_reader_load >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1; } \
-    && _proof_reader_load
+  bionic_need proof.sh _proof_reader_load && _proof_reader_load
 }
 _lr_plan() {  # <plan or landing record> -> the plan; a record is its plan's when the reader joins that plan to its directory
   local dir name docs c
@@ -744,8 +741,8 @@ poker_verb_reviews_part() {
     exit 1
   fi
   plan_verb_open reviews-part
-  if ! { declare -F line_reviews_state >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-     || ! declare -F line_reviews_state >/dev/null 2>&1 || ! declare -F proof_branch_head >/dev/null 2>&1; then
+  if ! bionic_need line.sh line_reviews_state \
+     || ! declare -F proof_branch_head >/dev/null 2>&1; then
     die "REFUSED — the renderer (lib/line.sh) or the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was rendered."
     exit 2
   fi
@@ -965,7 +962,7 @@ poker_verb_publish() {
 # notes are the orchestrator's words, written in `pr-summary.md` beside the run's log; Testing, Review, Known limits and
 # Decision records are the run's facts, printed by `pr-facts` from the reader and never typed:
 #   Testing           the newest whole regression's suites green of those it ran, each suite by its last verdict, and
-#                     the Eval design's criteria discharged of all (lib/reader.sh `reader_cells`)
+#                     the Test design's criteria discharged of all (lib/reader.sh `reader_cells`)
 #   Review            each question's newest review proof or waiver
 #   Known limits      each open deferral's stated sentence, the release entry's own reading (`known_limits_part`)
 #   Decision records  each ADR whose `wave:` is the run's, the register's own reading (sitrep.sh `decisions_all`)
@@ -1076,8 +1073,8 @@ poker_verb_known_limits_part() {
     exit 1
   fi
   plan_verb_open known-limits-part
-  if ! { declare -F line_reviews_commit >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-     || ! declare -F line_reviews_commit >/dev/null 2>&1 || ! _line_load_proof || ! declare -F proof_findings_owed >/dev/null 2>&1; then
+  if ! bionic_need line.sh line_reviews_commit \
+     || ! _line_load_proof || ! declare -F proof_findings_owed >/dev/null 2>&1; then
     die "REFUSED — the renderer (lib/line.sh) or the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was rendered."
     exit 2
   fi

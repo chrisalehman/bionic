@@ -4,7 +4,7 @@ set +x +v
 # D1, REQ-3 AC-3.5). The release gate runs it from the repository being published, from the last
 # release to the working head, and refuses the release on a non-zero exit.
 #
-# FIVE CHECKS, each always run, and the exit is 0 only when all pass:
+# SIX CHECKS, each always run, and the exit is 0 only when all pass:
 #
 #   1. the name scan (tests/lib/name-scan.sh <list path>, same working directory, same
 #      environment: BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD are the scan's own). Its output is
@@ -50,6 +50,12 @@ set +x +v
 #      line and exit 2, never a pass. A head over the limit is admitted when its tests are at or under the base's. A
 #      symlink is not counted, so a directory reached through one counts once. One `git ls-tree` and one `git cat-file
 #      --batch` read the head: a `git show` per file would cost a minute where this costs a second.
+#   6. the copies: payload/scripts/one-reader-check.sh beside this file's tests/lib/, so the copy the judge holds, run
+#      over the tree at BIONIC_CHECK_HEAD written out with `git archive`, never the working files. Each refusal it prints
+#      is ONE line after `release-check: ` and the exit is 1: a second parser of a plan or a log, a second writer of a
+#      plan, a copied loader, whatever its REFUSING list names. A pass prints its counts on one `one-reader:` line. A
+#      head holding no hooks/ and payload/scripts/ has no copy to count, and passes with one `one-reader:` line saying
+#      so; a head that cannot be written out, or a judge with no copy check, is ONE line and exit 2.
 #
 # On a mismatch it prints ONE line naming both versions and exits 1. A missing list path, a list
 # that is not a file, and a pair that cannot be read (no release heading, no `.version`, a path
@@ -324,6 +330,28 @@ if [ -n "$chg_version" ]; then
 fi
 # The cap reads the head's tree alone, so it runs whatever the release heading says.
 ( set +u; ratio_check ); fold_rc $?
+
+# copies_check -> the judge's copy check over the head's tree; 0 passes, 1 a refused copy, 2 not run. Run in a subshell,
+# so its scratch tree goes with it.
+copies_check() {
+  local orc="$HERE/../../payload/scripts/one-reader-check.sh" t out rc
+  if ! git cat-file -e "$head:hooks" 2>/dev/null || ! git cat-file -e "$head:payload/scripts" 2>/dev/null; then
+    echo "one-reader: $head holds no hooks/ and payload/scripts/, so no copy to count"; return 0
+  fi
+  [ -f "$orc" ] || { echo "release-check: refused — the judge holds no copy check at $orc"; return 2; }
+  t="$(mktemp -d "${TMPDIR:-/tmp}/release-check-copies.XXXXXX")" || { echo "release-check: refused — no scratch directory for the copy check"; return 2; }
+  trap 'rm -rf "$t"' EXIT
+  mkdir "$t/tree" && git archive "$head" | tar -x -C "$t/tree" \
+    || { echo "release-check: refused — the tree at $head cannot be written out for the copy check"; return 2; }
+  out="$(bash "$orc" "$t/tree" 2>"$t/err")"; rc=$?
+  case "$rc" in
+    0) printf '%s\n' "$out" | awk -F= 'NF == 2 && $1 ~ /^[a-z_]+$/ && $2 ~ /^[0-9]+$/ { s = s (s == "" ? "" : " ") $0 } END { print "one-reader: " s }' ;;
+    1) sed 's/^/release-check: /' "$t/err" ;;
+    *) echo "release-check: refused — the copy check could not read the tree at $head: $(tr '\n' ' ' < "$t/err")" ;;
+  esac
+  return "$rc"
+}
+( set +u; copies_check ); fold_rc $?
 
 # ---- the name scan ---------------------------------------------------------------------------
 bash "$HERE/name-scan.sh" "$list" || { rc=$?; [ "$status" -ne 0 ] || status="$rc"; }
