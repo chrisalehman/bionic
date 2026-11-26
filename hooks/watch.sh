@@ -162,7 +162,7 @@ while :; do
   case "$W_IV" in ''|*[!0-9]*) W_IV="$WATCH_INTERVAL_DEFAULT" ;; esac
   if [ $(( $(date +%s) - W_BORN + W_IV )) -ge "$W_SPAN" ]; then
     # Out is open on the roster, by the one close predicate every wall asks.
-    W_OPEN="$(roster_open_names "$W_ROOT/.bionic/tmp/roster-$W_SID.state" "$W_ROOT/.bionic/tmp/sweeper-$W_SID.state" "$W_SID")"
+    W_OPEN="$(roster_open_names "$(roster_path "$W_ROOT" "$W_SID")" "$W_ROOT/.bionic/tmp/sweeper-$W_SID.state" "$W_SID")"
     [ -n "$W_OPEN" ] && w_wake "bionic watch: RENEW - the watch has run its day with an agent still out: end this turn; its end starts a new watch"
     [ -n "$W_PR" ] && [ -s "$W_PR" ] || w_rest limit
     w_wake "bionic watch: RENEW - the watch has run its day with the pull request open: end this turn; its end starts a new watch"

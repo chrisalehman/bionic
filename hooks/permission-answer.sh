@@ -242,7 +242,7 @@ PA_STAGE="finding who asked"
 PA_NAME=""
 PA_ROW=""
 if [ -n "$PA_AGENT" ]; then
-  PA_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state"
+  PA_ROSTER="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   if [ -L "$PA_ROSTER" ]; then
     _pa_fail roster-symlink
   elif [ ! -e "$PA_ROSTER" ]; then

@@ -435,10 +435,9 @@ patrol_interval() {  # <repo-root> -> "<seconds> <configured|default>"
 # EVERY FAILURE IS AN EMPTY STRING, never a refusal: no session, no root or a filesystem that keeps no creation time
 # all mean "no window", and the counters read the whole transcript.
 patrol_window() {  # <repo-root> <sid> -> ISO instant on stdout, empty for "the whole transcript"
-  local repo="${1:-}" sid="${2:-}" t f b=""
+  local repo="${1:-}" sid="${2:-}" f b=""
   [ -n "$repo" ] && [ -n "$sid" ] || return 0
-  t="$(tmp_root "$repo" 2>/dev/null)" || return 0
-  f="$t/roster-${sid}.state"
+  f="$(roster_path "$repo" "$sid" 2>/dev/null)" || return 0
   b="$(stat -f %B "$f" 2>/dev/null || stat -c %W "$f" 2>/dev/null)" || b=""
   case "$b" in ''|*[!0-9]*|0) b="" ;; esac
   [ -n "$b" ] || return 0
@@ -472,7 +471,7 @@ _PATROL_ISO_AWK="${_TIME_ISO_AWK:-}"
 patrol_roster_state() {  # <repo-root> <sid> -> rows=…|open=…|closed=…|names=…|path=…
   local repo="${1:-}" sid="${2:-}" f ledger rows names closed open open_names nm nl='
 '
-  f="$(tmp_root "$repo")/roster-${sid}.state"
+  f="$(roster_path "$repo" "$sid")"
   if [ ! -f "$f" ] || [ -L "$f" ]; then
     printf 'rows=0|open=0|closed=0|present=no|path=%s' "$f"
     return 0

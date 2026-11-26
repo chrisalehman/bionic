@@ -302,7 +302,7 @@ PLAN
     git -C "$root/.worktrees/$t" add "$t.txt"
     git -C "$root/.worktrees/$t" commit --quiet -m "$t: one commit" || exit 1
     roster_row_fixture session="$WORLD_SID" name="wx-$t" agent_id="a00$t" plan="$plan" \
-      >> "$root/.bionic/tmp/roster-$WORLD_SID.state" || exit 1
+      >> "$(roster_path "$root" "$WORLD_SID")" || exit 1
   done
   printf '%s' "$root"
 )

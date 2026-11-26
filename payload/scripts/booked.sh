@@ -845,10 +845,11 @@ booked_run_open() {  # at the start of the tail, in the detached side
   case "$sid" in ''|*[!A-Za-z0-9_-]*) return 0 ;; esac
   r="$(booked_project_root)"
   [ -n "$r" ] || return 0
-  BOOKED_ROSTER="$r/.bionic/tmp/roster-$sid.state"
-  if [ ! -f "$BOOKED_ROSTER" ] || [ -L "$BOOKED_ROSTER" ]; then BOOKED_ROSTER=""; return 0; fi
+  # The roster library first: it names the roster's file as well as writing to it.
   # shellcheck disable=SC1091
   . "$BOOKED_SELF_DIR/lib/roster.sh" 2>/dev/null || { BOOKED_ROSTER=""; return 0; }
+  BOOKED_ROSTER="$(roster_path "$r" "$sid")"
+  if [ ! -f "$BOOKED_ROSTER" ] || [ -L "$BOOKED_ROSTER" ]; then BOOKED_ROSTER=""; return 0; fi
   roster_mark_run "$BOOKED_ROSTER" "$agent" "$run_log" "run_pid=$$" "run_head=$stamp_head" \
     "run_cmd=$(booked_one_line "$cmd" 120)" "run_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" || BOOKED_ROSTER=""
 }

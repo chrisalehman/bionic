@@ -1022,7 +1022,9 @@ _gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_
     */.git) root="${c%/.git}" ;;
     *) root="$_GATE_TREE"; [ -n "$root" ] || return 0 ;;
   esac
-  roster="$root/.bionic/tmp/roster-$sid.state"
+  # The roster library names the file; without it the roster reads as unreadable, and the call is admitted.
+  bionic_need roster.sh roster_path || return 0
+  roster="$(roster_path "$root" "$sid")"
   { [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; } || return 0
   row="$(GATE_BUDGET_WHO="$agent" awk '
     index($0, "roster-state/") == 1 {

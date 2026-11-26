@@ -436,7 +436,8 @@ probe_env_on
 #
 # BY KEY, never by position — the same rule the attestation and the observation
 # record already follow (checklist A6), so an added field is inert here.
-roster_path()  { printf '%s/.bionic/tmp/roster-%s.state' "$1" "$2"; }
+# The roster's file is named by the production library's `roster_path`, which roster-row.sh has loaded.
+type -t roster_path >/dev/null 2>&1 || . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh" || exit 1
 roster_rows()  { grep -v '^#' "$1" 2>/dev/null | grep -c . ; }
 # NAMED FOR WHAT IT DOES, because `roster_row` is now the production WRITER's name and this
 # suite sources it (tests/lib/roster-row.sh, S14). Two functions, one name, one of them

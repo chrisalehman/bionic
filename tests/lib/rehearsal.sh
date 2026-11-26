@@ -292,7 +292,7 @@ _rh_review() {
       "$(git -C "$RH_ROOT" show "$5:payload/scripts/lib/said.sh" 2>/dev/null | /usr/bin/grep -n '^rehearsal_landed()' | cut -d: -f1)"
     printf '\nThe review read the rows and found %s.\n' "$([ "$n" = 0 ] && echo nothing || echo one finding)"; } > "$RH_REC/$nm.md"
   printf '%s|questions=%s\n' "$(roster_row_fixture session="$WORLD_SID" name="$nm" agent_id="a-$nm" subagent_type="$t" \
-    launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$nm.md")" "$q" >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state"
+    launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$nm.md")" "$q" >> "$(roster_path "$RH_ROOT" "$WORLD_SID")"
   _rh_hand record "the review record record/wave-x/$nm.md"; _rh_hand launch "$nm's roster row (roster_row)"
   _rh_poker "proof-add $nm" proof-add review "record/wave-x/$nm.md" --question "$q" --reader "$nm"
 }
@@ -368,7 +368,7 @@ _rh_launch() {
   local u="toolu-$1"
   roster_row_fixture status=intended session="$WORLD_SID" name="$1" agent_id= subagent_type=bionic:senior-implementor \
     launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$2.md" plan="$RH_PLAN" row="$2" lands_on="$3" tool_use_id="$u" \
-    brief=".bionic/docs/record/wave-x/briefs/$1.md" brief_sum=- >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state" || return 1
+    brief=".bionic/docs/record/wave-x/briefs/$1.md" brief_sum=- >> "$(roster_path "$RH_ROOT" "$WORLD_SID")" || return 1
   _rh_hand launch "$1's roster row on $2, landing on $3 (roster_row)"
   _rh_do "$1's launch confirmed: its dispatch event" bash -c 'printf %s "$1" | bash "$2"' _ \
     "$(jq -nc --arg s "$WORLD_SID" --arg c "$RH_ROOT" --arg n "$1" --arg u "$u" '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse",

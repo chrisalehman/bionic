@@ -336,7 +336,7 @@ case "$COMMAND" in
   *commit*)
     _bw_aid="$(bionic_jq .agent_id)"
     if [ -n "$_bw_aid" ] && git_argv_has_sub "$COMMAND" commit && bionic_need roster.sh ruling_take_unread; then
-      _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+      _bw_roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
       if _bw_row="$(roster_row_for_id "$_bw_roster" "$_bw_aid")"; then
         BIONIC_RULINGS_WRITER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
         BIONIC_RULINGS_UNREAD="$(ruling_take_unread "$_bw_roster" "$BIONIC_RULINGS_WRITER" commit)"
@@ -388,7 +388,7 @@ case "$COMMAND" in
   *ruling-ack*)
     if _wall_poker_contract_verb "$COMMAND" ruling-ack && bionic_need roster.sh ruling_fold; then
       BIONIC_ACK_ID="${_WALL_POKER_ARGS%%"$GIT_ARGV_US"*}"
-      _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+      _bw_roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
       if [ -n "$BIONIC_ACK_ID" ]; then
         BIONIC_ACK_WRITER="$(ruling_fold "$_bw_roster" | awk -F"$RULING_US" -v id="$BIONIC_ACK_ID" '$1 == id { print $2; exit }')"
       fi
