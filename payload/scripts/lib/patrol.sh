@@ -24,6 +24,7 @@ declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${
 # one definition there (epic-22 wave-01, N1); this file is a caller of `claude_home`,
 # `transcripts_dir`, `tmp_root`, `plugin_root` and `project_root`.
 bionic_need roots.sh claude_home
+bionic_need fields.sh line_field_v
 # roster.sh, THE SAME SOFT SOURCE, for `roster_open_names` (epic-23 wave-20 T17, D10):
 # `patrol_roster_state` asks the one close predicate every wall asks, and this file is sourced
 # by callers (doctor, the stop library, suites) that never declared roster.sh themselves.
@@ -52,16 +53,6 @@ _patrol_clean() {  # <value> [max-chars]
     | tr '\n\r\t|' '    ' \
     | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')"
   printf '%s' "${v:0:${2:-200}}"
-}
-
-_patrol_field() {  # <line> <key>
-  local f
-  while IFS= read -r f; do
-    case "$f" in "${2}="*) printf '%s' "${f#"${2}="}"; return 0 ;; esac
-  done <<EOF
-$(printf '%s' "${1:-}" | tr '|' '\n')
-EOF
-  printf ''
 }
 
 # THE PROJECT ROOT A SESSION'S STATE FILES LIVE UNDER is `project_root`'s answer, called
@@ -518,9 +509,9 @@ patrol_report() {  # -> patrol-session/v1 … patrol-roster/v1 … patrol-wall/v
 
   while IFS= read -r sess; do
     [ -n "$sess" ] || continue
-    sid="$(_patrol_field "$sess" session)"
-    pid="$(_patrol_field "$sess" pid)"
-    cwd="$(_patrol_field "$sess" cwd)"
+    sid="$(line_field "$sess" session)"
+    pid="$(line_field "$sess" pid)"
+    cwd="$(line_field "$sess" cwd)"
     repo="$(project_root "$cwd")"
 
     tr="$(patrol_transcript "$sid")" || tr=""
@@ -551,7 +542,7 @@ EOF
     rline="$(patrol_roster_state "$repo" "$sid")"
     printf '%s|session=%s|%s\n' "$PATROL_ROSTER_SCHEMA" "$sid" "$rline"
 
-    dispatches="$(_patrol_field "$rline" rows)"
+    dispatches="$(line_field "$rline" rows)"
     case "$agents" in ''|*[!0-9]*) agents="" ;; esac
     if [ -z "$agents" ]; then
       printf '%s|session=%s|dispatched=|rostered=%s|blind=|refused=%s|cause=%s\n' \

@@ -273,6 +273,8 @@ done
 # actually looks, which is the whole failure the row exists to catch.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/loader.sh"
+# fields.sh, for `line_field`: the Patrol records are read by key, never by position.
+bionic_need fields.sh line_field_v
 # root.sh, run.sh and resources.sh — the library spine this page reports on
 # (bionic 1.4.0). `project_root` is the SSoT for which project this cwd is in, so
 # the run-scoped rows below read the same address space every hook does;
@@ -361,19 +363,6 @@ EOF
 }
 
 
-# One field of a `|`-delimited machine line, BY KEY. The Patrol records are the
-# only input this report parses that it did not also print, and every other
-# reader of a line in this shape — five hooks — reads it the same way, by key
-# and never by position.
-_doctor_pfield() {  # <line> <key>
-  local f
-  while IFS= read -r f; do
-    case "$f" in "${2}="*) printf '%s' "${f#"${2}="}"; return 0 ;; esac
-  done <<EOF
-$(printf '%s' "${1:-}" | tr '|' '\n')
-EOF
-  printf ''
-}
 
 # ─── Restart staleness: one reader, two surfaces ─────────────────────────────
 #
@@ -486,9 +475,9 @@ _doctor_restart_stale() {
   at="$(_doctor_registry_installed_at)"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    cwd="$(_doctor_pfield "$line" cwd)"
+    cwd="$(line_field "$line" cwd)"
     _doctor_session_here "$cwd" || continue
-    pid="$(_doctor_pfield "$line" pid)"; sid="$(_doctor_pfield "$line" session)"
+    pid="$(line_field "$line" pid)"; sid="$(line_field "$line" session)"
     [ -n "$sid" ] || continue
     rec="$DOCTOR_ROOT/.bionic/tmp/loaded-${sid}.state"
     [ -f "$rec" ] && [ ! -L "$rec" ] || continue
@@ -1593,13 +1582,13 @@ while IFS= read -r _p_line; do
   case "$_p_line" in
     "patrol-session/v1|"*)
       _patrol_flush
-      _p_sid="$(_doctor_pfield "$_p_line" session)"
+      _p_sid="$(line_field "$_p_line" session)"
       _p_open=0; _p_present=""; _p_blind=""
       _p_here=no
-      if _doctor_session_here "$(_doctor_pfield "$_p_line" cwd)"; then _p_here=yes; fi ;;
+      if _doctor_session_here "$(line_field "$_p_line" cwd)"; then _p_here=yes; fi ;;
     "patrol-roster/v1|"*)
-      _p_open="$(_doctor_pfield "$_p_line" open)"
-      _p_present="$(_doctor_pfield "$_p_line" present)" ;;
+      _p_open="$(line_field "$_p_line" open)"
+      _p_present="$(line_field "$_p_line" present)" ;;
     "patrol-wall/v1|"*)
       # LAUNCHES THE ROSTER NEVER SAW, already computed and already net of
       # refusals (lib/patrol.sh: agents - rostered - refused, floored at 0). The
@@ -1607,7 +1596,7 @@ while IFS= read -r _p_line; do
       # the box, no file under projects/ — and an empty count is not a count, so
       # `_patrol_flush` treats it as zero rather than as an alarm. A machine
       # without jq gets a quieter page, never a false one.
-      _p_blind="$(_doctor_pfield "$_p_line" blind)" ;;
+      _p_blind="$(line_field "$_p_line" blind)" ;;
   esac
 done <<EOF
 $PATROL_LINES
@@ -1717,7 +1706,7 @@ while IFS= read -r _dead_sid; do
 $(patrol_session_state_files "$DOCTOR_ROOT" "$_dead_sid")
 EOF2
   _dead_state="$(patrol_roster_state "$DOCTOR_ROOT" "$_dead_sid" 2>/dev/null)"
-  _dead_open="$(_doctor_pfield "$_dead_state" open)"
+  _dead_open="$(line_field "$_dead_state" open)"
   case "$_dead_open" in ''|*[!0-9]*) _dead_open=0 ;; esac
   # $DOCTOR_NIL, NOT $DOCTOR_BAD (R2, ticket-30; doctor-reads.test.sh 12f18's
   # own rule: "every ✗ row is a problem", count >= rows on the whole page).
