@@ -1819,13 +1819,15 @@ DSP_READINGS
     # machine is unfinished. Asked in this shell, the id read back through a file, since the gate's holder and the
     # `times` gate_end reads are this shell's.
     FR_GATE=""; FR_GATE_OWN=0
-    if declare -F gate_ask >/dev/null 2>&1 && FR_IDF="$(mktemp "${TMPDIR:-/tmp}/bionic-regression-gate.XXXXXX")"; then
+    if declare -F gate_ask_into >/dev/null 2>&1 && FR_IDF="$(mktemp "${TMPDIR:-/tmp}/bionic-regression-gate.XXXXXX")"; then
       FR_HERE="$PWD"; FR_ASK=2
       if cd "$FR_CO" 2>/dev/null; then
-        gate_ask whole "${FR_CMD:0:60}" > "$FR_IDF"; FR_ASK=$?
+        gate_ask_into "$FR_IDF" whole "${FR_CMD:0:60}"; FR_ASK=$?
+        FR_GATE="$GATE_ASK_ID"
         cd "$FR_HERE" 2>/dev/null || :
+      else
+        rm -f "$FR_IDF"
       fi
-      { read -r FR_GATE < "$FR_IDF"; } 2>/dev/null; rm -f "$FR_IDF"
       case "$FR_ASK" in
         0)
           case "$(sed -n 's/^holder=//p' "$(gate_dir)/requests/$FR_GATE" 2>/dev/null | tail -n 1)" in "$$:"*) FR_GATE_OWN=1 ;; esac

@@ -249,14 +249,22 @@ gate_share() {
   printf '%s\n' "$v"
 }
 
+# _gate_cores — the cores this process may use, a whole number of at least 1 (`_res_cores`, else 1): the one count the reserve's
+# bound and the share's room take.
+_gate_cores() {
+  local c
+  c="$(_res_cores)"
+  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  printf '%s\n' "$c"
+}
+
 # gate_reserve_ok <value> — rc 0 when <value> may be a reserve: a non-negative decimal of at most nine
 # characters, no larger than the cores this process may use. THE ONE SITE of that rule: gate_reserve
 # reads a refused file as 1, and the share verb refuses to write one, so the two cannot disagree.
 gate_reserve_ok() {
   local c
   case "${1:-}" in ''|.*|*.|*[!0-9.]*|*.*.*|??????????*) return 1 ;; esac
-  c="$(_res_cores)"
-  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  c="$(_gate_cores)"
   awk -v v="$1" -v c="$c" 'BEGIN { exit !(v + 0 <= c + 0) }'
 }
 
@@ -273,13 +281,12 @@ gate_reserve() {
 
 # _gate_share_cores — the processor room the share allows: share × cores ÷ 100 less the reserve,
 # never under 1 and otherwise unfloored (6.36 at share 92 and reserve 1 on 8 cores), the cores
-# being those this process may use (`_res_cores`). THE ONE SITE of that product: gate_width
+# being those this process may use (`_gate_cores`). THE ONE SITE of that product: gate_width
 # floors it, and the admission test (`_gate_decide`) and the room (`_gate_room_line`) compare
 # against it as it is, so they cannot drift apart and none keeps a formula of its own.
 _gate_share_cores() {
   local c
-  c="$(_res_cores)"
-  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  c="$(_gate_cores)"
   awk -v s="$(gate_share)" -v c="$c" -v r="$(gate_reserve)" \
     'BEGIN { x = s * c / 100 - r; if (x < 1) x = 1; printf "%.10g", x }'
 }
@@ -1699,6 +1706,28 @@ _gate_width() {
       }
       print n, "-"
     }'
+}
+
+# gate_ask_into <idfile> <gate_ask args…> — gate_ask in THIS shell, its id read back through <idfile> into GATE_ASK_ID and the
+# file removed; rc is gate_ask's. In `$( )` a subshell would be the holder and the `times` gate gate_end reads would miss what this
+# shell reaped. GATE_ASK_FILE names the file while the ask waits, for a caller's exit trap.
+GATE_ASK_ID=""; GATE_ASK_FILE=""
+gate_ask_into() {
+  local _gaf="$1" _gar
+  shift
+  GATE_ASK_ID=""; GATE_ASK_FILE="$_gaf"
+  gate_ask "$@" > "$_gaf"; _gar=$?
+  { read -r GATE_ASK_ID < "$_gaf"; } 2>/dev/null
+  rm -f "$_gaf"; GATE_ASK_FILE=""
+  return "$_gar"
+}
+
+# gate_ask_here <prefix> <gate_ask args…> — gate_ask_into over ${TMPDIR:-/tmp}/<prefix>.XXXXXX; with no file to be made, asked in `$( )`.
+gate_ask_here() {
+  local _gap="$1" _gaf
+  shift
+  if _gaf="$(mktemp "${TMPDIR:-/tmp}/$_gap.XXXXXX" 2>/dev/null)"; then gate_ask_into "$_gaf" "$@"; return; fi
+  GATE_ASK_ID="$(gate_ask "$@")"
 }
 
 # gate_asked — names on stdin, one who per line: prints, in the order given, each that has an
