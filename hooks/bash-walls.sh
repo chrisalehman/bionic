@@ -191,10 +191,7 @@ case "$SEAL_LINE" in
   changed*|busy)
     BIONIC_SEAL_LINE="$SEAL_LINE"; BIONIC_SEAL_PLAN="$BIONIC_BOUND_PLAN"; BIONIC_SEAL_LOG="$SEAL_LOG"
     EVENT=$(bionic_jq .hook_event_name); [ -n "$EVENT" ] || EVENT="PreToolUse"
-    bionic_fold "$EVENT" wall_run_seal; _bw_rc=$?
-    # The catch is kept in the seal before the ask is written, so the ask's own line, which the appender cannot
-    # seal for a plan that is gone, never reads later as the log added to, and a plan put back reads changed.
-    case "$SEAL_LINE" in changed*) seal_write "$BIONIC_SEAL_PLAN" "$BIONIC_SEAL_LOG" >/dev/null 2>&1 ;; esac
+    bionic_fold "$EVENT" wall_run_seal_kept; _bw_rc=$?
     bw_open_asks
     exit $_bw_rc ;;
 esac
@@ -229,13 +226,8 @@ fi
 # THE ENGAGEMENT GUARD, asked once for all five. EVERY UNREADABLE STATE READS AS NOT
 # ENGAGED — absent marker, a symlink at the path, a foreign or unshaped session key, no key
 # at all — and the fail direction is inverted here on purpose: a session that never invoked
-# the skill never consented, and no wall binds it. But consent is given once, by binding, not
-# held by the engaged file: under D3 a session the binding record holds to a plan stays judged
-# whatever became of that file, since a tool can remove it or replace it with a link, and a
-# guard that let that lift every wall would make the file a switch any command can throw. So
-# such a session is judged as engaged, by every wall below. A record of `none`, or no record,
-# leaves the file the one answer, as before.
-[ "$BIONIC_ENGAGED" = 1 ] || [ -n "$BIONIC_BOUND_PLAN" ] || exit 0
+# the skill never consented, and no wall binds it. A bound session is judged as engaged.
+bionic_judged || exit 0
 BIONIC_ENGAGED=1
 
 # AN ABSENT FIELD IS NOT A MISMATCH, so a hand-run payload still reaches the walls — the

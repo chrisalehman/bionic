@@ -2086,13 +2086,11 @@ bionic_context 2>/dev/null || exit 0
 # foreign or unshaped session key, no key at all. The marker is the one artifact whose
 # PRESENCE opens a wall, so the fail direction is inverted here on purpose, and it is
 # inverted against this file's own fail-CLOSED posture on the library: a wall that binds a
-# session which never consented is the defect this guard exists to remove. Consent is the
-# binding, though, not the marker (D3): hooks/bash-walls.sh hands this gate the plan the
-# session's binding record holds it to (BIONIC_BOUND_PLAN), and a session holding one is
-# judged whatever became of its marker, which any tool can remove or replace with a link.
-# The context resolved again above reads the marker alone, so the handed plan is asked too.
+# session which never consented is the defect this guard exists to remove. The context
+# resolved again above reads the marker alone, so the plan hooks/bash-walls.sh hands this gate
+# from the session's binding is asked too (lib/context.sh `bionic_judged`).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-[ "$BIONIC_ENGAGED" = 1 ] || [ -n "${BIONIC_BOUND_PLAN:-}" ] || exit 0
+bionic_judged || exit 0
 
 # ---------- JURISDICTION (wave-19 REQ-9, D10; ADR-031 amended): whose repository is this? ----------
 #
@@ -6642,4 +6640,13 @@ you run the verb, never the person, with their words quoted as they wrote them:
   session-poker.sh abandon '<their words>'   the run ends here
 Until then the change is the ask seal:changed on the run's register, in the log above."
   return 2
+}
+
+# wall_run_seal_kept <event> -> wall_run_seal's verdict, a changed run's catch kept in its seal before its caller opens
+# the ask, so the ask's own line never reads as the log added to and a plan put back reads changed.
+wall_run_seal_kept() {
+  local _rc
+  wall_run_seal "$1"; _rc=$?
+  case "${BIONIC_SEAL_LINE:-}" in changed*) seal_write "$BIONIC_SEAL_PLAN" "$BIONIC_SEAL_LOG" >/dev/null 2>&1 ;; esac
+  return "$_rc"
 }

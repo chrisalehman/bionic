@@ -805,7 +805,7 @@ poker_verb_reviews_part() {
 # person's to every function that folds the log; only the seal (lib/seal.sh) tells the run the tool wrote from one
 # written around it. The commit gate would catch such a line at the next commit, after the branch is on origin, so the
 # bound run is compared with its seal here, before the approval is read, and judged by the gate's own function
-# (lib/walls.sh `wall_run_seal`): a changed run is refused, exit 1, the catch kept in the seal and the gate's ask
+# (lib/walls.sh `wall_run_seal_kept`): a changed run is refused, exit 1, the catch kept in the seal and the gate's ask
 # `seal:changed` opened on the run's register, as hooks/bash-walls.sh does; a seal held past the wait is refused,
 # exit 2, to be run again. `none` and `nohome` are not compared, as the gate does not compare them. Unlike the gate,
 # which steps aside when the seal cannot be loaded, publish refuses then: no wall sees the push it makes.
@@ -840,9 +840,9 @@ publish_seal_words() {
       # shellcheck source=/dev/null
       . "$BIONIC_LIB/$_ps_l" >/dev/null 2>&1 || exit 1
     done
-    declare -F wall_run_seal >/dev/null 2>&1 || exit 1
+    declare -F wall_run_seal_kept >/dev/null 2>&1 || exit 1
     BIONIC_SEAL_LINE="$1" BIONIC_SEAL_PLAN="$2" BIONIC_SEAL_LOG="$3" BIONIC_WALL_OWED=""
-    wall_run_seal publish >/dev/null 2>&1
+    wall_run_seal_kept publish >/dev/null 2>&1
     [ "$?" -eq 2 ] || exit 1
     printf '%s\n%s\n%s\n' "$_BF_PEND_FACT" "$BIONIC_WALL_OWED" "$_BF_PEND_DETAIL" )
 }
@@ -872,8 +872,6 @@ poker_verb_publish() {
         die "$detail"
         exit 2
       fi
-      # The catch is kept in the seal before the ask is written, as the gate keeps it.
-      seal_write "$PV_PLAN" "$SEAL_LOG" >/dev/null 2>&1
       IFS=$'\t' read -r key title reply <<< "$ask"
       [ -z "$key" ] || proof_owed open "$key" "$title" "$reply"
       die "REFUSED — $fact; publish leaves the machine only for a run that matches its seal. Nothing was pushed and no pull request was opened; needs: the person — their ruling on the change, as a plain message in the chat; you then run bash $HOOK_DIR/session-poker.sh accept '<their words>' or bash $HOOK_DIR/session-poker.sh abandon '<their words>' with those words, the person never."

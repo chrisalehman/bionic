@@ -404,3 +404,7 @@ bionic_context() {
 
   return 0
 }
+
+# bionic_judged -> 0 when the session engaged or its binding holds it to the BIONIC_BOUND_PLAN its caller read: a bound
+# session stays judged whatever became of its engaged file, which BIONIC_ENGAGED alone still reports.
+bionic_judged() { [ "${BIONIC_ENGAGED:-0}" = 1 ] || [ -n "${BIONIC_BOUND_PLAN:-}" ]; }
