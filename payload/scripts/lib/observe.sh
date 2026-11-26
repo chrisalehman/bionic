@@ -55,6 +55,8 @@ bionic_need roster.sh roster_open_names
 # paths, the progress path) onto one field of 400 characters at most: normalized rather than refused, because this
 # library reports evidence, and a target with an odd character in it is still a target somebody asked about.
 bionic_need fields.sh line_field_v
+# time.sh, the same soft source, for `file_mtime` and `epoch_iso`.
+bionic_need time.sh _time_epoch
 
 # The machine line's schema token, printed by `observe_machine_line`. Versioned so a reader
 # can refuse a shape it does not read rather than guess at it.
@@ -76,8 +78,8 @@ OBSERVE_CADENCE_DEFAULT_S=900
 # tests/cross-gate-agreement.test.sh §C. The copies were the price of the no-library rule
 # (TDD §9: a sourced file the installer misses is a silently inert wall) and the loader's
 # fail-closed qualification is what repealed it — a hook whose library is missing refuses or
-# steps aside out loud, so there is no silent inertness left to buy.
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# steps aside out loud, so there is no silent inertness left to buy. `file_mtime` is time.sh's:
+# it prints nothing for a gone file, which a reader here takes as 0.
 file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
 
 # THE NEWEST COPY OF AN AGENT'S LOG, ANYWHERE UNDER ONE PROJECT DIRECTORY (D8; REQ-8;
@@ -98,7 +100,7 @@ agent_log_newest() {  # <agent-id> <project-dir> -> newest matching path on stdo
   [ -n "$proj" ] && [ -d "$proj" ] || return 1
   for f in "$proj"/*/subagents/"agent-${id}.jsonl"; do
     [ -f "$f" ] || continue
-    m="$(file_mtime "$f")"
+    m="$(file_mtime "$f" || echo 0)"
     case "$m" in ''|*[!0-9]*) m=0 ;; esac
     if [ "$m" -gt "$newest_m" ]; then
       newest="$f"; newest_m="$m"
@@ -112,11 +114,7 @@ agent_log_newest() {  # <agent-id> <project-dir> -> newest matching path on stdo
 # Claude Code names a project directory by slugifying its path.
 slugify() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 
-fmt_epoch() {
-  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || printf 'epoch:%s\n' "$1"
-}
+fmt_epoch() { epoch_iso "$1" || printf 'epoch:%s\n' "$1"; }
 
 fmt_age() {  # <seconds> -> "3m 12s"
   local s="$1"
@@ -411,7 +409,7 @@ observe_agent() {  # <typed-target> [deliverable …]
 
   # ---------- evidence 1: the working log (unfakeable — written by working) ----------
   if [ -f "$OBS_LOG" ]; then
-    OBS_LOG_MTIME=$(file_mtime "$OBS_LOG")
+    OBS_LOG_MTIME=$(file_mtime "$OBS_LOG" || echo 0)
     OBS_LOG_SIZE=$(file_size "$OBS_LOG")
     OBS_LOG_AGE=$((OBS_NOW - OBS_LOG_MTIME))
     [ "$OBS_LOG_AGE" -lt 0 ] && OBS_LOG_AGE=0
@@ -432,7 +430,7 @@ observe_agent() {  # <typed-target> [deliverable …]
       dp="$(observe_abs_path "$d")"
       OBS_DELIV_PATHS="${OBS_DELIV_PATHS:+$OBS_DELIV_PATHS,}$d"
       if [ -f "$dp" ]; then
-        dsize=$(file_size "$dp"); dmtime=$(file_mtime "$dp")
+        dsize=$(file_size "$dp"); dmtime=$(file_mtime "$dp" || echo 0)
         if [ "$dsize" -eq 0 ]; then
           OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}empty:$(line_field_clean "$d" 400)"
           pending=$((pending + 1))
@@ -468,7 +466,7 @@ observe_agent() {  # <typed-target> [deliverable …]
     OBS_PROGRESS_ABS="$pabs"
     if [ -e "$pabs" ]; then
       OBS_PROGRESS_STATE="present"
-      OBS_PROGRESS_MTIME=$(file_mtime "$pabs")
+      OBS_PROGRESS_MTIME=$(file_mtime "$pabs" || echo 0)
       OBS_PROGRESS_AGE=$((OBS_NOW - OBS_PROGRESS_MTIME))
       [ "$OBS_PROGRESS_AGE" -lt 0 ] && OBS_PROGRESS_AGE=0
     else

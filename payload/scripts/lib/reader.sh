@@ -273,10 +273,13 @@ reader_q_landed() {  # <plan> [row] -> each landing, of <row> when named
     ev() == "published" && (r == "" || line_kv("row") == r)'
 }
 
-# An ask's round, by key and round (absent, 1); a decision has one key, approve:D<n> read as decide:D<n>.
-_READER_ASK_AWK='
-function ask_round(   k, r) { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k = "decide:" substr(k, 9); r = line_kv("round")
-  return k SUBSEP (r == "" ? 1 : r) }
+# A decision has one key, approve:D<n> read as decide:D<n>; lib/owed.sh `owed_key` reads it here too.
+_READER_KEY_AWK='
+function ask_key(k) { return k ~ /^approve:D[0-9]+$/ ? "decide:" substr(k, 9) : k }
+'
+# An ask's round, by key and round (absent, 1).
+_READER_ASK_AWK="$_READER_KEY_AWK"'
+function ask_round(   r) { r = line_kv("round"); return ask_key(line_kv("key")) SUBSEP (r == "" ? 1 : r) }
 '
 
 reader_question asks list reader_q_asks
