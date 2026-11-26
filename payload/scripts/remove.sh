@@ -31,9 +31,12 @@
 #     detect.sh. The predicates are deliberately the SAME predicates detect.sh
 #     uses — the todo-tools export regex, the `bionic:start` marker, the
 #     `.claude/hooks/` substring, the retired permission block's begin/end
-#     sentinels — no test pins these against detect.sh and deps.sh since
-#     tests/remove.test.sh was deleted at 8582861; drift between them would go
-#     unnoticed until it broke a real teardown.
+#     sentinels. Each of this script's functions that has a library original
+#     is held equal to that original's body, with a mutant, by the copies
+#     section of tests/principles-item.test.sh, so a copy that drifts goes red
+#     there. What is not a function here, the legacy hook entries' strip
+#     program and the substring beside it, has no such pin: drift in those
+#     would go unnoticed until it broke a real teardown.
 #   * Where a library IS beside the script AND still owns the behaviour, the
 #     owner does the work: `env_unset` deletes an environment name and
 #     `remove_dep` applies the three-valued removal policy. The permission block
