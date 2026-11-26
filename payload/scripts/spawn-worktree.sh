@@ -186,8 +186,9 @@ ready   the writer's landing, run from the row's own tree. Refuses a tree
         (exit 0). A red suite returns the row, printing RED and its log; a
         conflict with the accepted head prints CONFLICT (exit 1). With
         --within, a suite whose promised seconds exceed the time left is
-        not started: WAITING and the same command to run again (exit 75),
-        then "waiting: <reason>", what held the row when its time ran out.
+        not started: WAITING and the same command to run again (exit 0, an
+        ordinary answer: read the line, not the exit), then "waiting:
+        <reason>", what held the row when its time ran out.
 USAGE
 }
 
@@ -571,15 +572,16 @@ cmd_land() {
   exit $?
 }
 
-# THE WRITER'S LANDING IS `ready` (wave-28 T4, D3): run from the row's own tree, it judges the tree
-# once, enters the row in the line and carries it: the candidate built, each suite the row lands on
-# run through the gate, published when green and first in line (lib/line.sh `line_ready`). Exit 0
-# `LANDED <row> <commit>` and the owed line; 1 `RED`, `CONFLICT` or `GUARD`; 75 `WAITING` with the
-# same command to run again, then `waiting: <reason>` (wave-38 T31; A-orch-43: a landing never waits in
-# silence), both passed through as line.sh prints them; 2 a refusal. `--within <seconds>` bounds it: no
-# suite starts whose promised seconds exceed the time left.
+# THE WRITER'S LANDING IS `ready`: run from the row's own tree, it judges the tree once, enters the row
+# in the line and carries it: the candidate built, each suite the row lands on run through the gate,
+# published when green and first in line (lib/line.sh `line_ready`). Exit 0 `LANDED <row> <commit>` and
+# the owed line; 1 `RED`, `CONFLICT` or `GUARD`; 2 a refusal. `--within <seconds>` bounds it: no suite
+# starts whose promised seconds exceed the time left. WAITING (with BUSY before it when the publish lock
+# was held) and the same command to run again, then `waiting: <reason>`, is an ordinary answer: the row
+# keeps its place and nothing failed, so it exits 0. line_ready returns it as 75, the library's own code,
+# and it is mapped here, once, where the command exits; a caller tells a landing by its LANDED line.
 cmd_ready() {
-  local within="" has_within=0 lib sid root tree self again
+  local within="" has_within=0 lib sid root tree self again rc
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --within) has_within=1; within="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
@@ -602,7 +604,9 @@ cmd_ready() {
   self="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)/$(basename "$0")"
   again="bash $(_wt_shquote "$self") ready${within:+ --within ${within}}"
   WORKTREE_CONTRACT_PROG="$PROG" line_ready "$tree" "$root" "$sid" "$within" "$again"
-  exit $?
+  rc=$?
+  [ "$rc" -ne 75 ] || rc=0
+  exit "$rc"
 }
 
 case "${1:-}" in

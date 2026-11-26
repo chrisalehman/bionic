@@ -585,6 +585,20 @@ tick_record_stands() {
   return 1
 }
 
+# tick_run_cmd <repo> <poker> <run args, quoted> <proof kind> <log, absolute> <log, docs-relative> -> THE TICK'S DETACHED
+# RUN, one command line: regression-run with <run args> as the tick, then proof-add <kind> over the log the run wrote.
+# It ends with the run's own code when the run wrote its log; 75 when the gate did not admit the run, which
+# regression-run tells only by a line in the note booked.sh names in BIONIC_NOT_ADMITTED (it exits 0 then, an ordinary
+# answer, so its exit cannot say it); and 69 when it ran nothing for any other reason. booked.sh records that code on
+# the stamp, the log's end and the roster's run_rc=: a 75 or a 69 is no run of the head, and a 75 is started again.
+tick_run_cmd() {
+  local cmd
+  cmd="cd $(printf '%q' "$1") || exit 1; bash $(printf '%q' "$2") regression-run ${3:+$3 }--starter tick; rc=\$?"
+  cmd="$cmd; if [ -f $(printf '%q' "$5") ]; then bash $(printf '%q' "$2") proof-add $4 $(printf '%q' "$6") || :"
+  cmd="$cmd; elif [ -n \"\${BIONIC_NOT_ADMITTED:-}\" ] && [ -s \"\$BIONIC_NOT_ADMITTED\" ]; then rc=75; else rc=69; fi; exit \"\$rc\""
+  printf '%s' "$cmd"
+}
+
 # tick_point_land <row> <proof: row, head, evidence, owed> -> the point's row landed at the working head on its run's proof:
 # one `published` event of the record kind naming the run's log, then the landing's writes (lib/line.sh), as a record
 # row's own landing makes them. Prints what it landed on, rc 0; rc 1, printing why, when it could not be written.
@@ -2357,9 +2371,7 @@ EOF
         suites_allowed=run.sh suites_source=DECLARED tool_use_id= plan="$plan")" || return 0
       printf '%s\n' "$row" >> "$ROSTER_FILE" 2>/dev/null || return 0
       poker="$HOOK_DIR/session-poker.sh"
-      cmd="cd $(printf '%q' "$REPO_REAL") || exit 1; bash $(printf '%q' "$poker") regression-run --point $(printf '%q' "$pt") --starter tick; rc=\$?"
-      cmd="$cmd; if [ -f $(printf '%q' "$docs/$rel") ]; then bash $(printf '%q' "$poker") proof-add point $(printf '%q' "$rel") || :"
-      cmd="$cmd; elif [ \"\$rc\" -ne 75 ]; then rc=69; fi; exit \"\$rc\""
+      cmd="$(tick_run_cmd "$REPO_REAL" "$poker" "--point $(printf '%q' "$pt")" point "$docs/$rel" "$rel")"
       out="$( cd "$REPO_REAL" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$BIONIC_LIB/../booked.sh" \
         --detach --no-wait --agent "$name" --suites run.sh --stamp-dir "$co" -- "$cmd" 2>&1 </dev/null )"
       log="$(printf '%s\n' "$out" | sed -nE 's/^booked: (started|attached) pid=[0-9]+ log=(.*) run=[^ ]*$/\2/p' | head -n 1)"
@@ -2395,8 +2407,9 @@ EOF
     #
     # THE TICK NEVER WAITS: booked.sh --no-wait prints its start line and returns, and the detached side
     # runs regression-run, then proof-add regression over the log the run wrote (the proof lands as a
-    # hand-typed run's does). The command ends with the run's code when the run wrote a log, 75 when the
-    # gate never admitted it, and 69 when it ran nothing: a stamp of 75 or 69 is no run of the head.
+    # hand-typed run's does). The command is `tick_run_cmd`'s: it ends with the run's code when the run wrote a log,
+    # 75 when the gate never admitted it (read from the note, not the exit), and 69 when it ran nothing: a stamp of 75 or
+    # 69 is no run of the head.
     tick_regression_start() {
       local plan="${SCHED_PLAN:-}" head ph wb co docs rel h8 name row poker cmd out log r rdy hold
       [ -n "$plan" ] && [ -f "$plan" ] && [ "${POKER_RUN_OPEN:-}" != unreadable ] || return 0
@@ -2475,9 +2488,7 @@ EOF
         suites_allowed=run.sh suites_source=DECLARED tool_use_id= plan="$plan")" || return 0
       printf '%s\n' "$row" >> "$ROSTER_FILE" 2>/dev/null || return 0
       poker="$HOOK_DIR/session-poker.sh"
-      cmd="cd $(printf '%q' "$REPO_REAL") || exit 1; bash $(printf '%q' "$poker") regression-run --starter tick; rc=\$?"
-      cmd="$cmd; if [ -f $(printf '%q' "$docs/$rel") ]; then bash $(printf '%q' "$poker") proof-add regression $(printf '%q' "$rel") || :"
-      cmd="$cmd; elif [ \"\$rc\" -ne 75 ]; then rc=69; fi; exit \"\$rc\""
+      cmd="$(tick_run_cmd "$REPO_REAL" "$poker" "" regression "$docs/$rel" "$rel")"
       out="$( cd "$REPO_REAL" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$BIONIC_LIB/../booked.sh" \
         --detach --no-wait --agent "$name" --suites run.sh --stamp-dir "$co" -- "$cmd" 2>&1 </dev/null )"
       log="$(printf '%s\n' "$out" | sed -nE 's/^booked: (started|attached) pid=[0-9]+ log=(.*) run=[^ ]*$/\2/p' | head -n 1)"

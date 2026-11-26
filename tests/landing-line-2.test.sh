@@ -723,7 +723,7 @@ ll_verb "$RS" T1 --within 900; ST2="$LL_RC"
 ll_verb "$RS" T1 --within 900; ST3="$LL_RC"; ST3_OUT="$LL_OUT"
 KS="$(ll_last_cand "$RS" T1)"
 LS1="$RS/.bionic/docs/record/wave-x/line/T1-c-${KS:0:12}.log"; LS2="$RS/.bionic/docs/record/wave-x/line/T1-c-${KS:0:12}-2.log"
-expect_eq "(st1) three bounded readies with no progress: WAITING, WAITING, then STALLED on the third" "75 75 70" "$ST1 $ST2 $ST3"
+expect_eq "(st1) three bounded readies with no progress: WAITING, WAITING (each exit 0), then STALLED on the third" "0 0 70" "$ST1 $ST2 $ST3"
 expect_eq "(st1) …the first started nothing (600 s promised, 500 left); the second and third ran once each, both none" "2 none none" \
   "$(ll_lines "$LL_SIG/st.runs") $(ll_results "$RS" T1 "$KS")"
 expect_eq "(st1) …the stall names the two runs' logs, one from each call" "STALLED T1 ${LS1},${LS2} — neither log holds the end line ready reads: \"c.test.sh: <p>/<t> passed, <f> failed\"" "$(printf '%s\n' "$ST3_OUT" | grep '^STALLED ')"
@@ -767,7 +767,7 @@ GP_FIRST="$(ll_lease_field "$GP_KEY" first)"
 expect_regex "(g1) …T1's lease holds its first-ask instant" '^[0-9]+$' "$GP_FIRST"
 world_tick 60
 ll_wait_file "$WORLD_ROOT/g1.out.rc" 300 || ll_kill_bg "$G1_BG"
-expect_eq "(g2) T1's ready returns WAITING once its time is up, having run nothing" "75 0" \
+expect_eq "(g2) T1's ready returns WAITING (exit 0) once its time is up, having run nothing" "0 0" \
   "$(cat "$WORLD_ROOT/g1.out.rc" 2>/dev/null) $(ll_lines "$LL_SIG/g-T1.runs")"
 expect_eq "(g2) …its lease kept, nobody's (carrier -), at the same first-ask instant" "-|$GP_FIRST" \
   "$(ll_lease_field "$GP_KEY" carrier)|$(ll_lease_field "$GP_KEY" first)"
@@ -778,7 +778,7 @@ expect_eq "(g3) …at the first ready's instant, not this one's" "$GP_FIRST" "$(
 expect_false "(g3) …and T1 is still held: no run in the 2 s while the older lease is open" wait_for 2 ll_has_lines "$LL_SIG/g-T1.runs" 1
 world_tick 60
 ll_wait_file "$WORLD_ROOT/g3.out.rc" 300 || ll_kill_bg "$G3_BG"
-expect_eq "(g3) WAITING again, nothing run" "75 0" "$(cat "$WORLD_ROOT/g3.out.rc" 2>/dev/null) $(ll_lines "$LL_SIG/g-T1.runs")"
+expect_eq "(g3) WAITING again (exit 0), nothing run" "0 0" "$(cat "$WORLD_ROOT/g3.out.rc" 2>/dev/null) $(ll_lines "$LL_SIG/g-T1.runs")"
 expect_eq "(g4-pre) the older landing's carrier closes its lease" "0" "$(ll_lease_gate gate_landing_close "$GP_OLD" "$GP_CAR")"
 expect_true "(g4) …and the gate now answers T1 at least 1" test "$(ll_width_ask "$GP_KEY")" -ge 1
 ll_verb_bg "$RG" T1 "$WORLD_ROOT/g4.out" --within 300; G4_BG=$!

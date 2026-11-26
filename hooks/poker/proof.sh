@@ -32,6 +32,25 @@ poker_one_line() {  # <text> -> the text, its line breaks folded by lib/said.sh'
 deferral_escape() {  # <folded sentence> -> as the plan holds it: \ for a backslash, \" for a quote
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
+
+# THE NOTE OF A RUN THE GATE DID NOT ADMIT. Not admitted is an ordinary answer: tests/run.sh, booked.sh and
+# regression-run exit 0 having run nothing, and tell a caller that named a file in BIONIC_NOT_ADMITTED by one line
+# appended to it. A verb that runs one of them and branches on whether it ran makes a note of its own and reads it,
+# never the exit, or a door that exits 0 when it ran nothing would read as green. A runner older than the note exits
+# 75 itself, which reads the same.
+poker_note_make() {  # -> a fresh empty note's path; rc 1 when none can be made
+  mktemp "${TMPDIR:-/tmp}/bionic-note.XXXXXX" 2>/dev/null
+}
+poker_note_said() {  # <note> <rc> -> 75 when the note holds a line (the run never ran), else <rc>; the note is removed
+  local r="$2"
+  if [ -n "$1" ] && [ -s "$1" ]; then r=75; fi
+  [ -z "$1" ] || rm -f "$1"
+  printf '%s' "$r"
+}
+poker_note_tell() {  # <line> -> the caller's note gets it, when the caller named one; always 0
+  [ -z "${BIONIC_NOT_ADMITTED:-}" ] || printf '%s\n' "$1" >> "$BIONIC_NOT_ADMITTED" 2>/dev/null
+  return 0
+}
 # review_readings <plan> -> `<record><TAB><question><TAB><head>` per record a standing review proof names as its
 # evidence, in the order the run first registered it, the question and head of its newest proof: the reader's
 # `reviews` answer (payload/scripts/reader.sh), asked once per call, so a run whose review proofs its log alone
@@ -629,7 +648,9 @@ whole_run_at_head() {
         exit 1
       fi
       if [ -f "$PF_WT/tests/run.sh" ]; then PF_CMD="bash tests/run.sh --only $PF_SUITE"; else PF_CMD="bash tests/$PF_SUITE"; fi
-      ( cd "$PF_WT" && bash -c "$PF_CMD" ) > "$PF_LOG.out" 2>&1; PF_RC=$?
+      PF_NOTE="$(poker_note_make)" || PF_NOTE=""
+      ( cd "$PF_WT" && BIONIC_NOT_ADMITTED="$PF_NOTE" bash -c "$PF_CMD" ) > "$PF_LOG.out" 2>&1; PF_RC=$?
+      PF_RC="$(poker_note_said "$PF_NOTE" "$PF_RC")"
       { printf 'head=%s suite=%s rc=%s
 command: %s
 ' "$PF_BASEH" "$PF_SUITE" "$PF_RC" "$PF_CMD"; cat "$PF_LOG.out" 2>/dev/null; } > "$PF_LOG"
@@ -1632,7 +1653,7 @@ DSP_READINGS
   # asks the machine's gate itself, kind whole (tests/run.sh THE ONE ADMISSION; ADR-051). Its log is the evidence
   # `proof-add floor` judges by the runner's own report (lib/proof.sh `proof_attested`): a red whole run is the
   # floor's candidate, its reds owed (wave-35 T9), so the record line is printed red or green. A run the gate never
-  # admitted (exit 75, no verdict) ran nothing and writes no log. With neither key nor runner it refuses, naming the
+  # admitted (its note written, no verdict) ran nothing, writes no log and exits 0, an ordinary answer. With neither key nor runner it refuses, naming the
   # other way: run the regression and cite its log. A config carrying `floor-attestation:`, a key removed in wave-36
   # (T35), is refused first, naming it (lib/proof.sh `proof_floor_retired`).
   # THE ONE PATH A RUNNER IS GIVEN THE WHOLE RUN BY, asked before anything runs, and three rules refuse it:
@@ -1728,7 +1749,7 @@ DSP_READINGS
         exit 1
       done
     fi
-    FR_RUNNING="REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and its log is this head's whole run once it ends. Nothing was run; if it ends 75, the gate never admitted it: run regression-run again then."
+    FR_RUNNING="REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and its log is this head's whole run once it ends. Nothing was run; if it ends saying the gate did not admit it, run regression-run again then."
     if [ -z "$FR_CMD" ]; then
       if [ ! -f "$FR_CO/tests/run.sh" ]; then
         die "REFUSED — this project declares no regression-command: in .bionic/config.yaml, and the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) holds no tests/run.sh to run as its regression; declare regression-command: <command> there, or run the regression yourself and cite its log (its first head= line head=<40-hex> dirty=0, its last line rc=0) with proof-add regression <log> [<log>…]. Nothing was run."
@@ -1810,8 +1831,9 @@ DSP_READINGS
           case "$(sed -n 's/^holder=//p' "$(gate_dir)/requests/$FR_GATE" 2>/dev/null | tail -n 1)" in "$$:"*) FR_GATE_OWN=1 ;; esac
           export BIONIC_GATE_ADMIT="$FR_GATE" ;;
         75)
-          die "regression-run — the gate did not admit the whole run (exit 75), so nothing ran and no log was written; run regression-run again."
-          exit 75 ;;
+          die "regression-run — the gate did not admit the whole run, so nothing ran and no log was written; run regression-run again."
+          poker_note_tell "regression-run: not admitted"
+          exit 0 ;;
         *)
           FR_GATE=""
           say "regression-run — the gate's store $(gate_dir) cannot be written, so this whole run runs unbooked, and neither the tick nor a second regression-run can see it running." ;;
@@ -1829,23 +1851,27 @@ DSP_READINGS
     # own exec ends). No perl on PATH: the command is launched as it was.
     FR_SIGDFL=()
     command -v perl >/dev/null 2>&1 && FR_SIGDFL=(perl -e '$SIG{$_} = "DEFAULT" for qw(HUP INT QUIT); exec { $ARGV[0] } @ARGV; exit($!{ENOENT} ? 127 : 126)' --)
+    # The command is handed a note of its own (THE NOTE, above): the runner that ran nothing writes it and exits 0.
+    FR_NOTE="$(poker_note_make)" || FR_NOTE=""
     if [ -n "$FR_WHOLE" ]; then
       ( cd "$FR_CO" 2>/dev/null || exit 1
-        exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} bash tests/run.sh ) </dev/null > "$FR_TMP" 2>&1
+        BIONIC_NOT_ADMITTED="$FR_NOTE" exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} bash tests/run.sh ) </dev/null > "$FR_TMP" 2>&1
     else
       ( cd "$FR_CO" 2>/dev/null || exit 1
         set -f
         # shellcheck disable=SC2086  # the configured command splits on blanks, as release-check's does
-        exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
+        BIONIC_NOT_ADMITTED="$FR_NOTE" exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
     fi
     FR_RC=$?
+    FR_RC="$(poker_note_said "$FR_NOTE" "$FR_RC")"
     if [ "$FR_GATE_OWN" -eq 1 ]; then gate_end "$FR_GATE" "$FR_RC" >/dev/null 2>&1 || :; unset BIONIC_GATE_ADMIT; fi
-    # A WHOLE RUN THE GATE NEVER ADMITTED RAN NOTHING (tests/run.sh: exit 75 before any suite, no verdict), so
-    # there is no run of the head to log.
+    # A WHOLE RUN THE GATE NEVER ADMITTED RAN NOTHING (tests/run.sh: its note written before any suite, no verdict,
+    # read as 75 above), so there is no run of the head to log, and the answer is an ordinary one.
     if [ -n "$FR_WHOLE" ] && [ "$FR_RC" -eq 75 ] && ! /usr/bin/grep -q '^Gating: ' "$FR_TMP" 2>/dev/null; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
-      die "regression-run — the gate did not admit the whole run (exit 75), so nothing ran and no log was written; run regression-run again."
-      exit 75
+      die "regression-run — the gate did not admit the whole run, so nothing ran and no log was written; run regression-run again."
+      poker_note_tell "regression-run: not admitted"
+      exit 0
     fi
     FR_NOW="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
     FR_DIRTY2="$(_wt_piece_dirt "$FR_CO" | awk 'END { print NR + 0 }')"

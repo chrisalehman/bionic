@@ -1416,7 +1416,8 @@ section "§STARTER: the tick starts the whole run itself when nothing is ready, 
 # waiting and started again.
 # FIXTURE FIDELITY: §STACK's shape at Step 4, with a regression proof at an older head from proof-add over a run line
 # from regression_fixture. The runner is the worktree's committed tests/run.sh stub: it holds while a hold file stands,
-# exits 75 with no verdict while a full file stands, else reports a green whole run; it books nothing at the gate, so the
+# answers as the real runner does when the gate admits nothing while a full file stands (no verdict, a line in the
+# caller's BIONIC_NOT_ADMITTED note, exit 0), else reports a green whole run; it books nothing at the gate, so the
 # open whole request beside it is the verb's own. Everything else is real, and the writer row is mkrow's, closed by the
 # real ack.
 # fails-when: the quiet condition inverted; the head compared to anything but the last regression proof's; proof-add
@@ -1429,9 +1430,13 @@ ST_CTL="$TMPROOT/starter-ctl"; mkdir -p "$ST_CTL"
 mkdir -p "$RST/tests"
 cat > "$RST/tests/run.sh" <<RUNNER
 #!/bin/bash
-# The fixture's whole run: marks its start, holds while the hold file stands, exits 75 with no verdict while the full file stands.
+# The fixture's whole run: marks its start, holds while the hold file stands, and while the full file stands ends as the
+# runner the gate did not admit ends: no verdict, a line in the caller's note, exit 0.
 : > "$ST_CTL/ran"; i=0; while [ -e "$ST_CTL/hold" ] && [ "\$i" -lt 600 ]; do i=\$((i + 1)); sleep 0.1; done
-[ ! -e "$ST_CTL/full" ] || exit 75
+if [ -e "$ST_CTL/full" ]; then
+  [ -z "\${BIONIC_NOT_ADMITTED:-}" ] || printf 'tests/run.sh: not admitted\n' >> "\$BIONIC_NOT_ADMITTED"
+  printf 'bionic: tests/run.sh refused at the gate; nothing ran\n'; exit 0
+fi
 printf 'Gating: 1 passed, 0 failed\n'
 RUNNER
 ( cd "$RST" && git add tests/run.sh && git commit -qm runner ) >/dev/null 2>&1

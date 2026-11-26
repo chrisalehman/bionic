@@ -294,7 +294,8 @@ section "§DETACH-CEILING — a detached run the gate has not admitted within th
 # detached side now asks the gate with --within BIONIC_SETTLE_MAX_WAIT (1200 s by default; 3 here), and
 # a run not admitted inside it ends through the shim's one not-admitted path: exit 75, the line in the
 # log (stderr is the log in the detached side), `rc=75` on the log's last line, `75` in `<log>.rc`,
-# `run_rc=75` on the roster row. The caller follows the log, copies the line and exits 75.
+# `run_rc=75` on the roster row. The caller follows the log, copies the line and exits 0: not admitted is an
+# ordinary answer at the console, and the records alone say the run never ran.
 #
 # FIXTURE FIDELITY. gate.test.sh's held gate (B.7): the share is 80 on 8 cores (6.4, less the reserve
 # of 1: 5.4), the machine reads 3.0 busy cores, a REAL background process holds an admission of one suite's
@@ -338,7 +339,7 @@ expect_false "DC.3 at 1000 of a 3-second bound the run has not ended (beside DC.
   test -e "${CE_LOG:-$D/none}.rc"
 world_tick 3
 bk_wait 20 bk_has "$D/ce.rc"
-expect_eq "DC.4 at 1003 the caller exits 75, the run's own code" "75" "$(cat "$D/ce.rc" 2>/dev/null)"
+expect_eq "DC.4 at 1003 the caller exits 0, an ordinary answer, while the records below keep 75" "0" "$(cat "$D/ce.rc" 2>/dev/null)"
 expect_eq "DC.6 …<log>.rc holds 75" "75" "$(cat "${CE_LOG:-$D/none}.rc" 2>/dev/null)"
 expect_eq "DC.7 …the log's last line is rc=75" "rc=75" "$(tail -n 1 "${CE_LOG:-$D/none}" 2>/dev/null)"
 expect_eq "DC.8 …the roster row carries run_rc=75" "75" \

@@ -94,6 +94,6 @@ section "§GATE: a rehearsed world whose own gate is full stops at the build row
 mkdir -p "$WORLD_ROOT/full/config/bionic" && printf '1\n' > "$WORLD_ROOT/full/config/bionic/share"
 GA_RC=0; ( RH_WITHIN=5 rehearse single-verify "$WORLD_ROOT/full" ) > /dev/null 2> "$WORLD_ROOT/full.err" || GA_RC=$?
 expect_eq "GA-1 a share of 1% under 30% used admits nothing: rehearse stops (exit 1)" "1" "$GA_RC"
-expect_contains "GA-1b …at the build row's ready, WAITING (rc 75)" "the build row says ready failed (rc 75)" "$(cat "$WORLD_ROOT/full.err")"
+expect_contains "GA-1b …at the build row's ready, read from its WAITING line, not its exit" "the build row says ready did not land: WAITING T1 " "$(cat "$WORLD_ROOT/full.err")"
 
 finish
