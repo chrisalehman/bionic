@@ -44,8 +44,13 @@
 #
 # BASH 3.2. Functions and constants only; nothing runs or prints at source time.
 
+# THE SCALES ARE lib/write-gate.sh's list, which the plan-write hook loads fail-closed; a caller that cannot
+# load it reads no rows and scale_cell refuses every scale.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need write-gate.sh write_gate_say || :
+
 SCALE_COLUMNS="patrol rigor writers regression branch integrate dealing"
-SCALE_ROWS="task wave epic"
+SCALE_ROWS="${WRITE_GATE_SCALES:-}"
 SCALE_TABLE="task|no|single|3|no|any|pr|piece
 wave|yes|double|uncapped|yes|wave/<NN>-<slug>|pr|piece+whole
 epic|yes|double|uncapped|no|epic/<NN>-<slug>|pr|piece"
@@ -62,7 +67,7 @@ scale_cell() {
     *" $scale "*) [ -n "$scale" ] ;;
     *) false ;;
   esac || {
-    printf "scale.sh: '%s' is no scale — use task, wave or epic\n" "$scale" >&2
+    printf "scale.sh: '%s' is no scale — use %s\n" "$scale" "$(write_gate_or "$SCALE_ROWS")" >&2
     return 1
   }
   if [ -z "$n" ]; then
