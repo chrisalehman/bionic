@@ -1471,6 +1471,27 @@ printf 'run/v1|ev=published|part=reviews|commit=%s|branch=wave/x|tree=-|by=T3|at
 expect_eq "(lg3) a part is no landing: the record's landings and the reader's landed rows are T3 alone, the part still read" "T3|T3|1" \
   "$(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWL" | grep -c '|part=reviews|')"
 
+section "§ONE-REASON: a tree whose plan names no working branch is refused with the run library's reason; both request keys have one maker"
+# fails-when: the landing spells its own no-working-branch reason, so its words and the run verb's can part: a tree with
+# its own record (the plan read from the record) or with none (the plan read through the binding) refused in words
+# other than lib/run.sh `run_no_branch_why` prints, or in other bytes than the refusal has always carried; or either
+# request key not `<prefix>:` and the branch with every character outside [A-Za-z0-9._-] written `:`.
+NB="$(ll_world)"; NBP="$(ll_plan "$NB")"
+awk '!/^working-branch: /' "$NBP" > "$NBP.n" && mv "$NBP.n" "$NBP"
+printf 'tree/v1|path=%s|plan=%s|row=T1|worker=wx-T1|spawned-by=%s|at=2026-10-04T00:06:00Z\n' "$NB/.worktrees/T1" "$NBP" "$WORLD_SID" \
+  > "$(git -C "$NB/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-tree"
+nb_run() { ( bionic_need run.sh plan_working_branch || exit 9; line_tree_run "$NB/.worktrees/$1" "$NB" "$WORLD_SID"
+  printf '%s|%s|%s' "$?" "$LINE_RUN_WHY" "$(run_no_branch_why "$NBP")" ) 2>&1; }   # <row> -> rc|the landing's words|run.sh's
+expect_eq "(nb0) precondition: the plan names no working branch and T1's tree has its own record naming the plan" "0|$NBP" \
+  "$(/usr/bin/grep -c '^working-branch: ' "$NBP")|$(line_field "$(worktree_tree_record "$NB/.worktrees/T1")" plan)"
+expect_eq "(nb1) a tree with its own record is refused in the run library's words, the bytes the refusal has carried" \
+  "1|no-working-branch plan=$NBP|no-working-branch plan=$NBP" "$(nb_run T1)"
+expect_eq "(nb2) …and a tree with none, through the binding, in the same words" \
+  "1|no-working-branch plan=$NBP|no-working-branch plan=$NBP" "$(nb_run T2)"
+expect_eq "(nb3) the publish ask and the closed-unmerged ask are made by one maker, the branch escaped alike" \
+  "pr:wave:x-1.a_b:c|pr-closed:wave:x-1.a_b:c|pr-closed:wave:x-1.a_b:c" \
+  "$(line_ask_key pr 'wave/x-1.a_b c')|$(line_ask_key pr-closed 'wave/x-1.a_b c')|$(line_merge_ask_key 'wave/x-1.a_b c')"
+
 # ---------------------------------------------------------------------------
 section "§WORLD: a world that lies inside a checkout ends the suite that sourced it"
 # The world refuses a directory inside a checkout so that no fixture's git acts on a real repository. A suite that went

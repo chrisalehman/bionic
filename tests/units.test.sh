@@ -42,6 +42,7 @@
 #   §POINT-RUN   a point's run is held by its own rows; an open point holds no whole run and writes no regression proof
 #   §POINT-RED   a suite red in a point's run is born as a fix row whose birth names the point and the rows it follows
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
+#   §RELEASE   whether a row is the plan's release is lib/plan-read.sh's one `release_row`, in each state its askers pass
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1195,5 +1196,38 @@ expect_eq "HELD-4 the status pass: asked twice, and with a pending step that nam
   "$(printf '%s\n' "$HD_OUT" | head -3 | sort -u | wc -l | tr -d ' ')|$(printf '%s\n' "$HD_OUT" | sed -n 1p)|$(printf '%s\n' "$HD_OUT" | head -3 | grep -c 'state=dispatched')"
 expect_eq "HELD-5 a fact of a row set since is passed again and read: a second status pass, T1 landed" \
   "2|row=T1 state=landed name=w-T1 brief=b sum=s commit=c1" "$(hd_n status)|$(printf '%s\n' "$HD_OUT" | sed -n 4p)"
+
+section "§RELEASE — whether a row is the plan's release is one function, and each asker's rule of which states count is its argument"
+# fails-when: the function admits a row that is not a doc row at a numeric step of 7 or more, or reads the state against
+# the rule its asker passes (a pending row counted where only a landed one does, a dropped one where it stands dropped,
+# or a state read at all where the asker passes no rule); or the release readers no longer load it, so it is undefined.
+# One child shell sources the units library, as every asker's process does, and the cases run through one awk program.
+# Each row is `<kind> <step> <state> <rule> <answer>`, `-` for an empty field: the rules are `landed` (the publish order,
+# the validator's landed release, the post-release readers), `standing` (the approval names, the scheduler) and empty
+# (the waits' reader, the order, the validator's order, whose callers skip a dropped row and a word step themselves).
+RL_CASES='doc 7 landed landed 1
+doc 7 pending landed 0
+doc 7 active landed 0
+doc 7 dropped landed 0
+doc 7 pending standing 1
+doc 7 active standing 1
+doc 7 landed standing 1
+doc 7 dropped standing 0
+doc 7 - standing 1
+doc 7 dropped - 1
+doc 9 pending - 1
+doc 6 landed landed 0
+doc 6 pending - 0
+test 7 landed landed 0
+integrate 8 pending standing 0
+doc 7a pending - 0
+doc x landed landed 0
+doc - pending standing 0'
+RL_OUT="$(printf '%s\n' "$RL_CASES" | bash -c '. "$1" >/dev/null 2>&1 || exit 127
+  awk "$_PLAN_READ_RELEASE_AWK"'"'"'{ for (k = 1; k <= 4; k++) if ($k == "-") $k = ""
+    if (release_row($1, $2, $3, $4) != $5) printf "%s %s %s %s: %s\n", $1, $2, $3, $4, release_row($1, $2, $3, $4); n++ }
+    END { print "cases=" n }'"'"'' _ "$LIB" 2>&1)"
+expect_eq "RL-1 every case answers as its row says, each state under each rule an asker passes (the cases read)" \
+  "cases=18" "$RL_OUT"
 
 finish
