@@ -307,8 +307,10 @@ SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
 
 # ---------------------------------------------------------------- shared readers
 
+# The machine's clock, never a suite's pinned one, which lib/time.sh's `time_now` follows. The instant a record is
+# stamped with is lib/time.sh's `iso_now`.
 now_epoch() { date -u +%s; }
-iso_now()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
+bionic_need time.sh _time_epoch
 
 # A field of a record line is read by key: `line_field` in the shell and `line_kv_of` in awk, both lib/fields.sh's.
 bionic_need fields.sh line_field_v
@@ -316,8 +318,9 @@ bionic_need fields.sh line_field_v
 # Values reach this file from a brief and from the operator's keyboard, and every record
 # here is pipe-delimited key=value. A `|`, a newline or a control character inside a value
 # forges a field, so they are folded to spaces by lib/fields.sh's `line_field_clean`, cut at
-# 400 characters, which must agree with hooks/session-sweeper.sh's clean(): a name written by
-# one is matched by the other.
+# 400 characters. hooks/session-sweeper.sh's clean() folds and cuts a value of valid characters
+# the same way, so a name written by one is matched by the other; a byte the locale cannot read
+# is where the two part (the library's `tr` drops what follows it).
 
 # THE ROSTER IS FOLDED ONCE, not once per row. The roster is append-only and a contract
 # advances along it (`intended` → `confirmed` → `identified`), every writer copying the

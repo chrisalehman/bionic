@@ -1017,7 +1017,7 @@ ADOPT_READERS
         PROG_AGE=""
         PROG_MTIME=0
         if [ -n "$RPROG_ABS" ] && [ -f "$RPROG_ABS" ]; then
-          PROG_MTIME="$(file_mtime "$RPROG_ABS")"
+          PROG_MTIME="$(file_mtime "$RPROG_ABS" || echo 0)"
           PROG_AGE=$(( ADOPT_NOW - PROG_MTIME ))
         fi
         CAD_S="$(parse_seconds "$RCAD")" || CAD_S=""
@@ -1051,7 +1051,7 @@ ADOPT_READERS
             # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
             # the agent takes, so its mtime is a fact about the agent rather than a
             # promise the agent has to remember to keep.
-            TX_MTIME="$(file_mtime "$TX")"
+            TX_MTIME="$(file_mtime "$TX" || echo 0)"
             TX_AGE=$(( ADOPT_NOW - TX_MTIME ))
           elif [ -n "$OSUB" ]; then
             # NEITHER SESSION HAS SPOKEN TO THE AGENT YET — still name the launcher's path

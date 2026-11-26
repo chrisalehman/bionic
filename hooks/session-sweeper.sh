@@ -192,6 +192,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "session-sweeper"; fi
 . "$BIONIC_LIB/roster.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# The clock, the field reader and the prose parser, each asked by a function it holds. A library that lacks one steps
+# this hook aside, as a missing wanted library does: a verdict read without them would be a guess.
+bionic_need time.sh _time_epoch && bionic_need fields.sh line_field_v && bionic_need observe.sh parse_seconds \
+  || { BIONIC_LIB_MISSING="time.sh, fields.sh or observe.sh"; loader_fail_open "session-sweeper"; }
 
 # THE SESSION KEY, from the library (design §1): the environment value is primary. This
 # script is invoked from a shell rather than by a hook payload, so there is no witness
@@ -262,32 +266,12 @@ fi
 
 # ---------------------------------------------------------------- portable facts
 #
-# DELIBERATELY DUPLICATED from hooks/stop-check.sh, byte for byte, for the reason the TDD
-# gives (§9): a sourced library the installer misses is a silently inert gate. The
-# copies are held together by tests/cross-gate-agreement.test.sh §I.1, which extracts
-# file_mtime, line_field, claims_live and clean (stop-check.sh's mline_value) out of BOTH
-# files and compares the bodies — a one-side edit goes red there.
-
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
-
-# One field out of a versioned pipe-delimited line, BY KEY, never by position. The roster
-# writer's field ORDER has already differed between shipped rows (a `cadence=` was added
-# mid-epic), so position would read the wrong value on a row this script did not author.
-# IN BUILTINS (wave-34 T11, D19): the walk splits on `|` (and on a newline, as `tr` made one a
-# field break) by parameter expansion and prints the first `<key>=` field's value with the newline
-# `cut` gave it — the reading `tr | grep | head | cut` gave, with no process. The three copies
-# (here, hooks/session-poker.sh, payload/scripts/lib/observe.sh) are one body.
-line_field() {  # <line> <key>
-  local _lf_rest="${1//$'\n'/|}|" _lf_f
-  while [ -n "$_lf_rest" ]; do
-    _lf_f="${_lf_rest%%|*}"; _lf_rest="${_lf_rest#*|}"
-    case "$_lf_f" in "$2="*) printf '%s\n' "${_lf_f#"$2="}"; return 0 ;; esac
-  done
-  return 0
-}
+# The clock, a path's modified time, a field by key and the prose parser are the libraries' (lib/time.sh,
+# lib/fields.sh, lib/observe.sh), loaded above. `file_mtime` prints nothing for a path it cannot stat, so a
+# reader that needs a number writes `file_mtime <path> || echo 0`.
 
 # Existence only. `pgrep -f` matches the full command line; a `ps` fallback covers a
-# machine without it. Same function as hooks/stop-check.sh's, same reason for the copy.
+# machine without it. No library holds this reading.
 claims_live() {  # <pattern>
   local pat="$1"
   if command -v pgrep >/dev/null 2>&1; then
@@ -297,33 +281,19 @@ claims_live() {  # <pattern>
   ps -eo command 2>/dev/null | grep -qF -- "$pat"
 }
 
+# The machine's clock, never a suite's pinned one, which lib/time.sh's `time_now` follows.
 now_epoch() { date -u +%s; }
-iso_now()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
-
-iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
-  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
-    || date -u -d "$1" +%s 2>/dev/null
-}
 
 # Values reaching a pipe-delimited record are roster-sourced prose and operator-supplied
 # paths; a `|`, newline or control character inside one would forge a field. Normalized
 # rather than refused, exactly as hooks/stop-check.sh normalizes its machine line.
 #
-# THE SECOND ARGUMENT IS THE POKER'S OWN ADDITION (T9, REQ-9), carried here so the two
-# copies stay code-identical (tests/cross-gate-agreement.test.sh §O) — this file never
-# calls clean() with one, since none of its own values are the list-valued fields
-# (`ROSTER_LIST_FIELDS`, payload/scripts/lib/roster.sh, named once: wave-37 T7, D11) the poker's
-# `adopt_write_row` exempts from the cut. Every call in THIS file stays on the cut branch below,
-# at 400 exactly as before.
-#
-# THE `re_executes` ARM IS CARRIED THE SAME WAY (T4, REQ-7/D4). The roster stores the
-# declared runs percent-encoded — `payload/scripts/lib/roster.sh` owns that encoding and
-# carries the reasoning — and the poker's `adopt_write_row` decodes them so its writer can
-# encode them again. This file reads no such field, so the arm is inert here; it is present
-# because the two copies are held identical as CODE, and a twin that drifted by one arm is
-# the drift §O exists to catch.
-# IN BUILTINS (wave-34 T11, D19): the fold, the squeeze, the trim and the cut are parameter
-# expansion, where `tr | sed | cut` used to start three processes per value.
+# THE SECOND ARGUMENT AND THE `re_executes` ARM ARE THE POKER'S (hooks/session-poker.sh `clean`, the same
+# body): the poker leaves the list-valued fields (`ROSTER_LIST_FIELDS`, payload/scripts/lib/roster.sh) uncut and
+# decodes the declared runs the roster stores percent-encoded. This file passes no field name, so every call here
+# takes the cut branch, at 400. The fold is lib/fields.sh `line_field_clean`'s reading on a value of valid
+# characters; it stays in builtins, where the library's pipeline starts three processes a value and its `tr`
+# drops what follows a byte the locale cannot read.
 clean() {  # <value>
   local out="${1//[[:cntrl:]|]/ }"
   while :; do case "$out" in *"  "*) out="${out//  / }" ;; *) break ;; esac; done
@@ -354,90 +324,6 @@ abs_path() {  # <path, as the roster spells it> -> absolute
     record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
     *)        printf '%s/%s\n' "$PROJECT_DIR" "$1" ;;
   esac
-}
-
-# ---------------------------------------------------------------- the prose parser
-#
-# `cadence=` and `duration=` are prose the dispatch gate lifted verbatim out of a brief:
-# "every ~5 min", "20 minutes", "30–40 minutes". This reads the forms a brief actually
-# uses and REFUSES everything else — a guessed threshold is a false alarm with a number
-# in front of it, and the design's answer to an unreadable field is to drop the conjunct
-# that needed it, never to invent a value.
-#
-# `cadence=` is the one field still read here, by row_still_live: fresh progress inside the
-# declared cadence is what spares a mid-flight agent a false UNMET. `duration=` reaches this
-# parser from nowhere in this script any more — it belonged to the deleted overdue
-# predicate — and the form is kept parseable because the same prose still rides the roster.
-#
-# Deliberate limits, each one a refusal rather than a guess:
-#   * exactly one number-unit pair. "1h30m" and "10 min, checkpoint at 5m" are refused.
-#   * whole numbers only. "0.5h" is refused.
-#   * a range ("30–40 minutes") is read at its GENEROUS end — the question is whether a
-#     promise is broken, and it is not broken until the longer bound passes.
-#   * zero is refused: a zero threshold would call every row late the instant it launched.
-parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be read
-  local raw="$1" s pairs count nums hi unit mult n allnums line rest m k nl=$'\n'
-  local re='^[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)'
-  [ -n "$raw" ] || return 1
-  s="${raw//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
-  case "$s" in
-    *[![:ascii:]]*) s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')" ;;
-    *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
-      for n in Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz; do
-        s="${s//${n%?}/${n#?}}"
-      done ;;
-  esac
-  # THE PAIR WALK IS `grep -oE`'s, IN BUILTINS (wave-34 T11, D19): line by line, a match can only
-  # start where a digit run starts, so each run start is tried anchored and a run that fails is
-  # skipped whole; a match resumes the walk at its end. Text outside ASCII keeps `tr` for the case
-  # fold, so the locale's own case map is still the one read.
-  count=0; pairs=""; unit=""; rest="$s$nl"
-  while [ -n "$rest" ]; do
-    line="${rest%%"$nl"*}"; rest="${rest#*"$nl"}"
-    while :; do
-      case "$line" in *[0123456789]*) ;; *) break ;; esac
-      line="${line#"${line%%[0123456789]*}"}"
-      if [[ $line =~ $re ]]; then
-        m="${BASH_REMATCH[0]}"; count=$((count + 1)); pairs="$m"; unit="${BASH_REMATCH[2]}"
-        line="${line:${#m}}"
-      else
-        line="${line#"${line%%[!0123456789]*}"}"
-      fi
-    done
-  done
-  [ "$count" -eq 1 ] || return 1
-  nums=""; k=0; m="$pairs"
-  while :; do
-    case "$m" in *[0123456789]*) ;; *) break ;; esac
-    m="${m#"${m%%[0123456789]*}"}"; n="${m%%[!0123456789]*}"; m="${m#"$n"}"
-    nums="${nums}${nums:+$nl}$n"; k=$((k + 1))
-  done
-  hi=0
-  for n in $nums; do [ "$n" -gt "$hi" ] && hi="$n"; done
-  [ "$hi" -gt 0 ] || return 1
-  case "$unit" in
-    h|hr|hrs|hour|hours)         mult=3600 ;;
-    m|min|mins|minute|minutes)   mult=60 ;;
-    s|sec|secs|second|seconds)   mult=1 ;;
-    *) return 1 ;;
-  esac
-  # REFUSE what the pair walk silently skipped rather than matched. It keeps only what it
-  # matched, so two failure shapes above look identical to a single clean pair:
-  #   * a decimal point anywhere near a digit ("0.5h" matches the trailing "5h" and never
-  #     sees the "0."; the header's "whole numbers only" is a refusal, not a truncation).
-  #   * two pairs glued with no separator ("1h30m" — "1h" fails its own trailing-boundary
-  #     check and is silently skipped, leaving only "30m" for `pairs` to find).
-  # A decimal anywhere in the cleaned string fails outright; a mismatch between every digit
-  # run in the string and the digit run(s) actually captured inside the matched pair catches
-  # the glued case, because nothing legitimate is a digit run OUTSIDE the one pair.
-  case "$s" in *[0123456789].[0123456789]*) return 1 ;; esac
-  allnums=0; m="$s"
-  while :; do
-    case "$m" in *[0123456789]*) ;; *) break ;; esac
-    m="${m#"${m%%[0123456789]*}"}"; m="${m#"${m%%[!0123456789]*}"}"; allnums=$((allnums + 1))
-  done
-  [ "$allnums" -eq "$k" ] || return 1
-  printf '%s' "$((hi * mult))"
 }
 
 # ---------------------------------------------------------------- the ledger
@@ -600,12 +486,6 @@ roster_names() {
 # The exit code is the state's alone: an acked UNMET row still exits 1, exactly as it did
 # when the callers read the ledger themselves, and what to do about the pair stays theirs.
 
-epoch_iso() {  # <epoch seconds> -> ISO-8601 Z; empty when it cannot be rendered
-  [ -n "$1" ] || return 0
-  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
-}
-
 # The delivered predicate, ONE declared path at a time (AC-4). Every outcome names its
 # conjunct in the caller's readback — `delivered=`, `missing=`, `empty=`, `stale=` — because
 # a bare "not delivered" tells a stopping agent nothing it can act on, and this string IS
@@ -655,7 +535,7 @@ landing_conjunct() {  # <path, as the roster spells it> <launched epoch|""> <lau
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       count=$((count + 1))
-      mtime="$(file_mtime "$f")"
+      mtime="$(file_mtime "$f" || echo 0)"
       case "$mtime" in ''|*[!0-9]*) mtime=0 ;; esac
       [ "$mtime" -gt "$newest" ] && newest="$mtime"
     done < <(find "$p" -maxdepth "$LANDING_DIR_MAXDEPTH" -type f 2>/dev/null \
@@ -669,7 +549,7 @@ landing_conjunct() {  # <path, as the roster spells it> <launched epoch|""> <lau
     if [ ! -s "$p" ]; then
       CONJUNCT="empty=$raw"; return 1
     fi
-    mtime="$(file_mtime "$p")"
+    mtime="$(file_mtime "$p" || echo 0)"
   else
     CONJUNCT="missing=$raw"; return 1
   fi
@@ -711,7 +591,7 @@ row_still_live() {  # <claims> <progress> <cadence> <launched_at>
   cad_s="$(parse_seconds "$cadence")" || return 1
   p="$(abs_path "$prog")"
   if [ -e "$p" ]; then
-    mtime="$(file_mtime "$p")"
+    mtime="$(file_mtime "$p" || echo 0)"
     age=$(( $(now_epoch) - mtime ))
   else
     # Never written: the promise is dated from the launch, so an artifact that was never
@@ -927,7 +807,7 @@ row_said() {  # <roster row> <launched epoch|""> <launched ISO> -> 0 said, 1 not
     have=1
     p="$(abs_path "$dm")"
     if [ -f "$p" ] && [ ! -L "$p" ]; then
-      mtime="$(file_mtime "$p")"
+      mtime="$(file_mtime "$p" || echo 0)"
       case "$mtime" in ''|*[!0-9]*) mtime=0 ;; esac
       if [ -z "$le" ] || [ "$mtime" -gt "$le" ]; then
         SAID="said=done marker $dm"; return 0
