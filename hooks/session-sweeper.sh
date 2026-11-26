@@ -213,13 +213,7 @@ fi
 # byte-identical private copy — one of eight — held together by an agreement suite;
 # there is one answer now, and it maps a worktree onto its main repository before it
 # walks for the nearest real `.bionic`.
-REPO="$(project_root "$PWD")"
-[ -n "$REPO" ] || REPO="$PWD"
-REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-if [ -z "$REPO_REAL" ]; then
-  die "REFUSED — cannot resolve the working directory."
-  exit 2
-fi
+REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
 
 # ---------------------------------------------------------------- where artifacts live
 #

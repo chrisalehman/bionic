@@ -1938,11 +1938,7 @@ sitrep_tick_line() {
       HO_SLUG="$(proof_plan_slug "$PV_PLAN")"
       HO_RUNWORD="$HO_SLUG"
     else
-      HO_ROOT="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-      if [ -z "$HO_ROOT" ]; then
-        die "REFUSED — cannot resolve the working directory."
-        exit 2
-      fi
+      HO_ROOT="$(project_root_or_refuse "$PWD")" || exit 2
       trap 'rm -f "$HO_FILE.tmp.$$" "$HO_CF"' EXIT
       HO_RUNWORD="no run bound"
     fi
@@ -1984,7 +1980,7 @@ sitrep_tick_line() {
     if [ -z "$HO_SID" ]; then
       HO_VER="unverified — no session key, so this session's agents cannot be read"
     else
-      HO_RF="$HO_ROOT/.bionic/tmp/roster-$HO_SID.state"
+      HO_RF="$(roster_path "$HO_ROOT" "$HO_SID")"
       HO_TR="$(session_transcript "$HO_SID")" || HO_TR=""
       HO_LRC=4; HO_SET=""; HO_SINCE=""
       if [ -n "$HO_TR" ]; then
@@ -2169,12 +2165,7 @@ sitrep_tick_line() {
   }
 
   poker_verb_landing_report() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     LR_PLAN=""
     if [ -n "$LR_ARG" ]; then
       LR_PLAN="$(docs_path "$REPO_REAL" "$LR_ARG")"
@@ -2364,12 +2355,7 @@ sitrep_tick_line() {
   # in one line naming the ledger's path when the run holds no round; 2 when there is no run to read. `decisions put`
   # and `decisions rule` are its writers, each one round (`decisions_append`).
   poker_verb_decisions() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     DC_DOCS="$(docs_root "$REPO_REAL")"
     if [ "$DC_ALL" = yes ]; then
       decisions_all "$DC_DOCS"
@@ -2421,12 +2407,7 @@ sitrep_tick_line() {
   # Refusals name the fix and change nothing: no file or no kind line (2), a plan that is not there or a session that
   # cannot be engaged (1); a sub-verb's refusal stops the ritual with that verb's code.
   poker_verb_resume() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     RS_DOCS="$(docs_root "$REPO_REAL")"
     RS_FILE="$(docs_path "$REPO_REAL" "$RS_ARG")"
     RS_SHOWN="$(printf '%s' "${RS_ARG:0:160}" | tr -d '[:cntrl:]')"
@@ -2594,7 +2575,7 @@ sitrep_tick_line() {
     else say "resume — bound this session to $RS_PLAN_REL"; fi
     printf 'step: %s\n' "$(awk -v cur="$RS_CURN" 'BEGIN { split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " ")
       if (cur == "") print "none named"; else print cur " " nm[cur + 1] }')"
-    RS_RF="$REPO_REAL/.bionic/tmp/roster-$SESSION_ID.state"
+    RS_RF="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     RS_UROWS="$(units_rows "$RS_PLAN" 2>/dev/null)"
     RS_AG=""
     while IFS= read -r RS_NAME; do
@@ -2651,12 +2632,7 @@ sitrep_tick_line() {
   # ruled there is never shown as owed and never left open for the next reader. The card prints only when card.sh
   # draws it (exit 0); a card it refuses prints nothing, card.sh's reasons reach stderr, and the verb exits 1.
   poker_verb_sitrep() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     SR_PLAN=""
     if [ -n "$SR_ARG" ]; then
       SR_PLAN="$(docs_path "$REPO_REAL" "$SR_ARG")"

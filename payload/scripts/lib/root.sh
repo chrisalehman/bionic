@@ -322,6 +322,22 @@ project_root() {
   return 0
 }
 
+# project_root_or_refuse [cwd] -> the project root with every symlink resolved, rc 0; rc 2 and nothing
+# on stdout when that root cannot be entered, after the one refusal every verb and hook gives for it.
+#
+# The refusal goes through the caller's own `die`, so it carries that hook's prefix, as each copy
+# this replaced did; a caller with no `die` gets the bare line on stderr. Run in a command
+# substitution, it cannot end the caller, so the caller exits:
+#     REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+project_root_or_refuse() {
+  local r
+  r="$(cd "$(project_root "${1:-$PWD}")" 2>/dev/null && pwd -P)"
+  [ -n "$r" ] && { printf '%s\n' "$r"; return 0; }
+  set -- "REFUSED — cannot resolve the working directory."
+  if declare -F die >/dev/null 2>&1; then die "$1"; else printf '%s\n' "$1" >&2; fi
+  return 2
+}
+
 # git_common_dir [dir] -> the repository's common git directory, absolute and symlink-resolved;
 # rc 1 and nothing printed when <dir> is in no repository.
 #

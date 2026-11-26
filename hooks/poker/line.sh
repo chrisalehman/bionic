@@ -194,7 +194,7 @@ DELIVER_FILES
   # read with a ruling unread (it holds the row first, stamping nothing); a ruling met here is printed and stamped
   # shown (lib/roster.sh `ruling_take_unread`), and the row lands at the next tick.
   sid="$(session_id)" || sid=""
-  roster="$PV_REPO/.bionic/tmp/roster-${sid}.state"
+  roster="$(roster_path "$PV_REPO" "$sid")"
   if ! row_writer "$roster" "$PV_PLAN" "$PV_ID" "$(units_field "$row" agent)"; then
     die "REFUSED — the row's writer cannot be read: lib/line.sh cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
@@ -1161,12 +1161,7 @@ poker_verb_known_limits_part() {
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
       *) usage "$use" ;;
     esac
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     if [ -n "$arg" ]; then
       plan="$(docs_path "$REPO_REAL" "$arg")"
       if [ ! -f "$plan" ] || [ -L "$plan" ]; then

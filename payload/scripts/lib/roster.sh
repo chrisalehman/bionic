@@ -859,6 +859,13 @@ roster_sessions_with_name() {  # <state dir> <name> -> "<session-id>|<status>" p
   return 0
 }
 
+# ---------- WHERE A SESSION'S ROSTER LIVES -------------------------------------------------------
+#
+# One spelling of the file, so a move of the roster is one edit and a reader can never be left
+# reading an empty roster at the old address without complaint. The project root is the caller's,
+# already resolved (`project_root_or_refuse`); nothing here checks that the file exists.
+roster_path() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "$2"; }   # <project root> <session id>
+
 # ---------- THE ACK LEDGER OF A ROSTER (epic-23 wave-33 T10) --------------------------------------
 #
 # The sweeper's ledger is the roster's sibling, `sweeper-<sid>.state` beside `roster-<sid>.state`:

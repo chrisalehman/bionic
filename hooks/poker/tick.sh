@@ -1245,13 +1245,8 @@ tick_watch_facts() {  # <file>
     # its tick. The sweeper above is required because nothing can be decided without it.
     ORDERS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/stop-orders.sh"
 
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
 
     # ---------- THE LINE'S STANDING REDS AND STALLED ENTRIES, EACH TOLD ONCE (wave-28 T5; D8) ----------
     #

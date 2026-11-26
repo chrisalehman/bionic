@@ -2272,11 +2272,7 @@ plan_verb_open() {
     say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
     exit 0
   fi
-  PV_REPO="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-  if [ -z "$PV_REPO" ]; then
-    die "REFUSED — cannot resolve the working directory."
-    exit 2
-  fi
+  PV_REPO="$(project_root_or_refuse "$PWD")" || exit 2
   PV_PLAN=""
   run="$(session_run "$PV_REPO" "$sid")"
   case "$run" in

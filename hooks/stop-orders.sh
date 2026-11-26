@@ -236,8 +236,7 @@ fi
 # byte-identical private copy — one of eight — held together by an agreement suite;
 # there is one answer now, and it maps a worktree onto its main repository before it
 # walks for the nearest real `.bionic`.
-REPO="$(project_root "$PWD")"
-REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
 
 # stopped_row_back <name> -> the plan row still running under <name> returned to pending, its launch taken back by
 # lib/units.sh `units_row_back` (the log's cancel), and said; 1 when this session's open run holds no
@@ -257,10 +256,6 @@ stopped_row_back() {
   fi
   say "stopped: $1 — its row $id is pending again, its launch taken back, and is offered at the next tick."
 }
-if [ -z "$REPO_REAL" ]; then
-  die "REFUSED — cannot resolve the working directory."
-  exit 2
-fi
 
 BIONIC_DIR="$REPO_REAL/.bionic"
 STATE_DIR="$BIONIC_DIR/tmp"
@@ -298,7 +293,8 @@ own_transcript() {  # -> the transcript file of THIS session, or nothing
   return 1
 }
 
-ROSTER_FILE="$STATE_DIR/roster-${SESSION_ID}.state"
+bionic_need roster.sh roster_path
+ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
 ORDERS_FILE="$STATE_DIR/stop-orders-${SESSION_ID}.state"
 
 if [ -L "$ORDERS_FILE" ]; then
@@ -637,7 +633,7 @@ EOF
       _best_at=""
       while IFS='|' read -r _msid _mstat; do
         [ -n "$_msid" ] && [ "$_msid" != "$SESSION_ID" ] || continue
-        _m="$(roster_landed "$STATE_DIR/roster-${_msid}.state" "$_target" 2>/dev/null)" || continue
+        _m="$(roster_landed "$(roster_path "$REPO_REAL" "$_msid")" "$_target" 2>/dev/null)" || continue
         [ -n "$_m" ] || continue
         git -C "$REPO_REAL" merge-base --is-ancestor "${_m%%$'\t'*}" HEAD 2>/dev/null || continue
         _m_at="${_m#*$'\t'}"
