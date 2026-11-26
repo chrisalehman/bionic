@@ -357,6 +357,26 @@ units_row_back() {
   [ -z "$nm" ] || units_dispatch_back "$plan" "$row" "$nm" || return 2
 }
 
+# units_record_stands <plan> <row> <Files cell> <root> <docs root> -> whether a record the row's Files or its artifact
+# cell (the plan-read library's cell of the row) names stands as a file: a path from the docs root (`record/…`) or from
+# the root, a leading `./` or `!` not part of it. The root is the repository, or a row's tree when the record is the one
+# its writer holds; with no docs root no `record/…` path stands. The tick and the close ask it, so a row's record stands
+# on one answer. 0 one stands; 1 the row names a path and none stands; 2 it names none (each entry empty, a dash or none).
+units_record_stands() {
+  local e art root="${4:-}" docs="${5:-}" named=""
+  art="$(plan_read_row "${1:-}" Tasks id "${2:-}" 2>/dev/null | sed -n 's/^artifact=//p')"
+  while IFS= read -r e; do
+    e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
+    case "$e" in
+      none) ;;
+      record/*) named=1; [ -n "$docs" ] && [ -f "$docs/$e" ] && return 0 ;;
+      *[A-Za-z0-9]*) named=1; [ -f "$root/$e" ] && return 0 ;;
+    esac
+  done <<< "$(printf '%s,%s\n' "${3:-}" "$art" | tr ',' '\n')"
+  [ -z "$named" ] && return 2
+  return 1
+}
+
 # units_born_event <plan> <row> [<reason>] [<finding>] [promoted] [<point>] [<rows>] -> the row's birth appended to its run's
 # log: one `born` event, the reason the words a born marker carried (`review S<n> <reach>`, `regression <suite>`), the finding
 # its `of=` list, `promoted=yes` for a finding the person moved to fix from outside the policy, which the fix-cap counts, and

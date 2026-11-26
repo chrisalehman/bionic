@@ -597,7 +597,8 @@ co_lands_refusal() {  # <rows> -> why this session cannot land them, or nothing
 # row out and the writer holding it. THE CLOSE LANDS NO ROW A WRITER HOLDS, and removes nothing a writer still reads:
 # landed at the merge, an active close row reads finished while its writer is mid-work. Who is out is the watcher's
 # own question (lib/patrol.sh `patrol_rows_out`), so the close typed by hand and the merge pass refuse on one answer;
-# an answer that cannot be had refuses too. It is asked in a command substitution, never in this shell: the rosters'
+# an answer that cannot be had refuses too. It asks whether a writer is out now, never whether one ever began a row's
+# file (co_cont_owner): a writer acked or gone holds nothing, though the file it began is still its own. It is asked in a command substitution, never in this shell: the rosters'
 # reader sources lib/fill.sh and through it lib/gate.sh, whose `gate_ask` would replace this file's own.
 co_rows_out() {
   local held said
@@ -607,8 +608,24 @@ co_rows_out() {
   said="$(printf '%s\n' "$held" | awk -F'\t' '$1 != "" { printf "%s%s (%s on roster %s)", (n++ ? ", " : ""), $1, $2, substr($3, 1, 8) }')"
   _co_held "rows of the run are out" "rows out: $said — the close runs once each writer is acked or gone — nothing was done"
 }
-act_lands() {  # <rows> -> each landed by one published event at the integration head; LANDS_LINE
-  local rows="$1" id ih left
+# co_lands_open <rows> -> the close rows among <rows> that name a record none of which stands, space-joined, in table
+# order. A CLOSE ROW IS FINISHED BY ITS RECORD, not by the merge: landed without it, a row whose writer never wrote it
+# reads done. A close row that names no record has nothing to wait for and lands with the merge. The record is read as
+# the tick reads it (lib/units.sh `units_record_stands`).
+co_lands_open() {
+  local id files out=""
+  while IFS=$'\t' read -r id files; do
+    [ -n "$id" ] || continue
+    units_record_stands "$PLAN" "$id" "$files" "$ROOT" "$DROOT"; [ "$?" != 1 ] || out="$out${out:+ }$id"
+  done <<< "$(units_rows "$PLAN" 2>/dev/null | CO_ROWS=" $1 " awk -F'\t' '$3 == "close" && index(ENVIRON["CO_ROWS"], " " $1 " ") { print $1 "\t" $9 }')"
+  printf '%s' "$out"
+}
+co_lands_said() {  # <rows landed> <rows left open> <where> -> the rows-landed line's words
+  if [ -n "$1" ]; then printf '%s at %s' "$1" "$3"; else printf 'none'; fi
+  [ -z "$2" ] || printf '; %s left open — no record it names stands' "$2"
+}
+act_lands() {  # <rows> -> each landed by one published event at the integration head, a close row once its record stands; LANDS_LINE
+  local rows="$1" id ih left open landed=""
   if [ -z "$rows" ]; then
     LANDS_LINE="none — no open integrate or close row"
     return 0
@@ -616,14 +633,17 @@ act_lands() {  # <rows> -> each landed by one published event at the integration
   ih="$CO_MERGE_COMMIT"
   [ -n "$ih" ] || _co_refuse "no merge was read, so rows $rows have no commit to land at"
   bionic_need line.sh line_published_event || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
+  open="$(co_lands_open "$rows")"
   for id in $rows; do
+    case " $open " in *" $id "*) continue ;; esac
     line_published_event "$PLAN" "row=$id" "commit=$ih" kind=close by=close-out why=merged >/dev/null \
       || _co_refuse "the landing of $id cannot be written to the run's log — rows before it are landed; run close-out again"
+    landed="$landed${landed:+ }$id"
   done
   # The readback: the act's own result, asked of the units helper rather than assumed from the writes.
   left="$(co_lands_rows)"
-  [ -z "$left" ] || _co_refuse "rows $left still read open after their landing was written — the run's log is not as written"
-  LANDS_LINE="$rows at $CO_MERGE_REF @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)"
+  [ "$left" = "$open" ] || _co_refuse "rows ${left:-none} read open after the landings were written, where only ${open:-none} should — the run's log is not as written"
+  LANDS_LINE="$(co_lands_said "$landed" "$open" "$CO_MERGE_REF @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)")"
 }
 
 # ─── Act 2: worktree branches ────────────────────────────────────────────────
@@ -1621,15 +1641,23 @@ co_cont_hh_none() {  # -> 0 when the continuation holds no `hand-holds: ` line u
   [ -f "$CONT" ] || return 0
   ! awk '/^## / { s = ($0 == "## Hand-holds"); next } s && index($0, "hand-holds: ") == 1 { f = 1 } END { exit !f }' "$CONT"
 }
-# THE CONTINUATION HAS ONE WRITER. A close row whose Files name it, and which was dispatched (the run's log holds its
-# dispatch), has a writer of its own for that file, so the close writes none of it, the file there or not: two writers
-# of one file is how a close appended to a continuation its row's writer was still writing. A close row nobody
-# dispatched has no writer, and the close stays the file's one writer, as before. Files entries are read from the
-# project's root and from the docs root, the two spellings a planner writes.
+# THE CONTINUATION HAS ONE WRITER. A close row whose Files name it, and which was ever dispatched (the run's log holds a
+# dispatch of it, whether or not the launch was taken back since), has a writer of its own for that file, so the close
+# writes none of it, the file there or not: two writers of one file is how a close appended to a continuation its row's
+# writer was still writing, or had begun before the stand-down took its launch back. A close row nobody dispatched has
+# no writer, and the close stays the file's one writer, as before. Files entries are read from the project's root and
+# from the docs root, the two spellings a planner writes. Whether a writer is out NOW is another question, the one that
+# holds the close (co_rows_out); this one asks whether a writer ever began the file.
+# co_rows_sent -> every row the run's log ever dispatched, one per line: read off the log's lines, since a cancel takes
+# the dispatch out of the standing facts. 2 when the lines cannot be read.
+co_rows_sent() {
+  bionic_need reader.sh reader_events || return 2
+  reader_events "$PLAN" | awk -F'|' "$_READER_AWK"'ev() == "dispatch" { print line_kv("row") }'
+}
 # co_cont_owner -> the id of the close row that owns the continuation, or nothing
 co_cont_owner() {
   local rows id files e
-  rows="$(units_rows "$PLAN" 2>/dev/null | CO_SENT=" $(co_facts dispatch row 2>/dev/null | tr '\n' ' ') " awk -F'\t' '
+  rows="$(units_rows "$PLAN" 2>/dev/null | CO_SENT=" $(co_rows_sent 2>/dev/null | tr '\n' ' ') " awk -F'\t' '
     $3 == "close" && $10 != "dropped" && index(ENVIRON["CO_SENT"], " " $1 " ") { print $1 "\t" $9 }')"
   while IFS=$'\t' read -r id files; do
     [ -n "$id" ] || continue
@@ -2288,7 +2316,10 @@ do_check() {
   elif [ -z "$CO_MERGE_COMMIT" ]; then
     say "rows-landed: none — run lands $CO_LANDS only once the merge is seen"
   else
-    say "rows-landed: run would land $CO_LANDS at $CO_MERGE_REF @ ${is:-?}"
+    local ck_open ck_id ck_land=""
+    ck_open="$(co_lands_open "$CO_LANDS")"
+    for ck_id in $CO_LANDS; do case " $ck_open " in *" $ck_id "*) ;; *) ck_land="$ck_land${ck_land:+ }$ck_id" ;; esac; done
+    say "rows-landed: run would land $(co_lands_said "$ck_land" "$ck_open" "$CO_MERGE_REF @ ${is:-?}")"
   fi
 
   # THE CENSUS NAMES ITS SOURCE, NOT JUST ITS RESULT (D5). `wt_branches` reads the
