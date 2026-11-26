@@ -38,6 +38,7 @@
 #   §7   no git, no .bionic: the cwd answers
 #   §8   a worktree of a bare repository: the checkout is the only working tree
 #   §10  the linked worktree's name is published as BIONIC_WORKTREE
+#   §11  path_normal folds . and .. lexically, and both walls' folders call it
 #
 # SIX TOPOLOGIES, BUILT FOR REAL — no mocked filesystem, no stubbed git. Every
 # fixture below is `mkdir`, `git init`, `git worktree add` and `ln -s` under one
@@ -505,5 +506,41 @@ expect_eq "10c: a linked worktree costs TWO — the one rev-parse plus rule 1's 
   "2" "$(git_calls "$SANDBOX/t2/wt-a/sub" "$HOME_DEFAULT")"
 expect_eq "10c: the one call asks for both paths at once" \
   "1" "$(git_calls "$SANDBOX/t1/ws/repo/src" "$HOME_DEFAULT" >/dev/null; grep -c -- '--git-common-dir .*--git-dir' "$GIT_CALL_LOG")"
+
+# ============================================================
+section "11 — path_normal folds . and .. lexically, and both walls' folders call it"
+# ============================================================
+# fails-when: a `..` climbs past the root or keeps its segment, a doubled or trailing slash
+# survives, a star in a path globs, a symlink is resolved, the caller's globbing or IFS is
+# changed, or a wall folds a path with a loop of its own.
+mkdir -p "$SANDBOX/t11/real/sub" "$SANDBOX/t11/glob"; : > "$SANDBOX/t11/glob/planted"
+ln -s "$SANDBOX/t11/real/sub" "$SANDBOX/t11/link"
+normal_of() {  # <absolute path> -> path_normal's answer, then the IFS and globbing after it
+  ( cd "$SANDBOX/t11/glob" || exit 1
+    . "$LIB" || exit 1
+    IFS=":"; set +f
+    path_normal "$1"
+    _pn_f=on; case "$-" in *f*) _pn_f=off ;; esac
+    printf '%s|[%s]|%s' "$PATH_NORMAL" "$IFS" "$_pn_f" )
+}
+expect_eq "11a: . and .. are folded, and the caller's IFS and globbing are as they were" \
+  "/a/c|[:]|on" "$(normal_of /a/./b/../c)"
+expect_eq "11b: doubled and trailing slashes are folded" "/x/y|[:]|on" "$(normal_of //x//y/)"
+expect_eq "11c: a climb past the root stops at the root" "/|[:]|on" "$(normal_of /a/b/../../..)"
+expect_eq "11d: a star is a character, never a glob" "/q/*|[:]|on" "$(normal_of '/q/./*')"
+expect_eq "11e: a symlink's .. folds to the link's parent, not its target's" \
+  "$SANDBOX/t11|[:]|on" "$(normal_of "$SANDBOX/t11/link/..")"
+# The two walls' folders, read by one extractor: a call of the home is the positive, the fold's
+# own `..` arm is the copy.
+fold_marks() {  # <hook>... -> `call <hook>` per call of path_normal, `fold <hook>` per `..` arm of a fold loop
+  awk '{ n = FILENAME; sub(/.*\//, "", n) }
+       /^[^#]*path_normal / { print "call " n }
+       /^[[:space:]]*\.\.\)[[:space:]]+[a-z_]+="\$\{[a-z_]+%\/\*\}"/ { print "fold " n }' "$@"
+}
+FOLD_MARKS="$(fold_marks "$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh" "$BIONIC_HOOKS_DIR/dispatch-preflight.sh")"
+expect_eq "11f: each wall's folder calls the home" "canonical-sdlc-governing-skill.sh dispatch-preflight.sh" \
+  "$(printf '%s\n' "$FOLD_MARKS" | sed -n 's/^call //p' | sort -u | paste -sd' ' -)"
+expect_eq "11g: neither wall folds a path with a loop of its own" "" \
+  "$(printf '%s\n' "$FOLD_MARKS" | sed -n 's/^fold //p' | sort -u | paste -sd' ' -)"
 
 finish
