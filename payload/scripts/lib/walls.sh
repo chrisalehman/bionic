@@ -930,19 +930,15 @@ _eg_commit_cwd() {
 # for every failure (no git, no repository, an unreadable root) — the caller judges those.
 _EG_JUR_TOP=""
 _eg_outside_root() {
-  local _d="${1:-}" _both _common _main
+  local _d="${1:-}" _common _main
   _EG_JUR_TOP=""
   case "$_d" in /*) : ;; *) return 1 ;; esac
-  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --show-toplevel 2>/dev/null)" || return 1
-  _common="${_both%%$'\n'*}"
-  [ "$_common" != "$_both" ] || return 1
-  _EG_JUR_TOP="${_both#*$'\n'}"
-  [ -n "$_common" ] && [ -n "$_EG_JUR_TOP" ] || { _EG_JUR_TOP=""; return 1; }
+  git_common_dir_and "$_d" --show-toplevel || return 1
+  _common="$BIONIC_GIT_COMMON"; _EG_JUR_TOP="$BIONIC_GIT_ALSO"
   if [ -d "$BIONIC_ROOT/.git" ]; then
     _main="$BIONIC_ROOT/.git"
   else
-    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { _EG_JUR_TOP=""; return 1; }
-    _main="${_main%%$'\n'*}"
+    _main="$(git_common_dir "$BIONIC_ROOT")" || { _EG_JUR_TOP=""; return 1; }
   fi
   if [ -z "$_main" ] || [ "$_common" = "$_main" ] || [ "$_common" -ef "$_main" ]; then
     _EG_JUR_TOP=""
@@ -3295,21 +3291,17 @@ _eg_wt_name() {
 _EG_GITWT=""
 _EG_GITWT_FOREIGN=""
 _eg_git_wt_name() {
-  local _d="${1:-}" _both _common _gitdir _main
+  local _d="${1:-}" _common _gitdir _main
   _EG_GITWT=""; _EG_GITWT_FOREIGN=""
   case "$_d" in /*) : ;; *) return 0 ;; esac
-  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 0
-  _common="${_both%%$'\n'*}"
-  _gitdir="${_both#*$'\n'}"
-  [ "$_common" != "$_both" ] || return 0
-  [ -n "$_common" ] && [ -n "$_gitdir" ] || return 0
+  git_common_dir_and "$_d" --git-dir || return 0
+  _common="$BIONIC_GIT_COMMON"; _gitdir="$BIONIC_GIT_ALSO"
   [ "$_common" != "$_gitdir" ] || return 0
   case "$_gitdir" in */worktrees/*) : ;; *) return 0 ;; esac
   if [ -d "$BIONIC_ROOT/.git" ]; then
     _main="$BIONIC_ROOT/.git"
   else
-    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-    _main="${_main%%$'\n'*}"
+    _main="$(git_common_dir "$BIONIC_ROOT")" || return 0
   fi
   [ -n "$_main" ] || return 0
   if [ "$_common" != "$_main" ] && ! [ "$_common" -ef "$_main" ]; then

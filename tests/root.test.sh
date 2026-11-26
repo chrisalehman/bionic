@@ -38,6 +38,7 @@
 #   §7   no git, no .bionic: the cwd answers
 #   §8   a worktree of a bare repository: the checkout is the only working tree
 #   §10  the linked worktree's name is published as BIONIC_WORKTREE
+#   §11  a tree's lease and the paired lookup ask the one common directory
 #
 # SIX TOPOLOGIES, BUILT FOR REAL — no mocked filesystem, no stubbed git. Every
 # fixture below is `mkdir`, `git init`, `git worktree add` and `ln -s` under one
@@ -505,5 +506,62 @@ expect_eq "10c: a linked worktree costs TWO — the one rev-parse plus rule 1's 
   "2" "$(git_calls "$SANDBOX/t2/wt-a/sub" "$HOME_DEFAULT")"
 expect_eq "10c: the one call asks for both paths at once" \
   "1" "$(git_calls "$SANDBOX/t1/ws/repo/src" "$HOME_DEFAULT" >/dev/null; grep -c -- '--git-common-dir .*--git-dir' "$GIT_CALL_LOG")"
+
+# ============================================================
+section "11 — a tree's lease and the paired lookup ask the one common directory"
+# ============================================================
+# Two walls refuse an orchestrator working from a writer's tree, and two more ask git
+# for the common directory beside a second path. Each asked git for itself; they ask
+# the library now, so the answers are pinned here, on the same real topologies.
+
+# lease_at <dir> [<root>] -> "<rc>|<top>|<main>" after one git_tree_lease call
+lease_at() {
+  ( . "$LIB" || exit 1
+    git_tree_lease "$@"; printf '%s|%s|%s' "$?" "$BIONIC_LEASE_TOP" "$BIONIC_LEASE_MAIN" )
+}
+# pair_at <dir> <option> [<PATH prefix>] -> "<rc>|<common>|<also>" after one git_common_dir_and call
+pair_at() {
+  ( [ -z "${3:-}" ] || { PATH="$3:$PATH"; export PATH; }
+    . "$LIB" || exit 1
+    git_common_dir_and "$1" "$2"; printf '%s|%s|%s' "$?" "$BIONIC_GIT_COMMON" "$BIONIC_GIT_ALSO" )
+}
+
+expect_eq "11: from deep inside a linked worktree, the lease names the tree's top and its main checkout" \
+  "0|$SANDBOX/t2/wt-a|$T2_MAIN" "$(lease_at "$SANDBOX/t2/wt-a/sub")"
+expect_eq "11: the main checkout holds no lease, and both names are blank" \
+  "1||" "$(lease_at "$T2_MAIN")"
+expect_eq "11: a tree whose top is the project root is its own project and holds no lease" \
+  "1||" "$(lease_at "$SANDBOX/t2/wt-a/sub" "$SANDBOX/t2/wt-a")"
+expect_eq "11: another root leaves the same tree's lease in place" \
+  "0|$SANDBOX/t2/wt-a|$T2_MAIN" "$(lease_at "$SANDBOX/t2/wt-a/sub" "$T1_WS")"
+expect_eq "11: outside any repository there is no lease" \
+  "1||" "$(lease_at "$SANDBOX/t7/plain/deep")"
+# A checkout whose `.git` is a link to a directory kept elsewhere has a common directory
+# whose parent is not the checkout, yet it is no linked worktree: only a `.git` FILE is one.
+mkdir -p "$SANDBOX/t11/store"
+gitinit "$SANDBOX/t11/repo"
+mv "$SANDBOX/t11/repo/.git" "$SANDBOX/t11/store/repo.git" && ln -s ../store/repo.git "$SANDBOX/t11/repo/.git"
+mkdir -p "$SANDBOX/t11/repo/sub"
+expect_eq "11: the linked .git fixture is a repository whose common directory sits outside the checkout" \
+  "$SANDBOX/t11/store/repo.git" "$( . "$LIB" && git_common_dir "$SANDBOX/t11/repo/sub")"
+expect_eq "11: …and it holds no lease, because its .git is no file" \
+  "1||" "$(lease_at "$SANDBOX/t11/repo/sub")"
+
+expect_eq "11: the paired lookup answers the common directory and the tree's own git directory" \
+  "0|$T2_MAIN/.git|$T2_MAIN/.git/worktrees/wt-a" "$(pair_at "$SANDBOX/t2/wt-a/sub" --git-dir)"
+expect_eq "11: …and the toplevel beside it, from a nested repository's subdirectory" \
+  "0|$SANDBOX/t1/ws/repo/.git|$SANDBOX/t1/ws/repo" "$(pair_at "$SANDBOX/t1/ws/repo/src" --show-toplevel)"
+expect_eq "11: the common directory it answers is the one git_common_dir answers" \
+  "$( . "$LIB" && git_common_dir "$SANDBOX/t2/wt-a/sub")" "$(pair_at "$SANDBOX/t2/wt-a/sub" --git-dir | cut -d'|' -f2)"
+expect_eq "11: outside any repository it answers nothing" \
+  "1||" "$(pair_at "$SANDBOX/t7/plain/deep" --git-dir)"
+# One line back is no pair: a git that answers only the first question.
+ONE_LINE="$SANDBOX/one-line"; mkdir -p "$ONE_LINE"
+printf '#!/bin/bash\nprintf "%%s\\n" /one/answer\n' > "$ONE_LINE/git"; chmod +x "$ONE_LINE/git"
+expect_eq "11: a git that answers one line gives no pair, so a tree is never read as its own common directory" \
+  "1||" "$(pair_at "$SANDBOX/t2/wt-a/sub" --git-dir "$ONE_LINE")"
+expect_eq "11: the paired lookup asks git once for both answers" \
+  "1" "$( : > "$GIT_CALL_LOG"; BIONIC_GIT_CALL_LOG="$GIT_CALL_LOG" pair_at "$SANDBOX/t2/wt-a/sub" --git-dir "$GIT_SHIM" >/dev/null
+          grep -c -- '--git-common-dir --git-dir' "$GIT_CALL_LOG")"
 
 finish

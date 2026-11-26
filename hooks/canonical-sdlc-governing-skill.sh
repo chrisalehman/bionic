@@ -407,9 +407,7 @@ gs_bind_fold() {
     case "$dir" in */*) dir="${dir%/*}" ;; *) dir="" ;; esac
   done
   [ -d "$dir" ] || return 1
-  common=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 1
-  [ -n "$common" ] || return 1
-  case "$common" in /*) ;; *) common="$dir/$common" ;; esac
+  common="$(git_common_dir "$dir")" || return 1
   main=$(cd "$common/.." 2>/dev/null && pwd -P) || return 1
   [ "$main" = "$root" ] || return 1
   top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 1
@@ -1207,29 +1205,8 @@ case "$BASENAME" in
     LEASE_AGENT=0
     [ -n "$(echo "$BIONIC_INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
     LEASE_CWD=$(bionic_jq .cwd)
-    if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ]; then
-      # A linked worktree's `.git` is a FILE pointing into the shared repository; the main
-      # checkout's is a directory. Same test scripts/lib/worktree.sh's land verb uses.
-      LEASE_TOP=$(git -C "$LEASE_CWD" rev-parse --show-toplevel 2>/dev/null) || LEASE_TOP=""
-      if [ -n "$LEASE_TOP" ] && [ -f "$LEASE_TOP/.git" ]; then
-        LEASE_TOP=$( cd "$LEASE_TOP" 2>/dev/null && pwd -P ) || LEASE_TOP=""
-      else
-        LEASE_TOP=""
-      fi
-      if [ -n "$LEASE_TOP" ]; then
-        # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
-        # answer against the tree, as lib/root.sh's own walk does.
-        LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || LEASE_COMMON=""
-        if [ -z "$LEASE_COMMON" ]; then
-          LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --git-common-dir 2>/dev/null) || LEASE_COMMON=""
-          case "$LEASE_COMMON" in ""|/*) ;; *) LEASE_COMMON="$LEASE_TOP/$LEASE_COMMON" ;; esac
-        fi
-        LEASE_MAIN=""
-        [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
-        if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
-          _gs_refuse lease "$LEASE_CWD" "$LEASE_TOP" "$LEASE_MAIN"
-        fi
-      fi
+    if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ] && git_tree_lease "$LEASE_CWD"; then
+      _gs_refuse lease "$LEASE_CWD" "$BIONIC_LEASE_TOP" "$BIONIC_LEASE_MAIN"
     fi
     ;;
 esac

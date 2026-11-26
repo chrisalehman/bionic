@@ -1364,6 +1364,7 @@ root.test.sh | §6 | keep | payload/scripts/lib/root.sh project_root: the git-to
 root.test.sh | §7 | keep | payload/scripts/lib/root.sh project_root: the cwd fallback dropped, so outside any repo with no .bionic the answer is empty (7) | none (searched 'cwd-fallback' in tests/)
 root.test.sh | §8 | keep | payload/scripts/lib/root.sh project_root: the bare-repository exception to the worktree map dropped, so a bare repo's checkout maps to dirname(bare.git) (8, 8b) | none (searched 'bare.git' in tests/)
 root.test.sh | §10 | keep | payload/scripts/lib/root.sh project_root: BIONIC_WORKTREE published from the branch name instead of the directory, so a branch named apart from its directory publishes the branch (10b); also the single rev-parse split in two (10c) | none (searched 'BIONIC_WORKTREE' in tests/)
+root.test.sh | §11 | keep | payload/scripts/lib/root.sh git_tree_lease and git_common_dir_and: the `.git`-is-a-file test or the root comparison dropped, so the main checkout or a tree that is its own project holds a lease; the main checkout taken as the common directory itself, so the tree names no main; a one-line answer read as a pair, so a tree reads as its own common directory; the two questions asked in two forks | none (searched 'git_tree_lease', 'git_common_dir_and' and 'BIONIC_LEASE_' in tests/: the governing-skill and dispatch-preflight suites drive the walls that call them, not the functions)
 
 ## roots.test.sh
 

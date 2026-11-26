@@ -213,13 +213,11 @@ _bionic_root_start() {
   # order the options were given, so the two questions rule 1 has always asked cost
   # one process instead of two. Measured at the parent (R3 §5): 11.7 ms + 10.8 ms,
   # 19% of the whole bash-walls run, on EVERY hook event of every session.
-  both="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || both=""
-  common="${both%%$'\n'*}"
-  gitdir="${both#*$'\n'}"
-  # Fewer than two lines is not an answer: a one-line `both` splits into two copies
-  # of itself, which would read as "git dir equals common dir" — a linked worktree
-  # silently demoted to an ordinary checkout. Blank both and let the arm below ask.
-  [ "$common" = "$both" ] && { common=""; gitdir=""; }
+  # Fewer than two lines is no answer from `git_common_dir_and`, so a linked worktree is
+  # never silently demoted to an ordinary checkout; the arm below asks again.
+  git_common_dir_and "$cwd" --git-dir
+  common="$BIONIC_GIT_COMMON"
+  gitdir="$BIONIC_GIT_ALSO"
 
   if [ -z "$common" ] || [ -z "$gitdir" ]; then
     # OLDER GIT (< 2.31) HAS NO `--path-format`, so the whole call above failed and
@@ -346,6 +344,41 @@ git_common_dir() {
     case "$c" in ''|*$'\n'*) return 1 ;; /*) ;; *) c="$d/$c" ;; esac
   fi
   _bionic_root_abs "$c"
+}
+
+# git_common_dir_and <dir> <path option> -> rc 0 with BIONIC_GIT_COMMON and BIONIC_GIT_ALSO set to git's answers
+# to `--git-common-dir` and to <path option> (`--git-dir`, `--show-toplevel`), from ONE ask of git; rc 1 and both
+# blank when git fails or answers fewer than two lines, or either answer is empty.
+#
+# For a caller that wants a second path beside the common directory: two questions in one `rev-parse` cost one
+# process where `git_common_dir` and a second ask cost two, on paths every hook event walks. The answers are git's
+# own `--path-format=absolute` lines, not resolved further, so a caller compares them with `-ef` or with each other;
+# an older git without the option fails here and the caller declines, or asks again itself. Set by variable, so no
+# subshell carries them away. One line back is not two answers: it would read as "git dir equals common dir".
+git_common_dir_and() {
+  local both
+  BIONIC_GIT_COMMON=""; BIONIC_GIT_ALSO=""
+  both="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir "$2" 2>/dev/null)" || return 1
+  case "$both" in *$'\n'*) ;; *) return 1 ;; esac
+  [ -n "${both%%$'\n'*}" ] && [ -n "${both#*$'\n'}" ] || return 1
+  BIONIC_GIT_COMMON="${both%%$'\n'*}"; BIONIC_GIT_ALSO="${both#*$'\n'}"
+}
+
+# git_tree_lease <dir> [<root>] -> rc 0 when <dir> sits in a linked worktree whose main checkout is another
+# directory, with BIONIC_LEASE_TOP set to the tree's top and BIONIC_LEASE_MAIN to the main checkout, both physical;
+# rc 1 and both blank otherwise. A linked worktree's `.git` is a FILE pointing into the shared repository and the
+# main checkout's is a directory, the test lib/worktree.sh's land verb makes too. A tree whose top is <root> is a
+# project of its own and holds no lease, so it answers rc 1 before the common directory is asked.
+git_tree_lease() {
+  local top common main
+  BIONIC_LEASE_TOP=""; BIONIC_LEASE_MAIN=""
+  top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ] && [ -f "$top/.git" ] || return 1
+  top="$(cd "$top" 2>/dev/null && pwd -P)" && [ -n "$top" ] || return 1
+  [ "$top" != "${2:-}" ] || return 1
+  common="$(git_common_dir "$top")" || return 1
+  main="$(cd "$common/.." 2>/dev/null && pwd -P)" && [ -n "$main" ] || return 1
+  [ "$main" != "$top" ] || return 1
+  BIONIC_LEASE_TOP="$top"; BIONIC_LEASE_MAIN="$main"
 }
 
 # git_linked_dir [dir] -> the tree's OWN git directory (`<main>/.git/worktrees/<name>`), absolute, on stdout, where

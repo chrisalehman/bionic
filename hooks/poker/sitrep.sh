@@ -1449,7 +1449,7 @@ SITREP_SIT
   SG_RELEASE="$(plan_frontmatter_get "$plan" release 2>/dev/null)"; SG_RELEASE="${SG_RELEASE:--}"
   SG_WAVE="$(printf '%s\n' "$SG_NAME" | awk 'match($0, /(^|-)wave-[0-9]+/) { s = substr($0, RSTART, RLENGTH); sub(/^.*wave-0*/, "", s); print (s == "") ? 0 : s; exit }')"
   SG_WAVE="${SG_WAVE:--}"
-  proj="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  proj="$(git_common_dir "$root")"
   case "$proj" in */.git) proj="${proj%/.git}"; proj="${proj##*/}" ;; *) proj="${root##*/}" ;; esac
   SG_PROJECT="$proj"
   # the run began at its Step 0, else at the plan's approval

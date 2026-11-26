@@ -325,13 +325,13 @@ expect_eq "the checkout's code, hooks, skills and agents name neither removed la
 section "GITHOME"
 # The common git directory is resolved by lib/root.sh's `git_common_dir` and by no other code. A line that is not a
 # comment and names `git-common-dir` is a resolution of its own, counted by file so that a line moving is no change.
-# The root library is the resolver's own file. The files below resolve it for themselves and are carried as a debt;
-# the pin refuses a line beyond them.
+# The root library is the resolver's own file, and no other file resolves it: a lookup that also wants a second
+# answer asks the root library's paired lookup, and a lease of a tree asks its lease lookup.
 git_homes() { ( cd "$1" && /usr/bin/grep -rnE -- 'git-common-dir' payload/scripts hooks 2>/dev/null \
   | awk -F: '{ t = $0; sub(/^[^:]*:[^:]*:/, "", t); if (t !~ /^[ \t]*#/) print $1 }' | /usr/bin/grep -vx 'payload/scripts/lib/root\.sh' \
   | LC_ALL=C sort | uniq -c | awk '{ printf "%s:%s ", $2, $1 }' | sed 's/ $//' ); }
-CARRIED="hooks/canonical-sdlc-governing-skill.sh:3 hooks/dispatch-preflight.sh:2 hooks/poker/plan.sh:1 hooks/poker/sitrep.sh:1 hooks/session-poker.sh:1 payload/scripts/booked.sh:1 payload/scripts/lib/stop.sh:1 payload/scripts/lib/walls.sh:4"
-expect_eq "the checkout resolves the common git directory for itself only in the carried files" "$CARRIED" "$(git_homes "$S")"
+CARRIED=""
+expect_eq "the checkout resolves the common git directory for itself in no file but the root library" "$CARRIED" "$(git_homes "$S")"
 printf '%s\n' '# asks --git-common-dir in a comment' 'f() { git_common_dir "$1"; }' > "$L/planted-home.sh"
 expect_eq "a comment naming the flag and a caller of the function are no resolution of their own" "$CARRIED" "$(git_homes "$S")"
 printf '%s\n' 'g() { git -C "$1" rev-parse --git-common-dir; }' >> "$L/planted-home.sh"
