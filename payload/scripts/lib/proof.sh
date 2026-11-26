@@ -27,14 +27,13 @@
 # THE REGRESSION IS KIND `regression` (wave-38 T8; REQ-9, D6). A line 1.20.0 wrote, `kind=floor`, is read as it:
 # proof_fields normalises the kind through lib/alias.sh, the one map of the old spellings.
 PROOF_KINDS="regression review task check walk"
-# THE MAP IS SOURCED FROM BESIDE THIS FILE, softly: a copy of this file read where alias.sh is not beside it (a suite's
-# doctored copy) reads only the new spellings, and _proof_alias_norm and _proof_alias_born say so by writing no arm.
-if ! declare -F alias_read >/dev/null 2>&1; then
-  _proof_alias_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  # shellcheck source=/dev/null
-  [ -n "$_proof_alias_dir" ] && [ -r "$_proof_alias_dir/alias.sh" ] && . "$_proof_alias_dir/alias.sh"
-  unset _proof_alias_dir
-fi
+# Every library below is loaded once through lib/loader.sh `bionic_need`; a caller that sourced this file alone gets
+# the loader from beside it.
+# shellcheck source=/dev/null
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# THE MAP IS SOURCED SOFTLY: a copy of this file read where alias.sh cannot be found (a suite's doctored copy) reads
+# only the new spellings, and _proof_alias_norm and _proof_alias_born say so by writing no arm.
+bionic_need alias.sh alias_read
 # _proof_alias_norm <kind> <awk variable> -> lib/alias.sh `alias_awk_norm`'s statements, or a blank when the map is
 # not loaded. _proof_alias_born -> the born marker's spellings as an ERE alternation, the new one alone without it.
 _proof_alias_norm() { if declare -F alias_awk_norm >/dev/null 2>&1; then alias_awk_norm "$@"; else printf ' '; fi; }
@@ -221,12 +220,7 @@ proof_waiver_line() {
 # record to hold its log, the appender cannot be loaded, or the appender refuses a value (a `|` or a line break); 1
 # when the write failed.
 _proof_event_load() {  # -> 0 once the reader and the appender are loaded in this shell; 2 when either cannot be
-  _proof_reader_load || return 2
-  if ! declare -F log_append >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$_READER_LIB_DIR/log.sh" >/dev/null 2>&1
-  fi
-  declare -F log_append >/dev/null 2>&1 || return 2
+  _proof_reader_load && bionic_need log.sh log_append || return 2
 }
 proof_waiver_event() {  # <plan> <field>=<value>… -> one waiver event in the plan's run log
   local log
@@ -1321,7 +1315,7 @@ _proof_records() {
   _proof_fields || return 0
   gd=""
   if [ -d "$co" ]; then
-    declare -F git_common_dir >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/root.sh" >/dev/null 2>&1
+    bionic_need root.sh git_common_dir
     gd="$(git_common_dir "$co" 2>/dev/null)"
   fi
   { if [ -n "$rec" ]; then line_lines "$rec"; fi
@@ -1370,14 +1364,8 @@ _proof_records() {
     }'
 }
 
-# _proof_line_load -> lib/line.sh sourced from beside this file, for `line_event`, the fold's writer.
-_proof_line_load() {
-  local d
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  # shellcheck source=/dev/null
-  [ -n "$d" ] && [ -r "$d/line.sh" ] && . "$d/line.sh" >/dev/null 2>&1
-  declare -F line_event >/dev/null 2>&1
-}
+# _proof_line_load -> 0 once lib/line.sh is loaded, for `line_event`, the fold's writer.
+_proof_line_load() { bionic_need line.sh line_event; }
 # _proof_fields -> 0 once lib/line.sh's reader of a record line (`_LINE_FIELDS_AWK`) is loaded: every read of the
 # landing record below goes through it, so a field is read by its name and there is no second parser.
 _proof_fields() { [ -n "${_LINE_FIELDS_AWK:-}" ] || _proof_line_load; [ -n "${_LINE_FIELDS_AWK:-}" ]; }
@@ -1408,8 +1396,7 @@ proof_regression_results() {
 # whole run's, never a landing's. Exit 1 when line.sh's writer cannot be loaded. <checkout> is kept for its callers.
 proof_regression_fold() {
   local plan="$1" head="$3" log="$4" rel="$5" res rec s r
-  declare -F line_event >/dev/null 2>&1 || _proof_line_load
-  declare -F line_event >/dev/null 2>&1 || return 1
+  _proof_line_load || return 1
   res="$(proof_regression_results "$log")"
   [ -n "$res" ] || return 0
   rec="$(line_record "$plan" 2>/dev/null)" || rec=""
@@ -1497,16 +1484,10 @@ _proof_floor_ends() {
     END { sub(/[ \t\r]+$/, "", l); print h; print l }' "$1" 2>/dev/null
 }
 
-# _proof_sha256 <file> -> its sha256, hex, through lib/detect.sh `_detect_sha256`, the one hash helper (loaded from
-# beside this file when the caller has not); rc 1 when no tool can answer.
+# _proof_sha256 <file> -> its sha256, hex, through lib/detect.sh `_detect_sha256`, the one hash helper (loaded when
+# the caller has not); rc 1 when no tool can answer.
 _proof_sha256() {
-  local d
-  if ! declare -F _detect_sha256 >/dev/null 2>&1; then
-    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-    # shellcheck source=/dev/null
-    [ -n "$d" ] && [ -r "$d/detect.sh" ] && . "$d/detect.sh" >/dev/null 2>&1
-  fi
-  declare -F _detect_sha256 >/dev/null 2>&1 || return 1
+  bionic_need detect.sh _detect_sha256 || return 1
   _detect_sha256 "$1"
 }
 
@@ -1720,12 +1701,7 @@ _proof_count_send() {
 }
 _proof_count_fresh() { [ "${_PROOF_FRESH:-}" = 1 ] || return 0; _proof_count judge _proof_facts; _PROOF_FRESH=2; }
 
-_proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
-  declare -F reader_facts >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/reader.sh" >/dev/null 2>&1
-  declare -F reader_facts >/dev/null 2>&1
-}
+_proof_reader_load() { bionic_need reader.sh reader_facts; }  # -> 0 once lib/reader.sh is loaded
 
 # The files a fold depends on: the reader's libraries, then the run's log, and no other file of its record.
 _PROOF_FACTS_LIBS="reader.sh plan-read.sh log.sh line.sh"
@@ -2528,28 +2504,13 @@ $(printf '%s\n\034\n%s\n' "$ev" "$pl" | PROOF_HAS_FIXED="${fixed:+1}" awk "$(pro
 PROOF_READINGS
 }
 
-# _proof_roots_load -> lib/roots.sh sourced beside this file unless its readers are loaded: the one lazy
-# source of it in this library (wave-28 T72; four copies of it stood here), for a caller that sourced
-# proof.sh alone.
-_proof_roots_load() {
-  local d
-  declare -F docs_root >/dev/null 2>&1 && declare -F config_value >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  # shellcheck source=/dev/null
-  . "$d/roots.sh" >/dev/null 2>&1
-  return 0
-}
+# _proof_roots_load -> lib/roots.sh loaded unless its readers are, for a caller that sourced proof.sh alone; exit 0
+# whether or not it could be.
+_proof_roots_load() { bionic_need roots.sh docs_root; bionic_need roots.sh config_value; return 0; }
 
-# _proof_prose_load -> lib/prose.sh sourced beside this file unless its predicate is loaded: the prose list has one
-# home, which the floor's walk and the cover walk read here and the dispatch wall reads too.
-_proof_prose_load() {
-  local d
-  declare -F prose_path >/dev/null 2>&1 && declare -F prose_list >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  # shellcheck source=/dev/null
-  . "$d/prose.sh" >/dev/null 2>&1
-  return 0
-}
+# _proof_prose_load -> lib/prose.sh loaded unless its predicate is: the prose list has one home, which the floor's walk
+# and the cover walk read here and the dispatch wall reads too. Exit 0 whether or not it could be.
+_proof_prose_load() { bionic_need prose.sh prose_path; bionic_need prose.sh prose_list; return 0; }
 
 # proof_state <plan> <tree> -> whether the plan's last regression proof stands at the working head, one
 # line (wave-31 T25; REQ-4 AC-4.1, REQ-13 AC-13.4; D3; A-orch-23; wave-35 T9: D8, AC-1.3):
@@ -2965,13 +2926,8 @@ proof_owed_suites() {
   printf '*\n'
 }
 
-# _proof_run_load -> lib/run.sh sourced beside this file unless its working-branch reader is loaded.
-_proof_run_load() {
-  declare -F plan_working_branch >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/run.sh" >/dev/null 2>&1
-  return 0
-}
+# _proof_run_load -> lib/run.sh loaded unless its working-branch reader is; exit 0 whether or not it could be.
+_proof_run_load() { bionic_need run.sh plan_working_branch; return 0; }
 
 # proof_regression <plan> -> `no` when the plan's leading frontmatter says `regression: no`, else `yes`;
 # exit 0 (wave-31 T27; REQ-12 AC-12.2; D4). THE REGRESSION IS A STEP-0 SETTING: `session-poker.sh
@@ -2982,10 +2938,7 @@ _proof_run_load() {
 # arm (lib/walls.sh validate_tests_block), dispatch preflight and the card read the same key through
 # the same function, lib/run.sh `plan_regression` (wave-33 T15), which this only maps to a word.
 proof_regression() {
-  if ! declare -F plan_regression >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/run.sh" >/dev/null 2>&1
-  fi
+  bionic_need run.sh plan_regression
   if [ "$(plan_regression "${1:-}")" = no ]; then printf 'no\n'; else printf 'yes\n'; fi
 }
 
@@ -3014,9 +2967,9 @@ facts_owed() {
   local owed r="" floor=1 dealing
   # THE WORD IS READ AS ITS LEVEL (wave-28 T44; wave-30 T11, D1). The dealing is keyed by the level
   # words themselves, so the plan's word is read through lib/run.sh `rigor_level` and a word that is
-  # no level deals nothing. A copy of this file read where run.sh is not beside it (a suite's
+  # no level deals nothing. A copy of this file read where run.sh cannot be found (a suite's
   # doctored copy) reads the word as written.
-  declare -F rigor_level >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/run.sh" >/dev/null 2>&1
+  bionic_need run.sh rigor_level
   if ! declare -F rigor_level >/dev/null 2>&1; then
     r="${1:-}"
   else
@@ -3025,10 +2978,10 @@ facts_owed() {
   [ -z "${4:-}" ] || [ "$(proof_regression "$4")" != no ] || floor=0
   # THE SCALE'S READS ARE ITS DEALING CELL (wave-38 T16; D25): `piece`, or `piece+whole` for one more
   # read of the whole per code question, from lib/scale.sh. WHO reads stays PROOF_DEALING's, per rigor.
-  # A scale the profile does not hold deals nothing. A copy of this file read where scale.sh is not
-  # beside it (a suite's doctored copy, as for run.sh above) has no profile to ask: it deals a piece
+  # A scale the profile does not hold deals nothing. A copy of this file read where scale.sh cannot
+  # be found (a suite's doctored copy, as for run.sh above) has no profile to ask: it deals a piece
   # read per question for a non-empty scale word, the reading with no row's extra read in it.
-  declare -F scale_cell >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/scale.sh" >/dev/null 2>&1
+  bionic_need scale.sh scale_cell
   if declare -F scale_cell >/dev/null 2>&1; then
     dealing="$(scale_cell "${2:-}" dealing 2>/dev/null)" || return 1
   else
@@ -3276,14 +3229,10 @@ _facts_state_replay() {  # <exit, a newline, the print, \036, the words on stder
   return "$rc"
 }
 _facts_state_judge() {
-  local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot="" pfx chains fact kind q role scope st rc=0
+  local plan="${1:-}" head="${2:-}" rigor scale owed tree droot="" pfx chains fact kind q role scope st rc=0
   local x pt pr ph pe wt wr we wh cb ws fixed="" born="" chk="" walked="|"
   [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  if ! declare -F plan_frontmatter_get >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$d/run.sh" >/dev/null 2>&1
-  fi
+  bionic_need run.sh plan_frontmatter_get
   # THE DOCS ROOT IS PROSE TO THE WALK (wave-36 T31; A-T28-9): the judge loads lib/roots.sh itself, as facts_cover
   # does, so no caller needs a load of its own for `docs_root`.
   _proof_roots_load
@@ -3852,12 +3801,5 @@ proof_debt_row_counts() {
   printf '%s %s\n' "$b" "$t"
 }
 
-# _proof_units_load -> 0 once lib/units.sh's Files matcher is defined, sourced from beside this file.
-_proof_units_load() {
-  local d
-  declare -F _units_files_awk >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  # shellcheck source=/dev/null
-  [ -n "$d" ] && [ -r "$d/units.sh" ] && . "$d/units.sh" 2>/dev/null
-  declare -F _units_files_awk >/dev/null 2>&1
-}
+# _proof_units_load -> 0 once lib/units.sh's Files matcher is defined.
+_proof_units_load() { bionic_need units.sh _units_files_awk; }
