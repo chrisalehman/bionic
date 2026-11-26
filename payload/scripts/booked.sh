@@ -776,6 +776,11 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
     # background job) hands the ignored state to the detached side and the command below it, where no bash can trap
     # or be ended by it; a bash cannot un-ignore a signal, this perl can, once, before it execs the shim.
     $SIG{$_} = "DEFAULT" for qw(HUP INT QUIT);
+    # NO HOLD OF THE CALLER: BIONIC_HELD names the held reads of the one command that started this run (lib/proof.sh
+    # `proof_hold_begin`), and that command removes them when it ends. This run outlives it, so a poker inside it would
+    # fold into a directory taken away under the fold and refuse what it was asked to record; without the name, each
+    # opens a hold of its own.
+    delete $ENV{BIONIC_HELD};
     open(STDIN, "<", "/dev/null") or POSIX::_exit(4);
     open(STDOUT, ">>", $log) or POSIX::_exit(4);
     open(STDERR, ">&", \*STDOUT) or POSIX::_exit(4);

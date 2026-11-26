@@ -1599,27 +1599,34 @@ section "§POINT-ASKED: a point whose rows have landed is run by the tick while 
 # next tick lands the point's row on that proof.
 # FIXTURE FIDELITY: §STARTER's repository, runner, roster and verbs, the two rows added by an edit as st_row adds them.
 # fails-when: the tick asks the whole run's declines of a point (no start beside T10's open writer); the detached call
-# records no point proof; the row is left unlanded on its proof, or landed by the regression row's rule.
+# records no point proof; the row is left unlanded on its proof, or landed by the regression row's rule; the detached
+# run folds its facts inside the hold of the tick that started it.
+# THE TICK OUTLIVES ITS RUN. On a loaded machine the tick is still alive while its detached run folds the run's facts,
+# and the tick removes its hold (lib/proof.sh `proof_hold_end`) when it ends, under any fold still going in it. The
+# fixture holds that moment still: the tick runs inside a hold this shell keeps, which a poker trusts while the pid in its
+# name lives and opens none beside, and once the tick has returned the hold is emptied and made unwritable, standing for
+# its removal. A detached run that shared it could fold nothing and would leave no proof; one with a hold of its own does.
 st_row '| T11 | 4 | test | the whole run after T7 and T8 · point | T7, T8 | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/T11.md | — |'
 st_row '| T10 | 4 | build | a build after the point | — | 30 | REQ-1 | g.sh | — |'
 st_dispatched T10 w-T10 6
 add_row "$RST" name=w-T10 agent_id=a-w-T10 subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$RST/record/T10.md" duration=60m
 ST_H5="$(s57_commit "$ST_WT" lib/e.sh H5)"
+PA_HELD="$(mktemp -d "$TMPROOT/bionic-held-$$.XXXXXX")" && chmod 700 "$PA_HELD"
+: > "$ST_CTL/hold"
+export BIONIC_HELD="$PA_HELD"
 forget_digest "$RST"; poke "$RST" tick
+unset BIONIC_HELD
 expect_contains "PA-1 T7 and T8 landed, T10's writer open: the tick starts the point's run as point-T11@<h8>" \
   "poker: regression-run started point-T11@${ST_H5:0:8} " "$(st_started)"
 [ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
 expect_eq "PA-1b …and starts no whole run beside it" "0" "$(st_started | /usr/bin/grep -c "regression@" || :)"
+expect_nonempty "PA-1c …and it folded the run's facts inside the hold the fixture keeps, so that hold is the tick's" \
+  "$(ls -A "$PA_HELD" 2>/dev/null | /usr/bin/grep '^fold-' || :)"
+find "$PA_HELD" -mindepth 1 -delete 2>/dev/null; chmod 500 "$PA_HELD"
+rm -f "$ST_CTL/hold"
 ST_PLOG="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p' | head -n 1)"
 expect_true "PA-2-pre the point's detached run ends" st_until 60 st_ended "${ST_PLOG:-$TMPROOT/none}"
-# A run the gate did not admit ends 75 and the next tick starts it again, as ST-7 holds for the whole run; a loaded
-# machine can meet that here, so up to two such retries are taken before the proof is read.
-for st_try in 1 2; do
-  [ "$(cat "${ST_PLOG:-$TMPROOT/none}.rc" 2>/dev/null)" = 75 ] || break
-  forget_digest "$RST"; poke "$RST" tick
-  ST_PLOG="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p' | head -n 1)"
-  st_until 60 st_ended "${ST_PLOG:-$TMPROOT/none}" || break
-done
+chmod 700 "$PA_HELD"
 expect_eq "PA-2 …and its proof is the point's own kind, naming T11, at the head it ran" "1" \
   "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=point head=$ST_H5 .*point=T11" || :)"
 [ "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=point head=$ST_H5 " || :)" = 1 ] \
