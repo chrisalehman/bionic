@@ -100,8 +100,7 @@ cur8_unruled_line() {
 # a refused line (`cur7_judge`) and what prints it on ask (the `cover` verb), so the two cannot say different
 # things of one range. Never called from the tick, `sched_facts_state`, `live_judge` or any wall: a person asks.
 cover_basis() {
-  if ! { declare -F facts_cover >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F facts_cover >/dev/null 2>&1; then
+  if ! bionic_need proof.sh facts_cover; then
     printf 'cover: the proof record (lib/proof.sh) cannot be loaded from %s\n' "$BIONIC_LIB" >&2
     return 2
   fi
@@ -158,8 +157,7 @@ cur8_approved_head() {
 cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judges Step 8 too)
   # The advance judges on the run's log, never the kept facts the tick reads (lib/proof.sh `_PROOF_FRESH`).
   local step="$1" wb out rc err _PROOF_FRESH=1
-  if ! { declare -F facts_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F facts_state >/dev/null 2>&1; then
+  if ! bionic_need proof.sh facts_state; then
     die "REFUSED — current: $step is admitted on the facts the run owes, and the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
