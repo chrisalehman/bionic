@@ -373,8 +373,7 @@ case "${SOURCE:-}" in
         /*) SS_DOOR_FILE="$SS_DOOR_REL" ;;
         *)  SS_DOOR_FILE="$BIONIC_ROOT/$SS_DOOR_REL" ;;
       esac
-      if [ -n "$SS_DOOR_FILE" ] && [ -f "$SS_DOOR_FILE" ] && [ ! -L "$SS_DOOR_FILE" ] \
-         && [ "$(head -n 1 "$SS_DOOR_FILE" 2>/dev/null)" = "bionic-handoff/v1" ]; then
+      if [ -n "$SS_DOOR_FILE" ] && bionic_need handoff.sh handoff_is_one && handoff_is_one "$SS_DOOR_FILE" no-link; then
         SS_DOOR="bionic: resume with /bionic:canonical-sdlc $SS_DOOR_REL"
       fi
     fi ;;
