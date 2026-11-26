@@ -710,6 +710,36 @@ sc_raw() { awk '$0 == "log line_lines" { n++ } END { print n + 0 }' "$SC_OUT/$1.
 expect_eq "DRV-3 the card over the run with a fixed finding computes its fixed findings, and reads the record raw more than the card with none" \
   "yes yes" "$([ "$(awk '$1 == "derive" && $2 == "proof_fixed" { n++ } END { print n + 0 }' "$SC_OUT/f.card.on.count")" -ge 1 ] && echo yes) $([ "$(sc_raw f card)" -gt "$(sc_raw n card)" ] && echo yes)"
 
+section "§DERIVE-KEY: a kept derived answer is served only to a process whose deriving code made it"
+# fails-when: a process of a held command whose proof.sh or units.sh is one line apart from the copy that kept an
+# answer is served that answer instead of computing its own, though the reader's libraries, and so the facts, are the
+# same; or a second process of the same copy computes it again.
+# The probe, on a copy of the n snapshot, with three copies of the libraries: B's proof.sh one comment line longer, C's
+# units.sh. One shell opens the hold, and four processes it starts each ask the proofs once: A, A again, B, C.
+DK_DIR="$TMPROOT/n/derive-key"; rm -rf "$DK_DIR" && cp -Rp "$TMPROOT/n/snap" "$DK_DIR"
+for DK_C in A B C; do cp -R "$SC_LIB" "$DK_DIR/lib$DK_C"; done
+printf '\n# a deriving library one line apart\n' >> "$DK_DIR/libB/proof.sh"
+printf '\n# a deriving library one line apart\n' >> "$DK_DIR/libC/units.sh"
+DK_OUT="$( cd "$DK_DIR/proj" && env TMPDIR="$DK_DIR/tmp" HOME="$DK_DIR/home" bash -c '
+    . "$1/libA/proof.sh" || exit 2; proof_hold_begin || exit 2
+    w="$1" p="$2"
+    ask() {  # <library copy> <asker> -> the asker, a process of its own, asks the proofs once; its counts in <asker>.count
+      BIONIC_COUNT="$w/$2.count" bash -c ". \"\$1/proof.sh\" && _proof_reader_load || exit 2; proof_lines \"\$2\"" \
+        _ "$w/$1" "$p" > "$w/$2.out"
+    }
+    ask libA a && ask libA a2 && ask libB b && ask libC c; r=$?
+    proof_hold_end; echo "$r"' _ "$DK_DIR" "$DK_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )"
+dk_n() { awk '$1 == "derive" && $2 == "proof_lines" && $3 != "-" { n++ } END { print n + 0 }' "$DK_DIR/$1.count" 2>/dev/null || echo -; }   # <asker> -> its kept computes
+expect_eq "DK-0 the probe's four processes each asked and exited 0, and the first printed the run's proofs" "0 yes" \
+  "$DK_OUT $([ -s "$DK_DIR/a.out" ] && echo yes)"
+expect_eq "DK-1 A, the first asker in the hold, computes the proofs once and keeps them" 1 "$(dk_n a)"
+expect_eq "DK-2 a second process of A is served A's kept answer, the same print" "0 same" \
+  "$(dk_n a2) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/a2.out" && echo same)"
+expect_eq "DK-3 B, whose proof.sh is one line apart, computes its own answer in the same hold" "1 same" \
+  "$(dk_n b) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/b.out" && echo same)"
+expect_eq "DK-4 C, whose units.sh is one line apart, computes its own answer in the same hold" "1 same" \
+  "$(dk_n c) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/c.out" && echo same)"
+
 section "§LOG: a command reads the run's log whole no more often than its ceiling"
 # fails-when: a reader in any of the commands reads the run's log whole once more, through the reader (`reader_events`)
 # or raw as the landing record (`line_lines`), in its first process or any it starts. Each ceiling is the command's
