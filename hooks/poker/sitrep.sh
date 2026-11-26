@@ -199,13 +199,13 @@ handoff_tree_lines() {  # <root> -> the branch:, head: and uncommitted lines
     print "  - " p " · " w }'
 }
 # THE RUNS IN FLIGHT: every log of the project's runs folder with a pid and no exit code whose pid is still that log's
-# detached shim (`run_live`, the rule adopt and the tick read), with its pid and its log, project-root-relative.
+# detached shim (lib/alive.sh `alive_shim`, the rule adopt and the tick read), with its pid and its log, project-root-relative.
 handoff_running_lines() {  # <root> -> `  - <run id> · pid <pid> · log <path>`, one per live run
   local log pid id
   for log in "$1"/.bionic/tmp/runs/*.log; do
     [ -f "$log" ] && [ ! -L "$log" ] && [ ! -e "$log.rc" ] || continue
     pid=""; { read -r pid < "$log.pid"; } 2>/dev/null
-    run_live "$pid" "$log" || continue
+    alive_shim "$pid" "$log" || continue
     id="${log##*/}"; id="${id%.log}"
     printf '  - %s · pid %s · log %s\n' "$(clean "$id")" "$pid" "$(clean "${log#"$1"/}")"
   done

@@ -2301,9 +2301,9 @@ EOF
     SR_GROUPS="$(run_groups "$RUN_PID")"
     kill -TERM -- "-$RUN_PID" 2>/dev/null || kill -TERM "$RUN_PID" 2>/dev/null
     _sr_i=0
-    while [ "$_sr_i" -lt 50 ] && run_live "$RUN_PID" "$RUN_OUT"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
+    while [ "$_sr_i" -lt 50 ] && alive_shim "$RUN_PID" "$RUN_OUT"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
     SR_HOW="TERM"
-    if run_live "$RUN_PID" "$RUN_OUT"; then
+    if alive_shim "$RUN_PID" "$RUN_OUT"; then
       SR_GROUPS="$SR_GROUPS
 $(run_groups "$RUN_PID")"
       for _sr_g in $(printf '%s\n' "$SR_GROUPS" | sort -u); do

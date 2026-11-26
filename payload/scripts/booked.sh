@@ -278,7 +278,7 @@ case "${BASH_SOURCE[0]}" in */*) : ;; *) BOOKED_SELF_DIR="$(pwd -P)" ;; esac
 . "$BOOKED_SELF_DIR/lib/roots.sh" 2>/dev/null
 # shellcheck disable=SC1091
 . "$BOOKED_SELF_DIR/lib/resources.sh" || exit 2
-# gate.sh brings the liveness rule (slots.sh) with it.
+# gate.sh brings the liveness rules (slots.sh, alive.sh) with it.
 # shellcheck disable=SC1091
 . "$BOOKED_SELF_DIR/lib/gate.sh" || exit 2
 # shellcheck disable=SC1091
@@ -642,17 +642,6 @@ booked_claim_log() {
   return 1
 }
 
-# booked_live <pid> <log> — rc 0 when <pid> is alive AND is still the detached shim of <log>: `ps`
-# names booked.sh with that --run-log. A pid the system gave to another process is not this run.
-booked_live() {
-  local c
-  case "$1" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 "$1" 2>/dev/null || return 1
-  c="$(ps -ww -o command= -p "$1" 2>/dev/null)" || return 1
-  case "$c" in *booked.sh*"--run-log $2"*) return 0 ;; esac
-  return 1
-}
-
 # booked_rc_of <log> — the run's code, from `<log>.rc`, which only the detached side writes, after
 # the log's own rc line; rc 1 while there is none. Never from the log's last line alone: a command
 # whose own last output is `rc=<n>` (a door command's `echo "rc=$rc"`) would read as ended.
@@ -678,7 +667,7 @@ booked_find_live() {
     if [ "$n" -eq 1 ]; then p="$1/$2.log"; else p="$1/$2-$n.log"; fi
     [ -e "$p" ] || break
     pid=""; { read -r pid < "$p.pid"; } 2>/dev/null
-    if [ -n "$pid" ] && ! booked_rc_of "$p" >/dev/null && booked_live "$pid" "$p" \
+    if [ -n "$pid" ] && ! booked_rc_of "$p" >/dev/null && alive_shim "$pid" "$p" \
        && [ "$(cat "$p.key" 2>/dev/null)" = "$key" ]; then
       found="$p"; fpid="$pid"
     fi
@@ -732,7 +721,7 @@ booked_follow() {
       printf 'booked: LOST run=%s last-written=%s\n' "$id" "$(booked_mtime_utc "$log")" >&2
       exit 70
     fi
-    booked_live "$pid" "$log" || { dead=1; continue; }
+    alive_shim "$pid" "$log" || { dead=1; continue; }
     sleep "$poll"
   done
 }
