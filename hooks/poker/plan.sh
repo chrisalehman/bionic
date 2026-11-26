@@ -1326,14 +1326,20 @@ $BRF_PINNED"; fi
       BRF_QLINE="${BRF_QS//,/, }"
       poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_header base-sha; BRF_BASE="$(printf '%s\n' "$BRF_ANS" | sed -n 's/^base-sha=//p')"
       poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_reviews
+      # THE SCOPE RIDES BESIDE EACH RANGE, so a reviewer copies it rather than choosing it: a record that says whole over a
+      # range starting past the run's base is refused, and one that says piece is not. The start is the base when it is the
+      # base's commit, spelled in full or by the prefix the plan wrote; with no base commit to start at, it is a piece.
+      BRF_BASEF=""
+      case "$BRF_BASE" in ''|*[!0-9a-fA-F]*) : ;; *) BRF_BASEF="$(git -C "$PV_REPO" rev-parse --verify -q "$BRF_BASE^{commit}" 2>/dev/null)" || BRF_BASEF="" ;; esac
       BRF_RANGE="$(printf '%s\n' "$BRF_ANS" | awk -F'|' -v qs=",$BRF_QS," -v base="${BRF_BASE:-(no review proof and no base-sha)}" \
-        -v end="${BRF_SHA:-$BRF_HEAD}" "$_LINE_FIELDS_AWK"'
+        -v bf="$BRF_BASEF" -v end="${BRF_SHA:-$BRF_HEAD}" "$_LINE_FIELDS_AWK"'
+        function scope(a) { return (bf != "" && length(a) >= 7 && index(bf, a) == 1) ? "whole" : "piece" }
         line_kv("ev") == "proof" && index(qs, "," line_kv("question") ",") { last[line_kv("question")] = line_kv("head") }
         END {
           n = split(substr(qs, 2, length(qs) - 2), q, ",")
           for (i = 1; i <= n; i++) { a[i] = (q[i] in last) ? last[q[i]] : base; if (a[i] != a[1]) mixed = 1 }
-          if (!mixed) print "Reviewed range: " a[1] ".." end
-          else for (i = 1; i <= n; i++) print "Reviewed range (" q[i] "): " a[i] ".." end
+          if (!mixed) print "Reviewed range: " a[1] ".." end " (scope: " scope(a[1]) ")"
+          else for (i = 1; i <= n; i++) print "Reviewed range (" q[i] "): " a[i] ".." end " (scope: " scope(a[i]) ")"
         }')"
     fi
     # A RED THE ROW MAY LAND WITH is a red admitted for it that the reader still holds open; the evidence is the
@@ -1344,6 +1350,9 @@ $BRF_PINNED"; fi
 
     # THE SCAFFOLD, in the shipped order. A label with no source on this row is not written.
     poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_status "$BRF_ID"; BRF_STATUS="$(printf '%s\n' "$BRF_ANS" | sed -n 's/^state=//p')"
+    # THE LANDING SCRIPT is named by its path, where this plugin keeps it (spawn-worktree.sh, a sibling of the library's
+    # directory), so the verb a brief gives is a command a writer can run as written.
+    BRF_LANDSH="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
     BRF_BODY="$(mktemp "${TMPDIR:-/tmp}/brief.XXXXXX")" || { die "REFUSED — no scratch file can be made. Nothing was written."; exit 2; }
     case "$BRF_SIZE" in ''|*[!0-9]*) BRF_BIG=no ;; *) if [ "$BRF_SIZE" -ge 15 ]; then BRF_BIG=yes; else BRF_BIG=no; fi ;; esac
     BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress "$BRF_ID")"
@@ -1365,6 +1374,7 @@ $BRF_PINNED"; fi
           "Questions")         [ "$BRF_KIND" != review ] || printf '%s: %s\n' "$BRF_L" "${BRF_QLINE:-<ORCHESTRATOR: the row declares no questions>}" ;;
           "Row")               printf '%s: %s\n' "$BRF_L" "$BRF_ID" ;;
           "Lands-on")          printf '%s: %s\n' "$BRF_L" "$BRF_LANDS" ;;
+          "Lands-by")          printf '%s: bash %s ready --within <seconds under your Bash timeout>\n' "$BRF_L" "$BRF_LANDSH" ;;
           "Lands-red")         [ -z "$BRF_RED" ] || printf '%s: %s\n' "$BRF_L" "$BRF_RED" ;;
           "Red-evidence")      [ -z "$BRF_RED" ] || printf '%s: %s/%s-red.md\n' "$BRF_L" "$BRF_RECREL" "$BRF_NAME" ;;
         esac
