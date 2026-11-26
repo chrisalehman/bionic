@@ -161,8 +161,9 @@ poker_hand() {
   [ -n "$sid" ] || return 1
   resolve_run "${REPO_REAL:-$(project_root "$PWD")}" "$sid" 2>/dev/null
   [ "${POKER_RUN_OPEN:-}" = yes ] && [ -n "$POKER_RUN_PLAN" ] && [ -f "$POKER_RUN_PLAN" ] || return 1
-  declare -F line_hand_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F line_hand_event >/dev/null 2>&1 || return 1
+  # This part is also sourced alone, beside libraries loaded without the loader (tests/reader.test.sh drives
+  # stop_run_gate so), so a writer already loaded is taken before the loader is asked.
+  declare -F line_hand_event >/dev/null 2>&1 || bionic_need line.sh line_hand_event || return 1
   line_hand_event "$POKER_RUN_PLAN" "$@" "by=$sid"
 }
 
@@ -2189,10 +2190,7 @@ EOF
         if [ -n "$RULE_WORDS" ]; then
           # THE USER'S WORDS, AS finding-move HOLDS THEM (wave-36 T9; D10): looked for in every session the
           # bound plan records, then this one; refused in said_refuse's voice, exit 2 as this arm refuses.
-          if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
-            . "$BIONIC_LIB/said.sh"
-          fi
-          if ! declare -F user_said >/dev/null 2>&1; then
+          if ! bionic_need said.sh user_said; then
             die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing written."
             exit 2
           fi
