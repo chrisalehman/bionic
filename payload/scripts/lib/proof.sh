@@ -2766,17 +2766,13 @@ _proof_floor_judge() {
   _proof_derive _proof_floor_judge "$_PROOF_TREE_KEY" _proof_floor_made "$@"
 }
 _proof_floor_made() {
-  local plan="$1" tree="$2" c="$3" h owed open why based=1 behind=0
+  local plan="$1" tree="$2" c="$3" h owed why based=1 behind=0
   _proof_floor_base "$plan" "$tree" || based=0
   h="$_PF_H"; owed="$_PF_OWED"
   c="$(git -C "$tree" rev-parse --verify -q "${c}^{commit}" 2>/dev/null)" || c=""
   [ "$based" = 0 ] || [ -z "$c" ] || [ "$h" = "$c" ] || ! git -C "$tree" merge-base --is-ancestor "$h" "$c" 2>/dev/null || behind=1
-  # Only the closes are asked here, never the commits: a commit no run proved must not hide a red still open. A walk
-  # git cannot list closes nothing, so every red stays open.
-  if [ -n "$owed" ] && [ "$behind" = 1 ]; then
-    open="$(_proof_past_f "$plan" "$tree" "$h" "$c" "$owed" closes)"
-    case $? in 0) owed="" ;; 2) owed="$open" ;; esac
-  fi
+  # Only the closes are asked here, never the commits: a commit no run proved must not hide a red still open.
+  [ -z "$owed" ] || [ "$behind" = 0 ] || owed="$(_proof_open_reds "$plan" "$tree" "$h" "$c" "$owed")"
   [ -z "$owed" ] || { printf 'owed\t%s\n' "$owed"; return 0; }
   [ "$based" = 1 ] || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }
   [ -n "$c" ] || { printf 'uncovered\tthe head %s is not a commit here\n' "$3"; return 0; }
@@ -2790,16 +2786,15 @@ _proof_floor_made() {
 # _proof_past_f <plan> <tree> <F> <head> <owed> [<only>] -> exit 0, printing nothing, when every commit on the first-parent line
 # F..<head> is excused or proved and every suite of <owed> (comma-joined) is closed; exit 2 printing the suites still
 # open, comma-joined; exit 1 printing one sentence naming the first commit that is not proved and what it lacks.
-# EXCUSED: its tree is its first parent's; or every path it changed is docs (on the prose list, lib/prose.sh, or under the docs
-# root or the tracked docs home); or every path is in the release set (`_proof_release_path`) and a check passed at it (`proof_check_passes`).
+# EXCUSED: its class on the walk (`_proof_path_walk`) is prose, a tree that is its first parent's among them; or
+# release, and a check passed at it (`proof_check_passes`).
 # PROVED: each suite its row's landing names (the row's last `ready` before the `published` event naming the commit;
 # with no such event, the suites the landing verdicts at it name) has a newest record at it that is green. A record is
 # at the commit it ran at, or at the row head a merge commit brought in as its second parent.
 # CLOSED: a red of F has a newest landing verdict (never a stamp, never a whole run) green at a commit after F.
-# With <only> `closes` the commits are not judged: exit 0 or 2 says only which suites of <owed> are still open, the one
-# reading of the closes the judge and the health line share (`proof_health_line`).
+# With <only> `closes` the commits are not judged: exit 0 or 2 says only which suites of <owed> are still open.
 _proof_past_f() {
-  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs plist files="" c f isdoc isrel chk
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs chk
   walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
     printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
@@ -2807,23 +2802,34 @@ _proof_past_f() {
   # The closes alone ask nothing of the paths or the checks: each commit's proof is skipped below.
   [ "$only" != closes ] || { printf '%s\n%s\n' "$walk" "$recs" | _proof_past_f_awk closes "$owed"; return $?; }
   _proof_roots_load
+  chk="$(proof_check_passes "$plan" "$tree")" || { printf 'the run'"'"'s facts cannot be read, so no check at a commit past %s is known' "${from:0:12}"; return 1; }
+  _proof_path_walk "$tree" "$from" "$to" || :
+  printf '%s\n%s\n%s\n%s\n' "$walk" "$recs" "$_PROOF_WALK" "$(printf '%s\n' "$chk" | sed '/^$/d; s/^/K	/')" \
+    | _proof_past_f_awk all "$owed"
+}
+
+# _proof_path_walk <tree> <from> <to> -> 0, _PROOF_WALK a `C<TAB><commit><TAB><prose><TAB><release>` line per
+# first-parent commit past <from>, oldest first, a class 1 when every path it touched is prose (`prose_path`) or in the
+# release set (`_proof_release_path`), so CHANGELOG.md spoils neither; 1, empty, when git cannot list the range. THE
+# ONE WALK of the cover (`_facts_walk`) and the regression (`_proof_past_f`), in the caller's shell.
+_proof_path_walk() {
+  local tree="$1" files f c="" prose=1 rel=1 plist
+  _PROOF_WALK=""
   # The prose list, the docs homes among its entries, is read once for the walk and asked per path with no fork.
   _proof_prose_load
   plist="$(prose_list "$tree" 2>/dev/null)"
+  files="$(git -C "$tree" log --reverse --first-parent -m --no-renames --name-only --format='%x01%H' "$2..$3" 2>/dev/null)" || return 1
   while IFS= read -r f; do
-    case "$f" in '') continue ;; $'\001'*) c="${f#?}"; continue ;; esac
-    # Each path is asked both questions, as the judge's cover asks them: CHANGELOG.md is docs and in the release set,
-    # so it spoils neither a docs commit's excuse nor a release commit's, which its passing check gives.
-    isdoc=0; isrel=0
-    ! prose_path "$f" "$plist" || isdoc=1
-    ! _proof_release_path "$f" || isrel=1
-    files="$files${files:+$'\n'}C	$c	$isdoc	$isrel"
-  done <<PROOF_PAST_FILES
-$(git -C "$tree" log --no-renames --first-parent -m --name-only --format='%x01%H' "$from..$to" 2>/dev/null)
-PROOF_PAST_FILES
-  chk="$(proof_check_passes "$plan" "$tree")" || { printf 'the run'"'"'s facts cannot be read, so no check at a commit past %s is known' "${from:0:12}"; return 1; }
-  printf '%s\n%s\n%s\n%s\n' "$walk" "$recs" "$files" "$(printf '%s\n' "$chk" | sed '/^$/d; s/^/K	/')" \
-    | _proof_past_f_awk all "$owed"
+    case "$f" in
+      '') continue ;;
+      $'\001'*) [ -z "$c" ] || _PROOF_WALK="$_PROOF_WALK"$'\n'"C	$c	$prose	$rel"; c="${f#?}"; prose=1; rel=1; continue ;;
+    esac
+    [ "$rel" = 0 ] || _proof_release_path "$f" || rel=0
+    [ "$prose" = 0 ] || prose_path "$f" "$plist" || prose=0
+  done <<PROOF_PATH_WALK
+$files
+PROOF_PATH_WALK
+  [ -z "$c" ] || _PROOF_WALK="$_PROOF_WALK"$'\n'"C	$c	$prose	$rel"
 }
 
 # _proof_past_f_awk <all|closes> <owed> -> the fold `_proof_past_f` judges its walk, records, paths and checks with, on
@@ -2873,19 +2879,27 @@ _proof_past_f_awk() {
     }'
 }
 
+# _proof_open_reds <plan> <tree> <F> <head> <owed> -> the suites of <owed> still open past F, F behind <head>, by
+# `_proof_past_f`'s closes; all of them when those cannot be read. THE ONE FOLD of the judge and the health line.
+_proof_open_reds() {
+  local open
+  open="$(_proof_past_f "$@" closes)"
+  case $? in 0) : ;; 2) printf '%s\n' "$open" ;; *) printf '%s\n' "$5" ;; esac
+}
+
 # proof_health_line <plan> <tree> [<record plan>] -> the matrix head's `stack-health:` value, one line, exit 0: the judge's
 # fact about the plan's last regression proof, rendered, so every writer of the line writes the same words.
 #   pending                                                     the plan has no regression proof
 #   green head=<F>[ pass=<n> total=<m>] evidence=<logs>          the whole run at F left nothing owed
 #   red head=<F>[ pass=<n> total=<m>] owed=<open>[ closed=<closed>] evidence=<logs>   otherwise
 # GREEN MEANS THE FULL PASS RAN GREEN AT THAT HEAD: a landing that greens a suite F left red closes it (`closed=`, the
-# judge's own closes, `_proof_past_f` at `closes`) and drops it from `owed=`, which may end empty, and the line stays red.
+# judge's own closes, `_proof_open_reds`) and drops it from `owed=`, which may end empty, and the line stays red.
 # The owed set is the proof line's own, inherited debt included, since the pass at F was not green with it. pass= and
 # total= are summed over the proof's logs (`proof_run_counts`) and dropped when any log carries no `Gating:` count. The
 # closes are read from F to the working branch's head; a head git cannot place after F closes nothing. <record plan> is
 # the plan whose landing record and working branch are read, for a <plan> that is the copy a verb writes (default <plan>).
 proof_health_line() {
-  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" f fc owed ev docs log n pass=0 total=0 counted=1 open="" closed="" c rc
+  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" f fc owed ev docs log n pass=0 total=0 counted=1 open="" closed="" c
   # The proof is the run's, read from the plan whose record holds its log (a verb's copy names none), with the proof the
   # verb is registering pending in it (`proof_pending`).
   f="$(proof_last "$rplan" regression)" && owed="$(_proof_last_read "$rplan" regression owed)" \
@@ -2909,8 +2923,7 @@ PROOF_HEALTH_LOGS
   fc="$(git -C "$tree" rev-parse --verify -q "${f}^{commit}" 2>/dev/null)" || fc=""
   c="$(proof_branch_head "$rplan" "$tree" 2>/dev/null)" || c=""
   if [ -n "$fc" ] && [ -n "$c" ] && [ "$fc" != "$c" ] && git -C "$tree" merge-base --is-ancestor "$fc" "$c" 2>/dev/null; then
-    rc=0; open="$(_proof_past_f "$rplan" "$tree" "$fc" "$c" "$owed" closes)" || rc=$?
-    case "$rc" in 0) open="" ;; 2) : ;; *) open="$owed" ;; esac
+    open="$(_proof_open_reds "$rplan" "$tree" "$fc" "$c" "$owed")"
   fi
   closed="$(PROOF_O=",$open," awk -F, '{ for (i = 1; i <= NF; i++) if ($i != "" && !index(ENVIRON["PROOF_O"], "," $i ",")) o = o (o == "" ? "" : ",") $i; print o }' <<PROOF_HEALTH_OWED
 $owed
@@ -3583,27 +3596,18 @@ PROOF_BORN
 # <last head>; nothing printed and 1 when <last head> is not on <head>'s history, or git cannot answer: uncovered is
 # the safe direction. Both heads are compared as the commits they resolve to, never as strings (T45; review pass 13 F10).
 _facts_walk() {
-  local tree="$1" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0 plist
+  local tree="$1" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh k c prose rel rc=0
   [ -n "$tree" ] || return 1
-  _proof_prose_load
-  plist="$(prose_list "$tree" 2>/dev/null)"
   lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
   hh="$(git -C "$tree" rev-parse --verify -q "$4^{commit}" 2>/dev/null)" || return 1
   [ "$lh" != "$hh" ] || return 0
   git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1
-  files="$(git -C "$tree" log --reverse --first-parent -m --no-renames --name-only --format='%x01%H' "$lh..$hh" 2>/dev/null)" || return 1
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    case "$f" in
-      $'\001'*) [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" "$rel" "$chk" || rc=1; c="${f#?}"; prose=1; rel=1; continue ;;
-    esac
-    [ "$rel" = 0 ] || _proof_release_path "$f" || rel=0
-    [ "$prose" = 1 ] || continue
-    prose_path "$f" "$plist" || prose=0
+  _proof_path_walk "$tree" "$lh" "$hh" || return 1
+  while IFS='	' read -r k c prose rel; do
+    [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" "$rel" "$chk" || rc=1
   done <<PROOF_DOCS_FILES
-$files
+$_PROOF_WALK
 PROOF_DOCS_FILES
-  [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" "$rel" "$chk" || rc=1
   return "$rc"
 }
 
