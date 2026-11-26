@@ -637,12 +637,21 @@ expect_true "(k2-pre) a fifth run started once p1 ended" ll_wait_started k 5
 expect_false "(k2) no sixth ask is filed in the 2 s after" wait_for 2 ll_filed_over 5
 expect_eq "(k2) asked again as p1 ended, half a minute on, the gate answered 2 and the drain started two: five filed, four admitted, none waiting" "5 4 0" "$(ll_reqs)"
 expect_eq "(k2) …p5 started, p6 not" "1 0" "$(ll_lines "$LL_SIG/k-p5.runs") $(ll_lines "$LL_SIG/k-p6.runs")"
-touch "$LL_SIG/k-p2.go" "$LL_SIG/k-p3.go" "$LL_SIG/k-p4.go" "$LL_SIG/k-p5.go" "$LL_SIG/k-p6.go"
+# p6's width is the runs live plus the gate's answer at the ask that starts it, so which runs have ended by then
+# decides it. Released together, the runs end in an order the machine's speed picks, and the drain asks again on
+# every poll while the answer is 0, so a run caught between its gate end and its rc line is live to the drain
+# and ended to the gate. p5 is released alone, and p6 waits on its end: the drain asks once, on that end, with
+# p2 p3 p4 running in both sources (p2 and p3 half faded, half a minute on), and the gate answers 1.
+touch "$LL_SIG/k-p5.go"
+expect_true "(k3-pre) p6 started once p5 ended" ll_wait_started k 6
+expect_eq "(k3-pre) …p5 ended, p2 p3 p4 still running: six filed, four admitted (p2 p3 p4 p6), none waiting" \
+  "1 0 6 4 0" "$(grep -c '^end ' "$LL_SIG/k-p5.runs") $(cat "$LL_SIG"/k-p[234].runs | grep -c '^end ') $(ll_reqs)"
+touch "$LL_SIG/k-p2.go" "$LL_SIG/k-p3.go" "$LL_SIG/k-p4.go" "$LL_SIG/k-p6.go"
 ll_wait_file "$WORLD_ROOT/k.out.rc" 600 || ll_kill_bg "$K_BG"
 KK="$(ll_last_cand "$RK" T1)"
 expect_eq "(k3) the row lands: exit 0, the branch at its candidate" "0 $KK" "$(cat "$WORLD_ROOT/k.out.rc" 2>/dev/null) $(ll_head "$RK")"
-expect_eq "(k3) …six verdicts, each with the width its pass was given (runs live plus the answer): 3, then 4 as p1 ended, then 3" \
-  "p1.test.sh:green:3 p2.test.sh:green:3 p3.test.sh:green:3 p4.test.sh:green:4 p5.test.sh:green:4 p6.test.sh:green:3" "$(ll_widths "$RK" "$KK")"
+expect_eq "(k3) …six verdicts, each with the width its pass was given (runs live plus the answer): 3, then 4 as p1 ended, then 4 as p5 ended beside three" \
+  "p1.test.sh:green:3 p2.test.sh:green:3 p3.test.sh:green:3 p4.test.sh:green:4 p5.test.sh:green:4 p6.test.sh:green:4" "$(ll_widths "$RK" "$KK")"
 expect_eq "(k3) …and six landing requests in all, one per run: the drain never filed an ask past the answer" "6 0 0" "$(ll_reqs)"
 world_machine 8 8192 30 5.0
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k6"
