@@ -113,13 +113,20 @@ proof_floor_line() {
   printf '%s%s\n' "$l" "${5:+ $5}"
 }
 
+# _proof_log_awk <awk args> -> awk, reading bytes. A run's log holds whatever its suites printed, and a failing suite can print a
+# byte that is no character; in a UTF-8 locale awk stops at such a byte, and these readers hide its error, so a red run read as
+# naming no failed suite. THE ONE PLACE THE LOG READERS ASK FOR BYTES (`proof_floor_owed`, `proof_run_counts`,
+# `_proof_floor_ends`, the verdict and count reads of `_proof_floor_log` and `proof_attested`, `proof_regression_results`): every
+# pattern they match is ASCII or a whole multibyte literal compared as bytes, so reading bytes changes no verdict.
+_proof_log_awk() { LC_ALL=C awk "$@"; }
+
 # proof_floor_owed <whole-run log> -> the suites the log's LAST run left red, comma-joined on one line, each
 # by its file name (wave-35 T9; D8, AC-1.3); nothing for a green run. Read from the runner's own `Failed:`
 # block (tests/run.sh), the lines `    - <suite>[ (<why>)]` after the last `Gating:` verdict that follows the
 # last `head=<sha> dirty=<n>` header, so a log with an earlier run in it is judged by its last. A LOG THAT ENDS
 # `rc=0` OWES NOTHING (wave-36 T35; AC-7.10): its run passed, whatever a block above its close says.
 proof_floor_owed() {
-  awk '
+  _proof_log_awk '
     NF { last = $0 }
     /^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; o = ""; inf = 0; next }
     !seen { next }
@@ -134,7 +141,7 @@ proof_floor_owed() {
 # `head=` header, as the floor's own reader takes it (the task-proof attest); nothing when the log has none,
 # for a project's own runner need not print one.
 proof_run_counts() {
-  awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = 0; next }
+  _proof_log_awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = 0; next }
     !seen { next }
     /^Gating: [0-9]+ passed, [0-9]+ failed$/ { p = $2; f = $4; v = 1 }
     END { if (v) print p, p + f }' "$1" 2>/dev/null
@@ -1176,7 +1183,7 @@ proof_attested() {
     fi
     printf '%s' "$head"; return 0
   fi
-  stamp="$(awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { s = $0 } END { if (s != "") print s }' "$ev" 2>/dev/null)"
+  stamp="$(_proof_log_awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { s = $0 } END { if (s != "") print s }' "$ev" 2>/dev/null)"
   rng="$(awk '/^reviewed:[ \t]/ { sub(/^reviewed:[ \t]+/, ""); sub(/[ \t].*$/, ""); print; exit }' "$ev" 2>/dev/null)"
   case "$kind" in
     review) stamp="" ;;
@@ -1202,7 +1209,7 @@ proof_attested() {
     # after every capture, so a log whose last verdict is followed by one was cut off.
     # NO VOID TERM (wave-35 T2; D11, AC-2.1): the runner reports no VOID, so a suite is passed or
     # failed and nothing else. A `Void:` line a log still carries counts for nothing.
-    verdict="$(awk '
+    verdict="$(_proof_log_awk '
       /^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = ""; inside = 0; next }
       !seen { next }
       /^Gating: [0-9]+ passed, [0-9]+ failed$/ { v = $2 " " $4; inside = 0; next }
@@ -1377,7 +1384,7 @@ _proof_fields() { [ -n "${_LINE_FIELDS_AWK:-}" ] || _proof_line_load; [ -n "${_L
 # `Gating suites:` header, outside every captured block (`───── <suite>: … ─────` to `───── end <suite> ─────`). A
 # suite the runner refused (`✗ REFUSED`) never ran and has no result.
 proof_regression_results() {
-  awk '
+  _proof_log_awk '
     index($0, "Gating suites:") == 1 { on = 1; n = 0; split("", r); split("", at); blk = ""; next }
     !on { next }
     index($0, "Gating: ") == 1 { on = 0; next }
@@ -1445,7 +1452,7 @@ _proof_floor_log() {
     owed="$(proof_floor_owed "$ev")"
     [ -n "$owed" ] || { printf 'the run in %s ended rc=%s, so the regression did not pass; fix what it names, run it again and cite that log' "$ev" "$rc"; return 1; }
     nred="$(printf '%s\n' "$owed" | awk -F, '{ print NF }')"
-    m="$(awk '/^Gating: [0-9]+ passed, [0-9]+ failed$/ { m = $4 } END { print m + 0 }' "$ev" 2>/dev/null)"
+    m="$(_proof_log_awk '/^Gating: [0-9]+ passed, [0-9]+ failed$/ { m = $4 } END { print m + 0 }' "$ev" 2>/dev/null)"
     [ "$nred" = "$m" ] || { printf 'the run in %s counts %s failed but its Failed: block names %s; cite the whole log of a full run, as tests/run.sh wrote it' "$ev" "$m" "$nred"; return 1; }
   fi
   # THE LOG IS A RUN THE MACHINE RECORDED (wave-37 T4; D7, AC-6.1; ADR-057): the grammar above is read first, then
@@ -1481,7 +1488,7 @@ PROOF_LOG_OWED
 # first line that opens `head=`, as `<sha> <dirty>` when it reads `head=<hex> dirty=<n>`, else `bad <the line>`, else
 # empty; then the log's last non-blank line, its trailing blanks cut. Nothing for a log that cannot be read.
 _proof_floor_ends() {
-  awk 'h == "" && /^head=/ { if ($0 ~ /^head=[0-9a-f]+ dirty=[0-9]+$/) { split($0, w, /[ =]/); h = w[2] " " w[4] } else h = "bad " $0 }
+  _proof_log_awk 'h == "" && /^head=/ { if ($0 ~ /^head=[0-9a-f]+ dirty=[0-9]+$/) { split($0, w, /[ =]/); h = w[2] " " w[4] } else h = "bad " $0 }
     NF { l = $0 }
     END { sub(/[ \t\r]+$/, "", l); print h; print l }' "$1" 2>/dev/null
 }
