@@ -2445,21 +2445,10 @@ if [ ! -f "$PLAN" ]; then
   exit 0
 fi
 
-# Extract YAML frontmatter (between first two `---` lines at column 0)
-# if the plan has any. Used to read the version marker, the triple, and the
-# discriminator flags the checks below key off.
-#
-# CRLF/CR-only plans would otherwise defeat the exact-match `$0=="---"`
-# comparison ("---\r" != "---"), so line endings are normalized to \n before
-# every awk pass (normalize_newlines) — meaning every downstream parse
-# (frontmatter values, SECTION lines, CURRENT, evidence blocks) sees plain
-# \n text regardless of the file's original line-ending style.
-FRONTMATTER=$(normalize_newlines "$PLAN" | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f')
-
-frontmatter_get() {  # one reading of the grammar: lib/run.sh's `frontmatter_value_v` (wave-34 T11)
-  local v
-  if frontmatter_value_v v "$FRONTMATTER" "$1"; then printf '%s\n' "$v"; fi
-}
+# The plan's header, read once by its one parser (`plan_read_header`, line ends translated) and asked for each key
+# from that reading: the version marker, the triple and the flags the checks below key off.
+_EG_HEADER="$(plan_read_header "$PLAN")" || _EG_HEADER=""
+frontmatter_get() { plan_header_value "$_EG_HEADER" "$1" || :; }
 
 DEPLOY_TARGET=$(frontmatter_get deploy_target)
 SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
@@ -2471,7 +2460,7 @@ MULTI_AGENT=$(frontmatter_get multi_agent)
 
 _EG_V15=0
 case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
-_EG_MARKED=0; grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:' <<< "$FRONTMATTER" && _EG_MARKED=1
+_EG_MARKED=0; plan_header_value "$_EG_HEADER" canonical_sdlc_version >/dev/null && _EG_MARKED=1
 
 _eg_plan_named() {  # -> the path the plan takes when named for its directory: an incident's for it, any other for its stem
   local d="${PLAN%/*}"
@@ -2504,11 +2493,14 @@ Plan: $PLAN
 Fix: run the commit again; the fold's own line above names why it failed."
 }
 _eg_refuse_lowered() {
-  local s found="declares canonical_sdlc_version: $SDLC_VERSION"
+  local s l="" found="declares canonical_sdlc_version: $SDLC_VERSION"
   s="$(_run_place "$PLAN")" || _eg_v15_unreadable
   case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
   [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
-  [ -n "$FRONTMATTER" ] || found="has no header on its first line"
+  # The parser answers nothing both for a page with no header and for a header that holds no key, and the two are told
+  # apart by the page's first line alone, its line end translated as the parser translates it.
+  IFS= read -r l < "$PLAN" || :
+  [ "${l%%$'\r'*}" = --- ] || found="has no header on its first line"
   refuse exit2 commit "this run's plan is lowered below 15" "put its version back to 15" \
 "canonical-sdlc plan: this plan $found, and the run's log beside it holds a step, so it is a run's plan at 15 with its version line lowered or lost, and nothing of it is judged without it.
 Plan: $PLAN
