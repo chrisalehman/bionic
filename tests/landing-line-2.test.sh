@@ -991,6 +991,23 @@ expect_eq "(ss3b) …and its ask stays open" "open" "$(ll_ask "$ST" record/wave-
 ST_FM="$(ll_poker "$ST" finding-move record/wave-x/recB.md#1 fixed T2)"; ST_FMRC=$?
 expect_eq "(ss4) finding-move on a finding the landing settled is refused (exit 1)" "1" "$ST_FMRC"
 expect_contains "(ss4b) …naming the landing" "settled by the landing of T1 at ${ST_C}" "$ST_FM"
+# The refusal asks for the landing library by the function it reads. Loading the fields library, as the roster library
+# does, sets the reader's text and not that function, so the verb is run here in a shell holding fields.sh and the proof
+# library, and not line.sh, its other readers stubbed: it must load line.sh itself and refuse, never skip the check.
+ST_FV="$(sed -n '/^  poker_verb_finding_move() {$/,/^  }$/p' "$REPO/hooks/poker/proof.sh")"
+expect_contains "(ss4c) the finding-move verb is read out of the poker's proof part" "line_settled_by" "$ST_FV"
+ST_FL="$(bash -c 'BIONIC_LIB="$1"; . "$1/loader.sh" && . "$1/fields.sh" && bionic_need proof.sh proof_finding_rating || exit 3
+  die() { printf "%s\n" "$*"; }; clean() { printf "%s" "$1"; }; deferral_fold() { printf "%s" "$1"; }
+  proof_finding_rating() { printf "S2 high\n"; }; user_said() { :; }; plan_verb_open() { :; }
+  review_readings() { printf "%s\tq\th\n" "${FM_ID%#*}"; }; docs_root() { printf "%s" "$PV_REPO"; }
+  proof_findings() { printf "1\tS2\thigh\tx\tx\tx\tt\n"; }; units_rows() { printf "T2\n"; }
+  proof_finding_event() { printf "WRITTEN\n"; }
+  eval "$2"; declare -F line_settled_by >/dev/null && echo "line.sh preloaded"
+  FM_ID="$3" FM_TO=fixed FM_ROW=T2 PV_PLAN="$4" PV_REPO="$5" HOOK_DIR=x
+  poker_verb_finding_move' _ "$REPO/payload/scripts/lib" "$ST_FV" record/wave-x/recB.md#1 "$STP" "$ST" 2>&1)"; ST_FLRC=$?
+expect_eq "(ss4d) …with the fields library loaded and the landing library not, the move is still refused (exit 1)" "1" "$ST_FLRC"
+expect_contains "(ss4e) …naming the landing" "settled by the landing of T1 at ${ST_C}" "$ST_FL"
+expect_absent "(ss4f) …and the landing library was not loaded before the verb ran" "line.sh preloaded" "$ST_FL"
 
 section "§CARRIED: a carried finding reads fixed when its row lands; a carry to a landed row closes at once (AC-4.2)"
 # fails-when: the carried finding stays open past the row's landing, or a carry to a landed row never closes.
@@ -1107,7 +1124,7 @@ git -C "$SL/.worktrees/T1" merge -q --no-edit wave/x && sed -i '' '/§RUN/d' "$S
   '| REQ-1 | r | AC-9.3 | hermetic | `tests/run.sh --only b.test.sh` → it says "the gone words" | x | T1 |' \
   '| REQ-1 | r | AC-9.4 | hermetic | `tests/run.sh --only b.test.sh` → it says the gone words | x | T1 |' \
   '| REQ-1 | r | AC-9.5 | hermetic | `tests/run.sh --only a.test.sh` §RU, a prefix of the name the row deletes | x | T1 |'; } >> "$SLP"
-( eval "$(sed -n '/^line_field() {/,/^}/p; /^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
+( . "$REPO/payload/scripts/lib/fields.sh"; eval "$(sed -n '/^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
   BIONIC_LIB="$REPO/payload/scripts/lib" BIONIC_ROOT="$SL" BIONIC_SID="$WORLD_SID"
   dispatch_event "status=confirmed|row=T1|name=wx-T1|brief=.bionic/docs/record/wave-x/briefs/T1.md|brief_sum=s|plan=$SLP" )
 SL_REC="$(ll_field "$(ll_ev "$SL" dispatch | tail -1)" criteria)"

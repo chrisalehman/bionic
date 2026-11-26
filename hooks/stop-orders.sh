@@ -314,9 +314,8 @@ SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
 now_epoch() { date -u +%s; }
 iso_now()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-line_field() {  # <line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
-}
+# A field of a record line is read by key: `line_field` in the shell and `line_kv_of` in awk, both lib/fields.sh's.
+bionic_need fields.sh line_field_v
 
 # Values reach this file from a brief and from the operator's keyboard, and every record
 # here is pipe-delimited key=value. A `|`, a newline or a control character inside a value
@@ -389,7 +388,7 @@ $(awk -v pfx="roster-state/${ROSTER_VERSION}|" '
       name = ""; got = 0
       nf = split($0, f, "|")
       for (i = 1; i <= nf; i++) {
-        # FIRST name= field wins, empty or not — line_field takes head -1 and so did the
+        # FIRST name= field wins, empty or not — line_field takes the first and so did the
         # comparison this fold replaces. A forged later name= must not overrule the writer.
         if (!got && substr(f[i], 1, 5) == "name=") { name = substr(f[i], 6); got = 1 }
       }
@@ -480,22 +479,17 @@ order_spellings() {  # <target> -> spellings, one per line
   for f in "$STATE_DIR"/roster-*.state; do
     [ -f "$f" ] && [ ! -L "$f" ] && [ "$f" != "$ROSTER_FILE" ] || continue
     printf '%s\n' "$f"
-  done | SO_KEY="$key" SO_TYPED="$1" awk '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
+  done | SO_KEY="$key" SO_TYPED="$1" awk "$_LINE_FIELDS_AWK"'
     function out(v) { if (v != "" && !(v in seen)) { seen[v] = 1; print v } }
     BEGIN { if (ENVIRON["SO_TYPED"] != ENVIRON["SO_KEY"]) out(ENVIRON["SO_KEY"]) }
     {
       f = $0
       while ((getline line < f) > 0) {
         if (index(line, "roster-state/") != 1) continue
-        st = kv(line, "status"); if (st != "confirmed" && st != "identified") continue
-        nm = kv(line, "name"); id = kv(line, "agent_id")
+        st = line_kv_of(line, "status"); if (st != "confirmed" && st != "identified") continue
+        nm = line_kv_of(line, "name"); id = line_kv_of(line, "agent_id")
         if (nm == "" || (nm != ENVIRON["SO_KEY"] && id != ENVIRON["SO_KEY"])) continue
-        sid = kv(line, "adopted_from"); if (sid == "") sid = kv(line, "session")
+        sid = line_kv_of(line, "adopted_from"); if (sid == "") sid = line_kv_of(line, "session")
         out(nm); out(id); if (sid != "") out(nm "@session-" substr(sid, 1, 8))
       }
       close(f)
