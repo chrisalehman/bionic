@@ -136,7 +136,7 @@ _gate_load() {  # rc 0 once lib/gate.sh is loaded
     _GATE_LOADED=no
     if [ -r "$REPO/payload/scripts/lib/gate.sh" ]; then
       # shellcheck source=/dev/null
-      . "$REPO/payload/scripts/lib/gate.sh" && declare -F gate_ask >/dev/null 2>&1 && _GATE_LOADED=yes
+      . "$REPO/payload/scripts/lib/gate.sh" && declare -F gate_ask_here >/dev/null 2>&1 && _GATE_LOADED=yes
     fi
   fi
   [ "$_GATE_LOADED" = yes ]
@@ -151,18 +151,14 @@ _gate_load() {  # rc 0 once lib/gate.sh is loaded
 # the budget's own line for the report. Any other failure to ask runs unadmitted, as before.
 _GATE_REFUSAL=""
 #
-# It asks in this shell, the id read back through a file: the gate's cpu0= baseline and gate_end read this shell's
-# `times`, so an ask inside `$( )` would leave out what this shell had reaped. `$( )` only when no file can be made.
+# It asks in this shell, the id read back through a file (lib/gate.sh `gate_ask_here`): the gate's cpu0= baseline and
+# gate_end read this shell's `times`, so an ask inside `$( )` would leave out what this shell had reaped.
 _gate_ask_for() {
-  local _rc _f
+  local _rc
   _GATE_ID=""; _GATE_OWN=0; _GATE_REFUSAL=""
   _gate_load || return 0
-  if _f="$(mktemp "${TMPDIR:-/tmp}/gate-id.XXXXXX" 2>/dev/null)"; then
-    gate_ask "$1" "$2" > "$_f"; _rc=$?
-    { read -r _GATE_ID < "$_f"; } 2>/dev/null; rm -f "$_f"
-  else
-    _GATE_ID="$(gate_ask "$1" "$2")"; _rc=$?
-  fi
+  gate_ask_here gate-id "$1" "$2"; _rc=$?
+  _GATE_ID="$GATE_ASK_ID"
   if [ "$_rc" -eq 75 ]; then
     _GATE_ID=""
     _GATE_REFUSAL="$(gate_budget "$1" "$2")"
@@ -185,6 +181,15 @@ _suite_load() {  # rc 0 once the plugin's suite primitive (lib/suite.sh, wave-33
     fi
   fi
   [ "$_SUITE_LOADED" = yes ]
+}
+# _scrub_env — sets _SCRUB_ENV, `env` with one `-u` per name of lib/suite.sh's BIONIC_SUITE_SCRUB; a tree with no copy of that library
+# is scrubbed of the same four names, spelt here once more for it.
+_SCRUB_ENV=()
+_scrub_env() {
+  local _n _names="BIONIC_GATE_DIR CLAUDE_PROJECT_DIR CLAUDE_PLUGIN_ROOT BIONIC_HELD"
+  ! _suite_load || _names="$BIONIC_SUITE_SCRUB"
+  _SCRUB_ENV=(env)
+  for _n in $_names; do _SCRUB_ENV+=(-u "$_n"); done
 }
 _gate_end_for() {  # <rc> — the request this shell holds is over
   [ "$_GATE_OWN" -eq 1 ] || return 0
@@ -236,7 +241,8 @@ if [ "${1:-}" = "--one" ]; then
     # (`bash tests/foo.test.sh`), written in this file — never outside input.
     [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
     # shellcheck disable=SC2086
-    env -u BIONIC_GATE_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_ROOT -u BIONIC_HELD $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+    _scrub_env
+    "${_SCRUB_ENV[@]}" $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
   fi
   _one_rc=$?
   _gate_end_for "$_one_rc"
@@ -889,7 +895,8 @@ run() {  # run <label> <cmd...>   — gating
     ( _gate_ask_for work "$label" \
         || { printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"; exit 75; }
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
-      env -u BIONIC_GATE_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_PLUGIN_ROOT -u BIONIC_HELD "$@" >"$TMP/${label}.out" 2>&1   # the scrub: the ask above keeps the store, the suite does not, nor the roots, nor a held command's hold
+      _scrub_env
+      "${_SCRUB_ENV[@]}" "$@" >"$TMP/${label}.out" 2>&1   # the scrub: the ask above keeps the store, the suite does not, nor the roots, nor a held command's hold
       _sr=$?
       _gate_end_for "$_sr"
       exit "$_sr" )
