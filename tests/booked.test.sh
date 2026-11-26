@@ -33,8 +33,8 @@
 #
 # ANTI-VACUITY ("Anti-vacuity"). DT.0 is the control the whole section stands on: the same kill
 # over a command left in the caller's group takes the command with it, so a later rc line is a
-# run that escaped, not a kill that missed. Every empty readback (DT.9, DT.23) sits beside a
-# positive on the same file (DT.9b, DT.18).
+# run that escaped, not a kill that missed. Every empty readback (DT.0, DT.9, DT.23) sits beside
+# a positive on the same file (DT.0a, DT.9b, DT.18).
 #
 # HERMETIC. Every run happens in the model world (tests/lib/world.sh): its own gate store, its own
 # fixture repository with row trees T1 and T2 and a roster naming wx-T1 and wx-T2 under WORLD_SID.
@@ -103,12 +103,18 @@ section "§DETACH — the run outlives its caller's process group and ends rc=<n
 # THE CONTROL FIRST: the same SIGKILL of the same kind of group, over a command that is NOT
 # detached, takes the command with it. So "the detached run wrote its rc" below is a run that
 # escaped the kill, not a kill that missed.
+# The command waits on a go-file the test makes only after the kill, never on a clock: a mark
+# left on a timer races the kill, and a loaded machine delivers the kill after the timer. So
+# the mark can appear only when the command outlived the kill, whenever the kill lands. Its
+# wait is bounded so an escaped command cannot linger; at the bound it leaves no mark.
 set -m
-( cd "$T1" && bash -c "sleep 1.5; : > '$D/ctl.ran'"; sleep 60 ) >/dev/null 2>&1 &
+( cd "$T1" && bash -c ": > '$D/ctl.up'; i=0; while [ ! -f '$D/ctl.go' ] && [ \$i -lt 600 ]; do i=\$((i+1)); sleep 0.05; done; [ -f '$D/ctl.go' ] && : > '$D/ctl.ran'"; sleep 60 ) >/dev/null 2>&1 &
 CTL_PG=$!
 set +m
-sleep 0.3
+expect_true "DT.0a control: the command is running in the caller's group before the kill" \
+  bk_wait 10 test -e "$D/ctl.up"
 bk_kill_group "$CTL_PG"
+touch "$D/ctl.go"
 sleep 2
 expect_false "DT.0 control: a command in the caller's group dies with the group (no mark after the kill)" \
   test -e "$D/ctl.ran"
