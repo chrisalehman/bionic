@@ -44,8 +44,8 @@
 # bash 3.2 (ADR-001).
 
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
-bionic_need line.sh line_value
-bionic_need line.sh _wt_proofs_put
+bionic_need line.sh line_event
+bionic_need worktree.sh _wt_proofs_put
 bionic_need seal.sh seal_write
 
 LOG_TYPES=" ready candidate verdict published returned stalled standing admitted void run walk step approval"
