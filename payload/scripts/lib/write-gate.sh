@@ -14,8 +14,40 @@
 #       write_gate_say, then `refuse exit2 write` with what it set: the caller exits 2 with the
 #       one-line verdict and the detail. It does not return.
 #
+# THE TRIPLE'S KINDS ARE SPELT HERE, ONCE: the words `intent:`, `rigor:` and `scale:` may take. The refusals, the
+# header check, lib/scale.sh's rows and the card's refusals read them, so a kind added is one edit. They live
+# here, not in lib/scale.sh, because the write hook loads this file fail-closed; lib/scale.sh loads it.
+#
 # Sourced, never executed; it prints nothing and runs nothing at source time. It needs `refuse`
 # (lib/refuse.sh) for write_gate_refuse and lib/run.sh for write_gate_header_fault.
+
+WRITE_GATE_INTENTS="build bugfix refactor tune spike incident-response"
+WRITE_GATE_RIGORS="single double"
+WRITE_GATE_SCALES="task wave epic"
+
+# write_gate_pipe <list> -> the words joined by `|`, no newline (`task|wave|epic`).
+write_gate_pipe() {
+  local w out=""
+  for w in $1; do out="${out:+$out|}$w"; done
+  printf '%s' "$out"
+}
+
+# write_gate_or <list> -> the words as prose, no newline: `single or double`, `task, wave or epic`.
+write_gate_or() {
+  local w out="" prev=""
+  for w in $1; do
+    [ -z "$prev" ] || out="${out:+$out, }$prev"
+    prev="$w"
+  done
+  printf '%s' "${out:+$out or }$prev"
+}
+
+# write_gate_has <word> <list> -> 0 when the word is one of the list's words, whole; else 1.
+write_gate_has() {
+  local w
+  for w in $2; do [ "$w" = "$1" ] && return 0; done
+  return 1
+}
 
 write_gate_say() {
   local key="${1:-}" BASENAME="${2-}" FILE_PATH="${3-}"
@@ -66,9 +98,9 @@ Fix: prepend:
   epic: epic-NN-<slug>
   wave: wave-NN-<slug>   # omit for epic-level and continuation
   canonical_sdlc_version: $1
-  intent: <build|bugfix|refactor|tune|spike|incident-response>
-  rigor: <single|double>
-  scale: <task|wave|epic>
+  intent: <$(write_gate_pipe "$WRITE_GATE_INTENTS")>
+  rigor: <$(write_gate_pipe "$WRITE_GATE_RIGORS")>
+  scale: <$(write_gate_pipe "$WRITE_GATE_SCALES")>
   ---" ;;
     no-temp-file)
       WG_FACT="this artifact could not be read"; WG_FIX="retry the write"
@@ -99,22 +131,22 @@ Fix: leave 'canonical_sdlc_version: 15' as it stands, and write the change in th
         "artifacts declare intent:/rigor:/scale:, never mode:" ;;
     no-intent)
       _write_gate_frame "this artifact declares no intent:" "add an intent: line" \
-        "requires intent: (build|bugfix|refactor|tune|spike|incident-response)" ;;
+        "requires intent: ($(write_gate_pipe "$WRITE_GATE_INTENTS"))" ;;
     no-rigor)  # <rigor set>
       _write_gate_frame "this artifact declares no rigor:" "add a rigor: line" \
-        "requires rigor: single or double:$1" ;;
+        "requires rigor: $(write_gate_or "$WRITE_GATE_RIGORS"):$1" ;;
     no-scale)
       _write_gate_frame "this artifact declares no scale:" "add a scale: line" \
-        "requires scale: (task|wave|epic)" ;;
+        "requires scale: ($(write_gate_pipe "$WRITE_GATE_SCALES"))" ;;
     bad-intent)  # <intent>
       _write_gate_frame "that intent is not one of the six" "pick an allowed intent" \
-        "invalid intent: '$1' — allowed: build|bugfix|refactor|tune|spike|incident-response" ;;
+        "invalid intent: '$1' — allowed: $(write_gate_pipe "$WRITE_GATE_INTENTS")" ;;
     bad-rigor)  # <rigor> <rigor set>
       _write_gate_frame "that rigor is not single or double" "pick an allowed rigor" \
-        "invalid rigor: '$1' — allowed: single or double:$2" ;;
+        "invalid rigor: '$1' — allowed: $(write_gate_or "$WRITE_GATE_RIGORS"):$2" ;;
     bad-scale)  # <scale>
       _write_gate_frame "that scale is not task, wave or epic" "pick an allowed scale" \
-        "invalid scale: '$1' — allowed: task|wave|epic" ;;
+        "invalid scale: '$1' — allowed: $(write_gate_pipe "$WRITE_GATE_SCALES")" ;;
     bad-cadence)  # <review-cadence>
       _write_gate_frame "that review-cadence is not once" "use once" \
         "invalid review-cadence: '$1' — allowed: once" ;;
@@ -230,22 +262,17 @@ Fix: group the REQs under three to six '## <theme>' sections, each opening on on
 #     for `write_gate_refuse "${WG_FAULT[@]}"`'s arguments after the artifact; rc 1 and WG_FAULT
 #     empty when the header holds none. Needs lib/run.sh.
 write_gate_header_fault() {
-  local mode="$1" intent="$2" rigor="$3" scale="$4" walk="$5" cad="$7" pol="$9" cap="${11}" set bad
+  local mode="$1" intent="$2" rigor="$3" scale="$4" walk="$5" cad="$7" pol="$9" cap="${11}" set bad w
   WG_FAULT=()
   [ -z "$mode" ] || { WG_FAULT=(mode); return 0; }
   [ -n "$intent" ] || { WG_FAULT=(no-intent); return 0; }
-  set="$(printf '\n  %s' "$(rigor_print single)" "$(rigor_print double)")"
+  set=""
+  for w in $WRITE_GATE_RIGORS; do set="$set"$'\n  '"$(rigor_print "$w")"; done
   [ -n "$rigor" ] || { WG_FAULT=(no-rigor "$set"); return 0; }
   [ -n "$scale" ] || { WG_FAULT=(no-scale); return 0; }
-  case "$intent" in
-    build|bugfix|refactor|tune|spike|incident-response) ;;
-    *) WG_FAULT=(bad-intent "$intent"); return 0 ;;
-  esac
+  write_gate_has "$intent" "$WRITE_GATE_INTENTS" || { WG_FAULT=(bad-intent "$intent"); return 0; }
   rigor_level "$rigor" >/dev/null || { WG_FAULT=(bad-rigor "$rigor" "$set"); return 0; }
-  case "$scale" in
-    task|wave|epic) ;;
-    *) WG_FAULT=(bad-scale "$scale"); return 0 ;;
-  esac
+  write_gate_has "$scale" "$WRITE_GATE_SCALES" || { WG_FAULT=(bad-scale "$scale"); return 0; }
   if [ "$6" = 1 ]; then
     review_cadence_level "$cad" >/dev/null || { WG_FAULT=(bad-cadence "$cad"); return 0; }
   fi

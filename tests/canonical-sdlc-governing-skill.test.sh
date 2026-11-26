@@ -949,6 +949,23 @@ wh() { bash -c '. "$1"; . "$2"; shift 2; write_gate_header_fault "$@"; echo "rc=
 assert_eq "WG-4 the header's first fault is named; a whole header has none" "rc=0 bad-scale huge|rc=0 mode|rc=1 " \
   "$(wh '' build double huge '' 0 '' 0 '' 0 '')|$(wh x build double wave '' 0 '' 0 '' 0 '')|$(wh '' build double wave '' 0 '' 0 '' 0 '')"
 assert_eq "WG-3 a key that is none of these says nothing, rc 2" "2 " "$(wg nope x /p >/dev/null; echo "$?") $(wg nope x /p 2>/dev/null)"
+# THE TRIPLE'S KINDS ARE SPELT ONCE (lib/write-gate.sh's three lists): the refusals, the scale library and the card build their words from
+# them, so a seventh intent or a fourth scale is one edit and every message names it. Each message is asked with a list that carries a word
+# no copy holds, so a message that spells its own list is red here.
+WL="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+wl() { bash -c '. "$1"; WRITE_GATE_INTENTS="$WRITE_GATE_INTENTS zz-intent"; WRITE_GATE_SCALES="$WRITE_GATE_SCALES zz-scale"; WRITE_GATE_RIGORS="$WRITE_GATE_RIGORS zz-rigor"; shift; write_gate_say "$@"; printf "%s" "$WG_DETAIL"' _ "$WG" "$@"; }
+assert_contains "TRIPLE-1 no-frontmatter names the three lists as they stand" "intent: <build|bugfix|refactor|tune|spike|incident-response|zz-intent>
+  rigor: <single|double|zz-rigor>
+  scale: <task|wave|epic|zz-scale>" "$(wl no-frontmatter x.plan.md /p/x.plan.md 15)"
+assert_contains "TRIPLE-2 a missing intent names the intent list" "requires intent: (build|bugfix|refactor|tune|spike|incident-response|zz-intent)" "$(wl no-intent x.plan.md /p/x.plan.md)"
+assert_contains "TRIPLE-3 a bad intent names the intent list" "invalid intent: 'q' — allowed: build|bugfix|refactor|tune|spike|incident-response|zz-intent" "$(wl bad-intent x.plan.md /p/x.plan.md q)"
+assert_contains "TRIPLE-4 a missing and a bad scale name the scale list" "requires scale: (task|wave|epic|zz-scale)|invalid scale: 'q' — allowed: task|wave|epic|zz-scale" \
+  "$(wl no-scale x.plan.md /p/x.plan.md | /usr/bin/grep -o 'requires scale: .*')|$(wl bad-scale x.plan.md /p/x.plan.md q | /usr/bin/grep -o "invalid scale: .*")"
+assert_contains "TRIPLE-5 a bad rigor names the rigor list in words" "invalid rigor: 'q' — allowed: single, double or zz-rigor" "$(wl bad-rigor x.plan.md /p/x.plan.md q '')"
+assert_eq "TRIPLE-6 the scale library's rows are the write gate's scales, and its refusal names them" "task wave epic|scale.sh: 'q' is no scale — use task, wave or epic" \
+  "$(bash -c '. "$1"; printf "%s|" "$SCALE_ROWS"; scale_cell q patrol 2>&1' _ "$WL/scale.sh")"
+assert_eq "TRIPLE-7 the intent list is spelt on one line of the three files, the scale list on one, the rigor words on none" "1 1 0" \
+  "$(/usr/bin/grep -c 'incident-response' "$WL/write-gate.sh" | tr -d ' ') $(/usr/bin/grep -c 'WRITE_GATE_SCALES=' "$WL/write-gate.sh" | tr -d ' ') $(cat "$WL/scale.sh" "${BIONIC_SCRIPTS_DIR}/payload/scripts/card.sh" | /usr/bin/grep -c 'single or double\|single|double\|task, wave or epic\|task|wave|epic' | tr -d ' ')"
 
 section "WINDOW: a plan write the hook admitted is the tool's from before the file changes"
 # Each tool call as Claude Code makes it: the before-arm, the tool's exact bytes on disk, the after-arm. Between

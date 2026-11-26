@@ -669,6 +669,28 @@ expect_contains "BC3 …and a different heavy command from one tree keys its own
 guarded "$R1" 'npx playwright test e2e/x.spec.ts &'
 expect_eq "BC2 a backgrounded browser run is REFUSED" "2" "$ST"
 
+section "B-EXPECT — a suite segment opening on BIONIC_EXPECT=red is wrapped as a run meant to fail"
+# The word is a leading assignment of the suite segment itself, read by the command reader: the wrap then hands the
+# shim `--expect red`, and the suite is named as it is without the word.
+guarded "$R1" 'BIONIC_EXPECT=red tests/run.sh --only alpha.test.sh'
+expect_eq "BE1 a declared run of a suite on the budget is ALLOWED" "0" "$ST"
+expect_contains "BE1 …wrapped with the declaration" "--expect red" "$WRAP"
+expect_contains "BE1 …and its suite named as without it" "--suites alpha.test.sh " "$WRAP"
+guarded "$R1" "cd $R1 || exit 1; LOG=/tmp/be.log; set -o pipefail; BIONIC_EXPECT=red tests/run.sh --only alpha.test.sh 2>&1 | tee \"\$LOG\"; rc=\$?; echo \"rc=\$rc\" >> \"\$LOG\"; exit \$rc"
+expect_contains "BE2 the doctrine's suite line with the word is wrapped with the declaration" "--expect red" "$WRAP"
+expect_contains "BE2 …and names its suite" "--suites alpha.test.sh " "$WRAP"
+guarded "$R1" 'tests/run.sh --only alpha.test.sh'
+expect_contains "BE3 control: the same suite with no word is wrapped" "--suites alpha.test.sh " "$WRAP"
+expect_absent "BE3 …and declares nothing" "--expect" "$WRAP"
+guarded "$R1" 'echo "BIONIC_EXPECT=red" && tests/run.sh --only alpha.test.sh'
+expect_contains "BE4 the word inside quotes on another segment: wrapped" "--suites alpha.test.sh " "$WRAP"
+expect_absent "BE4 …and declares nothing" "--expect" "$WRAP"
+guarded "$R1" 'BIONIC_EXPECT=red tests/run.sh --only alpha.test.sh && tests/run.sh --only beta.test.sh'
+expect_contains "BE5 the word on one suite of two sharing one exit: wrapped" "booked.sh" "$WRAP"
+expect_absent "BE5 …and declares nothing, since one code cannot invert for both" "--expect" "$WRAP"
+guarded "$R1" 'LOG="a b" BIONIC_EXPECT=red tests/run.sh --only alpha.test.sh'
+expect_contains "BE6 the word behind a quoted assignment is read" "--expect red" "$WRAP"
+
 section "B-THREAD — a heavy run on the orchestrator's thread leaves it, as a suite does"
 # The farm-out wall refuses a browser or compile run wherever it refuses a suite, and books nothing:
 # the gate's store stays empty because no wrap is staged beside a refusal.

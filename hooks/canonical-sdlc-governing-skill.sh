@@ -117,35 +117,16 @@ fi
 # Write tool creates parent directories, so the non-existent segment was never an obstacle
 # to the write — only to the wall seeing where it was going.
 #
-# The loop is hooks/dispatch-preflight.sh resolve_in_repo()'s, which already folds this way
-# before comparing a deliverable path against the repo, and whose `set -f` guard is
-# load-bearing here too: a `*` inside a tool-supplied path is a character, never a glob.
-# Two walls in one wave had disagreed about how to resolve a path, and this is the weaker
-# one adopting the stronger one.
-#
-# A LEXICAL fold, deliberately, not realpath: `<symlink>/..` folds to the symlink's parent
-# rather than to its target's parent. Same reading resolve_in_repo takes, and for a wall
-# whose question is "which tree does this path NAME" it is the right one.
+# The fold is lib/root.sh's path_normal, which hooks/dispatch-preflight.sh resolve_in_repo()
+# calls too before comparing a deliverable path against the repo, so the two walls cannot
+# disagree about where a path goes. It is lexical, and a `*` in the path is a character. This
+# function is defined above the loader but runs only after it, so root.sh is in place by then.
 fold_dots() {  # $1=path → `.` and `..` folded lexically, absolute
-  local p="$1" abs out part had_f
-  case "$p" in
-    /*) abs="$p" ;;
-    *)  abs="$(pwd)/$p" ;;
+  case "$1" in
+    /*) path_normal "$1" ;;
+    *)  path_normal "$(pwd)/$1" ;;
   esac
-  case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
-  set -f
-  out=""
-  local IFS=/
-  for part in $abs; do
-    case "$part" in
-      ''|.) ;;
-      ..)   out="${out%/*}" ;;
-      *)    out="$out/$part" ;;
-    esac
-  done
-  unset IFS
-  [ "$had_f" -eq 1 ] || set +f
-  printf '%s\n' "${out:-/}"
+  printf '%s\n' "$PATH_NORMAL"
 }
 
 physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resolved

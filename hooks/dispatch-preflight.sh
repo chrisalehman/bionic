@@ -1466,25 +1466,13 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # an ambiguity, and takes §7 direction — fall back to the lexical answer rather
 # than refuse on a question this gate cannot answer.
 resolve_in_repo() {  # <path> -> absolute, `.`/`..` folded, existing prefix physical
-  local p="$1" abs out part had_f head rest phys
+  local p="$1" out head rest phys
+  # lib/root.sh's lexical fold, the one the governing hook's fold_dots calls too.
   case "$p" in
-    /*) abs="$p" ;;
-    *)  abs="$BIONIC_ROOT/$p" ;;
+    /*) path_normal "$p" ;;
+    *)  path_normal "$BIONIC_ROOT/$p" ;;
   esac
-  case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
-  set -f   # a `*` inside a brief-supplied path is a character, never a glob
-  out=""
-  local IFS=/
-  for part in $abs; do
-    case "$part" in
-      ''|.) ;;
-      ..)   out="${out%/*}" ;;
-      *)    out="$out/$part" ;;
-    esac
-  done
-  unset IFS
-  [ "$had_f" -eq 1 ] || set +f
-  out="${out:-/}"
+  out="$PATH_NORMAL"
 
   head="$out"; rest=""
   while [ -n "$head" ] && [ ! -d "$head" ]; do
