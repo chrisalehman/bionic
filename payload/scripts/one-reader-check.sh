@@ -6,7 +6,7 @@
 # It reads every `*.sh` file under <root>/hooks and <root>/payload/scripts (symlinks not followed), and for
 # names alone also every file under those two, every `*.sh` file under <root>/tests outside tests/fixtures/
 # and the files of the loaded skill set, and prints one finding per line, `<kind>TAB<where>TAB<detail>`,
-# then the seven counts, one `key=value` line each and always in this order, as the last seven lines:
+# then the ten counts, one `key=value` line each and always in this order, as the last ten lines:
 #
 #   parsers=<n>        files that parse a plan or a log, outside the reader's own files
 #   plan_writers=<n>   files that write a plan
@@ -15,12 +15,17 @@
 #   loader_copies=<n>  files holding a pasted copy of the loader block
 #   unheard_folds=<n>  lines that take the run's fold or a reader answer and lose its exit
 #   names=<n>          lines that name a retired verb, read by the shape of its use, a removed file or function,
-#                      or a deleted plan section, and entries of the admitted list that admit no line
+#                      or a deleted plan section, and entries of KEPT_COPIES that admit no line
+#   load_guards=<n>    hand-written load-once guards and self-dirs, beside lib/loader.sh `bionic_need`
+#   git_homes=<n>      lines that look up the common git directory, beside lib/root.sh `git_common_dir`
+#   field_readers=<n>  lines that read a record's field by a key they are handed, beside lib/fields.sh
 #
-# It refuses a parser, a plan writer, a shared type and a name: when any of those four counts is
-# above nought it prints one line for each such finding on stderr, `one-reader-check: refused — <kind>
-# <file>:<line>`, and exits 1. The other three counts are reported and refuse nothing. Exit 0 when none
-# of the four is found, 2 when <root> holds no hooks/ and payload/scripts/. A comment line, or the
+# It refuses the counts REFUSING names, the one list of them: when one of those is above nought it prints
+# one line for each of its findings on stderr, `one-reader-check: refused — <kind> <file>:<line>` (a shared
+# type with its writers, a kept entry by the entry), and exits 1. A count off the list is reported and
+# refuses nothing, so a count is turned on by adding its name there and nowhere else; tests/lib/lint.sh
+# reads the refusals, so a count turned on here is turned on at a landing too. Exit 0 when no refusing
+# count is above nought, 2 when <root> holds no hooks/ and payload/scripts/. A comment line, or the
 # comment a function's line ends on, is never a parse, a write or a refusal; the loader's BEGIN marker
 # is the one comment read, and a name is read in a comment as in code.
 #
@@ -56,6 +61,16 @@
 #   - A REFUSAL is a refusal primitive called with its words (`refuse exit2|deny|block`, `fold_block`,
 #     `dp_finding`, `patrol_deny`, `dp_not_checked`, `deny`, `block`) in a file hooks/hooks.json runs.
 #   - A LOADER COPY is a file other than lib/loader.sh with the loader block's BEGIN marker.
+#   - A LOAD GUARD is a source of a `*.sh` file under a marker of its own (`declare -F <name>`, or `[ -n` or
+#     `[ -z` of a `${VAR:-}`): the marker on the same line, or on a line above that ends in `then`, `{`, `||`
+#     or `&&` and whose block, by indent, holds the source. A SELF-DIR is a function named `…dir` that reads
+#     BASH_SOURCE on its line or the next. Each is a copy of lib/loader.sh `bionic_need`, outside that file;
+#     the one bootstrap line a library opens with, BOOT_LINE, is admitted when it is the whole line.
+#   - A LOOKUP is a line naming the flag `git-common-di[r]`, outside lib/root.sh, the home of `git_common_dir`.
+#   - A FIELD READER is, outside lib/fields.sh, an awk `index(<x>, <var> "=") == 1` whose key is a variable,
+#     or a shell case arm `"$<var>="*)` opening at a field: the reading `line_kv` and `line_value` do. A key
+#     spelt as a literal, or a word found between blanks, is none.
+#   Those three are read in hooks/ and payload/scripts/ alone, never under tests/.
 #   - AN UNHEARD FOLD is a line outside lib/proof.sh and the reader's files that calls _proof_facts,
 #     _proof_ask, reader_main, reader_facts, reader_events or the reader program and pipes it, feeds a
 #     process substitution, assigns it to a local, or takes it in a $( ) whose exit no `||`, `&&`,
@@ -73,13 +88,22 @@
 #     letter (`[-]`, `[t]`) so that no name stands whole in this file: its own text matches none of them, and a word search of the tree for a name finds none here.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
-# and is admitted. Nothing else is admitted, and no function may write a plan.
+# and is admitted. THE COPIES KEPT BY NAME are KEPT_COPIES, `<file>:<function>` each: a load guard, a self-dir,
+# a lookup or a field reader inside that function is admitted, and an entry whose file is read and in which it
+# admits nothing is a finding counted with the names, so the list cannot outlive its copy. A root that holds no
+# file of an entry, a planted root or the lint's copy of a row's files, does not judge it. Nothing else is
+# admitted, and no function may write a plan.
 #
 # Executed, never sourced; bash 3.2.
 
 set -uo pipefail
 
 READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/fields.sh"
+# Each is an install root: the script finds its own folder before any library, the loader among them, is found.
+KEPT_COPIES="payload/scripts/doctor.sh:_doctor_self_dir payload/scripts/setup.sh:_setup_self_dir payload/scripts/version.sh:_version_self_dir payload/scripts/close-out.sh:_co_self_dir"
+REFUSING="parsers plan_writers shared_types loader_copies names"
+# Built by printf, so that no line of this file is the bootstrap line or reads as a guard: each `|` and `.` is an argument.
+BOOT_LINE="$(printf 'declare -F bionic_need >/dev/null 2>&1 %s%s case "${BASH_SOURCE[0]}" in */*) %s "${BASH_SOURCE[0]%%/*}/loader.sh" ;; *) %s ./loader.sh ;; esac' '|' '|' . .)"
 
 case "${BASH_SOURCE[0]}" in */*) _orc_dir="${BASH_SOURCE[0]%/*}" ;; *) _orc_dir="." ;; esac
 root="${1:-$(cd "$_orc_dir/../.." && pwd -P)}"
@@ -134,7 +158,8 @@ names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired v
 # The patterns are written so that this file's own text matches none of them: `\/` and `[#]` stand
 # where the grammar has a bare character, so the check never counts itself. Lines are read as bytes:
 # the walk of a command a character at a time stops on a line that is no valid UTF-8.
-NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " -v ruled=" $ruled_types " '
+NAMED="$(names_standing)" BOOT_LINE="$BOOT_LINE" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " -v ruled=" $ruled_types " \
+  -v kept=" $KEPT_COPIES " -v refusing=" $REFUSING " '
   function opname(s) {  # one operand token -> 1 when it names a plan, 2 a log
     if (s ~ /\.plan\.md"?$/) return 1
     if (s ~ /run\.log"?$/) return 2
@@ -217,6 +242,12 @@ NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v
       if (!(type in tseen)) { tseen[type] = 1; tord[++nt] = type }
     }
   }
+  function rf(c) { return index(refusing, " " c " ") > 0 }  # 1 when count <c> refuses
+  function copy(kind, cnt, where, detail, f,   k) {  # one copy of an idiom with a home, unless its function is kept
+    k = FILENAME ":" f
+    if (index(kept, " " k " ")) { kadm[k] = 1; return }
+    ncp++; cpk[ncp] = kind; cpc[ncp] = cnt; cpw[ncp] = where; cpd[ncp] = detail; ncnt[cnt]++
+  }
   function passed(s,   n, w, i, j, t) {  # the ruled type a call of a pass-through on line s hands it, or nothing
     n = split(s, w, /[ \t]+/)
     for (i = 1; i < n; i++) {
@@ -234,15 +265,22 @@ NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v
   }
   BEGIN { qt = "[\"" q "]"; nq = "[^\"" q "]"; rd = "(^|[^A-Za-z0-9_.-])(awk|sed|grep|cut|head|tail|cat) "
     rt = ruled; gsub(/^ +| +$/, "", rt); gsub(/ +/, "|", rt); rre = "[ \t]\"?(" rt ")\"?([ \t;)]|$)"
-    known = "^[ \t{(!]*([A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*[A-Za-z_/][A-Za-z0-9_/.-]*( |$)" }
-  FNR == 1 { depth = 0; fn[0] = "-"; ind[0] = -1 }
+    known = "^[ \t{(!]*([A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*[A-Za-z_/][A-Za-z0-9_/.-]*( |$)"
+    boot = ENVIRON["BOOT_LINE"]; loader = "payload/scripts/lib/loader.sh"; rootlib = "payload/scripts/lib/root.sh"
+    fieldslib = "payload/scripts/lib/fields.sh"
+    srcre = "(^|[;&|(){!]|[ \t](then|do|else))[ \t]*([.]|source)[ \t]+[\"$/A-Za-z_.~].*[.]sh([\"" q " \t;)|&]|$)"
+    markre = "declare -F [A-Za-z_]|[[][[]? +-[nz] +\"?[$][{][A-Za-z_][A-Za-z0-9_]*:-[}]\"? +[]]"
+    awkkv = "index[(][^,()]+,[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\"=\"[)][ \t]*==[ \t]*1"
+    shkv = "(^|[ \t(])\"[$][{]?[A-Za-z_0-9]+[}]?=\"[*][)]"
+    lg = "use bionic_need (" loader ")" }
+  FNR == 1 { depth = 0; fn[0] = "-"; ind[0] = -1; gopen = 0; pend = ""; readf[FILENAME] = 1 }
   /^[#] --- bionic-loader\/v2 BEGIN/ && FILENAME != "payload/scripts/lib/loader.sh" { ll[++nl] = "loader\t" FILENAME "\t:" FNR }
   /^[ \t]*#/ { next }
   {
-    line = $0
+    line = $0; isdef = 0
     if (match(line, /^[ \t]*[A-Za-z_][A-Za-z0-9_:-]*[ \t]*\(\)[ \t]*(\{|\(|$)/)) {
       d = line; match(d, /^[ \t]*/); w = RLENGTH; sub(/^[ \t]*/, "", d); sub(/[ \t]*\(.*/, "", d)
-      fn[++depth] = d; ind[depth] = w
+      fn[++depth] = d; ind[depth] = w; isdef = 1
       if (match(line, /^[^{]*\{[ \t]+[#]/)) line = substr(line, 1, RLENGTH - 1)  # the comment a function line ends on
     } else if (depth > 0 && match(line, /^[ \t]*\}/) && RLENGTH - 1 == ind[depth]) depth--
 
@@ -271,20 +309,49 @@ NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v
       p = substr(line, RSTART, RLENGTH); sub(/^[^_[:alnum:]]/, "", p); sub(/ .*/, "", p)
       rl[++nr] = "refusal\t" FILENAME ":" FNR "\t" p
     }
+
+    # The idioms with a home elsewhere. A guard block is the lines under its marker line indented past it; a blank
+    # line neither opens nor closes one.
+    if (line !~ /[^ \t]/) next
+    match(line, /^[ \t]*/); w = RLENGTH; wh = FILENAME ":" FNR
+    inblk = gopen && w > gind; if (!inblk) gopen = 0
+    if (pend != "") { if (line ~ /BASH_SOURCE/) copy("load-guard", "load_guards", FILENAME ":" pendn, "self-dir " pend ": " lg, pend); pend = "" }
+    if (FILENAME != loader && line != boot) {
+      if (line ~ srcre && (inblk || line ~ markre)) copy("load-guard", "load_guards", wh, "guard: " lg, fn[depth])
+      if (!gopen && line ~ markre && line ~ /(then|[{]|[|][|]|&&)[ \t]*$/) { gopen = 1; gind = w }
+      if (isdef && d ~ /dir$/) {
+        if (line ~ /BASH_SOURCE/) copy("load-guard", "load_guards", wh, "self-dir " d ": " lg, d)
+        else if (line ~ /[{][ \t]*$/) { pend = d; pendn = FNR }
+      }
+    }
+    if (FILENAME != rootlib && line ~ /git-common-di[r]/) copy("git-home", "git_homes", wh, "lookup: use git_common_dir (" rootlib ")", fn[depth])
+    if (FILENAME != fieldslib) {
+      if (line ~ awkkv) copy("field-reader", "field_readers", wh, "awk reader: use line_kv (" fieldslib ")", fn[depth])
+      else if (line ~ shkv) copy("field-reader", "field_readers", wh, "shell reader: use line_value (" fieldslib ")", fn[depth])
+    }
   }
   END {
     r = "one-reader-check: refused — "; e = "/dev/stderr"
     nn = split(ENVIRON["NAMED"], nm, "\n")
     for (i = 1; i <= nc; i++) if ((t = passed(cl[i])) != "") writer(t, cf[i], cn[i], cfn[i])
-    for (i = 1; i <= np; i++) { printf "parser\t%s\tsites=%d first=%d\n", pord[i], pn[pord[i]], pfirst[pord[i]]; print r "parser " pord[i] ":" pfirst[pord[i]] > e }
-    for (i = 1; i <= npw; i++) { printf "plan-writer\t%s\tsites=%d first=%d\n", word[i], wn[word[i]], wfirst[word[i]]; print r "plan-writer " word[i] ":" wfirst[word[i]] > e }
+    for (i = 1; i <= np; i++) { printf "parser\t%s\tsites=%d first=%d\n", pord[i], pn[pord[i]], pfirst[pord[i]]; if (rf("parsers")) print r "parser " pord[i] ":" pfirst[pord[i]] > e }
+    for (i = 1; i <= npw; i++) { printf "plan-writer\t%s\tsites=%d first=%d\n", word[i], wn[word[i]], wfirst[word[i]]; if (rf("plan_writers")) print r "plan-writer " word[i] ":" wfirst[word[i]] > e }
     for (i = 1; i <= nw; i++) print wl[i]
-    for (i = 1; i <= nt; i++) if (nwr[tord[i]] > 1) { print "shared\t" tord[i] "\t" ids[tord[i]]; print r "shared " tord[i] " " at[tord[i]] > e; ns++ }
-    for (i = 1; i <= nr; i++) print rl[i]
-    for (i = 1; i <= nl; i++) print ll[i]
-    for (i = 1; i <= nu; i++) print ul[i]
+    for (i = 1; i <= nt; i++) if (nwr[tord[i]] > 1) { print "shared\t" tord[i] "\t" ids[tord[i]]; if (rf("shared_types")) print r "shared " tord[i] " " at[tord[i]] > e; ns++ }
+    for (i = 1; i <= nr; i++) { print rl[i]; split(rl[i], x, "\t"); if (rf("hook_refusals")) print r "refusal " x[2] > e }
+    for (i = 1; i <= nl; i++) { print ll[i]; split(ll[i], x, "\t"); if (rf("loader_copies")) print r "loader " x[2] x[3] > e }
+    for (i = 1; i <= nu; i++) { print ul[i]; split(ul[i], x, "\t"); if (rf("unheard_folds")) print r "unheard " x[2] > e }
     for (i = 1; i <= nn; i++) { split(nm[i], f, ":"); t = nm[i]; sub(/^[^:]*:[^:]*:[ \t]*/, "", t)
-      print "name\t" f[1] ":" f[2] "\t" t; print r "name " f[1] ":" f[2] > e }
+      print "name\t" f[1] ":" f[2] "\t" t; if (rf("names")) print r "name " f[1] ":" f[2] > e }
+    nk = split(kept, ke, " ")
+    for (i = 1; i <= nk; i++) { t = ke[i]; sub(/:[^:]*$/, "", t)
+      if ((t in readf) && !(ke[i] in kadm)) { print "kept\t" ke[i] "\tadmits no line"; nn++; if (rf("names")) print r "kept " ke[i] > e } }
+    for (i = 1; i <= ncp; i++) { print cpk[i] "\t" cpw[i] "\t" cpd[i]; if (rf(cpc[i])) print r cpk[i] " " cpw[i] > e }
     printf "parsers=%d\nplan_writers=%d\nshared_types=%d\nhook_refusals=%d\nloader_copies=%d\nunheard_folds=%d\nnames=%d\n", np, npw, ns, nr, nl, nu, nn
-    exit (np + npw + ns + nn > 0)
+    printf "load_guards=%d\ngit_homes=%d\nfield_readers=%d\n", ncnt["load_guards"], ncnt["git_homes"], ncnt["field_readers"]
+    c["parsers"] = np; c["plan_writers"] = npw; c["shared_types"] = ns; c["hook_refusals"] = nr; c["loader_copies"] = nl
+    c["unheard_folds"] = nu; c["names"] = nn; c["load_guards"] = ncnt["load_guards"]; c["git_homes"] = ncnt["git_homes"]
+    c["field_readers"] = ncnt["field_readers"]; n = split(refusing, x, " "); bad = 0
+    for (i = 1; i <= n; i++) bad += c[x[i]]
+    exit (bad > 0)
   }' "${files[@]}"
