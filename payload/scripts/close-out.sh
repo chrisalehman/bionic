@@ -1651,8 +1651,10 @@ co_cont_hh_none() {  # -> 0 when the continuation holds no `hand-holds: ` line u
 # co_rows_sent -> every row the run's log ever dispatched, one per line: read off the log's lines, since a cancel takes
 # the dispatch out of the standing facts. 2 when the lines cannot be read.
 co_rows_sent() {
+  local said
   bionic_need reader.sh reader_events || return 2
-  reader_events "$PLAN" | awk -F'|' "$_READER_AWK"'ev() == "dispatch" { print line_kv("row") }'
+  said="$(reader_events "$PLAN")" || return 2
+  printf '%s\n' "$said" | awk -F'|' "$_READER_AWK"'ev() == "dispatch" { print line_kv("row") }'
 }
 # co_cont_owner -> the id of the close row that owns the continuation, or nothing
 co_cont_owner() {

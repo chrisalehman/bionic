@@ -75,6 +75,15 @@ plan_read_header() {  # <plan> [key [all]] -> `key=value` lines in the header's 
     END { exit !c }' "$1"
 }
 
+# A header that holds no key answers plan_read_header with nothing, as a page with no header does; a caller that
+# names the two apart asks whether the page opens with the fence, its first line ended as the header reader ends it.
+plan_read_headed() {  # <plan> -> 0 when its first line is `---`; 1 when it is not or the page is empty, 2 no plan
+  [ -f "${1:-}" ] || return 2
+  awk "$_PLAN_READ_EOL"'
+    { eol($0, L); h = (L[1] == "---"); exit }
+    END { exit !h }' "$1"
+}
+
 # _plan_read_lines <file> -> its lines, a carriage return ending a line wherever it stands. A file saved
 # with CR alone is one awk record, which no later pass can split again, so this pass comes first.
 _plan_read_lines() {

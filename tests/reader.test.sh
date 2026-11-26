@@ -362,6 +362,14 @@ printf -- '---\ngoals: a · one (x)\nrigor: double\ngoals: b · two (y)\n---\ngo
 every() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_header "$D/plans/epic-x/cr.plan.md" "$@" ) | tr '\n' '|'; }
 expect_eq "a repeated key answers its first line, and with all every line of it in the header, the body not read" \
   "goals=a · one (x)||goals=a · one (x)|goals=b · two (y)|" "$(every goals)|$(every goals all)"
+# Whether a page opens with a header is asked apart from its keys: a header holding no key answers no key, and still
+# opens the page, while a page whose first line is anything else has none. Its line end is read as the header's is.
+headed() { printf -- "$1" > "$D/plans/epic-x/hd.plan.md"; ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_headed "$D/plans/epic-x/hd.plan.md" ); echo "$?"; }
+expect_eq "a page opens with a header when its first line is the fence, keyless, CRLF or CR-only alike" "0 0 0 0" \
+  "$(headed '---\n---\n') $(headed '---\nrigor: double\n---\n') $(headed '---\r\n---\r\n') $(headed '---\rbody\r')"
+expect_eq "…and has none when its first line is anything else, the page empty, or no page there" "1 1 1 1 2" \
+  "$(headed '# A page\n') $(headed '\n---\nrigor: double\n---\n') $(headed ' ---\n---\n') $(headed '') $( ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_headed "$D/plans/epic-x/none.plan.md" ); echo "$?")"
+rm -f "$D/plans/epic-x/hd.plan.md"
 
 section "ROW"
 W=new; expect_eq "a row is its nine authored cells" \
