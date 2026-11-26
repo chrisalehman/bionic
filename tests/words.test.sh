@@ -33,6 +33,8 @@
 # A CHECK IS A TEST. The Step 2 and Step 3 cards, the Step 2 views and their refusals are drawn over a SYNTHESIZED
 # spec and plan, and every line of the hooks and scripts is read, for the old word "eval" naming a check; the shell
 # builtin of the same spelling and the old heading a page written before the rename still carries pass (§TEST-WORD).
+# The loaded pages define test and eval once each, teach the Test design and the reply words the cards print, and call
+# no check an eval (§TEST-WORD-PAGES).
 #
 # FIXTURE FIDELITY (see .claude/rules/test-harness.md, "Fixture fidelity"). §TEXTS reads the
 # shipped files in place. §PLANT and §SENSE are SYNTHESIZED: each copies a shipped surface into
@@ -48,7 +50,7 @@
 #
 # Usage: bash tests/run.sh --only words.test.sh
 #
-# pins: agents-src/blocks/implementor-mechanics.md agents/implementor.md agents/senior-implementor.md skills/canonical-sdlc/steps/0.md agents-src/templates/skills/canonical-sdlc/steps/0.md.tmpl skills/canonical-sdlc/steps/5.md agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl skills/canonical-sdlc/steps/7.md agents-src/templates/skills/canonical-sdlc/steps/7.md.tmpl skills/canonical-sdlc/operational-rules.md payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl hooks/dispatch-preflight.sh hooks/poker/tick.sh skills/sitrep/SKILL.md payload/scripts/card.sh payload/scripts/lib/cmd-class.sh payload/scripts/lib/git-argv.sh payload/scripts/lib/grant.sh payload/scripts/lib/plan-read.sh
+# pins: agents-src/blocks/implementor-mechanics.md agents/implementor.md agents/senior-implementor.md skills/canonical-sdlc/steps/0.md agents-src/templates/skills/canonical-sdlc/steps/0.md.tmpl skills/canonical-sdlc/steps/5.md agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl skills/canonical-sdlc/steps/7.md agents-src/templates/skills/canonical-sdlc/steps/7.md.tmpl skills/canonical-sdlc/operational-rules.md payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl hooks/dispatch-preflight.sh hooks/poker/tick.sh skills/sitrep/SKILL.md payload/scripts/card.sh payload/scripts/lib/cmd-class.sh payload/scripts/lib/git-argv.sh payload/scripts/lib/grant.sh payload/scripts/lib/plan-read.sh skills/canonical-sdlc/SKILL.md agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl skills/canonical-sdlc/steps/2.md agents-src/templates/skills/canonical-sdlc/steps/2.md.tmpl skills/canonical-sdlc/steps/3.md agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl
 
 set -uo pipefail
 
@@ -534,5 +536,48 @@ while IFS= read -r e; do
   tw_p="${e%%|*}"; tw_s="${e#*|}"; tw_s="${tw_s%|*}"
   expect_true "TW6 allow entry '$tw_s': $tw_p still holds it" /usr/bin/grep -qF -- "$tw_s" "$REPO/$tw_p"
 done < "$TW_ALLOW"
+
+# ── §TEST-WORD-PAGES ─────────────────────────────────────────────────────────
+section "§TEST-WORD-PAGES: the loaded pages define test and eval once each, teach the Test design and the card's reply words, and call no check an eval"
+
+# The pages are the loaded set §GONE reads, as shipped. A page line is read whole but for its HTML comments, code spans
+# included, because a reply word sits in one and a page that teaches `show evals` teaches a word the card refuses. Two
+# sentences must name the old word: the definition, and the note that a page under the old words still reads. Each is
+# cut from its line before the line is read, and each is counted over the whole set, so it is said exactly once. The
+# reply lines the pages draw are compared with the lines the real card prints over §TEST-WORD's fixture spec and plan.
+# fails-when: a page keeps the old word for a check, or a definition is missing.
+TP_DEF='A test is deterministic: unit, integration, hermetic or end to end; an eval tests a model, which is not, so it passes by reaching a stated threshold a stated share of the time.'
+TP_OLD='A page under the old words, `Eval design` with `Eval type` and `Eval`, still reads.'
+tp_hits() {  # <root> -> "<path>:<line>:<text>" for each line of the set naming the old word, the two sentences cut
+  local f
+  while IFS= read -r f; do
+    awk -v rel="$f" -v d="$TP_DEF" -v o="$TP_OLD" '{
+      t = $0; gsub(/<!--([^-]|-[^-])*-->/, "", t)
+      while ((c = index(t, d)) > 0) t = substr(t, 1, c - 1) substr(t, c + length(d))
+      while ((c = index(t, o)) > 0) t = substr(t, 1, c - 1) substr(t, c + length(o))
+      printf "%s:%d:%s\n", rel, NR, t }' "$1/$f" | tw_word
+  done <<< "$GONE_SET"
+}
+tp_count() { ( cd "$1" && while IFS= read -r f; do cat "$f"; done <<< "$GONE_SET" ) | /usr/bin/grep -c -F -- "$2" || true; }   # <root> <sentence>
+TP="$TMP/tp"
+while IFS= read -r f; do mkdir -p "$TP/${f%/*}" && cp "$REPO/$f" "$TP/$f"; done <<< "$GONE_SET"
+printf '\nPLANT-1 the eval of this criterion.\n' >> "$TP/skills/canonical-sdlc/steps/2.md"; printf '\nPLANT-2 reply `show evals <req>`.\n' >> "$TP/payload/context/checks-evidence.md"
+expect_eq "TP0 the planted copy of the set is refused at both plants, the one in a code span too (the control for TP1)" "2" "$(tp_hits "$TP" | /usr/bin/grep -c 'PLANT-[12]' || true)"
+expect_empty "TP1 no loaded page calls a check an eval (the same read over the shipped files)" "$(tp_hits "$REPO")"
+expect_eq "TP2 the definition of test and eval is said once over the set, on the skill's main page" "1|1" "$(tp_count "$REPO" "$TP_DEF")|$(/usr/bin/grep -c -F -- "$TP_DEF" "$PG_DIR/SKILL.md" || true)"
+expect_eq "TP2b the note that a page under the old words still reads is said once over the set" "1" "$(tp_count "$REPO" "$TP_OLD")"
+expect_eq "TP3 the Step 2 page teaches the heading and its six columns" "1|1" \
+  "$(pg_has steps/2.md 'flush-left `## Test design` table')|$(pg_has steps/2.md '| Requirement | Approach | Criterion | Test type | Test | Fails when |')"
+expect_eq "TP3b the rules page heads its guidance The Test design table" "1" "$(pg_has operational-rules.md '### The Test design table')"
+tw_card step2 "$TW/new.spec.md"; TP_C2="$(printf '%s\n' "$TW_OUT" | tail -1)"; TP_S2="$(printf '%s\n' "$TW_OUT" | /usr/bin/grep '^  Test design ' || true)"
+TP_P2="$(/usr/bin/grep -E '^show [^`]* · explain <decision> · show ownership$' "$PG_DIR/steps/2.md" | head -1)"
+expect_nonempty "TP4 the Step 2 page's card mock ends on a reply line" "$TP_P2"
+expect_eq "TP4b …the line the Step 2 card prints" "$TP_C2" "$TP_P2"
+expect_eq "TP4c …and the mock's section line is the card's, headed Test design over the type labels" "1" "$(pg_has steps/2.md "$TP_S2")"
+expect_ne "TP4d the Step 2 page names the view's command form, … tests <REQ>" "0" "$(pg_has steps/2.md '`… tests <REQ>`')"
+tw_card step3 "$TW/tw.plan.md"; TP_C3="$(printf '%s\n' "$TW_OUT" | tail -1)"
+TP_P3="$(/usr/bin/grep -E '^show [^`]*explain <decision>$' "$PG_DIR/steps/3.md" | head -1)"
+expect_nonempty "TP5 the Step 3 page's card mock ends on a reply line" "$TP_P3"
+expect_eq "TP5b …the line the Step 3 card prints" "$TP_C3" "$TP_P3"
 
 finish

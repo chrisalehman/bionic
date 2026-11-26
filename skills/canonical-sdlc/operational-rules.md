@@ -122,17 +122,17 @@ The load-bearing row of the section, and the only part later steps consume mecha
 - **Rendering surfaces include prose.** A constant read by two scripts and quoted in a doc has three surfaces, and the doc is the one that drifts, because nothing runs it.
 - **The agreement test is a real hermetic test that fails when the surfaces disagree** — named, not a suite and not "covered by the unit tests". The exemplar is the version pin in `tests/canonical-sdlc-evidence-gate.test.sh` §Section 2b: the commit gate and the write hook, each holding the literal `15`, driven on one plan at three versions so that they cannot disagree. Name what a test leaves out rather than rounding up to "pinned"; a surface becomes pinnable by changing its format or by naming it in the same test as the origin. `none — <why>` is a legitimate cell (prose against prose has no seam to test), but the reviewer stops on it: give the reason.
 
-### The Eval design table
+### The Test design table
 
-`## Eval design` sits beside `## Design` in a wave-or-epic spec; SKILL.md carries its contract. How to fill one in:
+`## Test design` sits beside `## Design` in a wave-or-epic spec; SKILL.md carries its contract. How to fill one in:
 
-- **Approach is one line, and it is a design decision.** "Grep the rendered file for the six column headers" is an approach; "test it" is not. It names the seam the eval reaches through, which is why the table is authored at Step 2, once the architecture has decided what is observable.
-- **Eval type is the ladder in words** — static · unit · hermetic · live · human, T0–T4 — because the Step-2 card counts types per requirement and `T0 T0 T2` tells a reader nothing to push back on.
-- **Eval is `command → expected observation`,** both halves: a command alone is a thing you ran, an observation alone is a hope. The observation is what the terminal shows — `rc=2, stderr names AC-K2.3`, never `the wall works`.
-- **Fails when names a PLANTED DEFECT, singular and specific.** "the code is broken" fails the column; "the `fails-when:` line is deleted from one AC block" passes it, because a writer can make that mutation and watch the eval turn red, first, before the code.
-- **A criterion that admits no "Fails when" goes back to Step 1.** The defect is in the criterion's wording, and an eval rewritten around an unfalsifiable criterion buys a green that means nothing.
-- **One row per criterion, read in place.** Step 3 adds sequencing and authors no eval.
-- **The gate reads the Fails when column.** From step 4 on, a criterion whose Fails when is empty refuses the commit, naming the row. A waiver dissolves the obligation to RUN an eval, never the obligation to have designed one.
+- **Approach is one line, and it is a design decision.** "Grep the rendered file for the six column headers" is an approach; "test it" is not. It names the seam the test reaches through, which is why the table is authored at Step 2, once the architecture has decided what is observable.
+- **Test type is the ladder in words** — static · unit · hermetic · live · human, T0–T4 — because the Step-2 card counts types per requirement and `T0 T0 T2` tells a reader nothing to push back on.
+- **Test is `command → expected observation`,** both halves: a command alone is a thing you ran, an observation alone is a hope. The observation is what the terminal shows — `rc=2, stderr names AC-K2.3`, never `the wall works`.
+- **Fails when names a PLANTED DEFECT, singular and specific.** "the code is broken" fails the column; "the `fails-when:` line is deleted from one AC block" passes it, because a writer can make that mutation and watch the test turn red, first, before the code.
+- **A criterion that admits no "Fails when" goes back to Step 1.** The defect is in the criterion's wording, and a test rewritten around an unfalsifiable criterion buys a green that means nothing.
+- **One row per criterion, read in place.** Step 3 adds sequencing and authors no test.
+- **The gate reads the Fails when column.** From step 4 on, a criterion whose Fails when is empty refuses the commit, naming the row. A waiver dissolves the obligation to RUN a test, never the obligation to have designed one.
 
 ## Close-out report (Step 9)
 
