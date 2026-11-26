@@ -571,20 +571,6 @@ tick_told_once() {
   return 0
 }
 
-# tick_record_stands <row> <Files cell> [<root>] -> 0 when a record its Files or its artifact cell (the plan-read
-# library's cell of the row) names stands as a file: a path from the docs root (`record/…`) or from the root, a leading
-# `./` or `!` not part of it. The root is the repository, or a row's tree when the record is the one its writer holds.
-tick_record_stands() {
-  local e art root="${3:-$REPO_REAL}" docs="${TICK_DOCS:-}"
-  [ "$root" = "$REPO_REAL" ] || docs="$(docs_root "$root" 2>/dev/null)"
-  art="$(plan_read_row "$POKER_RUN_PLAN" Tasks id "$1" 2>/dev/null | sed -n 's/^artifact=//p')"
-  while IFS= read -r e; do
-    e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
-    case "$e" in record/*) [ -n "$docs" ] && [ -f "$docs/$e" ] && return 0 ;; *[A-Za-z0-9]*) [ -f "$root/$e" ] && return 0 ;; esac
-  done <<< "$(printf '%s,%s\n' "${2:-}" "$art" | tr ',' '\n')"
-  return 1
-}
-
 # tick_point_land <row> <proof: row, head, evidence, owed> -> the point's row landed at the working head on its run's proof:
 # one `published` event of the record kind naming the run's log, then the landing's writes (lib/line.sh), as a record
 # row's own landing makes them. Prints what it landed on, rc 0; rc 1, printing why, when it could not be written.
@@ -615,7 +601,7 @@ tick_unlanded_tree() {
   case "$tree" in /*) ;; *) tree="$REPO_REAL/${tree#./}" ;; esac
   [ -d "$tree" ] && [ ! -L "$tree" ] || return 0
   recs="$(printf '%s\n' "$3" | tr ',' '\n' | /usr/bin/grep 'record/' | paste -sd, -)"
-  tick_record_stands "$id" "$recs" "$tree" || return 0
+  units_record_stands "$POKER_RUN_PLAN" "$id" "$recs" "$tree" "$(docs_root "$tree" 2>/dev/null)" || return 0
   th="$(git -C "$tree" rev-parse --verify -q HEAD 2>/dev/null)" || return 0
   { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
   declare -F proof_branch_head >/dev/null 2>&1 || return 0
@@ -1651,7 +1637,7 @@ BACKSTOP_ROWS
         printf "%s\t%s\t%s\n", $1, $3, $9 }')"
       TICK_OWN_STANDS=""; TICK_DOCS="$(docs_root "$REPO_REAL" 2>/dev/null)"
       while IFS=$'\t' read -r BS_ID BS_KIND BS_FILES; do
-        [ -n "$BS_ID" ] && tick_record_stands "$BS_ID" "$BS_FILES" && TICK_OWN_STANDS="${TICK_OWN_STANDS}${BS_ID}"$'\t'"${BS_KIND}"$'\n'
+        [ -n "$BS_ID" ] && units_record_stands "$POKER_RUN_PLAN" "$BS_ID" "$BS_FILES" "$REPO_REAL" "$TICK_DOCS" && TICK_OWN_STANDS="${TICK_OWN_STANDS}${BS_ID}"$'\t'"${BS_KIND}"$'\n'
       done <<< "$TICK_OWN"
       if [ -n "$TICK_OWN_STANDS" ]; then
         # THE JUDGMENT BEFORE THE QUESTION: an integrate row's wait on the reviews is met only by the tick's judgment of
