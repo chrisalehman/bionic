@@ -1630,15 +1630,6 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
 # each). <w> is the writer width this tick fills to. A full fill, or no candidate (every pending row on the
 # chain scores 0), prints no line. Through 1.20.0 it rode the CHAIN line as ` · SPLIT? …` on every tick, as
 # advice whatever the width. Nothing is split: a split is the orchestrator's edit of the plan.
-run_live() {  # <pid> <log> -> 0 when <pid> is alive and is still <log>'s detached shim
-  local c
-  case "$1" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 "$1" 2>/dev/null || return 1
-  c="$(ps -ww -o command= -p "$1" 2>/dev/null)" || return 1
-  case "$c" in *booked.sh*"--run-log $2"*) return 0 ;; esac
-  return 1
-}
-
 # run_row_of <roster file> <name> -> the name's latest row on that roster carrying a run record
 run_row_of() {
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
@@ -1670,7 +1661,7 @@ run_read() {
     ''|*[!0-9]*) : ;;
     *) RUN_STATE=FINISHED; RUN_RC="$rc"; return 0 ;;
   esac
-  if run_live "$RUN_PID" "$RUN_OUT"; then
+  if alive_shim "$RUN_PID" "$RUN_OUT"; then
     RUN_STATE=RUNNING
     [ -z "$RUN_STARTED" ] || t0="$(iso_epoch "$RUN_STARTED")"
     [ -n "$t0" ] || t0="$(file_mtime "$RUN_OUT.pid")"
@@ -1678,7 +1669,7 @@ run_read() {
     return 0
   fi
   # THE PID DIED: one more read of `<log>.rc`, then LOST. The shim's exit trap writes `.rc` and
-  # exits, and that can fall between the read above and run_live's answer, so a finished run would
+  # exits, and that can fall between the read above and alive_shim's answer, so a finished run would
   # read LOST (wave-32 T22; research-red3 §2). booked.sh's booked_follow guards the same gap.
   { read -r rc < "$RUN_OUT.rc"; } 2>/dev/null
   case "$rc" in ''|*[!0-9]*) : ;; *) RUN_STATE=FINISHED; RUN_RC="$rc"; return 0 ;; esac
