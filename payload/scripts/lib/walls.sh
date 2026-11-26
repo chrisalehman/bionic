@@ -4890,7 +4890,8 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
 #     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--kill-after <s> | --detach]
-#                                          [--stamp-dir <dir> | --unplaced] [--suites <names>] -- '<the command>'
+#                                          [--stamp-dir <dir> | --unplaced] [--suites <names>]
+#                                          [--expect red] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
 # (payload/scripts/booked.sh). This is the one site that sees every runner in every project
@@ -5178,6 +5179,17 @@ _bsg_wrap_text() {
   [ "$_BSG_UNPLACED" != 1 ] || set -- "$@" --unplaced
   set -- "$@" ${_BSG_CLASS_ARGS[@]+"${_BSG_CLASS_ARGS[@]}"} --suites "$_BSG_SUITES"
   [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
+  # A RUN MEANT TO FAIL: every suite segment opening on `BIONIC_EXPECT=red` hands the shim
+  # `--expect red`, which inverts only the code the console gets; the stamp keeps the suite's own.
+  # Never across a split reading: when one exit code cannot speak for each suite, it cannot be
+  # inverted for each either, and the run keeps its own code.
+  case "$COMMAND" in
+    *BIONIC_EXPECT=red*)
+      case $'\n'"$_BSG_TARGETS"$'\n' in
+        *$'\n'split$'\n'*) : ;;
+        *) [ "$(cmd_expect "$COMMAND")" != red ] || set -- "$@" --expect red ;;
+      esac ;;
+  esac
   wall_booked_argv "$COMMAND" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
