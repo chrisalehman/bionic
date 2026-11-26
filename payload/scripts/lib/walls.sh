@@ -2491,14 +2491,13 @@ Plan: $PLAN
 Fix: run the commit again; the fold's own line above names why it failed."
 }
 _eg_refuse_lowered() {
-  local s l="" found="declares canonical_sdlc_version: $SDLC_VERSION"
+  local s found="declares canonical_sdlc_version: $SDLC_VERSION"
   s="$(_run_place "$PLAN")" || _eg_v15_unreadable
   case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
   [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
-  # The parser answers nothing both for a page with no header and for a header that holds no key, and the two are told
-  # apart by the page's first line alone, its line end translated as the parser translates it.
-  IFS= read -r l < "$PLAN" || :
-  [ "${l%%$'\r'*}" = --- ] || found="has no header on its first line"
+  # The parser answers nothing both for a page with no header and for a header that holds no key, so the reader is
+  # asked apart whether the page opens with one.
+  plan_read_headed "$PLAN" || found="has no header on its first line"
   refuse exit2 commit "this run's plan is lowered below 15" "put its version back to 15" \
 "canonical-sdlc plan: this plan $found, and the run's log beside it holds a step, so it is a run's plan at 15 with its version line lowered or lost, and nothing of it is judged without it.
 Plan: $PLAN
