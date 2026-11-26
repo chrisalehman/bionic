@@ -939,6 +939,8 @@ name-scan.test.sh | §QUIET | keep | tests/lib/name-scan.sh:648 the EXIT trap's 
 
 names.test.sh | §SIBLINGS | keep | payload/scripts/lib/root.sh bionic_new: the noclobber create made plain, so two sibling children of a subshell that drew $RANDOM write one file; bionic_id: the pid read as $$, so the two siblings carry one id (the mutants, each with its own row) | speed-counts.test.sh §DERIVE DRV-4 (one caller, _proof_derive_file, through a held command)
 names.test.sh | §SITES | keep | payload/scripts and hooks: a name made from $$ and $RANDOM again outside lib/root.sh's maker, so two siblings share it | none (searched 'RANDOM' in tests/)
+names.test.sh | §PIDS | keep | payload/scripts and hooks: a temp file, id or session named from $$ (or $$ and a counter) outside lib/root.sh's makers, so two siblings share it; or a second copy of the own-pid read (`sh -c 'echo "$PPID"'`) outside bionic_id | none (searched '\$\$' and 'PPID' in tests/)
+names.test.sh | §SITE-SIBLINGS | keep | payload/scripts/lib/gate.sh `_gate_lease_put`: the lease's temp named `$f.tmp.$$` again, so two siblings move one file; payload/scripts/lib/line.sh `_line_merge_ask`: the stand-in session `merge-seen-$$` again, so two siblings open their asks under one session | gate.test.sh §LEASE (the lease's content, not its temp name)
 
 ## notify.test.sh
 

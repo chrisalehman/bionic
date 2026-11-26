@@ -1754,6 +1754,7 @@ RR_MATRIX
     done
     mkdir -p "$RR_DIR" 2>/dev/null || return 0
     [ ! -L "$f" ] || return 0
+    bionic_need root.sh bionic_new && bionic_new "$f.new" || return 0
     {
       printf '%s\n\n## Replay\n\n' "$1"
       printf 'release-approval/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "${RR_AT:-$(iso_now)}" "$RR_N"
@@ -1764,8 +1765,8 @@ RR_MATRIX
       done
       # THE CARRIES THE PAGE PUTS: every finding it shows deferred, so the reply that answers the page rules each.
       printf '%s' "$RR_CARRY" | while IFS= read -r i; do [ -z "$i" ] || printf 'carried: %s\n' "$i"; done
-    } > "$f.new.$$" 2>/dev/null && mv -f "$f.new.$$" "$f" 2>/dev/null
-    rm -f "$f.new.$$" 2>/dev/null
+    } >| "$BIONIC_NEW" 2>/dev/null && mv -f "$BIONIC_NEW" "$f" 2>/dev/null
+    rm -f "$BIONIC_NEW" 2>/dev/null
     return 0
   }
 
@@ -2550,8 +2551,10 @@ RP_TABLE
       say "promote — ${to#"$top"/} already holds ${src#"$root"/}; nothing changed.$([ "$top" = "$root" ] || printf ' The tree is %s.' "$top")"
       exit 0
     fi
-    if ! { mkdir -p "${to%/*}" && cp "$src" "$to.promote.$$" && mv -f "$to.promote.$$" "$to"; }; then
-      rm -f "$to.promote.$$"
+    BIONIC_NEW=""
+    if ! { mkdir -p "${to%/*}" && bionic_need root.sh bionic_new && bionic_new "$to.promote" \
+           && cp "$src" "$BIONIC_NEW" && mv -f "$BIONIC_NEW" "$to"; }; then
+      [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW"
       die "REFUSED — cannot write $to. Nothing was copied."
       exit 2
     fi

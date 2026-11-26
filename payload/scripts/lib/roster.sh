@@ -957,7 +957,10 @@ ruling_record() {  # <roster> <writer> <text> [<key=value>...: what it grants] -
   case "$w" in ''|*'|'*|*[[:space:]]*) return 1 ;; esac
   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 1
   now="$(date +%s)"
-  id="r${now}-$$"
+  # The id carries the asking process's own pid (lib/root.sh `bionic_id`), so two rulings in sibling subshells within
+  # one second are two ids.
+  bionic_need root.sh bionic_id && bionic_id || return 1
+  id="r${now}-${BIONIC_ID//./-}"
   _ruling_put "$f" "$w" "id=$id" "recorded=$now" "${@:4}" "text=$t" || return 1
   for r in "${f%/*}"/roster-*.state; do
     [ "$r" = "$f" ] || /usr/bin/grep '^roster-state/' "$r" 2>/dev/null | /usr/bin/grep -F "|name=${w}|" >/dev/null || continue

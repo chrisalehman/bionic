@@ -628,7 +628,10 @@ whole_run_at_head() {
       PF_LOG="$PF_RECD/inherited-$PF_SUITE-${PF_BASEH:0:12}.log"; PF_REL="${PF_LOG#"$PF_DOCS"/}"
       PF_SW="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
       PF_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/bionic-inherited.XXXXXX" 2>/dev/null)" || PF_PARENT=""
-      PF_BR="bionic-inherited/${PF_SUITE%.sh}-${PF_BASEH:0:12}-$$"
+      if ! { bionic_need root.sh bionic_id && bionic_id; }; then
+        die "REFUSED — no id can be made for the inherited run's branch (lib/root.sh bionic_id); the plan is unchanged. Fix: reinstall the plugin (claude plugin install bionic@bionic)."; exit 2
+      fi
+      PF_BR="bionic-inherited/${PF_SUITE%.sh}-${PF_BASEH:0:12}-${BIONIC_ID//./-}"
       PF_OK=""; [ -z "$PF_PARENT" ] || PF_OK="$(cd "$PV_REPO" && bash "$PF_SW" create "$PF_BASEH" "$PF_BR" "$PF_PARENT" 2>&1)"
       PF_WT="$(printf '%s
 ' "$PF_OK" | awk '/^spawn-worktree: OK / { for (i = 3; i <= NF; i++) if (index($i, "path=") == 1) { print substr($i, 6); exit } }')"

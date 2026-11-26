@@ -2288,8 +2288,14 @@ plan_verb_open() {
   # is no step, and PV_CUR_UNREAD says so: a verb that judges or writes at the step refuses on it, never on a guess.
   PV_CUR=""; PV_CUR_UNREAD=""
   if _fill_current_load "$PV_PLAN"; then PV_CUR="$_FILL_CURRENT_VALUE"; else PV_CUR_UNREAD=1; fi
-  PV_NEW="${PV_PLAN}.${verb}.$$"
-  PV_SID="planverb-$$"
+  # The working copy's name and the dry commit's session carry an id of this process (lib/root.sh `bionic_id`), so two
+  # verbs in sibling subshells never share either.
+  if ! { bionic_need root.sh bionic_id && bionic_id; }; then
+    die "REFUSED — $verb cannot make an id for its working copy (lib/root.sh bionic_id); the plan is unchanged. Fix: reinstall the plugin (claude plugin install bionic@bionic)."
+    exit 2
+  fi
+  PV_NEW="${PV_PLAN}.${verb}.$BIONIC_ID"
+  PV_SID="planverb-${BIONIC_ID//./-}"   # a session id's alphabet is letters, digits, _ and -
   PV_MARK="$(engaged_marker_path "$PV_REPO" "$PV_SID")" || PV_MARK=""
   trap 'run_last $?; rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"}' EXIT
 }
@@ -2460,11 +2466,12 @@ case "$VERB" in
     for SH_W in "share:$SH_SET:${SH_N:-}" "reserve:$SH_RSET:$SH_RES"; do
       IFS=: read -r SH_NAME SH_DO SH_VAL <<< "$SH_W"
       [ "$SH_DO" = yes ] || continue
-      SH_TMP="$SH_DIR/$SH_NAME.tmp.$$"
-      if printf '%s\n' "$SH_VAL" > "$SH_TMP" 2>/dev/null && mv -f "$SH_TMP" "$SH_DIR/$SH_NAME" 2>/dev/null; then
+      SH_TMP=""
+      if bionic_need root.sh bionic_new && bionic_new "$SH_DIR/$SH_NAME.tmp" && SH_TMP="$BIONIC_NEW" \
+         && printf '%s\n' "$SH_VAL" >| "$SH_TMP" 2>/dev/null && mv -f "$SH_TMP" "$SH_DIR/$SH_NAME" 2>/dev/null; then
         say "$SH_NAME set to $SH_VAL"
       else
-        rm -f "$SH_TMP" 2>/dev/null
+        [ -z "$SH_TMP" ] || rm -f "$SH_TMP" 2>/dev/null
         die "REFUSED — the $SH_NAME file could not be written; the $SH_NAME is unchanged."
         exit 1
       fi
