@@ -50,7 +50,10 @@ OBSERVE_ROSTER_VERSION="v1"
 # roster.sh in its BIONIC_LIB_WANT. roster.sh defines constants and functions and prints nothing.
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 bionic_need roster.sh roster_open_names
-# fields.sh, the same soft source, for `line_field`, which this file and the stop library read a row with.
+# fields.sh, the same soft source, for `line_field`, which this file and the stop library read a row with, and for
+# `line_field_clean`, which folds every operator-supplied value on the machine line (the typed target, the deliverable
+# paths, the progress path) onto one field of 400 characters at most: normalized rather than refused, because this
+# library reports evidence, and a target with an odd character in it is still a target somebody asked about.
 bionic_need fields.sh line_field_v
 
 # The machine line's schema token, printed by `observe_machine_line`. Versioned so a reader
@@ -138,15 +141,6 @@ observe_claims_live() {  # <pattern> -> 0 if a process matches, 1 otherwise
   # pipefail the pipeline reports 141 for a process that is there.
   procs="$(ps -eo command 2>/dev/null)"
   grep -qF -- "$pat" <<< "$procs"
-}
-
-# A `|`, a newline or a control character inside a VALUE would forge a field. Every value on
-# the machine line is operator-supplied — the typed target, the deliverable paths, the
-# progress path — so they are normalized rather than refused: this library's job is to report
-# evidence, and a target with an odd character in it is still a target somebody asked about.
-observe_mline_value() {  # <value>
-  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
 }
 
 # PROSE TO SECONDS. A third reading of the grammar `hooks/session-sweeper.sh` owns and
@@ -440,16 +434,16 @@ observe_agent() {  # <typed-target> [deliverable …]
       if [ -f "$dp" ]; then
         dsize=$(file_size "$dp"); dmtime=$(file_mtime "$dp")
         if [ "$dsize" -eq 0 ]; then
-          OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}empty:$(observe_mline_value "$d")"
+          OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}empty:$(line_field_clean "$d" 400)"
           pending=$((pending + 1))
         else
-          OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}present:$(observe_mline_value "$d")"
+          OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}present:$(line_field_clean "$d" 400)"
         fi
         OBS_DELIV_LAST_SIZE="$dsize"; OBS_DELIV_LAST_MTIME="$dmtime"
       elif [ -d "$dp" ]; then
-        OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}dir:$(observe_mline_value "$d")"
+        OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}dir:$(line_field_clean "$d" 400)"
       else
-        OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}absent:$(observe_mline_value "$d")"
+        OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}absent:$(line_field_clean "$d" 400)"
         pending=$((pending + 1))
       fi
     done
@@ -530,18 +524,18 @@ observe_class() {
 observe_machine_line() {
   printf '%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \
     "$OBSERVE_MACHINE_SCHEMA" \
-    "$(observe_mline_value "$OBS_ID")" \
-    "$(observe_mline_value "$OBS_TYPED")" \
-    "$(observe_mline_value "$OBS_LOG")" \
+    "$(line_field_clean "$OBS_ID" 400)" \
+    "$(line_field_clean "$OBS_TYPED" 400)" \
+    "$(line_field_clean "$OBS_LOG" 400)" \
     "$OBS_LOG_MTIME" \
     "$OBS_LOG_SIZE" \
     "$OBS_DELIVERABLES" \
-    "$(observe_mline_value "$OBS_PROGRESS")" \
+    "$(line_field_clean "$OBS_PROGRESS" 400)" \
     "$OBS_PROGRESS_MTIME" \
     "$OBS_PROGRESS_STATE" \
-    "$(observe_mline_value "$OBS_CLASSIFICATION")" \
-    "$(observe_mline_value "$OBS_DELIV_SOURCE")" \
-    "$(observe_mline_value "$OBS_PROGRESS_SOURCE")"
+    "$(line_field_clean "$OBS_CLASSIFICATION" 400)" \
+    "$(line_field_clean "$OBS_DELIV_SOURCE" 400)" \
+    "$(line_field_clean "$OBS_PROGRESS_SOURCE" 400)"
 }
 
 # ---------- the look, in one line ----------
