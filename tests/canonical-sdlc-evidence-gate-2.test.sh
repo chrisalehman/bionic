@@ -582,4 +582,22 @@ expect_eq "PA-2 …and one commit later that no landing proves: refused (exit 1)
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "commit ${OD_D:0:12} .*is not proved" && echo yes || echo no)"
 expect_absent "PA-2b …and the same refusal offers no second whole run (the positive above reads this output)" "run the whole" "$OD_OUT"
 
+# ============================================================
+section "§STRAY-BYTE — a run's log holding a byte that is no character is still read whole by the floor's readers, in a UTF-8 locale"
+# ============================================================
+# A failing suite can print a byte that is no character in any encoding, and the runner captures it into the whole run's log. In a
+# UTF-8 locale awk stops reading at such a byte and the readers hide its error, so a red run's log named no failed suites and no
+# counts, and proof-add refused it as a run that failed none. FIXTURE FIDELITY: the log is the runner's own shape (the header, a
+# captured line holding the byte, the `Gating:` verdict, the `Failed:` block, the closing rc line), read by the library functions the
+# verbs call. fails-when: a reader of the log reads in the caller's locale, so the byte ends its read and its owed suites or counts are empty.
+SB_LOG="$OD_ROOT/stray-byte.log"
+{ printf 'head=%s dirty=0\n' "$OD_B"; printf 'a suite printed \377 here\n'; printf 'Gating: 1 passed, 1 failed\nFailed:\n    - a.test.sh\nrc=1\n'; } > "$SB_LOG"
+sb_read() {  # <locale> <function> -> what that library function prints for the log, read in that locale
+  LC_ALL="$1" bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && "$3" "$2"' _ "$OD_LIB" "$SB_LOG" "$2" 2>/dev/null || :
+}
+expect_eq "SB-1 a red log with the byte before its Failed: block: the owed suites are read in the C locale (the positive beside SB-1b)" "a.test.sh" "$(sb_read C proof_floor_owed)"
+expect_eq "SB-1b …and the same log names the same suite in a UTF-8 locale" "a.test.sh" "$(sb_read en_US.UTF-8 proof_floor_owed)"
+expect_eq "SB-2 the run's counts read in a UTF-8 locale as they do in the C locale" "1 2|1 2" "$(sb_read en_US.UTF-8 proof_run_counts)|$(sb_read C proof_run_counts)"
+expect_eq "SB-3 the log's header and close read in a UTF-8 locale as they do in the C locale" "$(sb_read C _proof_floor_ends | paste -sd'|' -)" "$(sb_read en_US.UTF-8 _proof_floor_ends | paste -sd'|' -)"
+
 finish
