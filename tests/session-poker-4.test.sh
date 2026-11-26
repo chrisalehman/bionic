@@ -61,7 +61,7 @@ SEV_C1="$(s57_commit "$SEV_WT" lib/a.sh C1)"
 SEV_DIR="$RSEV/.bionic/docs/record/wave-01-fixture"
 SEV_RECS="r-ok r-nosev r-noreach r-s5 r-maybe r-count r-none r-twice r-where r-pri-bad r-pri-ok
 t-S1-on t-S1-off t-S2-on t-S2-off t-S3-on t-S3-off t-S4-on t-S4-off
-d-fix-flag d-defer-fail d-none-flag d-none-pass sh-dash sh-noshown sh-unsure sh-defer-unsure c-fix c-later"
+d-fix-flag d-defer-fail d-none-flag d-none-pass sh-dash sh-noshown sh-unsure sh-defer-unsure f-said c-fix c-later"
 sev_files() { local o="" n; for n in $1; do o="${o:+$o,}.bionic/docs/record/wave-01-fixture/$n.md"; done; printf '%s' "$o"; }
 SEV_RS="$(roster_of "$RSEV")"; new_roster "$RSEV"
 roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$SEV_RS"
@@ -253,10 +253,27 @@ expect_contains "SEV-shown3 …is refused as a fix shown nowhere, naming the lin
 expect_absent "SEV-shown3b …and the refusal offers no unsure: line" "unsure:" "$OUT"
 sev_rec sh-defer-unsure flag "findings: 2" 'finding: 1 S3 on - a "quoted" word wrong' "unsure: 1 which platforms" "finding: 2 S4 on - a typo"
 sev_add sh-defer-unsure
+SEV_DEFER_OUT="$OUT"; SEV_DEFER_RC="$RC"
 expect_eq "SEV-shown4 a finding the table defers, beside an unsure: line, appends its deferral alone; a note appends none" \
   "record/wave-01-fixture/sh-defer-unsure.md#1 S3 on defer \"a 'quoted' word wrong\"" \
   "$(sev_lines | /usr/bin/grep -F 'record/wave-01-fixture/sh-defer-unsure.md#' | paste -sd'|' -)"
 expect_eq "SEV-shown6 …and no check: line names it" "0" "$(/usr/bin/grep -c '^check: record/wave-01-fixture/sh-defer-unsure.md#' "$PSEV")"
+# A DEFERRAL ASKS FOR ITS SENTENCE AT ITS BIRTH: the registration names each finding it defers with no Known-limits
+# sentence, and the command that states one; it stands, exit 0. The second record's #1 carries a sentence the run
+# already holds (a stated event written before it, as the move verb writes one), so only its #2 is named.
+sev_said() {  # <text> <id> -> the count of lines naming <id> as deferred unstated, with the command that states it
+  printf '%s\n' "$1" | /usr/bin/grep -F "proof-add — $2 is deferred with no Known-limits sentence: bash /" \
+    | /usr/bin/grep -cF "/session-poker.sh finding-move $2 stated '<its sentence>'"
+}
+expect_eq "SEV-said §FACT a review deferring a finding with no sentence registers (exit 0) and names it with the command to state it" \
+  "0|1" "$SEV_DEFER_RC|$(sev_said "$SEV_DEFER_OUT" record/wave-01-fixture/sh-defer-unsure.md#1)"
+expect_eq "SEV-said2 …the finding the table notes is not named" "1|0" \
+  "$(sev_said "$SEV_DEFER_OUT" record/wave-01-fixture/sh-defer-unsure.md#1)|$(printf '%s\n' "$SEV_DEFER_OUT" | /usr/bin/grep -c 'sh-defer-unsure.md#2 is deferred')"
+printf 'run/v1|ev=finding|ref=record/wave-01-fixture/f-said.md#1|stated=A limit already said.|by=Dana Fixture|at=2026-10-04T00:20:00Z\n' >> "$(plan_fixture_log "$PSEV")"
+sev_rec f-said flag "findings: 2" "finding: 1 S3 on - the first deferral" "finding: 2 S2 off - the second deferral"
+sev_add f-said
+expect_eq "SEV-said3 …a deferral whose sentence the run already holds is not named, and its unstated sibling is" "0|0|1" \
+  "$RC|$(sev_said "$OUT" record/wave-01-fixture/f-said.md#1)|$(sev_said "$OUT" record/wave-01-fixture/f-said.md#2)"
 
 # ---------- the priority a record never states: library, release-check and the tick ----------
 SEV_OWED="$(bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null)"

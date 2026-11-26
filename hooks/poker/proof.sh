@@ -1057,6 +1057,16 @@ PF_PAIRS_LIST
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to the run's log${PF_BACK:+; $PF_BACK back to pending, its launch taken back there}."
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l (in the run's log)"; done
+    # A DEFERRAL ASKS FOR ITS SENTENCE WHERE IT IS BORN. The release entry's Known limits carry each open deferral's
+    # sentence, so one deferred with none is named here with the command that states it, never first at a later,
+    # unrelated landing. The registration stands: the sentence is the orchestrator's to give, and nothing waits on it.
+    # Read at the effective priority and the newest sentence, so a finding already stated or moved off defer is not named.
+    [ -z "$PF_PLANL" ] || proof_findings_owed "$PV_PLAN" 2>/dev/null | while read -r _pf_fid _ _ _pf_p _; do
+      [ "$_pf_p" = defer ] && [ "${_pf_fid%#*}" = "$PF_REL" ] || continue
+      _pf_st="$(proof_finding_stated "$PV_PLAN" "$_pf_fid" 2>/dev/null)"
+      [ -z "$_pf_st" ] || [ "$_pf_st" = - ] || continue
+      say "proof-add — $(clean "$_pf_fid") is deferred with no Known-limits sentence: bash ${HOOK_DIR}/session-poker.sh finding-move $(clean "$_pf_fid") stated '<its sentence>'"
+    done
     [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that review."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0

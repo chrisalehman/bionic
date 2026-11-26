@@ -29,6 +29,11 @@ set +x +v
 #      head's tree holds no plan to read. No plan naming the release (a closed run is archived), and
 #      a plan with no stated deferral, each pass with one `known-limits:` line saying so; a pass with
 #      sentences held says how many, in one such line.
+#      Checks 3 and 4 ask only a run that changes the entry (`entry_asked`): with BIONIC_CHECK_BASE named and the base's
+#      entry of the release equal to the head's, a landing that leaves the entry as it was, each line that would fail
+#      is printed after `known-limits: note — ` or `landing-numbers: note — `, one more line says why, and the check
+#      passes. The landing that writes the entry, the release check over the release's range, and a run with no base
+#      are judged in full.
 #   4. the landing numbers: the entry's `### The landing numbers` part names the head and the instant it
 #      was rendered for (``landing-report --rows` at <40-hex> on <ISO-UTC>:`, the line `release-note`
 #      prints), and its fenced block must equal, field for field, what `hooks/session-poker.sh release-note
@@ -37,8 +42,8 @@ set +x +v
 #      line naming the entry's and the report's. A landing in the run's landing record whose commit the
 #      checked head holds and the entry's head does not is ONE line naming the row, unless that landing
 #      carried the entry (its commit's CHANGELOG.md holds the head line, its first parent's does not): the
-#      entry is rendered again after it. An entry naming no head, and no plan naming the release, each
-#      pass with one `landing-numbers:` line.
+#      entry is rendered again after it. An entry naming no head is ONE line and exit 1 for a release at or past
+#      NUMS_RULE_FROM; before it, it passes with one `landing-numbers:` line, as no plan naming the release does.
 #
 #   5. the cap on tests: the non-whitespace characters of the tracked `*.sh` files under tests/ against those
 #      everywhere else, in the tree at BIONIC_CHECK_HEAD, never the working files, so joining lines changes no reading.
@@ -218,6 +223,9 @@ $plans
 LIM_PLANS
   return "$bad"
 }
+# The first release whose entry must hold its landing numbers. 2.2.0 shipped with none, under the rule that passed an
+# entry naming no head; from this release on the page's word holds: the entry pastes release-note's numbers whole.
+NUMS_RULE_FROM=2.3.0
 # nums_fence <text> -> the lines of the first fence after the line naming the head the numbers were rendered at.
 nums_fence() {
   printf '%s\n' "$1" | awk '
@@ -235,6 +243,9 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
   hl="$(entry_part "$cl" "$ver" 'The landing numbers' | /usr/bin/grep -E -m 1 '^`landing-report --rows` at [0-9a-f]{40} on [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z:$')"
   at="${hl#* at }"; at="${at%% *}"; on="${hl##* on }"; on="${on%:}"
   if [ -z "$hl" ]; then
+    if lim_version_at_least "$ver" "$NUMS_RULE_FROM"; then
+      echo "release-check: $ver holds no landing numbers; paste release-note"; return 1
+    fi
     echo "landing-numbers: $ver — the entry names no head its numbers were rendered at, so none is held to the report"
     return 0
   fi
@@ -321,12 +332,37 @@ fold_rc() {
     *) refusals=1 ;;
   esac
 }
+# entry_text <changelog text> <version> -> the whole entry of <version>, its heading to the next `## ` heading.
+entry_text() {
+  printf '%s\n' "$1" | awk -v v="$2" '/^## / { inb = (index($0, "## " v " ") == 1) } inb'
+}
+# entry_asked <version> -> 0 when this run asks the entry: no range is named (the check run by hand judges the whole
+# history), the base cannot be read, or the base's entry of <version> differs from the head's or is absent. A landing
+# that leaves the entry as it was is not the entry's to answer for: what it would refuse is told as a note, and the
+# landing that writes the entry, and the release check over the release's range, refuse it.
+entry_asked() {
+  local base="${BIONIC_CHECK_BASE:-}" was
+  [ -n "$base" ] || return 0
+  was="$(git show "$base:CHANGELOG.md" 2>/dev/null)" || return 0
+  [ "$(entry_text "$was" "$1")" != "$(entry_text "$changelog" "$1")" ]
+}
+# entry_rule <check> <prefix> <version> <changelog text> -> the check's lines and exit when the entry is asked; else a
+# failing check's `release-check: ` lines after `<prefix>: note — `, one line saying why, and exit 0. A refusal (exit 2)
+# is never softened: a check that could not run judged nothing.
+entry_rule() {
+  local chk="$1" pre="$2" out rc
+  if entry_asked "$3"; then "$chk" "$3" "$4"; return; fi
+  out="$("$chk" "$3" "$4")"; rc=$?
+  if [ "$rc" -ne 1 ]; then [ -z "$out" ] || printf '%s\n' "$out"; return "$rc"; fi
+  printf '%s\n' "$out" | sed "s/^release-check: /$pre: note — /"
+  echo "$pre: $3 — this range leaves the entry as it was, so these are notes; a range that changes the entry refuses them"
+  return 0
+}
 # The libraries they source are written for callers without `set -u`, so each plan-reading check runs in a subshell
 # without it; its lines pass through and its status is read.
 if [ -n "$chg_version" ]; then
-  for chk in lim_check nums_check; do
-    ( set +u; "$chk" "$chg_version" "$changelog" ); fold_rc $?
-  done
+  ( set +u; entry_rule lim_check known-limits "$chg_version" "$changelog" ); fold_rc $?
+  ( set +u; entry_rule nums_check landing-numbers "$chg_version" "$changelog" ); fold_rc $?
 fi
 # The cap reads the head's tree alone, so it runs whatever the release heading says.
 ( set +u; ratio_check ); fold_rc $?
