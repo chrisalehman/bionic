@@ -4,7 +4,8 @@
 # exit 2 holds the turn open: the re-entry, no field, a payload that is not JSON and no jq all end it.
 # §OPEN: each advisory hook alone passes, saying it steps aside. §REPAIR: the Bash wall alone admits the four
 # commands that mend an install, and the four its verbose refusal names are the four it admits. Every hook holds
-# the loader's stub, so a hook alone is a hook with no loader beside it.
+# the loader's stub, so a hook alone is a hook with no loader beside it. §STUB-WHOLE holds the whole stub, all eight
+# lines of it, equal to the loader's own text in each of the fourteen.
 # FIXTURE FIDELITY. The shipped hooks, copied; HOME and BIONIC_PLUGINS_DIR in a sandbox, so no healing
 # candidate exists. Only the payloads are synthesized.
 set -uo pipefail
@@ -50,11 +51,27 @@ ha() {
   printf '%s' "$p" | (cd "$S" && env HOME="$S/home" BIONIC_PLUGINS_DIR="$S/plugins" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID=hc \
     /bin/bash "$f" "$@" >"$S/out" 2>"$S/err"); echo $?
 }
-STUB="$( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/loader.sh" && bionic_loader_pin | sed -n '4p')"
-expect_contains "the stub's line that sources the loader is read" '. "$_bl_l"; bionic_load' "$STUB"
-expect_eq "each of the fourteen hooks holds it" 14 "$(cd "$BIONIC_HOOKS_DIR" && /usr/bin/grep -lxF -- "$STUB" bash-walls.sh \
-  canonical-sdlc-governing-skill.sh dispatch-preflight.sh engage.sh execution-recorder.sh permission-answer.sh preflight-probe.sh \
-  session-poker.sh session-start.sh session-sweeper.sh stop-check.sh stop-orders.sh stop.sh watch.sh | wc -l | tr -d ' ')"
+section "STUB-WHOLE"
+# The stub is a copy by design: it must find the library before any library exists. So the whole block, not one
+# line of it, is held equal to the loader's own text in every hook that carries a WANT line.
+PIN="$( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/loader.sh" && bionic_loader_pin)"
+NPIN="$(printf '%s\n' "$PIN" | wc -l | tr -d ' ')"
+expect_contains "the stub's line that sources the loader is read" '. "$_bl_l"; bionic_load' "$PIN"
+expect_nonempty "the pin is a block of lines" "$PIN"
+# stub_under <hook file> -> the pin's count of lines directly under the hook's WANT line
+stub_under() { awk -v n="$NPIN" 'f && c < n { print; c++ } /^BIONIC_LIB_WANT=/ && !f { f = 1 }' "$1"; }
+HOOKS_WITH_STUB="$(cd "$BIONIC_HOOKS_DIR" && /usr/bin/grep -lE '^BIONIC_LIB_WANT=' ./*.sh | sed 's|^\./||' | sort)"
+expect_eq "fourteen hooks carry a WANT line" 14 "$(printf '%s\n' "$HOOKS_WITH_STUB" | /usr/bin/grep -c .)"
+while IFS= read -r h; do
+  expect_eq "$h holds the whole stub under its WANT line" "$PIN" "$(stub_under "$BIONIC_HOOKS_DIR/$h")"
+done <<EOF2
+$HOOKS_WITH_STUB
+EOF2
+# The pin can fail: one line of a copy of the stub, other than the fourth, changed.
+awk -v n="$NPIN" 'f && c < n { c++; if (c == 6) $0 = $0 " " } { print } /^BIONIC_LIB_WANT=/ && !f { f = 1 }' \
+  "$BIONIC_HOOKS_DIR/session-poker.sh" > "$S/hooks/poker-mutant.sh"
+expect_nonempty "the mutant stub reads out of the copy" "$(stub_under "$S/hooks/poker-mutant.sh")"
+expect_ne "…and its stub no longer matches the pin (the pin can go red)" "$PIN" "$(stub_under "$S/hooks/poker-mutant.sh")"
 
 section "OPEN"
 while IFS='|' read -r h p a; do
