@@ -90,7 +90,7 @@ hooks/session-poker.sh|printed from the reader and never typed|the program that 
 hooks/poker/line.sh|the reader (lib/reader.sh) cannot be loaded|the program that answers from the run's log, named by its file, not a review
 hooks/poker/line.sh|or the reader (lib/reader.sh) that reads them|the program that answers from the run's log, named by its file, not a review
 hooks/poker/line.sh|line_kv("reader")|the proof line's reader= field, read by its name
-payload/scripts/lib/proof.sh|line_kv("reader")|the proof line's reader= field, read by its name
+payload/scripts/lib/proof.sh|p["reader"]|the proof line's reader= field, read by its name
 skills/sitrep/SKILL.md|never "reading" or "reader"|names the refused words, to refuse them
 payload/scripts/card.sh|(readers?|readings?|unmeasured)|the judgment check's pattern of the refused words
 WORDS_ALLOW_EOF
