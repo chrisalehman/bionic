@@ -140,15 +140,9 @@
 # of two columns of one name answering. Where the table is (fences, the heading, the header line, the
 # separator, a lone CR) and how a cell reads (`\|` a bar, a tab a space) are that parser's rules, so the
 # reader and the fill cannot read one table two ways. A raw `|` that widens a row is its `over` mark.
-_units_plan_read() {
-  local d
-  declare -F plan_read_table >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  # shellcheck source=/dev/null
-  [ -n "$d" ] && [ -f "$d/plan-read.sh" ] && . "$d/plan-read.sh" >/dev/null 2>&1
-  return 0
-}
-_units_plan_read
+# shellcheck source=/dev/null
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need plan-read.sh plan_read_table || :
 _UNITS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
 
 # ONE READ A COMMAND (lib/proof.sh `_proof_held_dir`). Inside a held command an answer this library computes from the
@@ -259,7 +253,7 @@ _units_live() {
     printf '%s' "$_UNITS_MEMO_LIVE"; return "$_UNITS_MEMO_LIVE_RC"
   fi
   plan="$(_units_origin "$plan")"
-  _units_lib proof.sh _proof_facts && _units_lib reader.sh reader_log || return 0
+  bionic_need proof.sh _proof_facts && bionic_need reader.sh reader_log || return 0
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
   _units_facts_at "$plan" || return 2
@@ -280,7 +274,7 @@ _units_proofs() {
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ] && [ -n "${_UNITS_MEMO_PROOFS_RC:-}" ]; then
     printf '%s' "$_UNITS_MEMO_PROOFS"; return "$_UNITS_MEMO_PROOFS_RC"
   fi
-  _units_lib proof.sh proof_fact_lines || return 0
+  bionic_need proof.sh proof_fact_lines || return 0
   local o
   o="$(_units_origin "${1:-}")"
   _units_facts_at "$o" || return 2
@@ -293,7 +287,7 @@ _units_proofs() {
 _units_fold() {
   local o
   _UNITS_FACTS_PLAN=""; _UNITS_FACTS=""; _UNITS_FACTS_FILE=""; _UNITS_FACTS_KEY=""
-  _units_lib proof.sh _proof_facts || return 0
+  bionic_need proof.sh _proof_facts || return 0
   o="$(_units_origin "${1:-}")"
   _proof_held_facts_at "$o" || proof_facts_at "$o" || return 2
   _UNITS_FACTS_FILE="$_PROOF_FACTS_FILE"; _UNITS_FACTS="$_PROOF_FACTS_TEXT"; _UNITS_FACTS_KEY="$_PROOF_FACTS_KEY"
@@ -345,21 +339,11 @@ _units_overlay() {
     { print }'
 }
 
-# _units_lib <file> <function> -> 0 once <function> is defined, sourcing <file> from this library's directory if not
-_units_lib() {
-  local d
-  declare -F "$2" >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || return 1
-  # shellcheck source=/dev/null
-  [ -f "$d/$1" ] && . "$d/$1" >/dev/null 2>&1
-  declare -F "$2" >/dev/null 2>&1
-}
-
 # units_dispatch_back <plan> <row> <name> -> the launch of <row> under <name> taken back: one `cancel` of that dispatch in
 # the run's log, which is what returns a row launched by the log to pending (a cell write cannot). 2 no log to write.
 units_dispatch_back() {
   local log
-  _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
+  bionic_need reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && bionic_need log.sh log_append || return 2
   RUN_LOG="$log" log_append cancel of=dispatch "row=${2:-}" "name=${3:-}"
 }
 
@@ -379,7 +363,7 @@ units_row_back() {
 # THE ONE WRITER OF A BORN ROW: the plan carries the row and nothing of how it was born. 2 no log to write.
 units_born_event() {
   local log
-  _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
+  bionic_need reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && bionic_need log.sh log_append || return 2
   RUN_LOG="$log" log_append born "row=${2:-}" ${3:+"reason=$3"} ${4:+"finding=$4"} ${5:+promoted=yes}
 }
 
@@ -389,7 +373,7 @@ units_born_event() {
 units_drop_event() {
   local log
   [ -n "${2:-}" ] && [ -n "${3:-}" ] || return 2
-  _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
+  bionic_need reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && bionic_need log.sh log_append || return 2
   RUN_LOG="$log" log_append drop "row=$2" "why=$3"
 }
 
@@ -399,7 +383,7 @@ units_drop_event() {
 _units_born_facts() {
   local plan
   plan="$(_units_origin "${1:-}")"
-  [ -f "$plan" ] && _units_lib proof.sh _proof_facts || return 0
+  [ -f "$plan" ] && bionic_need proof.sh _proof_facts || return 0
   _proof_fields && _units_facts_at "$plan" || return 2
   _proof_derive _units_born_facts "$plan" _units_born_made
 }
@@ -722,22 +706,9 @@ UNITS_READY
 }
 
 # _units_roster_libs -> 0 once `roster_open_names` and `fill_row_launched` are defined, sourcing
-# roster.sh and fill.sh from this file's own directory when they are not. fill.sh sources this
+# roster.sh and fill.sh through the loader when they are not (lib/patrol.sh asks by this name). fill.sh sources this
 # file only when `units_ready` is undefined, so the pair cannot loop.
-_units_roster_libs() {
-  local d
-  declare -F roster_open_names >/dev/null 2>&1 && declare -F fill_row_launched >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || return 1
-  if ! declare -F roster_open_names >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$d/roster.sh" >/dev/null 2>&1 || return 1
-  fi
-  if ! declare -F fill_row_launched >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$d/fill.sh" >/dev/null 2>&1 || return 1
-  fi
-  declare -F roster_open_names >/dev/null 2>&1 && declare -F fill_row_launched >/dev/null 2>&1
-}
+_units_roster_libs() { bionic_need roster.sh roster_open_names && bionic_need fill.sh fill_row_launched; }
 
 # units_held <plan> <step> -> one line per row HELD FOR ITS STEP or BY THE WORLD, table order
 # (wave-20 T10b; wave-21 T4): `<id>: step <n> <kind> row waits for current: <n>` for a gate act
@@ -962,7 +933,7 @@ units_record_landings() {
 # _units_criteria <plan> -> the criteria the reader lists (lib/reader.sh `reader_criteria`), one id per line; nothing
 # when the reader cannot be loaded or the plan names none.
 _units_criteria() {
-  declare -F reader_criteria >/dev/null 2>&1 || . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/reader.sh" >/dev/null 2>&1 || return 0
+  bionic_need reader.sh reader_criteria || return 0
   reader_criteria "$1" 2>/dev/null || return 0
 }
 
@@ -1102,18 +1073,11 @@ units_release_asked() {
 _units_ext_re() { printf '%s' '^ext:[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
 # _units_proof_awk -> proof.sh's `proof_awk`, the one reading of a proof line (wave-26 T14;
-# review 7 F6). proof.sh is sourced from this file's own directory once, when this file is
+# review 7 F6). proof.sh is sourced through the loader once, when this file is
 # loaded (below), not per question: readiness is asked inside command substitutions, where a
 # lazy source would be paid again on every call. If it cannot be loaded, a function that reads
 # no line as a proof: no proof is the cautious answer for a settled read.
-_units_proof_lib() {
-  local d
-  declare -F proof_awk >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  [ -n "$d" ] && [ -f "$d/proof.sh" ] && . "$d/proof.sh" >/dev/null 2>&1
-  return 0
-}
-_units_proof_lib
+bionic_need proof.sh proof_awk || :
 # THE READS TOKEN'S OLD SPELLING (wave-38 T8; REQ-9, D6): lib/alias.sh `alias_awk_norm reads`, through proof.sh, written
 # once at load into the two awk readers of a reads token, the readiness tokenizer (`addtok`) and the validator. A plan
 # 1.20.0 wrote reads `proof:floor` as `proof:regression`; with no map loaded the statements are a blank.
@@ -1275,7 +1239,7 @@ _units_floor_kept() {
 # Prepended to each program; NO APOSTROPHE inside it (it is single-quoted).
 _units_files_awk() {
   local h
-  declare -F docs_heads >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/root.sh"
+  bionic_need root.sh docs_heads
   h="$(docs_heads)"
   printf 'function in_docs(e) { return (index(e, ".bionic/") == 1 || e ~ /^(%s)\//) }\n' "${h//$'\n'/|}"
   printf '%s' '
@@ -2220,7 +2184,7 @@ units_validate() {
   fi
   # THE QUESTIONS A ROW AT 15 MAY DECLARE are lib/proof.sh PROOF_QUESTIONS, loaded when a task cell carries the tag.
   if [ -n "$v15" ] && [ -z "${PROOF_QUESTIONS:-}" ]; then
-    case "$rows" in *" · questions:"*) _units_lib proof.sh proof_question_ok ;; esac
+    case "$rows" in *" · questions:"*) bionic_need proof.sh proof_question_ok ;; esac
   fi
   if [ -n "$rows" ]; then
     violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" \
@@ -2564,7 +2528,7 @@ UNITS_RUN
     }')"
   case "$out" in
     'ask '*|*$'\n''ask '*)
-      if _units_lib reader.sh reader_q_statuses; then sts="$(_units_statuses "$(_units_origin "$plan")" 2>/dev/null)" || sts=""; fi
+      if bionic_need reader.sh reader_q_statuses; then sts="$(_units_statuses "$(_units_origin "$plan")" 2>/dev/null)" || sts=""; fi
       # The join: each row's first line is its state, and a dispatch is under a name when a `name=` line is not empty.
       out="$({ printf '%s\n' "$sts"; printf '\034\n'; printf '%s\n' "$out"; } | awk '
         $0 == "\034" { part = 1; next }
@@ -2788,7 +2752,7 @@ units_born_class() {
   if ! declare -F fix_policy_covers >/dev/null 2>&1 || ! fix_policy_covers "$pol" "${rating% *}" "${rating#* }"; then
     echo counted; return 0
   fi
-  _units_lib reader.sh reader_slug && own="record/$(reader_slug "$plan")/" || { echo counted; return 0; }
+  bionic_need reader.sh reader_slug && own="record/$(reader_slug "$plan")/" || { echo counted; return 0; }
   ids=""
   case "$words" in *" of="*) ids="${words#* of=}"; ids="${ids%% *}" ;; esac
   for id in $(printf '%s' "$ids" | tr ',' ' '); do

@@ -214,37 +214,22 @@
 #
 # [WALL: tests/gate.test.sh]
 
-_gate_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-_GATE_LIB_DIR="$(cd "$(_gate_self_dir)" 2>/dev/null && pwd -P)"
+# shellcheck source=/dev/null
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 # The readers and the liveness rule come from their own libraries, soft-sourced as slots.sh
 # sources resources.sh.
-if ! type -t _res_used_pct >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/resources.sh" ]; then
-  # shellcheck disable=SC1091
-  . "$_GATE_LIB_DIR/resources.sh"
-fi
+bionic_need resources.sh _res_used_pct
 # Whether a holder is alive is lib/alive.sh's one rule (`alive_run`, over slots.sh's pid and start).
-if ! type -t alive_run >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/alive.sh" ]; then
-  # shellcheck disable=SC1091
-  . "$_GATE_LIB_DIR/alive.sh"
-fi
+bionic_need alive.sh alive_run
 # An instant has one reader, lib/time.sh's (wave-39 T17; D18): the finished-row read below dates the record by it.
-if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$_GATE_LIB_DIR/time.sh" ]; then
-  # shellcheck disable=SC1091
-  . "$_GATE_LIB_DIR/time.sh"
-fi
+# Its reader `_TIME_ISO_AWK` is set by time.sh alone, as `_time_epoch` is defined there alone, so one marks the other.
+bionic_need time.sh _time_epoch
 # THE LANDING KEY AND THE LANDING RECORD ARE lib/line.sh's (wave-39 T17; D18, AC-12.1): its alphabet (`landing_key`,
 # `landing_key_ok`) and its record reader (`_LINE_FIELDS_AWK`, over `line_lines`, the record and the run's log read as one). Loaded when first needed, never at source: line.sh
-# sources the worktree library, and most of the gate's callers ask about no landing.
-_gate_load_line() {  # -> 0 once lib/line.sh's key and reader are loaded
-  declare -F landing_key >/dev/null 2>&1 && [ -n "${_LINE_FIELDS_AWK:-}" ] && return 0
-  # shellcheck disable=SC1091
-  [ -r "$_GATE_LIB_DIR/line.sh" ] && . "$_GATE_LIB_DIR/line.sh" 2>/dev/null
-  declare -F landing_key >/dev/null 2>&1 && [ -n "${_LINE_FIELDS_AWK:-}" ]
-}
+# sources the worktree library, and most of the gate's callers ask about no landing. The reader is asked for by
+# `line_value`, defined beside `_LINE_FIELDS_AWK` in lib/fields.sh, which line.sh sources: a key without its reader
+# loads line.sh again.
 
 _GATE_KEEP_DEFAULT=86400   # seconds a request that is no longer open is kept (BIONIC_GATE_KEEP's default)
 _GD=""        # the store, set by each verb
@@ -441,7 +426,7 @@ _gate_reap() {
 # Soft: a log that cannot be written changes no gate decision.
 _gate_reap_fact() {  # <id> -> the reaped request's run line in its run's log
   case "$_R_record" in /*/*) ;; *) return 0 ;; esac
-  _gate_load_line || return 0
+  bionic_need line.sh landing_key && bionic_need line.sh line_value || return 0
   line_run_event "$_R_record" rc=137 "key=$_R_key" "kind=$_R_kind" "tree=$_R_tree" \
     "landing=$_R_landing" "request=$1" >/dev/null 2>&1 || :
 }
@@ -461,7 +446,7 @@ _gate_holder() {
 # repository, as a `cd` into it and a `git` there answered.
 _gate_common_dir() {
   [ -d "${1:-}" ] || return 1
-  declare -F git_common_dir >/dev/null 2>&1 || . "$_GATE_LIB_DIR/root.sh" >/dev/null 2>&1 || return 1
+  bionic_need root.sh git_common_dir || return 1
   git_common_dir "$1"
 }
 
@@ -491,11 +476,7 @@ _gate_cost_file() {  # <key> <project> -> its cost file, cost/<project>%<key>
 # ask with no class pays nothing for it.
 _gate_class_heavy() {
   [ -n "${1:-}" ] || return 1
-  declare -F cmd_class_heavy >/dev/null 2>&1 || {
-    [ -r "$_GATE_LIB_DIR/cmd-class.sh" ] || return 1
-    # shellcheck disable=SC1091
-    . "$_GATE_LIB_DIR/cmd-class.sh" 2>/dev/null || return 1
-  }
+  bionic_need cmd-class.sh cmd_class_heavy || return 1
   cmd_class_heavy "$1"
 }
 
@@ -727,7 +708,7 @@ _gate_row_done() {
   local l ep
   if [ "$_G_DONE_FOR" != "$1" ]; then
     _G_DONE_FOR="$1"; _G_DONE=''
-    _gate_load_line && [ -n "${_TIME_ISO_AWK:-}" ] || return 1
+    bionic_need line.sh landing_key && bionic_need line.sh line_value && [ -n "${_TIME_ISO_AWK:-}" ] || return 1
     while IFS= read -r l; do
       [ -n "$l" ] || continue
       ep="${l%%$'\t'*}"
@@ -1072,11 +1053,7 @@ _gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_
   [ "$allowed" != none ] || allowed=""
   if [ "${_GATE_CB_LOADED:-}" != yes ]; then
     _GATE_CB_LOADED=no
-    if ! declare -F cmd_case_blind >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/cmd-class.sh" ]; then
-      # shellcheck disable=SC1091
-      . "$_GATE_LIB_DIR/cmd-class.sh" 2>/dev/null
-    fi
-    declare -F cmd_case_blind >/dev/null 2>&1 && _GATE_CB_LOADED=yes
+    bionic_need cmd-class.sh cmd_case_blind && _GATE_CB_LOADED=yes
   fi
   [ "$_GATE_CB_LOADED" != yes ] || ! cmd_case_blind "$root" || blind=1
   verdict="$(GATE_BUDGET_KEY="$key" GATE_BUDGET_SET="$allowed" GATE_BUDGET_RUNS="$runs" \
@@ -1156,32 +1133,15 @@ gate_order_of() {
 }
 gate_order_plan() {
   [ -f "${1:-}" ] || return 1
-  if ! declare -F proof_order_held >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    [ -r "$_GATE_LIB_DIR/proof.sh" ] && . "$_GATE_LIB_DIR/proof.sh" >/dev/null 2>&1
-    declare -F proof_order_held >/dev/null 2>&1 || return 1
-  fi
+  bionic_need proof.sh proof_order_held || return 1
   proof_order_held "$1" 2>/dev/null | awk '
     { k = substr($0, 1, index($0, "=") - 1); v[k] = substr($0, index($0, "=") + 1) }
     END { if (v["order"] != "given") exit 1; printf "given %s \"%s\"\n", v["at"], v["said"] }'
 }
 
-_gate_order_libs() {  # -> 0 once project_root, session_run and docs_root are loaded
-  local f
-  for f in root.sh run.sh; do
-    case "$f" in
-      root.sh) declare -F project_root >/dev/null 2>&1 && continue ;;
-      run.sh) declare -F session_run >/dev/null 2>&1 && declare -F docs_root >/dev/null 2>&1 && continue ;;
-    esac
-    # shellcheck disable=SC1090
-    [ -r "$_GATE_LIB_DIR/$f" ] && . "$_GATE_LIB_DIR/$f" >/dev/null 2>&1
-  done
-  declare -F project_root >/dev/null 2>&1 && declare -F session_run >/dev/null 2>&1 && declare -F docs_root >/dev/null 2>&1
-}
-
 gate_order() {
   local root="${1:-}" run plan=""
-  _gate_order_libs || return 1
+  bionic_need root.sh project_root && bionic_need run.sh session_run && bionic_need run.sh docs_root || return 1
   [ -n "$root" ] || root="$(project_root "$PWD")"
   root="$(cd "$root" 2>/dev/null && pwd -P)" || return 1
   run="$(session_run "$root" "${CLAUDE_CODE_SESSION_ID:-}" 2>/dev/null)"
@@ -1236,7 +1196,7 @@ _gate_term_end() {  # <id> <admitted: 0|1> — TERM came while gate_ask waited: 
 # _gate_landing_ok <key> — rc 0 when <key> is a landing key: lib/line.sh `landing_key_ok`, the one alphabet
 # (wave-39 T17; D18, AC-12.1). This spelt the alphabet itself as a bash pattern, whose ranges a UTF-8 locale widened.
 _gate_landing_ok() {
-  _gate_load_line && landing_key_ok "${1:-}"
+  bionic_need line.sh landing_key && bionic_need line.sh line_value && landing_key_ok "${1:-}"
 }
 
 # ── the verbs ────────────────────────────────────────────────────────────────
