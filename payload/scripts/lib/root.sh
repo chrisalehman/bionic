@@ -97,6 +97,9 @@
 # Pinned by tests/root.test.sh (seven on-disk topologies, each rule-bearing one
 # paired with a differential control).
 
+# The loader, for `docs_path`'s load of roots.sh at call time. It defines functions and runs nothing.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+
 # _bionic_root_abs <path> -> absolute, symlink-resolved path
 #
 # Falls back up the chain when the path does not exist yet: a hook is handed a
@@ -368,7 +371,7 @@ docs_heads() { printf '%s\n' record specs adrs plans; }
 docs_path() {
   local root="$1" p="${2#./}" d h
   case "$p" in '') return 1 ;; /*) printf '%s\n' "$p"; return 0 ;; esac
-  declare -F docs_root >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/roots.sh" >/dev/null 2>&1
+  bionic_need roots.sh docs_root
   d="$(docs_root "$root")"
   if [ ! -e "$root/$p" ]; then
     [ -e "$d/$p" ] && { printf '%s/%s\n' "$d" "$p"; return 0; }

@@ -44,15 +44,8 @@
 #
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/jit.sh"
 
-_jit_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-
-if ! declare -F check_dep >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_jit_self_dir)" && pwd -P)/deps.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need deps.sh check_dep
 
 # The catalog a native-kind row installs from used to be spelled here, because
 # this file composed the install command itself. `install_plugin_native` composes

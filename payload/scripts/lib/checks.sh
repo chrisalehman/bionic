@@ -51,31 +51,22 @@ _bionic_checks_self_dir() {
   case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
 }
 
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 # THE SOFT SOURCE, the same idiom detect.sh uses for deps.sh. detect.sh already
 # pulls deps.sh, env.sh and shell.sh in that order, so a caller that has detect.sh
 # gets all four and one that has none gets them all here, once.
-if ! declare -F detect_legacy_hook_files >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_bionic_checks_self_dir)" && pwd -P)/detect.sh"
-fi
+bionic_need detect.sh detect_legacy_hook_files
 
 # THE SAME SOFT SOURCE FOR patrol.sh, which the dead-session detector reads its
 # whole answer out of. doctor already has it loaded and the guard skips; setup
 # does not, and a detector that only works for one of its two callers is not a
 # detector. Sourcing it defines functions and nothing else — no probe, no read.
-if ! declare -F patrol_dead_sessions >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_bionic_checks_self_dir)" && pwd -P)/patrol.sh"
-fi
+bionic_need patrol.sh patrol_dead_sessions
 
 # THE SAME SOFT SOURCE FOR notify.sh, the one sender, whose channel-file path and reader the
 # notification row below asks instead of spelling a second copy (wave-33 T12). Sourcing it
-# defines functions and a variable and sends nothing.
-if ! declare -F notify_declared >/dev/null 2>&1 \
-   && [ -r "$(cd "$(_bionic_checks_self_dir)" && pwd -P)/notify.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_bionic_checks_self_dir)" && pwd -P)/notify.sh"
-fi
+# defines functions and a variable and sends nothing. Soft: without it the row reads absent.
+bionic_need notify.sh notify_declared || :
 
 # ─── The two repair routes ───────────────────────────────────────────────────
 #

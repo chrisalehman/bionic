@@ -107,12 +107,11 @@
 # prompt (fixtures `slash-args`, `slash-bare`).
 #
 # THE SESSION ID is `session_id` of lib/session.sh, as every reader of the session key takes it. It is
-# sourced from this file's own directory when the caller has not, the directory RESOLVED AT SOURCE TIME
-# as lib/context.sh resolves its own (a call-time `${BASH_SOURCE[0]%/*}` is relative to a working
-# directory the caller may have left, and a bare name has none).
+# loaded through lib/loader.sh's `bionic_need` when the caller has not, softly: a sibling that will not
+# load leaves its functions undefined and sourcing this file still succeeds.
 #
-# Sourced, never executed. Defines functions and one constant; the only thing it reads at load time
-# is the path of session.sh. Needs jq (rc 2 without it). bash 3.2. lib/root.sh (`project_root`) is
+# Sourced, never executed. Defines functions and one constant; the only things it reads at load time
+# are its siblings' paths. Needs jq (rc 2 without it). bash 3.2. lib/root.sh (`project_root`) is
 # sourced from here as session.sh is; lib/detect.sh (`project_slug`) when user_said first runs, since
 # it is a larger library and only the three verbs need it.
 
@@ -120,41 +119,20 @@
 # refusal text (hooks/session-poker.sh finding-move) both read this one number.
 SAID_MIN_WORDS=3
 
-_said_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-# RESOLVED AT SOURCE TIME, for the reason lib/context.sh states at `_CONTEXT_LIB_DIR`.
-_SAID_LIB_DIR="$(cd "$(_said_self_dir)" 2>/dev/null && pwd -P)"
-if ! declare -F session_id >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/session.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_SAID_LIB_DIR/session.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need session.sh session_id || :
 # The run's sessions are read by binding.sh's one reader, and its admission reads the marker through run.sh's
 # `session_plan`; each is sourced from here when the caller has not (functions only, nothing runs at source time).
-if ! declare -F session_plan >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/run.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_SAID_LIB_DIR/run.sh"
-fi
-if ! declare -F bind_sessions >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/binding.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_SAID_LIB_DIR/binding.sh"
-fi
+bionic_need run.sh session_plan || :
+bionic_need binding.sh bind_sessions || :
 # The root the words are held in is root.sh's one reader's (functions only).
-if ! declare -F project_root >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/root.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_SAID_LIB_DIR/root.sh"
-fi
+bionic_need root.sh project_root || :
 
-# _said_need_slug -> 0 when lib/detect.sh `project_slug` is defined, sourcing it from this file's own
-# directory first when the caller has not. Called in the caller's shell (user_said), so the readers below,
+# _said_need_slug -> 0 when lib/detect.sh `project_slug` is defined, loading it first when the caller has
+# not. Called in the caller's shell (user_said), so the readers below,
 # which run in command substitutions, inherit it rather than load it once per session.
 _said_need_slug() {
-  if ! declare -F project_slug >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/detect.sh" ]; then
-    # shellcheck source=/dev/null
-    . "$_SAID_LIB_DIR/detect.sh" >/dev/null 2>&1
-  fi
-  declare -F project_slug >/dev/null 2>&1
+  bionic_need detect.sh project_slug
 }
 
 # _said_root -> this root, physical, on stdout: project_root of the working directory, as the verbs take it.
