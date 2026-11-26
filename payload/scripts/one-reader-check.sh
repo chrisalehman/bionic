@@ -295,9 +295,12 @@ NAMED="$(names_standing)" BOOT_LINE="$BOOT_LINE" LC_ALL=C awk -v q="'" -v admitt
       wn[FILENAME]++
     }
 
-    if (line !~ /declare -F/ && match(line, /(^|[^A-Za-z0-9_])(log_append|line_event) +[^ ]/)) {
-      r = substr(line, RSTART + RLENGTH - 1); split(r, a, /[ \t]+/)
-      t = (line ~ /log_append/) ? a[1] : a[2]; gsub(/"/, "", t); writer(t, FILENAME, FNR, fn[depth])
+    # A call of the loader that names the appender as the marker it waits for writes no event: it is cut before the
+    # writer rule reads the line, so a call of the appender after it is still read.
+    wln = line; gsub(/bionic_need +[^ ;|&]+ +[A-Za-z_][A-Za-z0-9_]*/, "", wln)
+    if (wln !~ /declare -F/ && match(wln, /(^|[^A-Za-z0-9_])(log_append|line_event) +[^ ]/)) {
+      r = substr(wln, RSTART + RLENGTH - 1); split(r, a, /[ \t]+/)
+      t = (wln ~ /log_append/) ? a[1] : a[2]; gsub(/"/, "", t); writer(t, FILENAME, FNR, fn[depth])
       if (t ~ /^[$]/ && fn[depth] != "-") pass[fn[depth]] = 1
     } else if (line ~ rre) { cl[++nc] = line; cf[nc] = FILENAME; cn[nc] = FNR; cfn[nc] = fn[depth] }
     if (match(line, /(^|[^A-Za-z0-9_^-])(line|run|owed)\/v1[|]ev=[a-z][a-z-]*/) && line ~ (index(admitted, " " FILENAME " ") ? ">>" : "_wt_proofs_put|printf|echo|>>")) {  # after ^ it is a pattern; in a reader file a printed one is an answer
