@@ -95,6 +95,9 @@
 # [WALL: tests/patrol-duties-gate.test.sh]
 
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 
 # THE TABLE READER, SOURCED THE WAY payload/scripts/lib/stop.sh SOURCES IT and guarded on
 # the verb this file actually calls: a caller that already has it (the poker, whose
@@ -766,7 +769,7 @@ $s
   esac
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    mt="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"  # GNU first: its `stat -f` prints filesystem text
+    mt="$(file_mtime "$f")"
     case "$mt" in ''|*[!0-9]*) continue ;; esac
     [ "$mt" -gt "$newest" ] && newest="$mt"
   done <<RRO_FILES

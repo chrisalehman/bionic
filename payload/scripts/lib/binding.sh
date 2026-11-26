@@ -109,6 +109,9 @@
 #
 # [WALL: tests/engage.test.sh]
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 
 # _bind_resolve <abs-path> -> the path with its DIRECTORY resolved (symlinks and `..`
 # collapsed by `pwd -P`) and its final component left alone; exit 1 on a relative path or a
@@ -225,7 +228,7 @@ bind_plan() {
     stamp=$(grep -m1 -E '^engaged_at=' <<< "$lines" | sed -E 's/^engaged_at=//')
   fi
   if [ -z "$stamp" ]; then
-    stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || stamp=""
+    stamp=$(iso_now 2>/dev/null) || stamp=""
     [ -n "$stamp" ] || { BIND_REFUSAL="write-failed"; return 2; }
   fi
 

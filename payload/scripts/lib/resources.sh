@@ -46,6 +46,11 @@
 #
 # [WALL: tests/resources.test.sh]
 
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
+
 # ─────────────────────────────────────────────────────────────────── constants
 
 # Memory the machine must keep for itself — the OS, the editor, the agent processes, and
@@ -423,7 +428,8 @@ _res_cpu_quota() {
 # READ AGAIN ON EVERY CALL, so a test moves time under a command that is already running
 # (tests/lib/world.sh `world_tick`). It outranks BIONIC_NOW_EPOCH, as BIONIC_LOAD_NOW_FILE
 # outranks BIONIC_PROBE_LOAD_1M: the file is the more specific plant. A file that holds no
-# epoch falls through to the pin and then to the real clock, never to an empty answer.
+# epoch falls through to the pin (digits only: lib/time.sh `time_now` sets any other aside) and then to the real
+# clock, never to an empty answer.
 _res_now() {
   local t=''
   if [ -n "${BIONIC_NOW_FILE:-}" ]; then
@@ -433,11 +439,7 @@ _res_now() {
       return 0
     fi
   fi
-  if [ -n "${BIONIC_NOW_EPOCH:-}" ]; then
-    printf '%s' "${BIONIC_NOW_EPOCH}"
-    return 0
-  fi
-  date +%s 2>/dev/null
+  time_now
 }
 
 # _res_used_pct / _res_busy_cores / _res_busy_cores_5m / _res_total_mb — the gate's readings

@@ -72,6 +72,9 @@
 # needed on (jq missing, PATH broken, a half-uninstalled box). Bash's own
 # parameter expansion does the same work with no process at all.
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 bionic_need deps.sh check_dep
 
 # env.sh, THE SAME SOFT SOURCE, FOR ITS READ HALF ONLY — `rc_state`, `rc_get`, `rc_file`
@@ -1179,7 +1182,7 @@ ${sid}
     case "$live" in *"
 ${s}
 "*) ;; *) continue ;; esac
-    m="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
+    m="$(file_mtime "$f")"
     case "$m" in ''|*[!0-9]*) continue ;; esac
     if [ "$m" -gt "$bestm" ]; then bestm="$m"; best="$f"; fi
   done

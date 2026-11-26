@@ -69,6 +69,9 @@
 # for lib/patrol.sh. Guarded on the function, so a caller that already has it pays nothing.
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 bionic_need roots.sh docs_root
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 # plan-read.sh, the same way: the plan's header has one parser, and `plan_frontmatter_get` asks it.
 bionic_need plan-read.sh plan_read_header
 # normalize_newlines [file] -> that document with its line endings TRANSLATED to \n, never
@@ -681,12 +684,10 @@ live_runs() {
   done
   [ -n "$secs" ] || return 1
 
-  now="${BIONIC_NOW_EPOCH:-}"
-  case "$now" in ''|*[!0-9]*) now=$(date +%s) ;; esac
+  now="$(time_now)"
   cutoff=$(( now - secs ))
 
-  # THE MTIME READ IS THE FLEET'S (hooks/session-poker.sh:422 et al.): BSD `stat -f` first,
-  # GNU `stat -c` second. A path this cannot stat is NOT live — the fail-closed direction,
+  # THE MTIME READ IS lib/time.sh's `file_mtime`. A path this cannot stat is NOT live — the fail-closed direction,
   # because the cost of dropping it is `plan=none` and a bind the model makes by hand, while
   # the cost of admitting it is a session bound to a file nothing can read.
   #
@@ -696,7 +697,7 @@ live_runs() {
   # and it preserves the order it was handed line for line.
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    mt=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null) || mt=""
+    mt=$(file_mtime "$f") || mt=""
     case "$mt" in ''|*[!0-9]*) continue ;; esac
     [ "$mt" -ge "$cutoff" ] || continue
     printf '%s\n' "$f"

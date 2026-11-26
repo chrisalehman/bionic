@@ -72,6 +72,11 @@
 # [WALL: tests/farm-out-reminder.test.sh]
 # [WALL: tests/background-suite-guard.test.sh]
 
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
+
 # ─── THE PER-WALL LIBRARY DECLARATION (A-56.1, A-56.2) ───────────────────────
 #
 # ONE TABLE, TWO READERS, AND IT IS WHY THE COMPOUND DOES NOT FAIL CLOSED ON A
@@ -4081,7 +4086,7 @@ env_split_entries() {  # $1 = raw `environments:` value -> "name<TAB>descriptor"
 log_finding_quiet() {  # $1=check-id  $2=detail
   local f
   if f=$(audit_path "$(audit_root)"); then
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
+    local line="- $(iso_now) evidence-gate $1: $2 ($PLAN)"
     mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
   fi
   return 0
@@ -4428,7 +4433,7 @@ log_event() {  # $1=event $2=class
   # through the former `cut -c1-120` excerpt of the raw command.
   local f
   if f=$(audit_path "$BIONIC_ROOT"); then
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE"
+    local line="- $(iso_now) farm-out $1: class=$2 mode=$MODE"
     mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
   fi
   echo "farm-out [$1] class=$2" >&2

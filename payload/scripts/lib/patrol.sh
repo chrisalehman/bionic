@@ -441,13 +441,11 @@ patrol_window() {  # <repo-root> <sid> -> ISO instant on stdout, empty for "the 
   b="$(stat -f %B "$f" 2>/dev/null || stat -c %W "$f" 2>/dev/null)" || b=""
   case "$b" in ''|*[!0-9]*|0) b="" ;; esac
   [ -n "$b" ] || return 0
-  date -u -r "$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+  epoch_iso "$b"
   return 0
 }
 
-_patrol_mtime() {  # <file>
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
-}
+_patrol_mtime() { file_mtime "$1"; }   # <file>
 
 # THE DATE FUNCTIONS OF lib/time.sh, as the poker's parts and the readers here splice them into an awk program.
 _PATROL_ISO_AWK="${_TIME_ISO_AWK:-}"
@@ -914,7 +912,7 @@ watch_claim() {
     _watch_read "$f" && { told="$_WR_TOLD"; said="$_WR_SAID"; lost="$_WR_LOST"; woke="$_WR_WOKE"; }
     case "$s" in stopped\ *) lost="${s#stopped }" ;; esac
   fi
-  _patrol_claim _watch_holder "$1" "$2" "${3:-}" "$f" state=watching "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  _patrol_claim _watch_holder "$1" "$2" "${3:-}" "$f" state=watching "at=$(iso_now)" \
     ${told:+"told=$told"} ${lost:+"lost=$lost"} ${said:+"said=$said"} ${woke:+"woke=$woke"}
 }
 _watch_holder() {  # <root> <sid> -> `<pid> <start>` while a live watcher holds the record
@@ -935,7 +933,7 @@ watch_rest() {
   local f
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
   watch_holds "$1" "$2" "${3:-}" || return 1
-  set -- "$f" "${f%/*}/.watch-$2.$3" "state=resting" "why=${4:-unsaid}" "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  set -- "$f" "${f%/*}/.watch-$2.$3" "state=resting" "why=${4:-unsaid}" "at=$(iso_now)" \
     ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} ${_WR_SAID:+"said=$_WR_SAID"} ${_WR_WOKE:+"woke=$_WR_WOKE"}
   _watch_write "$@"
 }
@@ -955,7 +953,7 @@ _watch_keep() {  # <root> <sid> <pid> -> the watching record rewritten from the 
   local f
   f="$(watch_record_path "$1" "$2")" || return 1
   _watch_write "$f" "${f%/*}/.watch-$2.$3" "state=watching" "pid=$_WR_PID" "start=$_WR_START" \
-    "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} \
+    "at=$(iso_now)" ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} \
     ${_WR_SAID:+"said=$_WR_SAID"} ${_WR_WOKE:+"woke=$_WR_WOKE"}
 }
 watch_causes() {
