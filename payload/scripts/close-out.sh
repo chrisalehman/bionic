@@ -128,6 +128,8 @@ fi
 . "${CO_LIB}/seal.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/patrol.sh"
+# The clock's one home, asked by name: patrol.sh loads it only softly.
+bionic_need time.sh _time_epoch
 # shellcheck source=/dev/null
 . "${CO_LIB}/units.sh"
 # shellcheck source=/dev/null
@@ -2059,7 +2061,7 @@ gate_ask() {
   marker="$(engaged_marker_path "$ROOT" "$sid")" \
     || { GATE_LINE="could not build an engagement marker path for the dry-run"; return 9; }
   mkdir -p "${marker%/*}" 2>/dev/null
-  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$(iso_now)" > "$marker"
   input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
     '{session_id: $s,
       cwd: $cwd,

@@ -195,6 +195,8 @@ bionic_need gate.sh gate_room
 # THE RECORD'S FIELD READER, asked by name rather than reached through observe.sh: the awk programs of this file and
 # its parts read a roster row's field by `line_kv_of` (lib/fields.sh).
 bionic_need fields.sh line_field_v
+# The clock's one home, asked by name: no hook lists it among the libraries it wants.
+bionic_need time.sh _time_epoch
 # THE PASTED POKER PATH. The STANDDOWN line and the
 # refusals print this script's path for a reader to paste; it is ONE shell
 # word, so a plugin root with a space pastes whole. refuse.sh's `refuse_shell_word` owns the rule.
@@ -1202,11 +1204,6 @@ tick_state_root() {  # -> absolute path, or rc 1
   printf '%s' "$real"
 }
 
-epoch_iso() {  # <epoch seconds> -> UTC ISO-8601, the shape the CLI stamps entries with
-  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
-}
-
 # THE .bionic/tmp WRITE GUARD, one copy for both of this script's writers — the Patrol
 # stamp below and the adopted row further down. It was written inline in the stamp writer
 # and is a function now because a second writer arrived (epic-20 W1 B-1): a guard this
@@ -2147,9 +2144,7 @@ launch_sync_hand() {  # <verb> <operand>...
   printf '%s' "$out"
 }
 
-sitrep_now() {  # -> now, epoch seconds: BIONIC_NOW_EPOCH when it is a number, else the clock
-  case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) date -u +%s ;; *) printf '%s\n' "$BIONIC_NOW_EPOCH" ;; esac
-}
+sitrep_now() { time_now; }  # -> now, epoch seconds: lib/time.sh's pinned clock, under the name the poker's parts call
 sitrep_date() {  # <epoch> <strftime format> -> the local rendering: from the zone this command holds, else BSD date then GNU
   if _sitrep_local "$1" "$2"; then printf '%s\n' "$_SITREP_LOCAL"; return 0; fi
   date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2" 2>/dev/null

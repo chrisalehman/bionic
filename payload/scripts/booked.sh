@@ -296,6 +296,8 @@ case "${BASH_SOURCE[0]}" in */*) : ;; *) BOOKED_SELF_DIR="$(pwd -P)" ;; esac
 . "$BOOKED_SELF_DIR/lib/gate.sh" || exit 2
 # shellcheck disable=SC1091
 . "$BOOKED_SELF_DIR/lib/loader.sh" 2>/dev/null
+# The clock's one home, asked by name rather than reached through gate.sh.
+bionic_need time.sh _time_epoch
 
 BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
@@ -388,7 +390,7 @@ booked_stamp() {  # <rc>
   c="$(booked_one_line "$cmd" 120)"
   [ -z "$suites" ] || s="|suites=${suites//[!A-Za-z0-9._+,?-]/?}"
   printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=%s%s|cmd=%s\n' \
-    "$stamp_head" "${stamp_dirty:-0}" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$s" "$c" \
+    "$stamp_head" "${stamp_dirty:-0}" "$1" "$(iso_now)" "$s" "$c" \
     >> "$stamp_file" 2>/dev/null
   return 0
 }
@@ -702,9 +704,8 @@ booked_find_live() {
 
 booked_mtime_utc() {  # <file> — its last write, UTC ISO-8601
   local m
-  m="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
-  [ -n "$m" ] || { printf 'unknown'; return 0; }
-  date -u -r "$m" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$m" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown'
+  m="$(file_mtime "$1")" || { printf 'unknown'; return 0; }
+  epoch_iso "$m" || printf 'unknown'
 }
 
 # booked_follow <log> <pid> — THE WAIT: every BIONIC_RUN_POLL seconds, the log's new whole lines to
@@ -851,7 +852,7 @@ booked_run_open() {  # at the start of the tail, in the detached side
   BOOKED_ROSTER="$(roster_path "$r" "$sid")"
   if [ ! -f "$BOOKED_ROSTER" ] || [ -L "$BOOKED_ROSTER" ]; then BOOKED_ROSTER=""; return 0; fi
   roster_mark_run "$BOOKED_ROSTER" "$agent" "$run_log" "run_pid=$$" "run_head=$stamp_head" \
-    "run_cmd=$(booked_one_line "$cmd" 120)" "run_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" || BOOKED_ROSTER=""
+    "run_cmd=$(booked_one_line "$cmd" 120)" "run_started_at=$(iso_now)" || BOOKED_ROSTER=""
 }
 
 # booked_run_line <rc> — THE RUN, RECORDED WHERE A FLOOR PROOF LOOKS (wave-37 T4; D7, REQ-6 AC-6.1; ADR-057): after the
@@ -891,7 +892,7 @@ booked_run_close() {  # <rc> — the exit trap of the detached side
   rm -f ${BOOKED_IDF:+"$BOOKED_IDF"} ${BOOKED_NOTE:+"$BOOKED_NOTE"}
   if [ -n "$BOOKED_ROSTER" ]; then
     roster_mark_run "$BOOKED_ROSTER" "$agent" "$run_log" "run_rc=$1" \
-      "run_ended_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null
+      "run_ended_at=$(iso_now)" 2>/dev/null
   fi
   # THE RC LINE IS A LINE OF ITS OWN: a command whose output ends without a newline would glue it.
   [ -z "$(tail -c 1 "$run_log" 2>/dev/null)" ] || printf '\n' >> "$run_log"

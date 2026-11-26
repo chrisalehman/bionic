@@ -238,6 +238,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "preflight-probe"; fi
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# The clock's one home, asked by name: no hook lists it among the libraries it wants.
+bionic_need time.sh _time_epoch
 # Whether another session is alive is lib/alive.sh's one rule. Soft: a library directory without it
 # (an older checkout) prunes nothing and reports no other session, the direction that loses nothing.
 # shellcheck source=/dev/null
@@ -602,7 +604,7 @@ fi
   printf 'kind=%s\n'         "preflight-attestation"
   printf 'session_id=%s\n'   "$SESSION_ID"
   printf 'written_at=%s\n'   "$(date -u +%s)"
-  printf 'written_at_iso=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'written_at_iso=%s\n' "$(iso_now)"
   printf 'repo=%s\n'         "$REPO_REAL"
   printf 'git_branch=%s\n'   "$GIT_BRANCH"
   printf 'git_head=%s\n'     "$GIT_HEAD"
