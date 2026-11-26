@@ -2470,7 +2470,7 @@ _card_early() {  # -> 0 when the page may render; 1 and CARD_EARLY_WHY on the fi
   local roster ledger names n type st q head8 out rc line
   CARD_EARLY_WHY=""
   # (1) AN OPEN READER: the roster's open names (lib/roster.sh, the one closing rule), each read by its latest row's role.
-  roster="$CF_ROOT/.bionic/tmp/roster-$CF_SID.state"
+  roster="$(roster_path "$CF_ROOT" "$CF_SID")"
   if [ -f "$roster" ] && [ ! -L "$roster" ]; then
     ledger="$(roster_ack_ledger "$roster")"
     names="$(roster_open_names "$roster" "$ledger" "$CF_SID")"

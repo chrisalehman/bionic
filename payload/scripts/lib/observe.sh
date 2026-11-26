@@ -286,7 +286,7 @@ observe_agent() {  # <typed-target> [deliverable …]
   OBS_TYPED="$target"
   OBS_NOW=$(date -u +%s)
 
-  [ -n "${OBSERVE_ROSTER:-}" ] || OBSERVE_ROSTER="$OBSERVE_ROOT/.bionic/tmp/roster-${OBSERVE_SESSION}.state"
+  [ -n "${OBSERVE_ROSTER:-}" ] || OBSERVE_ROSTER="$(roster_path "$OBSERVE_ROOT" "$OBSERVE_SESSION")"
 
   # A typed reference is a NAME, an agent id, or `name@team` — all three are legal TaskStop
   # inputs and none of them is resolved for us. Comparison is LITERAL: a target string is

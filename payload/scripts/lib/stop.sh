@@ -783,7 +783,7 @@ fi
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
 [ "$BIONIC_ENGAGED" = 1 ] || return "$_adv"
 
-ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+ROSTER_FILE="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
 # Existence first, so a session that has dispatched nothing costs one stat. The symlink
 # guard is the write half of TDD §8: a repo controls its own .bionic/, and a link at any
 # level redirects this script's marker append outside the repo.
@@ -1989,7 +1989,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # THE OCCUPANCY IS THE ONE CLOSE PREDICATE'S OPEN SET (wave-20 T2, D10): this session's
   # roster rows not closed by a later ack. A roster or ledger that is a symlink is not read,
   # and the numbers are left unknown rather than judged on zero — zero refuses more.
-  FILL_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  FILL_ROSTER="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   FILL_ACKS="$BIONIC_ROOT/.bionic/tmp/sweeper-${BIONIC_SID}.state"
   if [ -L "$FILL_ROSTER" ] || [ -L "$FILL_ACKS" ]; then
     return 0
@@ -2182,17 +2182,14 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
   [ -n "$lb" ] || return 0
   orders="$BIONIC_ROOT/.bionic/tmp/stop-orders-${BIONIC_SID}.state"
   [ -f "$orders" ] && [ ! -L "$orders" ] && [ -r "$orders" ] || return 0
-  targets="$(awk -v lb="${lb:0:19}" -v sid="$BIONIC_SID" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
+  # Each line's fields are read by name, through the record's field reader (lib/fields.sh).
+  bionic_need fields.sh line_field_v || return 0
+  targets="$(awk -v lb="${lb:0:19}" -v sid="$BIONIC_SID" "$_LINE_FIELDS_AWK"'
     index($0, "stop-order/v1|") == 1 {
-      if (kv($0, "by") != "patrol") next
-      s = kv($0, "session"); if (s != "" && s != sid) next
-      at = substr(kv($0, "at"), 1, 19); if (at == "" || at < lb) next
-      t = kv($0, "target"); if (t !~ /^[A-Za-z0-9_.-]+$/) next
+      if (line_kv_of($0, "by") != "patrol") next
+      s = line_kv_of($0, "session"); if (s != "" && s != sid) next
+      at = substr(line_kv_of($0, "at"), 1, 19); if (at == "" || at < lb) next
+      t = line_kv_of($0, "target"); if (t !~ /^[A-Za-z0-9_.-]+$/) next
       if (!(t in last) || at > last[t]) last[t] = at
     }
     END { for (t in last) printf "%s %s\n", t, last[t] }' "$orders" 2>/dev/null)"
@@ -2201,16 +2198,11 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
   # the name's row with `held=<iso> <reason> fp=…`, and the latest row of a name is its row. The
   # tick orders no held name while the hold's fingerprint stands, so an order newer than the hold
   # says something about the agent has changed since, and that order stands.
-  roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   held=""
   if [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; then
-    held="$(awk '
-      function kv(line, key,   i, n, parts) {
-        n = split(line, parts, "|")
-        for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-        return ""
-      }
-      index($0, "roster-state/") == 1 { nm = kv($0, "name"); if (nm != "") h[nm] = kv($0, "held") }
+    held="$(awk "$_LINE_FIELDS_AWK"'
+      index($0, "roster-state/") == 1 { nm = line_kv_of($0, "name"); if (nm != "") h[nm] = line_kv_of($0, "held") }
       END { for (nm in h) { at = substr(h[nm], 1, 19); if (at != "") printf "%s %s\n", nm, at } }' "$roster" 2>/dev/null)"
   fi
   targets="$(printf '%s\n' "$targets" | awk -v held="$held" '
@@ -2223,15 +2215,10 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
   vout=$( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
           CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" verdict 2>/dev/null )
   case "$?" in 0|1) : ;; *) return 0 ;; esac
-  printf '%s\n' "$vout" | awk -v want=" $targets" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
+  printf '%s\n' "$vout" | awk -v want=" $targets" "$_LINE_FIELDS_AWK"'
     index($0, "landing-verdict/v1|") == 1 {
-      nm = kv($0, "name")
-      if (kv($0, "state") != "MET" || kv($0, "acked") != "no") next
+      nm = line_kv_of($0, "name")
+      if (line_kv_of($0, "state") != "MET" || line_kv_of($0, "acked") != "no") next
       if (index(want, " " nm " ") == 0 || (nm in seen)) next
       seen[nm] = 1; out = out (out == "" ? "" : " ") nm
     }
@@ -2412,7 +2399,7 @@ stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
   done
   [ "$_WR_STATE" = resting ] && [ "$_WR_WHY" = person ] || return 0
   [[ "$_WR_AT" < "$prompt" ]] && return 0
-  [ -z "$(roster_open_names "$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state" \
+  [ -z "$(roster_open_names "$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")" \
     "$BIONIC_ROOT/.bionic/tmp/sweeper-$BIONIC_SID.state" "$BIONIC_SID" 2>/dev/null)" ] || return 0
   key="$(tick_digest_field "$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")" digest)"
   key="digest=${key:-at $_WR_AT}"
@@ -2600,7 +2587,7 @@ stop_agent_armed() {  # -> 0 armed; 1 not
   [ -d "${BIONIC_ROOT:-}" ] || return 1
   [ "${BIONIC_ENGAGED:-}" = 1 ] || return 1
   [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || return 1
-  local roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  local roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   [ ! -L "$roster" ] && [ -f "$roster" ]
 }
 
@@ -2841,7 +2828,7 @@ stop_guard() {  # <hook-dir> -> 0 admits; a refusal exits 2
   ALIAS_SUFFIX=""
   case "$RAW" in *@*) ALIAS_SUFFIX="${RAW##*@}" ;; esac
 
-  ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
+  ROSTER_FILE="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
   ROSTER_UNREADABLE=""
   [ -L "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1

@@ -607,7 +607,7 @@ _line_roster_mark() {  # <plan> <root> <row> <commit> <at>
   LINE_MARKED=""
   [ -n "$LINE_SID" ] || return 0
   bionic_need roster.sh roster_mark_landed || return 0
-  roster="${2%/}/.bionic/tmp/roster-${LINE_SID}.state"
+  roster="$(roster_path "${2%/}" "$LINE_SID")"
   # A run adopted after a clear (no launch line on this roster) is marked too: the writer is then the
   # plan row's agent cell. No row of the name, no mark.
   line_row_writer "$roster" "$1" "$3" || return 0
@@ -1546,9 +1546,10 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   # row's `lands_on=`; the debt is the launch line's `lands_red=` suite, carried on the `ready` event for
   # the debt write (`line_publish` step 6). The asking session's roster first, which holds a row adopted
   # after a clear, then the spawning session's, which holds the launch line a successor never saw.
+  bionic_need roster.sh roster_path
   for lsid in "$sid" "$LINE_RUN_BY"; do
     [ -n "$lsid" ] || continue
-    roster="${root%/}/.bionic/tmp/roster-${lsid}.state"
+    roster="$(roster_path "${root%/}" "$lsid")"
     [ -n "$roster0" ] || roster0="$roster"
     line_row_writer "$roster" "$plan" "$row"
     [ -z "$LINE_NOW" ] || break
@@ -1677,9 +1678,10 @@ LINE_ASSUME
 }
 # The roster row's ack, when the session's roster still holds it open. Sets LINE_ACKED to 1 when this call wrote it.
 _line_close_ack() {  # <root> <name> -> 0 acked or closed already · 1 not written
-  local roster="${1%/}/.bionic/tmp/roster-${LINE_SID:-}.state"
+  local roster
   LINE_ACKED=""
   [ -n "${LINE_SID:-}" ] && bionic_need roster.sh roster_row_for_id || return 1
+  roster="$(roster_path "${1%/}" "$LINE_SID")"
   roster_open_names "$roster" "$(roster_ack_ledger "$roster")" "$LINE_SID" | grep -xF -- "$2" >/dev/null || return 0
   ( cd "$1" && CLAUDE_CODE_SESSION_ID="$LINE_SID" \
       bash "$_LINE_LIB_DIR/../../hooks/session-sweeper.sh" ack "$2" --by patrol --reason landed ) >/dev/null 2>&1 || return 1

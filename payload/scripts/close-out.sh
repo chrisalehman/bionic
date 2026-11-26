@@ -1029,7 +1029,7 @@ _co_tmp_scratch() {
   local root="$1" live own="" s n
   CO_SCRATCH_KEPT=0
   live="$(patrol_live_session_ids 2>/dev/null)"
-  [ -z "$CO_SID" ] || own="$(roster_open_names "$TMP_DIR/roster-$CO_SID.state" "$TMP_DIR/sweeper-$CO_SID.state" "$CO_SID")"
+  [ -z "$CO_SID" ] || own="$(roster_open_names "$(roster_path "$ROOT" "$CO_SID")" "$TMP_DIR/sweeper-$CO_SID.state" "$CO_SID")"
   while IFS= read -r s; do
     [ -n "$s" ] || continue
     if [ -n "$CO_SID" ] && [ "${s##*/}" = "$CO_SID" ] && [ -d "$s" ] && [ ! -L "$s" ]; then

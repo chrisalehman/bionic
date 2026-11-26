@@ -58,7 +58,7 @@ if [ -z "$_rp_root" ] && [ -n "${_rp_cwd:-}" ] && [ -r "$_rp_lib/root.sh" ]; the
   . "$_rp_lib/root.sh" 2>/dev/null && _rp_root="$(project_root "$_rp_cwd" 2>/dev/null)"
 fi
 { [ -n "$_rp_sid" ] && [ -n "$_rp_root" ]; } || exit 0
-_rp_roster="$_rp_root/.bionic/tmp/roster-${_rp_sid}.state"
+_rp_roster="$(roster_path "$_rp_root" "$_rp_sid")"
 _rp_flag="$(ruling_pending_flag "$_rp_roster")" || exit 0
 [ -e "$_rp_flag" ] || exit 0
 
