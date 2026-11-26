@@ -45,6 +45,9 @@
 #   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
 #             and one line names the word and the change.
 #   §ABANDON  abandon is taken only on words a session typed, and on them it ends the run.
+#   §JUDGE    the one judgment of a changed seal: refused with the ask staged and the catch kept, so a plan put
+#             back still reads changed where the wall's words alone keep nothing; a held seal is refused and keeps
+#             nothing; both callers ask it and neither keeps the catch itself.
 #   §HELD     a living command's held fold, a planted step in it too, is what its processes are served; once the
 #             command ends its directory is gone, and a copy under a dead pid serves a decider nothing.
 #
@@ -659,5 +662,32 @@ expect_eq "once the command ends its held directory is gone, and a decider namin
 expect_eq "a held directory whose command is dead, the planted fold in it, serves a decider nothing: it reads the log" "9|5" \
   "$(hd_step "$HD_DEAD")|$(hd_ask "$HD_DEAD")"
 rm -rf "$HD_DEAD"
+
+section "JUDGE"
+# The one judgment of a changed seal that the commit gate folds and the publish verb reads its words from.
+judge() {  # <fn> <seal line> -> the function's exit and the ask it staged, asked in a shell of its own
+  ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/fold.sh"; . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
+    BIONIC_SEAL_LINE="$2" BIONIC_SEAL_PLAN="$P" BIONIC_SEAL_LOG="$L" BIONIC_WALL_OWED=""
+    "$1" publish >/dev/null 2>&1; printf '%s|%s\n' "$?" "${BIONIC_WALL_OWED%%$'\t'*}" )
+}
+PB="$SB/plan.sealed"; PCH="changed what=plan how=changed"; JK=()
+for fn in wall_run_seal wall_run_seal_kept; do
+  base; cp "$P" "$PB"; printf '| T9 | x |\n' >> "$P"
+  expect_eq "$fn: the plan changed by the shell reads changed" "$PCH" "$(seal_verify "$P")"
+  expect_eq "$fn: the changed run is refused, the ask staged" "2|seal:changed" "$(judge "$fn" "$PCH")"
+  cp "$PB" "$P"; JK[${#JK[@]}]="$(seal_verify "$P")"
+done
+expect_eq "the wall's words alone keep nothing: the plan put back reads clean" clean "${JK[0]}"
+expect_eq "the judgment keeps the catch: the plan put back still reads changed" "$PCH" "${JK[1]}"
+base; cp "$P" "$PB"; printf '| T9 | x |\n' >> "$P"
+expect_eq "a seal held past the wait is refused, nothing staged" "2|" "$(judge wall_run_seal_kept busy)"
+cp "$PB" "$P"
+expect_eq "and nothing is kept: the plan put back reads clean" clean "$(seal_verify "$P")"
+expect_eq "a clean run is nothing to judge" "0|" "$(judge wall_run_seal_kept clean)"
+CW='seal_write "\$(BIONIC_SEAL_PLAN|PV_PLAN)"'
+expect_ne "the commit gate folds the one judgment" 0 "$(/usr/bin/grep -c 'bionic_fold "$EVENT" wall_run_seal_kept' "$BIONIC_HOOKS_DIR/bash-walls.sh")"
+expect_ne "the publish verb reads its words from it" 0 "$(/usr/bin/grep -c 'wall_run_seal_kept publish' "$BIONIC_HOOKS_DIR/poker/line.sh")"
+expect_ne "the judgment keeps the catch in the library" 0 "$(/usr/bin/grep -cE "$CW" "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh")"
+expect_eq "and neither caller keeps it itself" 0 "$(cat "$BIONIC_HOOKS_DIR/bash-walls.sh" "$BIONIC_HOOKS_DIR/poker/line.sh" | /usr/bin/grep -cE "$CW")"
 
 finish

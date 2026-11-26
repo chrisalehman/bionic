@@ -393,6 +393,21 @@ REC_ZERO=$(probe "$SANDBOX" "$(payload "$R_OPTIN")" CLAUDE_CODE_SESSION_ID="$SID
 expect_eq "BIONIC_CONTEXT_WANT_RUN=0 is not an ask" "unset" "$(field "$REC_ZERO" run_word)"
 
 # ============================================================
+section "5 — a session is judged when it engaged or its binding holds it to a plan"
+# bionic_judged reads the engagement value and the bound plan its caller read; the engagement value itself stays
+# the marker's alone, so the hooks that read it alone answer as before.
+judged() {  # <repo> [BIONIC_BOUND_PLAN] -> engaged=<value> judged=<yes|no>, after the real preamble in a child shell
+  payload "$1" | env HOME="$SANDBOX/home" CLAUDE_CODE_SESSION_ID="$SID" ${2+BIONIC_BOUND_PLAN="$2"} /bin/bash -uc '
+    cd "$1" || exit 99; . "$2" >/dev/null 2>&1 || exit 98; bionic_context 2>/dev/null
+    if bionic_judged; then j=yes; else j=no; fi; printf "engaged=%s judged=%s\n" "$BIONIC_ENGAGED" "$j"' _ "$1" "$LIB" 2>/dev/null
+}
+R_J0="$(mk_repo judged-bare bare)"; R_J1="$(mk_repo judged-engaged engaged)"
+expect_eq "an engaged session is judged" "engaged=1 judged=yes" "$(judged "$R_J1")"
+expect_eq "a session neither engaged nor bound is not" "engaged=0 judged=no" "$(judged "$R_J0")"
+expect_eq "a bound session with no marker is judged, and still reads not engaged" "engaged=0 judged=yes" "$(judged "$R_J0" "$R_J0/p.plan.md")"
+expect_eq "a binding of no plan is no binding" "engaged=0 judged=no" "$(judged "$R_J0" "")"
+
+# ============================================================
 section "6 — the payload is read ONCE: adopted when already set, stdin otherwise"
 # ============================================================
 #
