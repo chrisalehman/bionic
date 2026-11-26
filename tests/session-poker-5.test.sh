@@ -30,7 +30,7 @@ S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
 # ============================================================
-section "§CHECK: current <N> --check runs what current <N> runs before it writes, writes nothing, and exits as the advance would (wave-38 T1; REQ-1 AC-1.3; D20)"
+section "§CHECK: current <N> --check runs what current <N> runs before it writes, writes nothing, and answers as the advance would, exiting 0 on either answer"
 # ============================================================
 # `current <N> --check` (N in 5..8) runs the advance's own path up to the swap, through the real gate and the same
 # `cur7_judge <N>`, prints `would advance` or `would refuse` above the refusal text, and writes nothing.
@@ -90,7 +90,8 @@ CK_GOOD="$(ck_floor "$CK_C")
 $(ck_reads "$CK_C")"
 
 # ck_case <label> <N> <current> <want rc> <proof lines> -> the check on a fresh fixture,
-# then the advance on a fresh fixture of the same bytes; asserts both exit <want>, the check's first line,
+# then the advance on a fresh fixture of the same bytes; asserts the advance exits <want> and the check exits 0 (either
+# answer is an answer), the check's first line the verdict <want> gives,
 # that the check wrote nothing (the plan by cmp, the whole tree by cksum), and that a refusal's text is the
 # advance's own. Leaves CK_RC/CK_OUT (the check) and AD_RC/AD_OUT (the advance).
 ck_case() {
@@ -101,8 +102,8 @@ ck_case() {
   ck_plan "$cur" "$proofs"
   expect_true "$label precondition: the advance's fixture is the check's, byte for byte (cmp)" cmp -s "$TMPROOT/ck-before" "$PCK"
   poke "$RCK" current "$n"; AD_RC="$RC"; AD_OUT="$OUT"
-  expect_eq "$label — current $n --check and current $n exit alike, $want (check|advance)" "$want|$want" "$CK_RC|$AD_RC"
-  [ "$CK_RC|$AD_RC" = "$want|$want" ] || printf '      the check said: %s\n      the advance said: %s\n' "$CK_OUT" "$AD_OUT"
+  expect_eq "$label — current $n --check exits 0 and current $n exits $want (check|advance)" "0|$want" "$CK_RC|$AD_RC"
+  [ "$CK_RC|$AD_RC" = "0|$want" ] || printf '      the check said: %s\n      the advance said: %s\n' "$CK_OUT" "$AD_OUT"
   [ "$want" = 0 ] && verdict="would advance" || verdict="would refuse"
   expect_eq "$label — …the check's first line is its verdict" "poker: current $n --check: $verdict" "$(printf '%s\n' "$CK_OUT" | head -1)"
   expect_true "$label — …the check left the plan byte-identical (cmp)" cmp -s "$TMPROOT/ck-before" "$TMPROOT/ck-after"
@@ -166,7 +167,8 @@ poke "$RCK" current --check 7
 expect_eq "CK-u4 the flag before the step is a usage error (exit 2)" "2" "$RC"
 expect_true "CK-u5 …and none of them touched the plan (cmp)" cmp -s "$TMPROOT/ck-before" "$PCK"
 poke "$RCK" current 7 --check
-expect_eq "CK-u6 …control: current 7 --check on that plan is admitted (exit 0)" "0" "$RC"
+expect_eq "CK-u6 …control: current 7 --check on that plan is admitted (exit 0)" "0|poker: current 7 --check: would advance" \
+  "$RC|$(printf '%s\n' "$OUT" | head -1)"
 
 # ---------- the mutant: the judge dropped from the path --check takes ----------
 # A doctored copy of the poker (hooks/ beside scripts/lib, the tree's own library linked in, so the copy's

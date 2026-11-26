@@ -16,6 +16,8 @@
 #   refuse_plugin_root -> the plugin root this library was loaded from, for a fix line.
 #   refuse_shell_word <word> [placeholder] -> <word> as one shell argument, quoted if needed.
 #   refuse_quote <word> -> <word> as one single-quoted shell argument, always.
+#   refuse_ordinary -> the list of ordinary answers, the answers that exit 0, one per line.
+#   refuse_ordinary_exit <key> <code> -> the exit a command gives for <code>: 0 for an answer the list holds.
 #
 # THE VERDICT IS EXACTLY ONE LINE:
 #
@@ -272,6 +274,48 @@ refuse_channel() {
 # refuse_modes -> the modes that may carry a refusal, one per line, table order.
 refuse_modes() {
   printf '%s\n' "$BIONIC_REFUSE_TABLE" | awk -F'|' '$3=="yes" { print $1 }'
+}
+
+# ── THE ORDINARY ANSWERS, BESIDE THE REFUSALS ─────────────────────────────────
+#
+# A command that answers "waiting", "busy", "nothing ran" or "no" to what it was asked has done its work: it exits 0
+# and says the answer in its words. A refusal, a failed check, a stall and a row returned stay non-zero. This list is
+# the one place that says which answers are ordinary: a command maps its code to its exit through it, and a reader that
+# must tell an answer from a failure reads the same rows. Five fields, `|`-separated, one row an answer:
+#
+#   1  key      the answer's command, the first operand of `refuse_ordinary_exit`
+#   2  command  the command as a session types it
+#   3  code     the code the answer keeps inside the tool: a library's return, the run record's stamp, the roster's
+#               run_rc=, the judge's `judged <N> exit <rc>` line. A reader of the record branches on it, never on
+#               the exit, which is 0
+#   4  word     the words that say the answer, which a caller that needs it reads in place of the exit
+#   5  answer   what it means
+#
+# A command not admitted by the gate ran nothing and keeps 75 in its record (the shim's stamp, the roster's
+# run_rc=75); one that a caller must tell from a green run says so through the note file BIONIC_NOT_ADMITTED names,
+# never through its exit.
+BIONIC_ORDINARY_TABLE='ready|spawn-worktree.sh ready|75|WAITING|the landing waits its turn behind a row ahead or for room on the machine; run the same command again
+ready|spawn-worktree.sh ready|75|BUSY|another landing holds the publish lock; run the same command again
+door|tests/run.sh|75|refused at the gate|the gate admitted nothing, so no suite ran; the note gets one line
+booked|booked.sh|75|did not admit|the gate did not admit the wrapped command, so it ran nothing; stamped rc=75
+regression-run|session-poker.sh regression-run|75|did not admit the whole run|nothing ran and no log was written; the note gets one line
+check|session-poker.sh current <N> --check|1|would refuse|the step would not advance; the lines under the verdict say why
+judge|session-poker.sh judge <N>...|1|would refuse|a step would not advance; its block closes with judged <N> exit 1'
+
+# refuse_ordinary -> the list, one row a line, table order.
+refuse_ordinary() { printf '%s\n' "$BIONIC_ORDINARY_TABLE"; }
+
+# refuse_ordinary_exit <key> <code> -> the exit for a command that gave <code>: 0 when the list holds an answer of
+# <key> with that code, else <code> itself. Where a command exits, it asks this once, so the code its answer keeps
+# inside the tool and the exit it gives are told apart in one place.
+refuse_ordinary_exit() {
+  local key="${1:-}" code="${2:-}"
+  case "$code" in ''|*[!0-9]*) printf '%s' "${code:-1}"; return 0 ;; esac
+  if [ "$code" -ne 0 ] && printf '%s\n' "$BIONIC_ORDINARY_TABLE" \
+      | awk -F'|' -v k="$key" -v c="$code" '$1 == k && $3 == c { f = 1 } END { exit !f }'; then
+    code=0
+  fi
+  printf '%s' "$code"
 }
 
 # _refuse_words <string> -> its word count. `set -f` because a `fix` naming a path

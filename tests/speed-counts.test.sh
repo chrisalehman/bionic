@@ -254,8 +254,8 @@ section "§FIXTURE: each size is built, and each command runs the path its count
 # read nothing.
 expect_eq "FX-1 both sizes are built" " n 2n" "$SC_BUILT"
 for SC_SIZE in n 2n; do
-  expect_eq "FX-2 ($SC_SIZE) the exits: card 0, check 1 (it would refuse), tick 0, resume 0, watch 0, wall 0 (it admits), close 0" "0 1 0 0 0 0 0" \
-    "$(for SC_C in $SC_CMDS; do cat "$SC_OUT/$SC_SIZE.$SC_C.on.rc" 2>/dev/null || echo -; done | paste -sd' ' -)"
+  expect_eq "FX-2 ($SC_SIZE) the exits: card 0, check 0 (it would refuse, an answer), tick 0, resume 0, watch 0, wall 0 (it admits), close 0" "0 0 0 0 0 0 0|1" \
+    "$(for SC_C in $SC_CMDS; do cat "$SC_OUT/$SC_SIZE.$SC_C.on.rc" 2>/dev/null || echo -; done | paste -sd' ' -)|$(/usr/bin/grep -c -- '--check: would refuse' "$SC_OUT/$SC_SIZE.check.on.err" 2>/dev/null)"
   SC_ROWS="$(sc_rows "$SC_SIZE")"
   expect_regex "FX-3 ($SC_SIZE) the card's head counts every row, all but the integrate row landed" \
     " · $((SC_ROWS - 1)) of $SC_ROWS tasks landed\$" "$(head -1 "$SC_OUT/$SC_SIZE.card.on.out" 2>/dev/null)"
