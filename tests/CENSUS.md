@@ -928,6 +928,11 @@ name-scan.test.sh | §SITES | keep | rule: check pin — tests/lib/name-scan.sh 
 name-scan.test.sh | §COST | keep | tests/lib/name-scan.sh:285 look()'s `$line += ($1 =~ tr/\n//)` made a count from the text's start at each hit, so 20,000 matching lines in one blob cost their square and pass 5 seconds (unverified) | none (searched 'took under 5 seconds' in tests/)
 name-scan.test.sh | §QUIET | keep | tests/lib/name-scan.sh:648 the EXIT trap's `rm -rf "$TMP_SCAN"` deleted, so the throwaway, whose paths and blobs hold every entry, is left in TMPDIR (QUIET1, QUIET2); also :405-406 `2>/dev/null` dropped from for-each-ref (QUIET4) | none (searched 'TMPDIR' and 'left behind' in tests/)
 
+## names.test.sh
+
+names.test.sh | §SIBLINGS | keep | payload/scripts/lib/root.sh bionic_new: the noclobber create made plain, so two sibling children of a subshell that drew $RANDOM write one file; bionic_id: the pid read as $$, so the two siblings carry one id (the mutants, each with its own row) | speed-counts.test.sh §DERIVE DRV-4 (one caller, _proof_derive_file, through a held command)
+names.test.sh | §SITES | keep | payload/scripts and hooks: a name made from $$ and $RANDOM again outside lib/root.sh's maker, so two siblings share it | none (searched 'RANDOM' in tests/)
+
 ## notify.test.sh
 
 notify.test.sh | §ONCE | keep | payload/scripts/lib/notify.sh: the item not marked sent after a send, so a later Stop on the same unresolved block sends again; (N3) goes red; payload/scripts/lib/owed.sh owed_register: a bound session's store named off its run's log (N2f) | none (searched 'owed_unsent' and 'ntfy' in tests/)

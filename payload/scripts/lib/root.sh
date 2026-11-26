@@ -528,3 +528,47 @@ log_answer() {  # $1=project root  $2=the answer line — appends it; rc 1 when 
   mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
   printf '%s\n' "$2" >> "$f" 2>/dev/null
 }
+
+# NAMES NO TWO PROCESSES SHARE. A subshell shares its parent's $$, and under bash 3.2 the children of a subshell
+# that has drawn $RANDOM each draw the same next value; a counter is copied by the fork with the rest. So no name
+# is made from those alone. A scratch file or directory is made by an exclusive create that draws again while the
+# name is held, which costs no process for a file; an id carries the asking process's own pid. Pinned by
+# tests/names.test.sh.
+
+# bionic_new <prefix> [dir] -> 0 with BIONIC_NEW naming the empty file (with `dir`, the directory) this call
+# created, <prefix>.<$$>.<draw>.<try>; 1, nothing made and BIONIC_NEW empty, when <prefix>'s folder is not there or
+# 32 tries made none. A file is created under noclobber, whose open fails on a name that exists; the caller's own
+# noclobber setting is left as it was.
+bionic_new() {
+  local p n=0 c=1
+  BIONIC_NEW=""
+  case "$1" in */*) [ -d "${1%/*}" ] || return 1 ;; esac
+  case "$-" in *C*) c=0 ;; esac
+  while [ "$n" -lt 32 ]; do
+    p="$1.$$.$RANDOM.$n"
+    if [ "${2:-}" = dir ]; then
+      if mkdir "$p" 2>/dev/null; then BIONIC_NEW="$p"; return 0; fi
+    else
+      set -C
+      if { : > "$p"; } 2>/dev/null; then [ "$c" = 0 ] || set +C; BIONIC_NEW="$p"; return 0; fi
+      [ "$c" = 0 ] || set +C
+    fi
+    n=$((n + 1))
+  done
+  return 1
+}
+
+# bionic_id -> 0 with BIONIC_ID set to <pid>.<draw>.<count>: the asking process's own pid, a draw, and how many ids
+# this process has made. Two processes alive at once differ by pid, two ids of one process by the count, and a pid
+# the system hands out again later by the draw. bash 3.2 has no $BASHPID, so the pid is read as the parent of a
+# child this process starts: a `$( )` holding one exec runs it in the forked child, whose parent is the asker.
+# 1, BIONIC_ID empty, when the pid cannot be read.
+bionic_id() {
+  local p=""
+  BIONIC_ID=""
+  [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] || p="${BASHPID:-}"
+  [ -n "$p" ] || p="$(exec /bin/sh -c 'echo "$PPID"')"
+  case "$p" in ''|*[!0-9]*) return 1 ;; esac
+  _BIONIC_ID_N=$(( ${_BIONIC_ID_N:-0} + 1 ))
+  BIONIC_ID="$p.$RANDOM.$_BIONIC_ID_N"
+}
