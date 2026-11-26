@@ -1851,6 +1851,10 @@ stop.test.sh | §RUNNING | keep | payload/scripts/lib/patrol.sh tick_running: th
 ## time.test.sh
 
 time.test.sh | §AGREE | keep | payload/scripts/lib/time.sh iso_epoch: the trailing-Z check loosened, so `2026-10-18T15:07:33Zx` reads an epoch on all three readers instead of nothing (AG.8) | none (searched 'iso_epoch' in tests/)
+time.test.sh | §STAMP | keep | payload/scripts/lib/time.sh iso_now: made to render BIONIC_NOW_EPOCH when it is set, so a pin of 1008 stamps 1970-01-01T00:16:48Z and ST.3 goes red | none (searched 'iso_now' in tests/: inbox.test.sh defines its own and tests nothing of the library)
+time.test.sh | §EPOCH | keep | payload/scripts/lib/time.sh epoch_iso: the digits check deleted, so BSD `date -r abc` prints the time of the file named abc and EP.5 goes red | none (searched 'epoch_iso' in tests/)
+time.test.sh | §PIN | keep | payload/scripts/lib/time.sh time_now: the pin printed whenever it is set, so a pin of `abc` is handed on as now and PN.5 goes red | none (searched 'time_now' in tests/; handoff-file.test.sh pins the poker's own sitrep_now)
+time.test.sh | §MTIME | keep | payload/scripts/lib/time.sh file_mtime: BSD `stat -f %m` asked before GNU `stat -c %Y`, so under GNU stat the filesystem text is read as the time and MT.5 goes red | none (searched 'file_mtime' in tests/)
 
 ## units.test.sh
 
