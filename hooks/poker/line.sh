@@ -879,7 +879,7 @@ poker_verb_publish() {
       seal_write "$PV_PLAN" "$SEAL_LOG" >/dev/null 2>&1
       IFS=$'\t' read -r key title reply <<< "$ask"
       [ -z "$key" ] || proof_owed open "$key" "$title" "$reply"
-      die "REFUSED — $fact; publish leaves the machine only for a run that matches its seal. Nothing was pushed and no pull request was opened; needs: the person — their ruling on the change, by bash $HOOK_DIR/session-poker.sh accept '<their words>' or bash $HOOK_DIR/session-poker.sh abandon '<their words>'."
+      die "REFUSED — $fact; publish leaves the machine only for a run that matches its seal. Nothing was pushed and no pull request was opened; needs: the person — their ruling on the change, as a plain message in the chat; you then run bash $HOOK_DIR/session-poker.sh accept '<their words>' or bash $HOOK_DIR/session-poker.sh abandon '<their words>' with those words, the person never."
       die "$detail"
       exit 1 ;;
   esac
