@@ -1595,8 +1595,18 @@ expect_contains "PA-1 T7 and T8 landed, T10's writer open: the tick starts the p
 expect_eq "PA-1b …and starts no whole run beside it" "0" "$(st_started | /usr/bin/grep -c "regression@" || :)"
 ST_PLOG="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p' | head -n 1)"
 expect_true "PA-2-pre the point's detached run ends" st_until 60 st_ended "${ST_PLOG:-$TMPROOT/none}"
+# A run the gate did not admit ends 75 and the next tick starts it again, as ST-7 holds for the whole run; a loaded
+# machine can meet that here, so up to two such retries are taken before the proof is read.
+for st_try in 1 2; do
+  [ "$(cat "${ST_PLOG:-$TMPROOT/none}.rc" 2>/dev/null)" = 75 ] || break
+  forget_digest "$RST"; poke "$RST" tick
+  ST_PLOG="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p' | head -n 1)"
+  st_until 60 st_ended "${ST_PLOG:-$TMPROOT/none}" || break
+done
 expect_eq "PA-2 …and its proof is the point's own kind, naming T11, at the head it ran" "1" \
   "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=point head=$ST_H5 .*point=T11" || :)"
+[ "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=point head=$ST_H5 " || :)" = 1 ] \
+  || { printf '      the run ended rc=%s; its log:\n' "$(cat "${ST_PLOG:-$TMPROOT/none}.rc" 2>/dev/null)"; sed -n '1,40p' "${ST_PLOG:-$TMPROOT/none}" 2>/dev/null; }
 expect_eq "PA-2b …never a regression proof at that head" "0" "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H5 " || :)"
 forget_digest "$RST"; poke "$RST" tick
 expect_contains "PA-3 the next tick lands the point's row on its proof" "poker: LANDED T11 — " "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: LANDED T11 ' || :)"
