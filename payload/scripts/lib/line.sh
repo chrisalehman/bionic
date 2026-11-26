@@ -2552,8 +2552,12 @@ _line_debt_write() {  # <rec> <row> <row commit> <candidate> <row branch> <at>
   local d
   LINE_DEBT_ID=""; LINE_DEBT_SUITE=""
   d="$(_line_declared "$1" "$2" "$4")" || return 0
-  LINE_DEBT_SUITE="$d"; LINE_DEBT_ID="$$.${RANDOM}${RANDOM}"
-  _wt_debt_write "$1" "$LINE_DEBT_ID" "$2" "$5" "$3" "$d" "${LINE_DEBT_TOKEN:--}" && return 0
+  LINE_DEBT_SUITE="$d"
+  # The id carries this process's own pid (lib/root.sh `bionic_id`), so two landings in sibling subshells owe two debts.
+  if bionic_need root.sh bionic_id && bionic_id; then
+    LINE_DEBT_ID="$BIONIC_ID"
+    _wt_debt_write "$1" "$LINE_DEBT_ID" "$2" "$5" "$3" "$d" "${LINE_DEBT_TOKEN:--}" && return 0
+  fi
   _wt_refuse "debt-unwritten why=proofs-unwritable suite=${d} path=${1} row=${2} — the declared red's debt cannot be written to the landing record (${_WT_PROOFS_SAW:-the append failed}), so nothing is published; make it writable, say ready again"
   LINE_DEBT_ID=""; return 1
 }

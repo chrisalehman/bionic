@@ -1845,20 +1845,23 @@ _proof_facts_held() {  # <plan> -> 0 with _PROOF_HELD_FOLD its fold's file (empt
   # THE ONE FOLD: the log is read once into the directory, the facts folded from that read, and the finding events and
   # the inherited proofs taken from it whole in one pass, since a finding is read from all of its events. A fold that
   # failed is short or empty: it is an error to whoever asked, and nothing of it is kept.
-  ev="$d/.events-$id.$$.$RANDOM"
-  if [ -n "$log" ]; then reader_events "$plan" > "$ev" 2>/dev/null || rc=$?; else : > "$ev"; fi
+  # Its scratch files are named off one made by the exclusive create, so a sibling folding the same plan writes its own.
+  ev=""
+  if bionic_need root.sh bionic_new && bionic_new "$d/.events-$id"; then ev="$BIONIC_NEW"; else rc=2; fi
+  if [ "$rc" -ne 0 ]; then :; elif [ -n "$log" ]; then reader_events "$plan" >| "$ev" 2>/dev/null || rc=$?; else : >| "$ev"; fi
   [ "$rc" -ne 0 ] || ( set -o pipefail; reader_events() { cat "$ev"; }; reader_facts "$plan" ) > "$ev.f" || rc=$?
-  : > "$ev.n"; : > "$ev.i"
+  [ "$rc" -ne 0 ] || { : > "$ev.n"; : > "$ev.i"; }
   [ "$rc" -ne 0 ] || awk -v fo="$ev.n" -v io="$ev.i" 'index($0, "run/v1|ev=finding|") == 1 { print > fo }
     index($0, "run/v1|ev=proof|kind=inherited|") == 1 { print > io }' "$ev" || rc=$?
   if [ "$rc" -eq 0 ]; then
     mv -f "$ev.f" "$d/fold-$id" && mv -f "$ev.n" "$d/findings-$id" && mv -f "$ev.i" "$d/inherited-$id" || rc=2
   fi
-  rm -f "$ev" "$ev.f" "$ev.n" "$ev.i"
+  [ -z "$ev" ] || rm -f "$ev" "$ev.f" "$ev.n" "$ev.i"
   if [ "$rc" -ne 0 ]; then
     _PROOF_FACTS_KEY=""; _PROOF_FACTS_LOG=""; _PROOF_HELD_ID=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""
     rm -f "$d/key-$id" "$d/made-$id"
-    printf '_proof_facts: lib/reader.sh exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2
+    if [ -z "$ev" ]; then printf '_proof_facts: no scratch file could be made in %s to fold the facts of %s; nothing is kept\n' "$d" "$plan" >&2
+    else printf '_proof_facts: lib/reader.sh exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2; fi
     return 2
   fi
   if [ -n "$key" ]; then printf '%s\n' "$key" > "$d/made-$id" && printf '%s\n' "$key" > "$d/key-$id"; else rm -f "$d/key-$id" "$d/made-$id"; fi
@@ -2008,24 +2011,14 @@ _proof_derive() {
 # _proof_derive_file <index> <answer> -> 0 with _PROOF_DERIVE_FILE a file beside <index> made new for <answer> and
 # holding it; 1, nothing made, when none can be. NO KEPT ANSWER IS WRITTEN OVER: a subshell shares its parent's $$,
 # and under bash 3.2 the children of a subshell that drew $RANDOM each draw the same next value, so two answers made
-# in sibling subshells draw one name. Each file is made exclusively (noclobber's O_EXCL), and a name another holds is
-# drawn again, so an index line names only the answer written for its own key.
+# in sibling subshells would draw one name. Each file is made by lib/root.sh `bionic_new`, an exclusive create that
+# draws again while a name is held, so an index line names only the answer written for its own key.
 _PROOF_DERIVE_FILE=""
 _proof_derive_file() {
-  local p n=0 off=1
   _PROOF_DERIVE_FILE=""
-  case "$-" in *C*) off=0 ;; esac
-  set -C
-  while [ "$n" -lt 8 ]; do
-    p="$1.$$.$RANDOM.$n"
-    if { printf '%s' "$2" > "$p"; } 2>/dev/null; then
-      [ "$off" = 0 ] || set +C
-      _PROOF_DERIVE_FILE="$p"; return 0
-    fi
-    n=$((n + 1))
-  done
-  [ "$off" = 0 ] || set +C
-  return 1
+  bionic_need root.sh bionic_new && bionic_new "$1" || return 1
+  if { printf '%s' "$2" >| "$BIONIC_NEW"; } 2>/dev/null; then _PROOF_DERIVE_FILE="$BIONIC_NEW"; return 0; fi
+  rm -f "$BIONIC_NEW"; return 1
 }
 # _proof_derive_key <key> -> 0 with _PROOF_DERIVE_KEY <key> and the key of each view of the facts the caller holds, one
 # line; 1 when a view has none

@@ -407,7 +407,7 @@ units_born_logged() {
 # of the command, subshells included, as the regression state is kept; read now outside a memo.
 _units_waits() {
   local plan="${1:-}" f="${_UNITS_MEMO_WAITS:-}" out
-  if [ -n "$f" ] && [ -f "$f" ] && awk -v p="$plan" 'NR == 1 { if ($0 != p) exit 1; next } { print }' "$f" 2>/dev/null; then
+  if [ -n "$f" ] && [ -s "$f" ] && awk -v p="$plan" 'NR == 1 { if ($0 != p) exit 1; next } { print }' "$f" 2>/dev/null; then
     return 0
   fi
   declare -F plan_read_waits >/dev/null 2>&1 || return 1
@@ -447,20 +447,23 @@ units_memoised() {  # <plan> <command> [args...]
     return
   fi
   local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
-  local _UNITS_MEMO_WAITS="${TMPDIR:-/tmp}/bionic-units-waits-$$-${RANDOM}${RANDOM}"
+  # The memo files are made empty by the exclusive create (lib/root.sh `bionic_new`), so two commands in sibling
+  # subshells never share one; an empty file is read as nothing kept, and a name not made leaves that memo off.
+  local _UNITS_MEMO_WAITS=""
+  ! bionic_need root.sh bionic_new || ! bionic_new "${TMPDIR:-/tmp}/bionic-units-waits" || _UNITS_MEMO_WAITS="$BIONIC_NEW"
   local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC="" _UNITS_MEMO_PROOFS="" _UNITS_MEMO_PROOFS_RC="" _UNITS_FACTS_PLAN="" _UNITS_FACTS="" _UNITS_FACTS_FILE="" _UNITS_FACTS_KEY=""
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _units_fold "${1:-}"
   _UNITS_MEMO_LIVE="$(_units_live "${1:-}")"; _UNITS_MEMO_LIVE_RC=$?
   _UNITS_MEMO_PROOFS="$(_units_proofs "${1:-}")"; _UNITS_MEMO_PROOFS_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
-  if [ -z "$_UNITS_MEMO_FLOOR" ]; then
-    _UNITS_MEMO_FLOOR="${TMPDIR:-/tmp}/bionic-units-floor-$$-${RANDOM}${RANDOM}"; own=1
+  if [ -z "$_UNITS_MEMO_FLOOR" ] && bionic_need root.sh bionic_new && bionic_new "${TMPDIR:-/tmp}/bionic-units-floor"; then
+    _UNITS_MEMO_FLOOR="$BIONIC_NEW"; own=1
   fi
   shift
   "$@"; rc=$?
-  [ -z "$own" ] || [ ! -e "$_UNITS_MEMO_FLOOR" ] || rm -f "$_UNITS_MEMO_FLOOR"
-  [ ! -e "$_UNITS_MEMO_WAITS" ] || rm -f "$_UNITS_MEMO_WAITS"
+  set -- ${own:+"$_UNITS_MEMO_FLOOR"} ${_UNITS_MEMO_WAITS:+"$_UNITS_MEMO_WAITS"}
+  [ "$#" -eq 0 ] || rm -f "$@"
   return "$rc"
 }
 
