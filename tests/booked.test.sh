@@ -10,7 +10,8 @@
 #
 #   §DETACH  AC-3.1, AC-3.6, AC-3.8 — the run survives its caller's group and ends `rc=<n>`; its
 #            place is held by the detached pid until the end; the stamp, the end and the roster
-#            record are written with nobody waiting; the progress file is exported.
+#            record are written with nobody waiting; the progress file is exported; the caller's hold
+#            (BIONIC_HELD) is not handed to the run.
 #   §LOG2    AC-3.4 — a second attempt writes `…-2.log` and never truncates the first.
 #   §WAIT-CALLER  (T12; A-orch-7) the caller waits on its run: the log's lines on stdout, the progress
 #            line on stderr, the run's own code; a re-run of a live run attaches; LOST exits 70.
@@ -188,6 +189,19 @@ DX_LOG="$(bk_started dx log)"
 bk_kill_group "$BK_PG"
 expect_true "DT.24 a command that exits 3 still ends its log with an rc line" bk_wait 20 bk_last_rc "$DX_LOG"
 expect_eq "DT.25 …and that line is rc=3" "rc=3" "$(tail -n 1 "$DX_LOG" 2>/dev/null)"
+
+# A detached run outlives the command that started it, and that command removes its hold (lib/proof.sh
+# `proof_hold_end`) when it ends, so the run never shares it: a hold the caller names in BIONIC_HELD is not in the
+# run's environment, while a variable exported beside it is.
+export BIONIC_HELD="$D/bionic-held-$$.fixture" BK_KEPT=kept
+bk_caller hd "$T1" --detach --agent wx-T2 --suites probe-h.test.sh -- "printf '%s|%s' \"\${BK_KEPT-unset}\" \"\${BIONIC_HELD-unset}\" > '$D/hd.saw'"
+unset BIONIC_HELD BK_KEPT
+bk_wait 10 bk_grep '^booked: started ' "$D/hd.out"
+HD_LOG="$(bk_started hd log)"
+bk_kill_group "$BK_PG"
+expect_true "DT.26 a detached run started from inside a held command ends its log with an rc line" bk_wait 20 bk_last_rc "$HD_LOG"
+expect_contains "DT.26b …its command saw the variable the caller exported beside the hold" "kept|" "$(cat "$D/hd.saw" 2>/dev/null)"
+expect_eq "DT.27 …and did not see the caller's hold" "kept|unset" "$(cat "$D/hd.saw" 2>/dev/null)"
 
 # =====================================================================================
 section "§LOG2 — a second attempt writes …-2.log and never truncates the first (AC-3.4)"
