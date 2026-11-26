@@ -432,6 +432,51 @@ expect_true "HL-3 a hand landing whose ready says none, with no verdict recorded
 printf 'line/v1|ev=verdict|row=T8|commit=%s|suite=b.test.sh|result=green|log=/fixture/T8.log|at=2026-10-12T12:32:00Z\n' "$OD_R2" >> "$(od_lrec)"
 expect_eq "HL-4 …and covered once the verdicts the row recorded name a green suite at the row head" "covered" "$(od_state)"
 
+# ============================================================
+section "§POINT-PROOF — a point's run is a proof of its own kind: run beside a later open row, it never proves the head"
+# ============================================================
+# The point T3 follows T1; T7, a later build, is open. The whole run is refused for T7; the point's run is not, and its log
+# and proof are its own kind's. A landing past it, green on its own suites, leaves the integrate row's regression wait
+# unmet and the judge owing a whole run; the same run recorded as a regression proof would meet both (the control).
+# FIXTURE FIDELITY: §WHOLE-RUN's repository, runner and verbs; the landing past the point in its writers' shapes, as FX-3.
+# fails-when: the point's run is refused for the later open row, written as the head's whole run, or read as the head's proof.
+OD_PH="$(od_git rev-parse HEAD)"
+od_prows() {  # <regression row status> -> the point's page: T1 landed, the point T3 after it, T7 a later build, the
+  # regression row, the integrate row
+  od_row T1 4 build 'the lib writer' implementor lib/b.sh landed 'approval:plan'
+  od_row T3 4 test 'the whole run after T1 · point' test-runner .bionic/docs/record/w/T3.md pending 'T1'
+  od_row T7 4 build 'a later build' implementor lib/c.sh pending 'T3'
+  od_row T2 5 test 'the whole regression' test-runner — "$1" 'approval:plan'
+  od_row T5 8 integrate 'merge into main' orchestrator — pending 'approval:release, approval:merge'
+}
+od_plan 5 '' "$(od_prows pending)"
+od_poke regression-run
+expect_eq "PP-0 control: the whole run beside the open later row T7 is refused (exit 1), naming it" "1|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'T7 (step 4, pending)' && echo yes)"
+od_poke regression-run --point T3
+expect_eq "PP-1 the point's run beside the same open row runs (exit 0) and keeps its own log, no whole run's" "0|yes|0" \
+  "$OD_RC|$([ -f "$OD_REC/point-run-T3-$OD_PH.log" ] && echo yes)|$(find "$OD_REC" -name "regression-run-$OD_PH*.log" | wc -l | tr -d ' ')"
+[ "$OD_RC" = 0 ] || printf '      the verb said: %s\n' "$OD_OUT"
+od_poke proof-add point "$OD_RL/point-run-T3-$OD_PH.log"
+OD_PPL="$(bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_lines "$2"' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null | /usr/bin/grep '^proved: kind=point ' || :)"
+expect_eq "PP-2 …and proof-add point records it as a point's proof naming its row, at the head it ran (exit 0)" "0|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_PPL" | /usr/bin/grep -q "head=$OD_PH .*point=T3" && echo yes)"
+printf 'four\n' > "$OD/lib/c.sh"; od_git add lib/c.sh; od_git commit -qm 'T7: the later build'; OD_PC="$(od_git rev-parse HEAD)"
+{ printf 'line/v1|ev=ready|row=T7|suites=tests/a.test.sh,tests/b.test.sh|at=2026-10-13T12:00:00Z\n'
+  printf 'line/v1|ev=published|row=T7|commit=%s|at=2026-10-13T12:10:00Z\n' "$OD_PC"
+  for od_s in a.test.sh b.test.sh; do
+    printf 'line/v1|ev=verdict|row=T7|commit=%s|suite=%s|result=green|log=/fixture/T7.log|at=2026-10-13T12:05:00Z\n' "$OD_PC" "$od_s"
+  done; } >> "$(od_lrec)"
+# The regression row lands here, so the integrate row's regression wait turns on the proof alone; the point's proof stays.
+printf 'run/v1|ev=published|row=T2|at=2026-10-13T12:20:00Z\n' >> "$OD_REC/run.log"; seal_fixture "$OD_PLAN" "$OD_REC/run.log"
+od_regw() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && . "$1/units.sh" && units_waiting "$2" 8' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null | awk -F'\t' '$1 == "T5" && $2 == "proof:regression" { print "unmet"; exit }'; }
+od_whole() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_whole_text "$2" "$3"' _ "$OD_LIB" "$OD_PLAN" "$OD" 2>/dev/null; }
+expect_eq "PP-3 a green point run and a landing past it: the integrate row's regression wait is unmet, the judge owes a whole run" \
+  "unmet|uncovered|none" "$(od_regw)|$(od_state)|$(od_whole)"
+od_plan 5 "run/v1|ev=proof|kind=regression|head=$OD_PH|evidence=$OD_RL/point-run-T3-$OD_PH.log|at=2026-10-13T11:00:00Z" "$(od_prows landed)"
+expect_eq "PP-4 control: the same run recorded as a regression proof is the head's proof past the landing, so PP-3 reads the kind" \
+  "|covered" "$(od_regw)|$(od_state)"
+
 section "§HL — a ready line's none is no suite at every landing kind, so a hand and a queue landing of one row read alike"
 # ============================================================
 # A queue ready writes `suites=none` for a row that lands on no suite, and so does a hand ready. The landing-record fold maps

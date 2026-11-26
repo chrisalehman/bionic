@@ -1590,6 +1590,45 @@ expect_eq "ST-14 AC-10.2 the one open writer is T9's, whose row waits on the reg
 [ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
 rm -f "$ST_CTL/hold"
 expect_true "ST-14b …and its run ends" st_until 60 st_ended "$(st_log "${ST_H4:0:8}")"
+
+# ============================================================
+section "§POINT-ASKED: a point whose rows have landed is run by the tick while a later build is open, and the tick lands it"
+# ============================================================
+# The point T11 follows T7 and T8, both landed; T10, a later build, is under way with its writer open, which declines a whole
+# run. The tick starts the point's run as `point-T11@<h8>` all the same, its proof lands through proof-add point, and the
+# next tick lands the point's row on that proof.
+# FIXTURE FIDELITY: §STARTER's repository, runner, roster and verbs, the two rows added by an edit as st_row adds them.
+# fails-when: the tick asks the whole run's declines of a point (no start beside T10's open writer); the detached call
+# records no point proof; the row is left unlanded on its proof, or landed by the regression row's rule.
+st_row '| T11 | 4 | test | the whole run after T7 and T8 · point | T7, T8 | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/T11.md | — |'
+st_row '| T10 | 4 | build | a build after the point | — | 30 | REQ-1 | g.sh | — |'
+st_dispatched T10 w-T10 6
+add_row "$RST" name=w-T10 agent_id=a-w-T10 subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$RST/record/T10.md" duration=60m
+ST_H5="$(s57_commit "$ST_WT" lib/e.sh H5)"
+forget_digest "$RST"; poke "$RST" tick
+expect_contains "PA-1 T7 and T8 landed, T10's writer open: the tick starts the point's run as point-T11@<h8>" \
+  "poker: regression-run started point-T11@${ST_H5:0:8} " "$(st_started)"
+[ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
+expect_eq "PA-1b …and starts no whole run beside it" "0" "$(st_started | /usr/bin/grep -c "regression@" || :)"
+ST_PLOG="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p' | head -n 1)"
+expect_true "PA-2-pre the point's detached run ends" st_until 60 st_ended "${ST_PLOG:-$TMPROOT/none}"
+# A run the gate did not admit ends 75 and the next tick starts it again, as ST-7 holds for the whole run; a loaded
+# machine can meet that here, so up to two such retries are taken before the proof is read.
+for st_try in 1 2; do
+  [ "$(cat "${ST_PLOG:-$TMPROOT/none}.rc" 2>/dev/null)" = 75 ] || break
+  forget_digest "$RST"; poke "$RST" tick
+  ST_PLOG="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p' | head -n 1)"
+  st_until 60 st_ended "${ST_PLOG:-$TMPROOT/none}" || break
+done
+expect_eq "PA-2 …and its proof is the point's own kind, naming T11, at the head it ran" "1" \
+  "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=point head=$ST_H5 .*point=T11" || :)"
+[ "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=point head=$ST_H5 " || :)" = 1 ] \
+  || { printf '      the run ended rc=%s; its log:\n' "$(cat "${ST_PLOG:-$TMPROOT/none}.rc" 2>/dev/null)"; sed -n '1,40p' "${ST_PLOG:-$TMPROOT/none}" 2>/dev/null; }
+expect_eq "PA-2b …never a regression proof at that head" "0" "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H5 " || :)"
+forget_digest "$RST"; poke "$RST" tick
+expect_contains "PA-3 the next tick lands the point's row on its proof" "poker: LANDED T11 — " "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: LANDED T11 ' || :)"
+expect_eq "PA-3b …once: the run's log holds one landing of T11" "1" \
+  "$(/usr/bin/grep -c '|ev=published|row=T11|' "$(st_rec)" 2>/dev/null || :)"
 POKE_BOUND="$ST_BOUND_WAS"
 
 

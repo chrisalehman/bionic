@@ -357,14 +357,15 @@ units_row_back() {
   [ -z "$nm" ] || units_dispatch_back "$plan" "$row" "$nm" || return 2
 }
 
-# units_born_event <plan> <row> [<reason>] [<finding>] [promoted] -> the row's birth appended to its run's log: one
-# `born` event, the reason the words a born marker carried (`review S<n> <reach>`, `regression <suite>`), the finding its
-# `of=` list, and `promoted=yes` for a finding the person moved to fix from outside the policy, which the fix-cap counts.
+# units_born_event <plan> <row> [<reason>] [<finding>] [promoted] [<point>] [<rows>] -> the row's birth appended to its run's
+# log: one `born` event, the reason the words a born marker carried (`review S<n> <reach>`, `regression <suite>`), the finding
+# its `of=` list, `promoted=yes` for a finding the person moved to fix from outside the policy, which the fix-cap counts, and
+# for a red of a whole-run point's run, `point=` the point and `rows=` the rows it follows, comma-joined.
 # THE ONE WRITER OF A BORN ROW: the plan carries the row and nothing of how it was born. 2 no log to write.
 units_born_event() {
   local log
   bionic_need reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && bionic_need log.sh log_append || return 2
-  RUN_LOG="$log" log_append born "row=${2:-}" ${3:+"reason=$3"} ${4:+"finding=$4"} ${5:+promoted=yes}
+  RUN_LOG="$log" log_append born "row=${2:-}" ${3:+"reason=$3"} ${4:+"finding=$4"} ${5:+promoted=yes} ${6:+"point=$6"} ${7:+"rows=$7"}
 }
 
 # units_drop_event <plan> <row> <the person's words> -> the row's work no longer owed: one `drop` event in its run's log,
@@ -1009,6 +1010,21 @@ _units_landed() {
 # full run: a run now proves a head these rows are about to move.
 units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 
+# units_points <plan> [<id>] -> `<id><TAB><status>` for each whole-run point of the plan, a test row its task cell marks
+# (`marked`, the mark's one spelling), table order; with <id>, that row alone, and rc 1 when it is no point.
+units_points() {
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' -v want="${2:-}" "$(_units_cell_awk)"'
+    $3 == "test" && marked($4) && (want == "" || $1 == want) { printf "%s\t%s\n", $1, $10; f = 1 }
+    END { exit (want != "" && !f) }'
+}
+
+# units_point_rows <plan> <id> -> the rows the point <id> follows, comma-joined, in the order its waits name them: the rows
+# its deps cell names (lib/plan-read.sh `plan_read_waits`), since a point waits on nothing by its kind but the approval.
+units_point_rows() {
+  bionic_need plan-read.sh plan_read_waits || return 2
+  plan_read_waits "${1:-}" "${2:-}" 2>/dev/null | awk -F'\t' '$2 == "row" { printf "%s%s", (n++ ? "," : ""), $3 }'
+}
+
 # units_approval_names <plan> [<id>] -> each approval an OPEN row waits on, `approval:<name>` among its waits, once, sorted.
 # With <id>, row <id>'s alone, the reader asked for that row only, and a failure of the table's read or of the reader is
 # returned with its exit, so an asker that must not take a failure for "none" hears it; with none, a failure answers
@@ -1494,7 +1510,7 @@ _units_sched_awk() {
     $0 == SUBSEP "proofs" { part = 4; next }
     part == 1 {
       if ($1 == "") next
-      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10
+      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; tsk[n] = $4; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10
       at[$1] = n
       next
     }
@@ -2007,10 +2023,12 @@ _units_sched_awk() {
       # THE REGRESSION HOLDS (T52; review 14 B1, R1): every writer the regression row (want, or each open
       # verify or test row when want is empty) waits on through judge, kept when it has not
       # landed and writes the tracked tree. judge never names a row downstream of the regression.
+      # A POINT IS ASKED BY ITS ID ALONE: its run is held by the rows it follows, and the whole run is never held by an
+      # open point, whose rows are earlier ones.
       if (mode == "holds") {
         for (i = 1; i <= n; i++) {
           if (want != "") { if (id[i] != want) continue }
-          else if (!(isopen(i) && (knd[i] == "verify" || knd[i] == "test"))) continue
+          else if (!(isopen(i) && (knd[i] == "verify" || knd[i] == "test") && !(knd[i] == "test" && marked(tsk[i])))) continue
           for (k = 1; k <= ntk[i]; k++) {
             if (judge(i, tk[i, k])) continue
             for (w = 1; w <= nw; w++) {

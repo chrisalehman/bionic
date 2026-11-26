@@ -228,7 +228,8 @@ plan_read_criterion_faults() {
 # row id is that row, itself included, so a row that waits on itself waits for ever; a path is each other
 # row whose Files write it, so a row's artifact is that row; `head` is each other row writing the tracked
 # tree that does not read head itself or stands at an earlier step, `record` the same over the record;
-# `merge` each integrate row; `proof:<kind>` each row of the kind that writes one, and the proof itself.
+# `merge` each integrate row; `proof:<kind>` each row of the kind that writes one, and the proof itself. A whole-run point
+# writes a proof of its own kind, never the regression's, so it is no writer of `proof:regression`.
 # `live:` is read as what it prefixes, and a row reading `live:head` does not read the settled head, so it
 # still writes it for the rows that do. An integrate or close row also waits for the run to reach its step
 # (`step:<n>`). A path's writers are found once per path, from each row's Files entries split once.
@@ -303,7 +304,7 @@ plan_read_waits() {
           } else if (t == "merge") {
             for (j = 1; j <= n; j++) if (j != i && knd[j] == "integrate") row(j, o)
           } else if (t ~ /^proof:/) {
-            for (j = 1; j <= n; j++) if (j != i && (p == "regression" && (knd[j] == "verify" || knd[j] == "test") || p == "review" && knd[j] == "review")) row(j, o)
+            for (j = 1; j <= n; j++) if (j != i && (p == "regression" && (knd[j] == "verify" || knd[j] == "test" && !marked(tsk[j])) || p == "review" && knd[j] == "review")) row(j, o)
           } else if (t !~ /[ \t:!]/ && t ~ /[\/.*?]/) {
             m = split(writers(t), w, " "); for (x = 1; x <= m; x++) if (w[x] != i) row(w[x], o)
           }

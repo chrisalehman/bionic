@@ -39,6 +39,8 @@
 #              whole run's open-row refusal as before
 #   §POINT-MARK  a test row marked ` · point` waits on its deps alone and is never the regression row; the validator
 #              admits the mark on a test row at step 5 or earlier only
+#   §POINT-RUN   a point's run is held by its own rows; an open point holds no whole run and writes no regression proof
+#   §POINT-RED   a suite red in a point's run is born as a fix row whose birth names the point and the rows it follows
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
@@ -1118,6 +1120,46 @@ pt T1 4 build 'b1 · point' — a.sh T3 6 test 'the floor · point' T1 record/pt
 expect_eq "PM-5 the mark on a build row, or on a test row past step 5, is refused naming the row (rc 1)" \
   "T1: task marks a whole-run point; only a test row is a point T3: task marks a whole-run point at step 6; a point stands among the build, at step 5 or earlier|1" \
   "$(call units_validate "$PT" | paste -sd' ' -)|$(call_rc units_validate "$PT")"
+
+section "§POINT-RUN — a point's run is held by the point's own rows; an open point holds no whole run and writes no regression proof"
+# fails-when: the one reader of the mark answers a row that is no point; rule 2 of a point's run asks rows the point does not
+# follow; the whole run's refusal asks an open point's rows; the integrate row's regression wait counts the point a writer.
+# T1 has landed (the page's log); T2 is open, T3 is the point after T2, T7 a later build waiting on it, T8 the regression row.
+pt T1 4 build b1 — a.sh T2 4 build b2 — b.sh T3 4 test 'the whole run after T2 · point' T2 record/pt/T3.md T7 4 build b3 T3 c.sh T8 5 test reg — record/pt/T8.md "${PT_TAIL[@]}"
+expect_eq "PR-1 the reader of the mark names the point T3 with its status, and only it (T8, a plain test row, is none: rc 1)" \
+  "$(printf 'T3\tpending')|$(printf 'T3\tpending')|1" "$(call units_points "$PT")|$(call units_points "$PT" T3)|$(call_rc units_points "$PT" T8)"
+expect_eq "PR-2 the point's run is held by T2 alone, the row it follows, while the later build T7 is open too" \
+  "T2" "$(call units_floor_holds "$PT" T3 | cut -f1 | paste -sd' ' -)"
+pr_regw() { call plan_read_waits "$PT" "$1" | awk -F'\t' '$2 == "row" && index("," $4 ",", ",proof:regression,") { printf "%s%s", (n++ ? " " : ""), $3 }'; }
+expect_eq "PR-3 the integrate row's regression wait names the regression row T8 as its writer, never the point T3" "T8" "$(pr_regw T6)"
+pt T1 4 build b1 — a.sh T2 4 build b2 — b.sh T3 4 test 'the whole run after T2 · point' T2 record/pt/T3.md "${PT_TAIL[@]}"
+expect_eq "PR-4 a page whose only test row is an open point: its run is held by T2, and the whole run's refusal holds nothing for it" \
+  "T2|" "$(call units_floor_holds "$PT" T3 | cut -f1 | paste -sd' ' -)|$(call units_floor_holds "$PT" "" | cut -f1 | paste -sd' ' -)"
+
+section "§POINT-RED — a suite red in a point's run is born as a fix row whose birth names the point and the rows it follows"
+# fails-when: a red the point's proof owes backs no born row; the birth names no point, or not the rows the point follows; a
+# suite the point's proof does not owe is admitted.
+# FIXTURE FIDELITY: §DEBT's planted plan at 15 with a point row T3 after T1 and T2, its proof in the run's log as proof-add
+# point writes it (kind=point, the point's row, the red suite owed); task-add is the real verb, as this session.
+PRD_R="$(db_repo point-red)"; PRD_H="$(git -C "$PRD_R" rev-parse HEAD)"
+PRD_P="$(db_plan "$PRD_R" 4 '| T3 | 4 | test | the whole run after T1 and T2 · point | T1, T2 | 30 | REQ-1 | .bionic/docs/record/wave-01-debt/T3.md | — |' \
+  "proof|kind=point|head=$PRD_H|evidence=$DB_OWN/point-run-T3-$PRD_H.log|owed=b.test.sh|point=T3")"
+prd_poke() {  # <id> <suite> -> DB_OUT, DB_RC: a step-4 build row an edit adds, then task-add of it born of <suite>'s red
+  awk -v r="| $1 | 4 | build | Fix $2. It is green again. · born: regression | — | 30 | REQ-1 | lib/$1.sh | — |" '{ print } /^\| T3 \|/ { print r }' "$PRD_P" > "$PRD_P.t" && mv "$PRD_P.t" "$PRD_P"
+  DB_RC=0; DB_OUT="$(cd "$PRD_R" && env CLAUDE_CODE_SESSION_ID="$DB_SID" HOME="$DB_ROOT/home" CLAUDE_CONFIG_DIR="$DB_ROOT/config" \
+    BIONIC_GATE_DIR="$DB_ROOT/gate" BIONIC_PLUGINS_DIR="$DB_ROOT/no-plugins" bash "$DB_POKER" task-add "$1" --born "regression:$2" 2>&1)" || DB_RC=$?
+}
+prd_born() { { /usr/bin/grep -F "|ev=born|row=$1|" "$PRD_R/.bionic/docs/$DB_OWN/run.log" || :; } | sed -e 's/^run\/v1//' -e 's/|at=.*//'; }   # <id> -> its born event
+prd_poke T6 b.test.sh
+expect_eq "PRD-1 task-add born of b.test.sh, which the point's proof owes, exits 0" "0" "$DB_RC"
+[ "$DB_RC" = 0 ] || printf '      the verb said: %s\n' "$DB_OUT"
+expect_eq "PRD-2 …and its birth names the point's red, the point and the rows it follows" \
+  "|ev=born|row=T6|reason=regression b.test.sh|finding=point@${PRD_H:0:12}|point=T3|rows=T1,T2" "$(prd_born T6)"
+expect_contains "PRD-3 …and the verb says which point's run it fixes" "a red of the run of point T3, after T1, T2" "$DB_OUT"
+prd_poke T7 a.test.sh
+expect_eq "PRD-4 a suite the point's proof does not owe backs no birth: refused (exit 1), and no born event for T7 (PRD-2 read it for T6)" \
+  "1|" "$DB_RC|$(prd_born T7)"
+
 section "§HELD — inside a held command the table's answer and the status pass are kept for the command, keyed by what they read"
 # fails-when: a read inside a held command is not served the command's one read (the count grows), or a plan edited or a
 # fact of a row set during the command is served the answer kept before it (a stale read), or anything is kept outside a

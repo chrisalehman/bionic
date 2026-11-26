@@ -650,7 +650,7 @@ command: %s
       exit 0
     fi
     if ! proof_kind_ok "$PF_KIND"; then
-      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name regression, review, task or walk (or proof-add inherited <suite>). The plan is unchanged."
+      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name regression, point, review, task or walk (or proof-add inherited <suite>). The plan is unchanged."
       exit 1
     fi
     # A CHECK FACT IS WRITTEN BY THE VERB THAT RAN THE CHECK (wave-27 T16; D12): a log handed in
@@ -895,7 +895,21 @@ PF_OTHER_LIST
     # grammar (lib/proof.sh `_proof_floor_log`), the first refusal is the verb's, and logs that read different heads
     # are refused naming each, for a floor is the runs of one head. The owed reds are the union of each log's.
     PF_OWED=""
-    if [ "$PF_KIND" = regression ]; then
+    # A POINT'S RUN IS READ BY THE SAME GRAMMAR, ONE LOG, its row the one the log's name carries
+    # (`point-run-<row>-<head>[-<n>].log`, regression-run --point's), which must be an open point of the plan.
+    PF_POINT=""
+    case "$PF_KIND/$PF_EVIDS" in regression/point-run-*|regression/*/point-run-*|regression/*$'\n'point-run-*)
+      die "REFUSED — a point's run is never the head's whole run, so its log is recorded with proof-add point <log>, not as a regression. The plan is unchanged."
+      exit 1 ;;
+    esac
+    if [ "$PF_KIND" = point ]; then
+      PF_POINT="$(printf '%s' "${PF_REL##*/}" | sed -nE 's/^point-run-([A-Za-z0-9._]+)-[0-9a-f]{40}(-[0-9]+)?\.log$/\1/p')"
+      if [ -z "$PF_POINT" ] || ! plan_verb_id_ok "$PF_POINT" || ! units_points "$PV_PLAN" "$PF_POINT" >/dev/null 2>&1; then
+        die "REFUSED — $(clean "$PF_REL") is no point's run of $PV_PLAN: a point's proof cites the log regression-run --point <row> wrote, record/<wave>/point-run-<row>-<head>.log, for a test row whose task cell carries ' · point'. The plan is unchanged."
+        exit 1
+      fi
+    fi
+    if [ "$PF_KIND" = regression ] || [ "$PF_KIND" = point ]; then
       PF_FH=""; PF_FHEADS=""; PF_FRELS=""; PF_SPLIT=""; PF_RUNAT=""; PF_RUNRC=""
       while IFS='	' read -r _pf_real _pf_rel; do
         [ -n "$_pf_real" ] || continue
@@ -975,10 +989,11 @@ PF_PAIRS_LIST
     # A RED WHOLE RUN'S REDS RIDE ON ITS PROOF: proof_attested took each log and every red
     # named; the proof lists them as owed, and the judge reads them there. Its evidence= is the logs, comma-joined (T35),
     # and it names the recorded run it read.
-    if [ "$PF_KIND" = regression ]; then
+    if [ "$PF_KIND" = regression ] || [ "$PF_KIND" = point ]; then
       [ -z "$PF_OWED" ] || PF_EV+=("owed=$PF_OWED")
       [ -z "$PF_RUNAT" ] || PF_EV+=("run=$PF_RUNAT")
       [ -z "$PF_RUNRC" ] || PF_EV+=("rc=$PF_RUNRC")
+      [ -z "$PF_POINT" ] || PF_EV+=("point=$PF_POINT")
     fi
     # THE PROOF IS READ AS STANDING BY EVERY READ BELOW, and appended only once nothing is left to refuse.
     if ! proof_pending "${PF_EV[@]}"; then
@@ -1628,15 +1643,23 @@ DSP_READINGS
   # WHO STARTED IT is written on the run line as `starter=`: the tick or the orchestrator (the default) is the machine,
   # and a person is a hand-hold, so `--starter person` carries the person's `--reason`, kept on the same line; the
   # hand-holds count reads it (hooks/poker/line.sh `hand_holds_report`).
+  # A WHOLE-RUN POINT'S RUN (`--point <row>`): the same run at the same head, asked by a point's row, a test row its task
+  # cell marks (lib/units.sh `units_points`). Rule 2 asks the point's own rows alone, so a later row still open is no
+  # reason; rule 3 asks only that no whole run is running and no run of this point has its log at this head; the full
+  # pass is not asked, for the point's row lands on its own run. Its log is `record/<wave>/point-run-<row>-<head>.log`,
+  # never a whole run's, its run line names the point, and it folds no verdict: `proof-add point` records it as a proof
+  # of its own kind, which never proves the head.
   poker_verb_regression_run() {
-    FR_STARTER=orchestrator; FR_REASON="";
+    FR_STARTER=orchestrator; FR_REASON=""; FR_POINT=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --starter) [ $# -ge 2 ] || usage "regression-run --starter takes one of tick, orchestrator or person."
           FR_STARTER="$2"; shift 2 ;;
         --reason) [ $# -ge 2 ] || usage "regression-run --reason takes the person's reason, in quotes."
           FR_REASON="$2"; shift 2 ;;
-        *) usage "regression-run takes only --starter <tick|orchestrator|person> and, with person, --reason '<why>': it runs .bionic/config.yaml's regression-command: command, else tests/run.sh, at the working branch's head." ;;
+        --point) [ $# -ge 2 ] && plan_verb_id_ok "$2" || usage "regression-run --point takes one row id, the point's."
+          FR_POINT="$2"; shift 2 ;;
+        *) usage "regression-run takes only --starter <tick|orchestrator|person>, with person --reason '<why>', and --point <row>: it runs .bionic/config.yaml's regression-command: command, else tests/run.sh, at the working branch's head." ;;
       esac
     done
     case "$FR_STARTER" in
@@ -1684,6 +1707,27 @@ DSP_READINGS
     FR_WAVE="$(proof_plan_slug "$PV_PLAN")"
     FR_DOCS="$(docs_root "$PV_REPO")"
     FR_WHOLE=""
+    if [ -n "$FR_POINT" ]; then
+      FR_PST="$(units_points "$PV_PLAN" "$FR_POINT" 2>/dev/null | cut -f2)"
+      if [ -z "$FR_PST" ]; then
+        die "REFUSED — $FR_POINT is no whole-run point of $PV_PLAN: a point is a test row whose task cell carries ' · point'; name one: regression-run --point <row>. Nothing was run."
+        exit 1
+      fi
+      case "$FR_PST" in pending|active) : ;; *)
+        die "REFUSED — the point $FR_POINT reads $(clean "$FR_PST"), and only an open point is run; the whole run after the last build row is regression-run with no --point. Nothing was run."
+        exit 1 ;;
+      esac
+      FR_OPEN="$(units_floor_holds "$PV_PLAN" "$FR_POINT" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s (step %s, %s)", (n++ ? ", " : ""), $1, $2, $3 }')"
+      if [ -n "$FR_OPEN" ]; then
+        die "REFUSED — rows the point $FR_POINT follows still write tracked files: $FR_OPEN; its run comes once they have landed: regression-run --point $FR_POINT then. Nothing was run."
+        exit 1
+      fi
+      for _fr_l in "$FR_DOCS/record/$FR_WAVE/point-run-$FR_POINT-$FR_HEAD"*.log; do
+        [ -f "$_fr_l" ] || continue
+        die "REFUSED — the point $FR_POINT has its run at ${FR_HEAD:0:12}: ${_fr_l#"$FR_DOCS"/}; record it with proof-add point. Nothing was run."
+        exit 1
+      done
+    fi
     FR_RUNNING="REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and its log is this head's whole run once it ends. Nothing was run; if it ends 75, the gate never admitted it: run regression-run again then."
     if [ -z "$FR_CMD" ]; then
       if [ ! -f "$FR_CO/tests/run.sh" ]; then
@@ -1696,8 +1740,8 @@ DSP_READINGS
         die "REFUSED — the plan declares regression: no (Step 0), so it owes no whole run, and no approval overrides the setting; put it to the user and change it with: bash ${HOOK_DIR}/session-poker.sh regression yes '<the user's reply>'. Nothing was run."
         exit 1
       fi
-      # RULE 2. A row the regression waits on still writes the head.
-      FR_OPEN="$(units_floor_holds "$PV_PLAN" "" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s (step %s, %s)", (n++ ? ", " : ""), $1, $2, $3 }')"
+      # RULE 2. A row the regression waits on still writes the head (a point's, asked above).
+      FR_OPEN=""; [ -n "$FR_POINT" ] || FR_OPEN="$(units_floor_holds "$PV_PLAN" "" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s (step %s, %s)", (n++ ? ", " : ""), $1, $2, $3 }')"
       if [ -n "$FR_OPEN" ]; then
         die "REFUSED — rows the regression waits on still write tracked files: $FR_OPEN; the whole run comes once, after the last of them lands, or it proves a head that does not survive their landing. Nothing was run."
         exit 1
@@ -1705,7 +1749,9 @@ DSP_READINGS
       # RULE 3. ONE WHOLE RUN AT A HEAD. A log of tests/run.sh at this head refuses another: a red is a fix row's, its
       # own suites plus the red one, and the next whole run is at the head its landing makes. A whole run still running
       # in the checkout refuses one too: a second would wait behind it at the gate to prove the same head.
-      if whole_run_at_head "$FR_DOCS" "$FR_WAVE" "$FR_HEAD" "$FR_CO" tests/run.sh; then
+      if [ -n "$FR_POINT" ]; then
+        if declare -F gate_whole_open >/dev/null 2>&1 && gate_whole_open "$FR_CO"; then die "$FR_RUNNING"; exit 1; fi
+      elif whole_run_at_head "$FR_DOCS" "$FR_WAVE" "$FR_HEAD" "$FR_CO" tests/run.sh; then
         if [ -n "$WRA_LOG" ]; then
           die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: $WRA_LOG. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
         else
@@ -1715,7 +1761,7 @@ DSP_READINGS
       fi
       # A head the last full pass still proves is not run again: nothing a suite runs differs from the pass, so a run here
       # proves what is proved, and the next whole run is at the head a landing of code makes. The printer is the one reader.
-      FR_GREEN="$(proof_whole_text "$PV_PLAN" "$FR_CO" "$FR_HEAD" 2>/dev/null)"
+      FR_GREEN=""; [ -n "$FR_POINT" ] || FR_GREEN="$(proof_whole_text "$PV_PLAN" "$FR_CO" "$FR_HEAD" 2>/dev/null)"
       case "$FR_GREEN" in
         "green at "*", "*)
           FR_PASS="record/$FR_WAVE/regression-run-$(proof_last "$PV_PLAN" regression 2>/dev/null).log"
@@ -1811,8 +1857,9 @@ DSP_READINGS
       die "REFUSED — the regression ($(clean "$FR_CMD")) moved the working checkout $FR_CO while it ran ($FR_MOVED); no log was written. Put back what it changed and run regression-run again."
       exit 1
     fi
-    FR_REL="record/$FR_WAVE/regression-run-$FR_HEAD.log"; FR_NTH=1
-    while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/regression-run-$FR_HEAD-$FR_NTH.log"; done
+    FR_STEM="regression-run"; [ -z "$FR_POINT" ] || FR_STEM="point-run-$FR_POINT"
+    FR_REL="record/$FR_WAVE/$FR_STEM-$FR_HEAD.log"; FR_NTH=1
+    while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/$FR_STEM-$FR_HEAD-$FR_NTH.log"; done
     FR_LOG="$FR_DOCS/$FR_REL"
     if ! mkdir -p "${FR_LOG%/*}" 2>/dev/null \
        || ! { printf 'head=%s dirty=%s\ncommand: %s\n' "$FR_HEAD" "$FR_DIRTY" "$FR_CMD"; awk '{ print }' "$FR_TMP"; printf 'rc=%s\n' "$FR_RC"; } > "$FR_LOG" 2>/dev/null; then
@@ -1828,13 +1875,13 @@ DSP_READINGS
     bionic_need line.sh line_event
     if [ -z "$FR_SHA" ] || ! declare -F line_event >/dev/null 2>&1 \
        || ! line_run_event "$(line_log "$PV_PLAN")" "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" \
-              "starter=$FR_STARTER" ${FR_REASON:+"reason=$FR_REASON"} 2>/dev/null; then
+              "starter=$FR_STARTER" ${FR_REASON:+"reason=$FR_REASON"} ${FR_POINT:+"point=$FR_POINT"} 2>/dev/null; then
       die "regression-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add regression will refuse this log as no recorded run."
     fi
     # THE REGRESSION'S FACTS (wave-39 T24; D9; ADR-061): a clean whole run folds into one verdict per suite at its head,
     # each keyed by the commit it ran at (lib/proof.sh `proof_regression_fold`). A run the gate never admitted returned
     # above; a dirty run proves no commit and folds nothing.
-    if [ -n "$FR_WHOLE" ] && [ "$FR_DIRTY" -eq 0 ] && ! proof_regression_fold "$PV_PLAN" "$FR_CO" "$FR_HEAD" "$FR_LOG" "$FR_REL" 2>/dev/null; then
+    if [ -n "$FR_WHOLE" ] && [ -z "$FR_POINT" ] && [ "$FR_DIRTY" -eq 0 ] && ! proof_regression_fold "$PV_PLAN" "$FR_CO" "$FR_HEAD" "$FR_LOG" "$FR_REL" 2>/dev/null; then
       say "regression-run — this run's per-suite facts could not be written to the plan's landing record; the judge reads the run's proof line at ${FR_HEAD:0:12} alone."
     fi
     if [ -n "$FR_WHOLE" ]; then
@@ -1844,8 +1891,13 @@ DSP_READINGS
       if [ "$FR_DIRTY" -ne 0 ]; then
         say "regression-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add regression refuses this log; commit and run regression-run again."
       else
-        [ "$FR_RC" -eq 0 ] || say "regression-run — a red whole run is the regression's candidate: proof-add regression records it with its red suites owed, each closed by a later landing that runs it green (a fix row)."
-        say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add regression $FR_REL"
+        if [ -n "$FR_POINT" ]; then
+          [ "$FR_RC" -eq 0 ] || say "regression-run — a red run of the point $FR_POINT: proof-add point records it with its red suites owed, each a fix row's (task-add <id> --born regression:<suite>)."
+          say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add point $FR_REL"
+        else
+          [ "$FR_RC" -eq 0 ] || say "regression-run — a red whole run is the regression's candidate: proof-add regression records it with its red suites owed, each closed by a later landing that runs it green (a fix row)."
+          say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add regression $FR_REL"
+        fi
       fi
       exit "$FR_RC"
     fi
@@ -1859,7 +1911,7 @@ DSP_READINGS
     if [ "$FR_DIRTY" -ne 0 ]; then
       say "regression-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add regression refuses this log; commit and run regression-run again."
     else
-      say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add regression $FR_REL"
+      say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add ${FR_POINT:+point}${FR_POINT:-regression} $FR_REL"
     fi
     exit 0
   }
