@@ -691,6 +691,7 @@ git-argv.test.sh | §Section 4 | keep | payload/scripts/lib/walls.sh wall_eviden
 git-argv.test.sh | §Section 4b | keep | payload/scripts/lib/git-argv.sh git_argv_expand: a `-c` string's command not expanded, so the push inside `bash -c "git push"` is missed (has_push rows) | none (searched 'git_argv_expand' in tests/)
 git-argv.test.sh | §Section 5 | keep | payload/scripts/lib/git-argv.sh git_branch_protected: the master arm deleted, so master answers no | none (searched 'git_branch_protected' in tests/)
 git-argv.test.sh | §Section 6 | keep | payload/scripts/lib/walls.sh _wall_mentions_git: a recognised form (env-prefixed or quoted git) screened out, so the screen short-circuits before the parser for that fixture | none (searched '_wall_mentions_git' in tests/; bash-walls.test.sh §2 drives only the backslash-newline form)
+git-argv.test.sh | §Section 7 | keep | payload/scripts/lib/git-argv.sh git_argv_split_off: globbing not turned back on, or IFS left on the separator, so the caller's next expansion globs or splits wrong (7a); or a split in git-argv.sh, grant.sh or walls.sh sets IFS to the separator by hand (7d) | none (searched 'git_argv_split_on' and 'GIT_ARGV_US' with 'set -f' in tests/)
 
 ## grant.test.sh
 
@@ -1366,6 +1367,7 @@ root.test.sh | §6 | keep | payload/scripts/lib/root.sh project_root: the git-to
 root.test.sh | §7 | keep | payload/scripts/lib/root.sh project_root: the cwd fallback dropped, so outside any repo with no .bionic the answer is empty (7) | none (searched 'cwd-fallback' in tests/)
 root.test.sh | §8 | keep | payload/scripts/lib/root.sh project_root: the bare-repository exception to the worktree map dropped, so a bare repo's checkout maps to dirname(bare.git) (8, 8b) | none (searched 'bare.git' in tests/)
 root.test.sh | §10 | keep | payload/scripts/lib/root.sh project_root: BIONIC_WORKTREE published from the branch name instead of the directory, so a branch named apart from its directory publishes the branch (10b); also the single rev-parse split in two (10c) | none (searched 'BIONIC_WORKTREE' in tests/)
+root.test.sh | §11 | keep | payload/scripts/lib/root.sh path_normal: the `..` arm keeps its segment, set -f dropped so a star globs, or the caller's globbing left changed (11a-11e); or hooks/canonical-sdlc-governing-skill.sh fold_dots or hooks/dispatch-preflight.sh resolve_in_repo folds with a loop of its own (11g) | none (searched 'path_normal', 'fold_dots' and 'resolve_in_repo' in tests/)
 
 ## roots.test.sh
 

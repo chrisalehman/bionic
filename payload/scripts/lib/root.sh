@@ -164,6 +164,27 @@ _bionic_root_abs() {
   ( cd "$p" 2>/dev/null && pwd -P ) || printf '%s\n' "$p"
 }
 
+# path_normal <absolute path> -> PATH_NORMAL: `.`, `..` and doubled slashes folded LEXICALLY
+# (`<link>/..` is the link's parent: a wall asks which tree a path names), `/` when none is left.
+# A `*` is a character, so globbing is off for the split; the caller's state is kept.
+PATH_NORMAL=""
+path_normal() {
+  local part had_f=0
+  case "$-" in *f*) had_f=1 ;; esac
+  set -f
+  PATH_NORMAL=""
+  local IFS=/
+  for part in $1; do
+    case "$part" in
+      ''|.) ;;
+      ..)   PATH_NORMAL="${PATH_NORMAL%/*}" ;;
+      *)    PATH_NORMAL="$PATH_NORMAL/$part" ;;
+    esac
+  done
+  [ "$had_f" -eq 1 ] || set +f
+  PATH_NORMAL="${PATH_NORMAL:-/}"
+}
+
 # _bionic_root_is_home_or_above <path> <home> -> 0 when <path> is <home> or an
 # ancestor of it. Rule 4. The pattern half of the `case` is quoted, so a path
 # carrying a glob character is compared literally.

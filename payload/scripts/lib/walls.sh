@@ -863,27 +863,23 @@ _eg_path_fold() {
 # COMMAND that only the caller can act on, and a command substitution would leave it in a subshell.
 _EG_MOVING=""
 _eg_commit_cwd() {
-  local _line _oldifs _hadf _p _c _gc
+  local _line _p _c _gc
   _EG_CWD=""; _EG_CWD_SRC=""; _EG_MOVING=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   # `env` in any letter case: the argv reader folds the prefix word (wave-25 T12), so
   # `ENV -C <dir> git commit` is placed by its directory exactly as `env -C <dir>` is.
   case " $COMMAND " in
     *" -C "*|*" -C"[\"\']*|*env*|*[Ee][Nn][Vv]*)
-      _oldifs="$IFS"; _hadf=0
       while IFS= read -r _line; do
         [ -n "$_line" ] || continue
         git_argv_parse "$_line" || continue
         [ "$GIT_SUB" = commit ] || continue
         _git_argv_skip "$_line"
         [ -n "$GIT_ARGV_REST" ] || break
-        case "$-" in *f*) _hadf=1 ;; esac
-        set -f
-        IFS="$GIT_ARGV_US"
+        git_argv_split_on
         # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
         set -- $GIT_ARGV_REST
-        IFS="$_oldifs"
-        [ "$_hadf" -eq 1 ] || set +f
+        git_argv_split_off
         shift   # argv[0], the git binary
         _gc=""
         while [ $# -gt 0 ]; do
@@ -961,7 +957,7 @@ _eg_outside_root() {
 _EG_COMMITS=0
 _EG_COMMIT_NC=0
 _eg_commit_count() {
-  local _line _oldifs="$IFS" _hadf
+  local _line
   _EG_COMMITS=0; _EG_COMMIT_NC=0
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
@@ -973,14 +969,10 @@ _eg_commit_count() {
     [ -n "$GIT_ARGV_REST" ] || continue
     # env's `-C`/`--chdir` is a directory override too (wave-20 T3, D3).
     [ -z "$GIT_ARGV_ENV_CHDIR" ] || _EG_COMMIT_NC=$((_EG_COMMIT_NC + 1))
-    _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     shift   # argv[0], the git binary
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -4825,20 +4817,16 @@ return 0
 # values; hooks/bash-walls.sh reads the acknowledgement's operand this way.
 _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
 _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <verb> (sets _WALL_POKER_VERB) · 1 not
-  local _line _oldifs _hadf _w _i _script _next _want="${2:-}"
+  local _line _oldifs _w _i _script _next _want="${2:-}"
   _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _git_argv_skip "$_line"
     [ -n "$GIT_ARGV_REST" ] || continue
-    _oldifs="$IFS"; _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     [ $# -gt 0 ] || continue
     _script=""
     # The runner word is a NAME, read through git-argv.sh's fold (wave-25 T12): `BASH x.sh`
@@ -5230,7 +5218,7 @@ _bsg_wrap_only() {
 # is exactly `<verb> <own row>`.
 _BSG_DL_OWN=""; _BSG_DL_TARGET=""
 _bsg_own_row() {
-  local _pick _seg _segs _l _n=0 _oldifs _hadf
+  local _pick _seg _segs _l _n=0
   _BSG_DL_OWN=""; _BSG_DL_TARGET=""
   wall_libs background-suite-guard roster.sh || return 1
   if _pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
@@ -5239,14 +5227,10 @@ _bsg_own_row() {
       case "$_seg" in row=*) _BSG_DL_OWN="${_seg#row=}"; break ;; esac
     done
   fi
-  _oldifs="$IFS"; _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_ARGS
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   _BSG_DL_TARGET="${1:-}"
   [ $# -eq 1 ] && [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_TARGET" = "$_BSG_DL_OWN" ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
@@ -5333,7 +5317,7 @@ _bsg_under() {
 # repository or directory, so cmd_place's answer is not where git commits; 1 otherwise. The verbs
 # and the option walk are `_eg_commit_count`'s reading of git's global options.
 _bsg_git_relocates() {
-  local _line _oldifs="$IFS" _hadf
+  local _line
   case "$COMMAND" in
     *GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
       _BSG_JUR_WHY="the command names GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR, which send a commit to a repository the placement check does not read"
@@ -5349,14 +5333,10 @@ _bsg_git_relocates() {
       return 0
     fi
     [ -n "$GIT_ARGV_REST" ] || continue
-    _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     shift   # argv[0], the git binary
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -5440,7 +5420,7 @@ _bsg_commit_outside() {
 # environment), so the staged flag is how the row says a writer widened it.
 _BSG_AM_OWN=""; _BSG_AM_TARGET=""; _BSG_AM_UPD=""
 _bsg_own_amend() {
-  local _pick _seg _segs _l _n=0 _oldifs _hadf _files=0 _reason=0 _cmd="" _w
+  local _pick _seg _segs _l _n=0 _files=0 _reason=0 _cmd="" _w
   _BSG_AM_UPD=""
   wall_libs background-suite-guard roster.sh || return 1
   if _pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
@@ -5449,14 +5429,10 @@ _bsg_own_amend() {
       case "$_seg" in name=*) _BSG_AM_OWN="${_seg#name=}"; break ;; esac
     done
   fi
-  _oldifs="$IFS"; _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_ARGS
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   _BSG_AM_TARGET="${1:-}"
   [ -n "$_BSG_AM_OWN" ] && [ "$_BSG_AM_TARGET" = "$_BSG_AM_OWN" ] || return 1
   shift
@@ -5473,14 +5449,10 @@ _bsg_own_amend() {
   [ "$_files" -ge 1 ] && [ "$_reason" -eq 1 ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
   [ "$_n" -eq 1 ] || return 1
-  _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_CALL
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   for _w in "$@"; do
     _wall_sh_word "$_w"
     _cmd="${_cmd:+$_cmd }$_WALL_WORD"
