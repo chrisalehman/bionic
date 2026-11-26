@@ -35,13 +35,13 @@
 #
 # bash 3.2 (ADR-001).
 
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 _READER_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
 # shellcheck source=/dev/null
 . "$_READER_LIB_DIR/fields.sh"
 # The reader calls nothing of the landing library, but its callers find that library loaded through it: their guards
 # read a set field reader as the landing library loaded, and call its record readers on that word.
-# shellcheck source=/dev/null
-declare -F line_lines >/dev/null 2>&1 || . "$_READER_LIB_DIR/line.sh"
+bionic_need line.sh line_lines
 # The record's field reader, read by name; `ev()` is its event, for the `run/v1` shape the fold prints.
 _READER_AWK="${_LINE_FIELDS_AWK}"'
 function ev() { return line_kv("ev") }
@@ -571,8 +571,7 @@ reader_q_verdicts() {  # <plan> [row] -> each suite's verdict standing, of <row>
 # shellcheck source=/dev/null
 . "$_READER_LIB_DIR/plan-read.sh"
 # A criterion's tier is its eval type through the scale profile's one map.
-# shellcheck source=/dev/null
-declare -F scale_tier_awk >/dev/null 2>&1 || . "$_READER_LIB_DIR/scale.sh"
+bionic_need scale.sh scale_tier_awk
 
 reader_question header value reader_q_header
 reader_q_header() {  # <plan> [key] -> key=value per header key, or the one named; 1 when it is absent
@@ -590,9 +589,9 @@ reader_q_row() {  # <plan> <id> -> the row's nine authored cells as key=value, i
 }
 
 reader_question criterion value reader_q_criterion
-reader_q_criterion() {  # <plan> <id> -> its Eval design row as key=value, one per column; 1 no such criterion
+reader_q_criterion() {  # <plan> <id> -> its criteria table row as key=value, one per column; 1 no such criterion
   _reader_needs criterion '<id>' "${2:-}" || return 2
-  plan_read_row "$1" 'Eval design' Criterion "$2"
+  plan_read_row "$1" "$PLAN_READ_CRITERIA" Criterion "$2"
 }
 
 reader_question cell value reader_q_cell
@@ -628,14 +627,14 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 reader_cells() {
   # Its names are its own: a caller that hands it the facts names its copy `facts`, which a local of that name would hide.
   local _rc_plan="$1" _rc_head="${2:-}" _rc_eval _rc_facts
-  _rc_eval="$(plan_read_rows "$_rc_plan" 'Eval design' criterion 2>/dev/null)" || _rc_eval=""
+  _rc_eval="$(plan_read_rows "$_rc_plan" "$PLAN_READ_CRITERIA" criterion 2>/dev/null)" || _rc_eval=""
   [ -n "$_rc_eval" ] || return 1
   _rc_facts="$(reader_facts "$_rc_plan")" || return
   printf 'E\n%s\nF\n%s\n' "$_rc_eval" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
     function cell(s, k,   n, i, c) { n = split(s, c, "\t"); for (i = 1; i <= n; i++) if (index(c[i], k "=") == 1) return substr(c[i], length(k) + 2); return "" }
     $0 == "E" || $0 == "F" { part = $0; next }
     $0 == "" { next }
-    part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "eval-type")); req[c] = cell($0, "requirement"); next }
+    part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "test-type")); req[c] = cell($0, "requirement"); next }
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }

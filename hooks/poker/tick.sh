@@ -29,7 +29,7 @@ tick_digest_file() {  # <session-id> -> absolute path, or empty
 # `gate_raised=` is the set of gate requests already raised (below). `change=` is the fingerprint of the plan's
 # `## Tasks` statuses and its ready set (wave-26 T15; D16): the task-list duty is owed only when
 # it moved, so the first tick of a session compares against nothing.
-write_tick_digest() {  # <session-id> <digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state> [<reconcile cause>]]]]]] -> 0 written, 1 not
+write_tick_digest() {  # <session-id> <digest> <since> <decision> <duty> [<gate keys> [<change> [<live head> [<plan current> <plan rows> [<facts state> [<reconcile cause> [<plan ids>]]]]]] -> 0 written, 1 not
   local f d
   f="$(tick_digest_file "$1")" || return 1
   [ -n "$f" ] || return 1
@@ -72,6 +72,11 @@ write_tick_digest() {  # <session-id> <digest> <since> <decision> <duty> [<gate 
     # turn-end wall (lib/stop.sh `stop_turn_facts`) so its refusal gives the tick's own cause.
     if [ -n "${12:-}" ]; then
       printf 'reconcile=%s\n' "${12}"
+    fi
+    # THE TABLE'S IDS, comma-joined in table order: the row count says the table grew, the ids say which row is new
+    # wherever it sits, so the reconcile line names that row and not the one at the table's end.
+    if [ -n "${13:-}" ]; then
+      printf 'plan_ids=%s\n' "${13}"
     fi
   } > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
@@ -345,8 +350,7 @@ EOF
 # fold, so the tick reads them from the place every other surface does, a fact the run's log alone holds among them.
 tick_ask() {  # <reader question's function> [args] -> its answer over the bound run; rc 1 when no run or no reader
   [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ] && [ "${POKER_RUN_OPEN:-}" != unreadable ] || return 1
-  declare -F _proof_ask >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
-  declare -F _proof_ask >/dev/null 2>&1 || return 1
+  bionic_need proof.sh _proof_ask || return 1
   local q="$1"; shift
   _proof_ask "$POKER_RUN_PLAN" "$q" "$POKER_RUN_PLAN" "$@"
 }
@@ -402,7 +406,7 @@ tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per go
   declare -F owed_open >/dev/null 2>&1 && declare -F plan_goals_read >/dev/null 2>&1 || return 0
   OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_file >/dev/null 2>&1 || return 0
   # the suites a standing debt declares red: the reader's debts admitted on a red verdict, each with an id, none voided
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  bionic_need line.sh line_lines
   reds=" $(tick_ask reader_q_debts | awk -F'|' "${_LINE_FIELDS_AWK:-}"'line_kv("ev") == "admitted" { id = line_kv("id"); s = line_kv("suite")
       sub(/.*\//, "", s); if (id != "" && s != "") print s }' | tr '\n' ' ') "
   while IFS='	' read -r st t m rd; do
@@ -567,17 +571,43 @@ tick_told_once() {
   return 0
 }
 
-# tick_record_stands <row> <Files cell> -> 0 when a record its Files or its artifact cell (the plan-read library's cell
-# of the row) names stands as a file: a path from the docs root (TICK_DOCS, for `record/…`) or from the repository, a
-# leading `./` or `!` not part of it.
+# tick_record_stands <row> <Files cell> [<root>] -> 0 when a record its Files or its artifact cell (the plan-read
+# library's cell of the row) names stands as a file: a path from the docs root (`record/…`) or from the root, a leading
+# `./` or `!` not part of it. The root is the repository, or a row's tree when the record is the one its writer holds.
 tick_record_stands() {
-  local e art
+  local e art root="${3:-$REPO_REAL}" docs="${TICK_DOCS:-}"
+  [ "$root" = "$REPO_REAL" ] || docs="$(docs_root "$root" 2>/dev/null)"
   art="$(plan_read_row "$POKER_RUN_PLAN" Tasks id "$1" 2>/dev/null | sed -n 's/^artifact=//p')"
   while IFS= read -r e; do
     e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
-    case "$e" in record/*) [ -n "$TICK_DOCS" ] && [ -f "$TICK_DOCS/$e" ] && return 0 ;; *[A-Za-z0-9]*) [ -f "$REPO_REAL/$e" ] && return 0 ;; esac
+    case "$e" in record/*) [ -n "$docs" ] && [ -f "$docs/$e" ] && return 0 ;; *[A-Za-z0-9]*) [ -f "$root/$e" ] && return 0 ;; esac
   done <<< "$(printf '%s,%s\n' "${2:-}" "$art" | tr ',' '\n')"
   return 1
+}
+
+# tick_unlanded_tree <row> <writer> <Files cell> <tree> -> says one NOT-LANDED line for a writer that has met its record
+# and committed in its tree and has not landed, naming the commit and the landing command. A row with a tree lands
+# through `ready`, from that tree, and a writer's record is the first file it writes, so MET alone finds one still at
+# work: the line waits for what only a finished writer holds, a record in its tree, a commit past the working head and
+# no tracked edit left over. A writer whose landing carrier lives is landing and is not named. Told once for each tree
+# head, so a further commit is told again and the same head never is.
+tick_unlanded_tree() {
+  local id="$1" writer="$2" tree="$4" recs th wh n sw
+  case "$tree" in /*) ;; *) tree="$REPO_REAL/${tree#./}" ;; esac
+  [ -d "$tree" ] && [ ! -L "$tree" ] || return 0
+  recs="$(printf '%s\n' "$3" | tr ',' '\n' | /usr/bin/grep 'record/' | paste -sd, -)"
+  tick_record_stands "$id" "$recs" "$tree" || return 0
+  th="$(git -C "$tree" rev-parse --verify -q HEAD 2>/dev/null)" || return 0
+  { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
+  declare -F proof_branch_head >/dev/null 2>&1 || return 0
+  wh="$(proof_branch_head "$POKER_RUN_PLAN" "$REPO_REAL" 2>/dev/null)" && [ -n "$wh" ] || return 0
+  n="$(git -C "$tree" rev-list --count "$wh..$th" 2>/dev/null)"
+  case "$n" in ''|*[!0-9]*|0) return 0 ;; esac
+  [ -z "$(git -C "$tree" status --porcelain --untracked-files=no 2>/dev/null)" ] || return 0
+  landing_carrier_names "$POKER_RUN_PLAN" | /usr/bin/grep -qxF -- "$writer" && return 0
+  tick_told_once "unlanded:$id" "$th" || return 0
+  sw="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
+  say "NOT-LANDED $id — $(clean "$writer") met its record and committed ${th:0:12} in $(clean "$tree"), and has not landed: its last act, from that tree, is bash $sw ready --within <seconds under its Bash timeout>"
 }
 
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
@@ -620,8 +650,7 @@ landing_carrier_names() {  # <plan> -> the names of the entries whose landing ca
   local rec
   [ "$TICK_CARRIERS_READ" = yes ] && { printf '%s' "$TICK_CARRIERS"; return 0; }
   TICK_CARRIERS_READ=yes
-  declare -F _line_entries >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F _line_entries >/dev/null 2>&1 || return 0
+  bionic_need line.sh _line_entries || return 0
   rec="$(_wt_proofs_path "$REPO_REAL" "$1" 2>/dev/null)" || rec=""
   [ -n "$rec" ] && line_held "$rec" || return 0
   TICK_CARRIERS="$(_line_entries "$rec" "" 2>/dev/null | awk -F'\t' '$4 == "yes" && $2 != "" { print $2 }')"
@@ -819,10 +848,8 @@ tick_run_delivered() {
 tick_run_pr_open() {
   local pr rc asks
   [ -n "${1:-}" ] && [ -f "$1" ] || return 2
-  declare -F reader_main >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/reader.sh" ] && . "$BIONIC_LIB/reader.sh"; } >/dev/null 2>&1
-  declare -F reader_main >/dev/null 2>&1 || return 2
-  declare -F line_merge_ask_key >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F line_merge_ask_key >/dev/null 2>&1 || return 2
+  bionic_need reader.sh reader_main || return 2
+  bionic_need line.sh line_merge_ask_key || return 2
   pr="$(reader_main "$1" pr 2>/dev/null)"; rc=$?
   [ "$rc" -ne 1 ] || return 1
   [ "$rc" -eq 0 ] || return 2
@@ -928,7 +955,7 @@ tick_watch_facts() {  # <file>
     # regression state in (lib/units.sh `_units_floor_state`), so a tick runs `proof_state` once.
     [ -z "$TICK_BUF" ] || _UNITS_MEMO_FLOOR="$TICK_BUF.floor"
     TICK_DIGEST=""; TICK_UNCHANGED=no; TICK_SINCE=""; TICK_DECIDED=""; TICK_DUTY=owed; TICK_CHANGE=""; TICK_CHANGE_STORE=""
-    TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""
+    TICK_PLAN_CUR=""; TICK_PLAN_ROWS=""; TICK_PLAN_IDS=""
     TICK_GATE_KEYS=""; TICK_GATE_NEW=""; TICK_GATE_FIELD=""; TICK_LANDINGS=""; TICK_RUNS_LINES=""; TICK_RUNS_KEY=""
     TICK_DIGEST_FILE="$(tick_digest_file "$SESSION_ID")" || TICK_DIGEST_FILE=""
     # ONE RESTART LINE, FROM DOCTOR'S READER (wave-35 T5; REQ-4 AC-4.5; D13). The CLI holds hooks.json,
@@ -976,7 +1003,7 @@ tick_watch_facts() {  # <file>
       fi
       rm -f "$TICK_BUF" "$TICK_BUF.floor" 2>/dev/null
       if [ -n "$TICK_DIGEST" ]; then
-        write_tick_digest "$SESSION_ID" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" \
+        write_tick_digest "$SESSION_ID" "$TICK_DIGEST" "$TICK_SINCE" "$TICK_DECIDED" "$TICK_DUTY" "$TICK_GATE_KEYS" "$TICK_CHANGE_STORE" "${UNITS_LIVE_HEAD:-}" "$TICK_PLAN_CUR" "$TICK_PLAN_ROWS" "${UNITS_FACTS_STATE:-}" "${TICK_RECONCILE:-}" "$TICK_PLAN_IDS" \
           || die "WARN — the tick digest could not be written; the next tick prints in full."
       fi
       [ -z "$TICK_RUN_ROOT" ] || tick_run_release "$TICK_RUN_ROOT" "$SESSION_ID" "$$"
@@ -1035,15 +1062,19 @@ tick_watch_facts() {  # <file>
       [ -n "$TICK_PLAN_ROWS" ] && [ "$TICK_PLAN_ROWS" -gt "$pr" ] || return 1
       TICK_RECONCILE=grew
     }
-    # THE LIST ONLY APPENDS: a row added after the last tick owes its own entry at the end, and the rows past
-    # the count the digest holds are the rows added, since task-add writes at the end of the table. The tick
-    # reads the plan and its digest and never the platform's list.
+    # THE LIST ONLY APPENDS: a row added after the last tick owes its own entry at the end of the task list, and
+    # the rows added are the ids the digest does not hold, wherever the plan's table puts them. A digest from
+    # before it kept the ids holds none: the rows past its count stand in, as task-add writes at the table's end.
+    # The tick reads the plan and its digest and never the platform's list.
     tick_grown_entries() {
-      local n id step task e="" k=0
+      local n id step task e="" k=0 seen
+      seen="$(tick_digest_field "$TICK_DIGEST_FILE" plan_ids)"
       n=$(( TICK_PLAN_ROWS - $(tick_digest_field "$TICK_DIGEST_FILE" plan_rows) ))
       while IFS=$'\t' read -r id step _ task _; do
         e="${e:+$e; }$step/$id: $(clean_whole "$(plan_task_title "$task")")"; k=$((k + 1))
-      done <<< "$(units_rows "$SCHED_PLAN" 2>/dev/null | tail -n "$n")"
+      done <<< "$(units_rows "$SCHED_PLAN" 2>/dev/null | if [ -n "$seen" ]; then
+        awk -F'\t' -v seen=",$seen," 'index(seen, "," $1 ",") == 0'
+      else tail -n "$n"; fi)"
       say "RECONCILE — the ## Tasks table grew since the last tick: add the task-list $([ "$k" -gt 1 ] && echo entries || echo entry) $e at the end of the list"
     }
     tick_conclude() {  # <decision before the gate>
@@ -1060,6 +1091,7 @@ tick_watch_facts() {  # <file>
         TICK_CHANGE="$(tick_plan_memoised tick_change_rows | cksum | awk '{ print $1 "-" $2 }')"
         TICK_PLAN_CUR="$(sched_plan_current "$SCHED_PLAN")"
         TICK_PLAN_ROWS="$(tick_plan_memoised tick_change_rows | grep -vc '^ready=')"
+        TICK_PLAN_IDS="$(tick_plan_memoised tick_change_rows | grep -v '^ready=' | cut -d'|' -f1 | paste -sd, -)"
       fi
       if [ -n "$TICK_BUF" ]; then
         TICK_DIGEST="$( {
@@ -1233,8 +1265,7 @@ tick_watch_facts() {  # <file>
     LT_REC=""
     [ -z "$POKER_RUN_PLAN" ] \
       || LT_REC="$(proof_debt_record "$POKER_RUN_PLAN" "$REPO_REAL" 2>/dev/null)" || LT_REC=""
-    [ -z "$LT_REC" ] || declare -F line_lines >/dev/null 2>&1 \
-      || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+    [ -z "$LT_REC" ] || bionic_need line.sh line_lines
     if [ -n "$LT_REC" ] && declare -F line_lines >/dev/null 2>&1 && line_held "$LT_REC" && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}" && declare -F line_value >/dev/null 2>&1; then
       lt_f() { line_value "$LT_EV" "$1"; }   # <key> -> its value in the event
       while IFS= read -r LT_EV; do
@@ -1542,8 +1573,9 @@ EOF
     # launch, `units_rows`), and the tick lands it (hooks/poker/line.sh `record_row_land`, in a subshell, so each of
     # its checks stands): one `published` event at the working head. A row whose checks fail (no record, a review not
     # yet registered) is left active and told once per reason, and asked again at the next tick. Only a row with no
-    # tree whose Files write nothing the head carries is asked; a row with a tree lands through `ready`. MET is read
-    # off this tick's one verdict read, acked or not: the ack closes the agent, never the row.
+    # tree whose Files write nothing the head carries is asked; a row with a tree lands through `ready`, and the tick
+    # only names its writer once its tree holds the work (`tick_unlanded_tree`). MET is read off this tick's one
+    # verdict read, acked or not: the ack closes the agent, never the row.
     if [ "${POKER_RUN_OPEN:-}" = yes ] && [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ]; then
       TICK_MET="$(printf '%s\n' "$VERDICT_OUT" | awk -F'|' '$1 == "landing-verdict/v1" { n = ""; s = ""
           for (i = 2; i <= NF; i++) { if ($i ~ /^name=/) n = substr($i, 6); else if ($i ~ /^state=/) s = substr($i, 7) }
@@ -1553,7 +1585,7 @@ EOF
         # An empty cell is printed `-`: a tab is white space to `read`, so two in a row would shift a field.
         while IFS=$'\t' read -r BS_ID BS_AGENT BS_FILES BS_WT; do
           [ -n "$BS_ID" ] || continue
-          case "$BS_WT" in *[A-Za-z0-9]*) continue ;; esac
+          case "$BS_WT" in *[A-Za-z0-9]*) tick_unlanded_tree "$BS_ID" "$BS_AGENT" "$BS_FILES" "$BS_WT"; continue ;; esac
           ! units_writes_head "$BS_FILES" || continue
           # AN UNREAD RULING HOLDS THE ROW AND PAGES THE PERSON (wave-34 T4; REQ-3 AC-3.1, AC-3.2; D13, D4
           # option 1). The writer has ended, so a ruling it never read is read by nobody here: the backstop
@@ -2260,10 +2292,7 @@ EOF
       case "${SCHED_STEP:-}" in ''|*[!0-9]*) return 0 ;; esac
       [ "$SCHED_STEP" -ge 4 ] || return 0
       [ "$(plan_regression "$plan" 2>/dev/null)" != no ] || return 0
-      if ! declare -F proof_branch_head >/dev/null 2>&1; then
-        [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
-      fi
-      declare -F proof_branch_head >/dev/null 2>&1 && declare -F proof_checkout >/dev/null 2>&1 || return 0
+      bionic_need proof.sh proof_branch_head && declare -F proof_checkout >/dev/null 2>&1 || return 0
       head="$(proof_branch_head "$plan" "$REPO_REAL" 2>/dev/null)" || return 0
       case "$head" in [0-9a-f]*) : ;; *) return 0 ;; esac
       ph="$(proof_last "$plan" regression 2>/dev/null)"
@@ -3126,8 +3155,7 @@ EOF
   watch_merge_look() {
     local root="${1:-}" plan="${2:-}" seen co tmp acct rel key sid out
     [ -d "$root" ] && [ -f "$plan" ] || return 0
-    declare -F line_merge_seen >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-    declare -F line_merge_seen >/dev/null 2>&1 || return 0
+    bionic_need line.sh line_merge_seen || return 0
     seen="$(line_merge_seen "$plan" "$root" --fetch 2>/dev/null)" || return 0
     sid="$(printf '%s' "${CLAUDE_CODE_SESSION_ID:-}" | LC_ALL=C tr -cd 'A-Za-z0-9_-' | cut -c1-8)"
     rel=".bionic/tmp/close-${sid:-session}.out"; acct="$root/$rel"
@@ -3160,8 +3188,7 @@ EOF
   # and runs the close on the first pass that finds nobody out. Rows that cannot be read are out: doubt never closes.
   watch_rows_out() {
     local plan="$1" seen="$2" acct="$3" held rc ids="" key word room more=0
-    declare -F patrol_rows_out >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/patrol.sh" ] && . "$BIONIC_LIB/patrol.sh"; } >/dev/null 2>&1
-    if declare -F patrol_rows_out >/dev/null 2>&1; then held="$(patrol_rows_out "$plan" 2>/dev/null)"; rc=$?; else held=""; rc=2; fi
+    if bionic_need patrol.sh patrol_rows_out; then held="$(patrol_rows_out "$plan" 2>/dev/null)"; rc=$?; else held=""; rc=2; fi
     if [ "$rc" -ne 0 ]; then ids=unread; held="the rows or their rosters cannot be read"
     else ids="$(printf '%s\n' "$held" | awk -F'\t' '$1 != "" { printf "%s%s", (n++ ? " " : ""), $1 }')"; fi
     [ -n "$ids" ] || return 1

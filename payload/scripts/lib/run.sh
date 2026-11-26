@@ -67,19 +67,10 @@
 
 # roots.sh, THE SOFT SOURCE — the idiom lib/detect.sh uses for lib/deps.sh and lib/checks.sh
 # for lib/patrol.sh. Guarded on the function, so a caller that already has it pays nothing.
-_run_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-if ! declare -F docs_root >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_run_self_dir)" && pwd -P)/roots.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need roots.sh docs_root
 # plan-read.sh, the same way: the plan's header has one parser, and `plan_frontmatter_get` asks it.
-if ! declare -F plan_read_header >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/plan-read.sh" ;; *) . ./plan-read.sh ;; esac
-fi
+bionic_need plan-read.sh plan_read_header
 # normalize_newlines [file] -> that document with its line endings TRANSLATED to \n, never
 # deleted. A trailing \r is stripped from each record (CRLF: \r\n → \n) and any remaining
 # lone \r becomes a real newline (classic-Mac CR-only). Called with NO argument it reads
@@ -524,19 +515,11 @@ run_open() {
 # _run_place <plan> -> the reader's held answer of where the run stands (`n=`, `state=`, `approved=`), also left in
 # _PROOF_PLACE; 2 when it cannot be read. lib/proof.sh, beside this file, is loaded the first time.
 _run_place() {
-  if ! declare -F proof_step_held >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(_run_self_dir)" && pwd -P)/proof.sh" >/dev/null 2>&1
-    declare -F proof_step_held >/dev/null 2>&1 || return 2
-  fi
+  bionic_need proof.sh proof_step_held || return 2
   proof_step_held "$1"
 }
 
-_run_reader() {  # -> 0 once lib/reader.sh, beside this file, is loaded in this shell
-  declare -F reader_main >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$(cd "$(_run_self_dir)" && pwd -P)/reader.sh"
-}
+_run_reader() { bionic_need reader.sh reader_main; }  # -> 0 once lib/reader.sh, beside this file, is loaded in this shell
 
 # run_step <plan> -> the reader's `step` answer for the plan's run: `n=<step>` when one stands, then
 # `state=open|delivered|abandoned`, read from its log. A caller that prints a run's step or tells a delivered run
@@ -816,12 +799,7 @@ session_binding() {
   seal_binding_get "$1" "$2"
 }
 
-_run_seal() {  # -> 0 once lib/seal.sh, beside this file, is loaded in this shell
-  declare -F seal_binding_get >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$(cd "$(_run_self_dir)" && pwd -P)/seal.sh" >/dev/null 2>&1
-  declare -F seal_binding_get >/dev/null 2>&1
-}
+_run_seal() { bionic_need seal.sh seal_binding_get; }  # -> 0 once lib/seal.sh, beside this file, is loaded in this shell
 
 # session_plan <root> <sid> -> the session's bound plan on stdout, exit 0; exit 1 and silent
 # when there is no binding to report.

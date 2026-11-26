@@ -689,6 +689,31 @@ poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question ad
 expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no reading before it (exit 0)" "0|1" \
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_C .* evidence=record/wave-01-fixture/past-waiver.md question=adversarial ")"
 
+# THE SECOND PASS REGISTERS THE FIRST TIME: the brief of a review row whose last proof is past the run's base prints that
+# range with scope: piece beside it, and a record that carries the range and the scope as the brief printed them is
+# taken. A record that says scope: whole over the same range is refused (the control, read by the same verb).
+VG_R9_ROW='| R9 | 6 | review | the critic reads it again · questions: adversarial | critic | — | 30 | REQ-1 | record/wave-01-fixture/second-pass.md | — | — | pending |'
+awk -v row="$VG_R9_ROW" '{ print } /^\| T5 \| 5 \| verify / { print row }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$SID" name=vg-crit2 agent_id=a-vg-crit2 \
+  subagent_type=bionic:critic files=.bionic/docs/record/wave-01-fixture/second-pass.md,.bionic/docs/record/wave-01-fixture/second-whole.md)" >> "$(roster_of "$RVG")"
+poke "$RVG" brief R9 vg-R9
+expect_eq "VG-2c the second pass's brief is rendered (exit 0)" "0" "$RC"
+VG_RANGE="$(sed -n 's/^Reviewed range: \([0-9a-f]*\)\.\.\([0-9a-f]*\) (scope: \([a-z]*\))$/\1 \2 \3/p' "$VG_DIR/briefs/vg-R9.md")"
+expect_eq "VG-2d …its range starts at the last reading's head, past the base, and says scope: piece" "$VG_C piece" "$(printf '%s\n' "$VG_RANGE" | awk '{ print $1, $3 }')"
+VG_D="$(s57_commit "$VG_WT" lib/a.sh D)"
+VG_PRINTED="$(printf '%s\n' "$VG_RANGE" | awk '{ print $1, $3 }')"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: whole\n' "$VG_C" "$VG_D" > "$VG_DIR/second-whole.md"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: %s\n' "${VG_PRINTED% *}" "$VG_D" "${VG_PRINTED#* }" > "$VG_DIR/second-pass.md"
+poke "$RVG" proof-add review record/wave-01-fixture/second-whole.md --question adversarial --reader vg-crit2
+expect_eq "VG-2e control: the same range under scope: whole is refused for its range (exit 1)" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'says scope: whole, but its range starts at')"
+poke "$RVG" proof-add review record/wave-01-fixture/second-pass.md --question adversarial --reader vg-crit2
+expect_eq "VG-2f a record carrying the scope the brief printed registers on its first try (exit 0)" "0|1" \
+  "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_D .* evidence=record/wave-01-fixture/second-pass.md question=adversarial ")"
+
+# The review row served the one brief and is taken off the plan again, so the rows below read the plan they were written for.
+/usr/bin/grep -v '^| R9 |' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+
 # ---------- §CUR7-COVERED: prose landed past the whole run is green, code landed past it is unproved ----------
 # The plan holds a whole-run row, a release row and an open integrate row reading the release; the user approves the
 # release at C2 and waives there, then two prose commits land: green, admitted with no word. A code commit after them
@@ -776,6 +801,66 @@ rs_page "key=row:AC-9.1|default=waive AC-9.1|${RS_ROW/pick=default/pick=other}" 
 poke "$RVG" reply 'all recommended'
 expect_eq "RS-4 AC-13.3 'all recommended' takes the orchestrator's choice on each, in order (exit 0)" \
   "0|withheld: row:AC-9.1|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+
+# ---------- §REPLY-SEQ, a short reply after its card or its ask, and a reply quoted with its line breaks ----------
+# The person writes around a short reply ("Re: release card: all default", "approved — and …"), so its words are not
+# their whole prompt. Typed after the card was drawn (its header's at=) or the ask was opened (its round's at=), they
+# are their word on it; the same words typed only before it are not (the controls). The transcript is begun again so no
+# earlier whole prompt holds the words. A reply quoted whole, with its line breaks, is folded to the words it holds.
+# fails-when: a short reply typed after its instant is refused as too short; one typed only before it is taken; a reply
+# quoted with its line breaks is refused for its shape.
+rs_typed() {  # <ISO stamp> <prompt> -> the prompt, typed at that instant, appended to this section's transcript
+  jq -c --arg t "$2" --arg at "$1" '.message.content = $t | .timestamp = $at' "$RS_FX/typed.jsonl" >> "$RS_TX"
+}
+rs_approval() { /usr/bin/grep -F "|ev=approval|key=$1|" "$VG_DIR/run.log"; }  # <key> -> the run's approval lines of it
+cat "$RS_FX/frame.jsonl" > "$RS_TX"
+RS_CARRY="${RS_FIND/pick=other/pick=default}"
+rs_page "$RS_CARRY"
+rs_typed 2026-10-19T23:59:00.000Z 'Re: release card: all default'
+poke "$RVG" reply 'all default'
+expect_eq "RS-5 control: 'all default' typed only before the card was drawn is refused as too short, nothing recorded" \
+  "1|1|" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -c 'too short')|$(rs_done)"
+rs_typed 2026-10-20T00:00:30.000Z 'Re: release card: all default'
+poke "$RVG" reply 'all default'
+expect_eq "RS-5b AC-18.1 'all default' typed after the card was drawn, inside a longer prompt, is applied (exit 0)" \
+  "0|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+rs_page "$RS_CARRY"
+rs_typed 2026-10-20T00:01:00.000Z 'Re: release card: all recommended'
+poke "$RVG" reply 'all recommended'
+expect_eq "RS-6 AC-18.1 'all recommended' typed after the card was drawn, inside a longer prompt, is applied (exit 0)" \
+  "0|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+rs_page "$RS_CARRY"
+poke "$RVG" reply $'all default\n'
+expect_eq "RS-7 AC-18.3 a reply quoted with its line break is folded and applied, its words recorded on one line (exit 0)" \
+  "0|applied: finding:$RS_F carried|1" "$RC|$(rs_done)|$(/usr/bin/grep -c '^replied: .* words="all default"$' "$RS_P")"
+# The ask is opened by its one writer (lib/owed.sh `owed_open`) at a fixed instant, 2026-10-21T00:00:00Z.
+bash -c '. "$1/owed.sh" && OWED_ROOT="$2" OWED_PLAN="$3" OWED_SID="$4" BIONIC_NOW_EPOCH=1792540800 owed_open approve:step0 "Step 0" "approve step0"' \
+  _ "${S46_LIB%/*}" "$RVG" "$PVG" "$SID"
+expect_eq "RS-8a precondition: the ask approve:step0 stands open in the run's log at its instant" "1" \
+  "$(/usr/bin/grep -c '|ev=ask|key=approve:step0|.*|at=2026-10-21T00:00:00Z$' "$VG_DIR/run.log")"
+rs_typed 2026-10-20T23:00:00.000Z 'approved, and keep the scope as written'
+poke "$RVG" approve step0 'approved'
+expect_eq "RS-8 control: 'approved' typed only before its ask was opened is refused as too short, no approval written" \
+  "1|1|" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -c 'too short')|$(rs_approval step0)"
+rs_typed 2026-10-21T00:00:30.000Z 'approved — and the second requirement can wait for the next wave'
+poke "$RVG" approve step0 'approved'
+expect_eq "RS-8b AC-18.2 'approved' opening a longer message typed after its ask was opened is recorded (exit 0)" \
+  "0|1" "$RC|$(rs_approval step0 | /usr/bin/grep -c '|said=approved|')"
+RS_TWO=$'approved for step one.\nThe second requirement can wait.'
+rs_typed 2026-10-21T00:01:00.000Z "$RS_TWO"
+poke "$RVG" approve step1 "$RS_TWO"
+expect_eq "RS-9 AC-18.3 the person's whole message, quoted with its line break, is recorded folded to one line (exit 0)" \
+  "0|1" "$RC|$(rs_approval step1 | /usr/bin/grep -c '|said=approved for step one. The second requirement can wait.|')"
+RS_TWOW=$'I waive the readings here.\nThey were read at the last head.'
+rs_typed 2026-10-21T00:02:00.000Z "$RS_TWOW"
+poke "$RVG" waive structure "$RS_TWOW"
+expect_eq "RS-9b AC-18.3 a question's waiver quoted with its line break is written folded (exit 0)" "0|1" \
+  "$RC|$(/usr/bin/grep -c '|ev=waiver|question=structure|.*|said=I waive the readings here. They were read at the last head.|' "$VG_DIR/run.log")"
+RS_TWOJ=$'judge from this head on.\nIts copy of the check is the one.'
+rs_typed 2026-10-21T00:03:00.000Z "$RS_TWOJ"
+poke "$RVG" check-from "$RS_TWOJ"
+expect_eq "RS-9c AC-18.3 the judge moved on words quoted with their line break, recorded folded (exit 0)" "0|1" \
+  "$RC|$(rs_approval judge | /usr/bin/grep -c '|said=judge from this head on. Its copy of the check is the one.|')"
 export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
 # ============================================================
@@ -1077,6 +1162,9 @@ section "§TICK-LANDS: the tick lands a record row on the registration its kind 
 # run's log (`sp_fact`).
 # fails-when: a row lands on its file alone, a landing writes a cell or a step line, a reason is told at every tick,
 # a refusal names no fix, or a row that waits on a landed row stays unready.
+# The tick prints only from its exit trap, so a tick the watchdog kills at the bound prints nothing and every row that reads
+# its output goes red as missing text; the sections that tick a run use the wide bound so a slow machine does not kill it.
+TL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 TL="$(make_repo tick-lands)"; ( cd "$TL" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
 git -C "$TL" config user.name "Dana Fixture"
 TL_RD="record/wave-01-fixture"; TL_D=".bionic/docs/$TL_RD"
@@ -1192,6 +1280,53 @@ expect_eq "TL-15 precondition: the page is at 15, its integrate row pending and 
 poke "$TI" tick
 expect_eq "TL-16 on a page at 15 the tick lands the orchestrator's integrate row whose reviews stand: one published event of the record kind" \
   "1|1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c "^poker: LANDED T5 — the orchestrator's integrate row")|$(TI_PUB)"
+POKE_BOUND="$TL_BOUND_WAS"
+
+# A WRITER WITH A TREE LANDS THROUGH `ready`, and the tick names one that has met its record and committed but has not
+# landed: its writer ends with its contract met before `ready`, and no line of the tick said so. FIXTURE FIDELITY: the
+# task-scale plan at 15 of §TICK-LANDS (`vc_15`), each build row active under its writer, its tree a linked worktree on
+# its own branch at the working head (`git worktree add`, the `tree` event the row's launch writes), its roster row MET
+# (the record in the tree, the agent's done marker); T31 holds a commit past the head, T32 none, T33 a commit and no
+# record, T34 a commit and a tracked edit left uncommitted.
+# fails-when: the committed writer is on no line, or its line names no landing command, or it is told at every tick,
+# or a writer with no commit, no record or an unfinished edit is named.
+UL="$(make_repo tick-unlanded)"; ( cd "$UL" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
+git -C "$UL" config user.name "Dana Fixture"
+UL_RD="record/wave-01-fixture"; UL_D=".bionic/docs/$UL_RD"
+UL_P="$(vc_plan "$UL" \
+  "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |" \
+  "| T31 | 4 | build | the committed writer | w-T31 | — | 30 | REQ-1 | lib/z31.sh, $UL_D/T31.md | active | — | $UL_D/T31.md |" \
+  "| T32 | 4 | build | the writer with no commit | w-T32 | — | 30 | REQ-1 | lib/z32.sh, $UL_D/T32.md | active | — | $UL_D/T32.md |" \
+  "| T33 | 4 | build | the writer with no record | w-T33 | — | 30 | REQ-1 | lib/z33.sh, $UL_D/T33.md | active | — | $UL_D/T33.md |" \
+  "| T34 | 4 | build | the writer with an edit under way | w-T34 | — | 30 | REQ-1 | lib/z34.sh, $UL_D/T34.md | active | — | $UL_D/T34.md |")"
+vc_15 "$UL" "$UL_P"; sed "s/^base-sha: abc1234$/base-sha: $(git -C "$UL" rev-parse main)/" "$UL_P" > "$UL_P.t" && mv "$UL_P.t" "$UL_P"
+( cd "$UL" && git add -f "$UL_P" && git commit -qm base ) >/dev/null 2>&1; new_roster "$UL"
+UL_LOG="$(plan_fixture_log "$UL_P")"; UL_RC_DIR="$UL/.bionic/tmp/ul-done"; mkdir -p "$UL_RC_DIR"
+for ul_t in T31 T32 T33 T34; do
+  git -C "$UL" worktree add -q -b "wt/$ul_t" "$UL/.worktrees/01-$ul_t" main >/dev/null 2>&1
+  printf 'run/v1|ev=tree|row=%s|path=.worktrees/01-%s|at=2026-10-04T01:%02d:00Z\n' "$ul_t" "$ul_t" "${ul_t#T}" >> "$UL_LOG"
+  mkdir -p "$UL/.worktrees/01-$ul_t/$UL_D"
+  [ "$ul_t" = T33 ] || printf 'record of %s\n' "$ul_t" > "$UL/.worktrees/01-$ul_t/$UL_D/$ul_t.md"
+  add_row "$UL" name="w-$ul_t" deliverable="$UL/.worktrees/01-$ul_t/$UL_D/$ul_t.md" duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$UL_RC_DIR" "w-$ul_t")"
+done
+seal_fixture "$UL_P" "$UL_LOG"
+ul_said() { printf '%s\n' "$OUT" | /usr/bin/grep "NOT-LANDED $1 "; }
+poke "$UL" tick
+expect_eq "UL-0 precondition: no tree holds a commit past the head yet, so no writer is named" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T3[1-4] ')"
+for ul_t in T31 T33 T34; do ( cd "$UL/.worktrees/01-$ul_t" && printf 'code\n' > "lib-$ul_t.sh" && git add . && git commit -qm "code of $ul_t" ) >/dev/null 2>&1; done
+( cd "$UL/.worktrees/01-T34" && printf 'more\n' >> "lib-T34.sh" ) >/dev/null 2>&1
+poke "$UL" tick
+expect_contains "UL-1 a MET writer whose tree holds its record and a commit past the head is named once, the line naming its row and its writer" "NOT-LANDED T31 — w-T31" "$(ul_said T31)"
+expect_contains "UL-2 …and giving the landing command: ready, from its tree" "spawn-worktree.sh ready --within" "$(ul_said T31)"
+expect_contains "UL-2b …naming the commit that is past the head" "$(git -C "$UL/.worktrees/01-T31" rev-parse --short=12 HEAD)" "$(ul_said T31)"
+expect_eq "UL-3 a MET writer whose tree holds no commit past the head is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T32 ')"
+expect_eq "UL-4 a committed writer whose tree holds no record is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T33 ')"
+expect_eq "UL-5 a committed writer with a tracked edit uncommitted is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T34 ')"
+poke "$UL" tick
+expect_eq "UL-6 a second tick over the same tree head names it again nowhere" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T31 ')"
+( cd "$UL/.worktrees/01-T31" && printf 'again\n' >> "lib-T31.sh" && git add . && git commit -qm "a second commit" ) >/dev/null 2>&1
+poke "$UL" tick
+expect_contains "UL-7 a new commit is a new tree head: the writer is told again" "NOT-LANDED T31 — w-T31" "$(ul_said T31)"
 
 # ============================================================
 section "§STACK: the regression's health is the judge's rendering, and no verb writes it into the plan"

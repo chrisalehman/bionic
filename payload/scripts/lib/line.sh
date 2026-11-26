@@ -2327,7 +2327,7 @@ _line_stale() {  # <plan> <row> <root> <base> <candidate> -> `<criterion><TAB><w
   rec="$(printf '%s\n' "$rec" | sed -n 's/^criteria=//p')"
   [ -n "$rec" ] || return 0
   bionic_need plan-read.sh plan_read_criterion_sums || { printf 'plan-read-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
-  crit="$(plan_read_criterion_sums "$plan" eval)"
+  crit="$(plan_read_criterion_sums "$plan" test)"
   case $? in 0) ;; 1) return 0 ;; *) printf 'plan-unreadable plan=%s\n' "$plan"; return 2 ;; esac
   cells="$(_proof_ask "$plan" reader_cells "$plan")" || { printf 'log-unreadable plan=%s\n' "$plan"; return 2; }
   diff="$(git -C "$root" -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --no-renames \

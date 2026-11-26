@@ -76,6 +76,8 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/width.sh"
 # shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/loader.sh"
+# shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/root.sh"
 # THE TWO LIBRARIES THE STEP-3 CARD ASKS ITS LAST TWO QUESTIONS OF (epic-23
 # wave-18-fixit-185, T10; REQ-4 D9, REQ-3 AC-3.4). `roots.sh` owns the ONE reading of
@@ -834,7 +836,7 @@ BEGIN { OFS = "\t"; ERRMSG = ""; enum = 0 }
   else if (h == "Design") { sec = "design"; sawdesign = 1 }
   else if (h == "Not Doing") sec = "nd"
   else if (h == "Tasks") { sec = "tasks"; sawtasks = 1 }
-  else if (h == "Eval design") { sec = "eval"; saweval = 1; erow = 0 }
+  else if (h == "Test design" || h == "Eval design") { sec = "eval"; saweval = 1; erow = 0 }
   else if (h ~ /^Requirements/) sec = "reqs"
   else sec = ""
   next
@@ -1393,8 +1395,7 @@ _card_batch_rows() {  # <plan> -> `<batch>\t<step>\t<id>` per row, in table orde
 _card_project_open() {
   local copy="${2:-}/.bionic/docs/plans/run/${1##*/}"
   git init -q "${2:-}" >/dev/null 2>&1 && mkdir -p "${copy%/*}" && cp "${1:-}" "$copy" || return 1
-  declare -F proof_approval_event >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/proof.sh" >/dev/null 2>&1 || return 1
-  declare -F line_log >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/line.sh" >/dev/null 2>&1 || return 1
+  bionic_need proof.sh proof_approval_event && bionic_need line.sh line_log || return 1
   # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and the fill offers nothing to a run
   # whose plan stands unapproved, so a copy without the approval would answer every batch with nothing.
   proof_approval_event "$copy" step3 by=card said=projected || return 1
@@ -2404,7 +2405,7 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
     case "$n" in 1|2) [ "$(_card_stem "$art")" = "$(_card_stem "$plan")" ] || return 0 ;; *) return 0 ;; esac
   fi
   _card_settled "$n" "$plan" && return 0
-  declare -F owed_open >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/owed.sh" 2>/dev/null || return 0
+  bionic_need owed.sh owed_open || return 0
   case "$n" in
     0) q="$CARD_Q_STEP0"; t="approval: Step 0 configuration" ;;
     1) q="$CARD_Q_STEP1"; t="approval: Step 1 requirements" ;;
@@ -2436,14 +2437,6 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
 #
 # THE SESSION'S OWN RUN. The checks act on the run the session is bound to, so a plan that is not that run is
 # refused by name rather than judged against another run's advances.
-_card_early_load() {  # -> 0 when the owed ledger and the roster readers are loaded beside this file
-  # shellcheck source=/dev/null
-  declare -F owed_list >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/owed.sh" 2>/dev/null
-  # shellcheck source=/dev/null
-  declare -F roster_open_names >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/roster.sh" 2>/dev/null
-  declare -F owed_list >/dev/null 2>&1 && declare -F roster_open_names >/dev/null 2>&1
-}
-
 _card_early_ctx() {  # <plan as given> -> 0 and the CF_* context, or 1 and CF_ERR
   local bound=""
   CF_ERR=""
@@ -2554,7 +2547,7 @@ CF_POST
 # _card_t4_confirm_key -> the key a T4 row's block carries beside `evidence:`, the user's confirmation of the row's own
 # check, as walls.sh `keys_for_tier` names it; nothing when walls.sh cannot be loaded, so the refusal stays early.
 _card_t4_confirm_key() {
-  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F keys_for_tier >/dev/null 2>&1 || exit 1
+  ( bionic_need walls.sh keys_for_tier || exit 1
     for _ck in $(keys_for_tier T4); do [ "$_ck" = evidence ] || { printf '%s' "$_ck"; break; }; done )
 }
 
@@ -2573,11 +2566,11 @@ _card_judge_line() {
 # (payload/scripts/lib/walls.sh `eg_review_unanswered_fact`, `eg_review_failing_line`), read in a subshell. Nothing
 # when walls.sh cannot be loaded, and then no line is settled as that refusal, so the page stays early.
 _card_review_fact() {
-  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F eg_review_unanswered_fact >/dev/null 2>&1 || exit 1
+  ( bionic_need walls.sh eg_review_unanswered_fact || exit 1
     eg_review_unanswered_fact )
 }
 _card_review_failing() {
-  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F eg_review_failing_line >/dev/null 2>&1 || exit 1
+  ( bionic_need walls.sh eg_review_failing_line || exit 1
     eg_review_failing_line )
 }
 
@@ -2586,7 +2579,7 @@ _card_review_failing() {
 # the criterion. Nothing when walls.sh cannot be loaded, and then no refusal is settled as that one, so the page stays
 # early.
 _card_live_exit() {
-  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F matrix_live_row_exit >/dev/null 2>&1 || exit 1
+  ( bionic_need walls.sh matrix_live_row_exit || exit 1
     matrix_live_row_exit '%s' )
 }
 
@@ -3747,7 +3740,7 @@ case "$1" in
     # Whether the release approval card may render: the three facts, and what a red check owes that the page settles.
     [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one plan path (got $(( $# - 1 )))"
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable plan at '$2'"
-    _card_early_load || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }
+    bionic_need owed.sh owed_list && bionic_need roster.sh roster_open_names || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }
     _card_early_ctx "$2" || { printf 'card.sh: %s: %s\n' "$1" "$CF_ERR" >&2; exit 1; }
     # THE RUN'S FACTS ARE READ ONCE, IN THIS SHELL, before any subshell asks: inside the command's hold the held fold
     # is read here and inherited, so no subshell below reads it again; outside one this shell folds once for them all.

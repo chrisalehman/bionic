@@ -77,8 +77,17 @@ printf '# typed by hand before the brief was rendered\n' > "$BD/T2.md"; cp "$BD/
 poke "$BR" brief R1 w01-R1
 expect_eq "R0 the review brief is written under its dispatch name (exit 0)" "0" "$RC"
 expect_eq "R1 AC-6.3 its range starts at the last proof's head of its questions and ends at the working head" \
-  "Reviewed range: $A..$HD" "$(grep '^Reviewed range:' "$BD/w01-R1.md")"
+  "Reviewed range: $A..$HD" "$(grep '^Reviewed range:' "$BD/w01-R1.md" | sed 's/ (scope: [a-z]*)$//')"
+expect_eq "R1b a range that starts past the base prints scope: piece beside it, which a record of it registers on" \
+  "Reviewed range: $A..$HD (scope: piece)" "$(grep '^Reviewed range:' "$BD/w01-R1.md")"
 expect_eq "R2 its Questions are the row's, rendered" "Questions: adversarial, structure" "$(grep '^Questions:' "$BD/w01-R1.md")"
+# A FIRST READING STARTS AT THE BASE, and a record of it may say scope: whole; with the proofs gone the same brief
+# prints that, beside the piece above (the same extractor reads both).
+cp "$REC/run.log" "$TMPROOT/run.log.proofs"; printf 'run/v1|ev=step|n=4|at=%s:00Z\n' "$t" > "$REC/run.log"
+poke "$BR" brief R1 first-R1
+expect_eq "R2b with no proof held, the range starts at the base and prints scope: whole" \
+  "Reviewed range: ${O:0:9}..$HD (scope: whole)" "$(grep '^Reviewed range:' "$BD/first-R1.md")"
+cp "$TMPROOT/run.log.proofs" "$REC/run.log"
 
 poke "$BR" brief T1 w01-T1
 expect_eq "R3 a build row with a section of its own renders (exit 0)" "0" "$RC"
@@ -118,6 +127,24 @@ expect_false "R9c …and nothing is written" test -e "$BD/w01-T4.md"
 poke "$BR" brief T1 w01-T2
 expect_eq "R10 a name another row's dispatch carries is refused (exit 1)" "1" "$RC"
 expect_true "R10b …and the row's own file stands" test -s "$BD/w01-T1.md"
+
+# THE BRIEF SAYS HOW TO LAND: its Lands-by line gives the landing command with the script that holds the verb, for a
+# build row and a review row alike, and the script is a file that exists. The verb alone, with no script before it,
+# is a command a writer cannot run.
+lands_by() { grep '^Lands-by:' "$BD/$1.md"; }
+land_sh() { lands_by "$1" | sed -n 's/^Lands-by: bash \(\/[^ ]*\/spawn-worktree\.sh\) ready --within <seconds under your Bash timeout>$/\1/p'; }
+expect_true "R11 setup: the build brief carries a Lands-by line" test -n "$(lands_by w01-T1)"
+expect_true "R11b the build brief's Lands-by names the script by its full path, then the verb" test -f "$(land_sh w01-T1)"
+expect_true "R11c …and the review brief's does too (beside R11b, the same extractor)" test -f "$(land_sh w01-R1)"
+expect_eq "R11d …one script for both briefs" "$(land_sh w01-T1)" "$(land_sh w01-R1)"
+ROLE_BAD=""; ROLE_N=0
+for rf in "$BIONIC_HOOKS_DIR"/../agents/*.md; do
+  ROLE_N=$((ROLE_N + 1))
+  grep -q 'ready --within' "$rf" || ROLE_BAD="$ROLE_BAD ${rf##*/}:none"
+  grep 'ready --within' "$rf" | grep -qv 'spawn-worktree\.sh ready --within' && ROLE_BAD="$ROLE_BAD ${rf##*/}"
+done
+expect_eq "R12 setup: the six role files are read" "6" "$ROLE_N"
+expect_eq "R12b each role file that names the landing verb has the script before it (and each names it)" "" "$ROLE_BAD"
 
 section "§BAR: a suite promised over the landing bar is left out of Lands-on, kept in Suites, and named (AC-23.1)"
 # The gate store is the prelude's fixture store; a cost line is keyed by the fixture repository's project.

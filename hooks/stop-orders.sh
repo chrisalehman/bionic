@@ -245,11 +245,7 @@ REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
 # offered again, so stopping it is the whole of returning it.
 stopped_row_back() {
   local run plan rows id
-  # shellcheck source=/dev/null
-  { declare -F session_run >/dev/null 2>&1 || . "$BIONIC_LIB/run.sh"; } >/dev/null 2>&1
-  # shellcheck source=/dev/null
-  { declare -F units_row_back >/dev/null 2>&1 || . "$BIONIC_LIB/units.sh"; } >/dev/null 2>&1
-  declare -F session_run >/dev/null 2>&1 && declare -F units_row_back >/dev/null 2>&1 || return 1
+  bionic_need run.sh session_run && bionic_need units.sh units_row_back || return 1
   run="$(session_run "$REPO_REAL" "$SESSION_ID" 2>/dev/null)" || return 1
   case "$run" in 'bound-open '*) plan="${run#bound-open }" ;; *) return 1 ;; esac
   rows="$(units_rows "$plan" 2>/dev/null)" || return 1
@@ -290,8 +286,7 @@ done
 own_transcript() {  # -> the transcript file of THIS session, or nothing
   local projects slug d
   projects="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
-  declare -F project_slug >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/detect.sh" ] && . "$BIONIC_LIB/detect.sh"; } >/dev/null 2>&1
-  if declare -F project_slug >/dev/null 2>&1; then
+  if bionic_need detect.sh project_slug; then
     for slug in "$(project_slug "$PWD")" "$(project_slug "$REPO_REAL")"; do
       [ -n "$slug" ] && [ -f "$projects/$slug/$SESSION_ID.jsonl" ] || continue
       printf '%s\n' "$projects/$slug/$SESSION_ID.jsonl"; return 0
@@ -567,9 +562,7 @@ EOF
     # operator is owed the difference in one line.
     # The read is the stop library's, the one the stop guard asks: the first line of the call scoped
     # to the name. Loaded here alone, so no other verb pays for it; a library without it says nothing.
-    # shellcheck source=/dev/null
-    { declare -F stop_verdict_line >/dev/null 2>&1 || . "$BIONIC_LIB/stop.sh"; } >/dev/null 2>&1
-    if [ -f "$SWEEPER" ] && declare -F stop_verdict_line >/dev/null 2>&1; then
+    if bionic_need stop.sh stop_verdict_line && [ -f "$SWEEPER" ]; then
       _line=$(stop_verdict_line "$REPO_REAL" "$SESSION_ID" "$SWEEPER" "$_target")
       if [ -n "$_line" ]; then
         _state=$(line_field "$_line" state)
@@ -631,9 +624,7 @@ EOF
     # already acked (MET and gone) still has its tree: `stopped` writes no second ack for it, and removes the
     # tree below, behind the same fresh-panel check as any other. An acked row with no mark is refused as ever.
     _mark=""
-    # shellcheck source=/dev/null
-    { declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null \
-      && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
+    bionic_need roster.sh roster_landed && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
     # AN ADOPTED ROW'S MARK IS FOUND ON ANY ROSTER OF THE PROJECT (wave-38 T14; REQ-3 AC-3.6, L12; A-orch-17).
     # The landing marks the roster of the session whose carrier ran `ready`, which for a row adopted after a
     # `/clear` is the PREDECESSOR's: this session's roster holds the adopted row (the row lookup above, and the
@@ -821,7 +812,7 @@ EOF
     # agent" is asked of every `roster-*.state` under the state directory, a predecessor's and a dead
     # session's included: a writer a predecessor's roster still holds, its contract unmet, is exactly what a
     # `/clear` leaves until `adopt` copies the rows, and recording it as unrostered would pass its stop.
-    declare -F roster_sessions_with_name >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    bionic_need roster.sh roster_sessions_with_name
     _held="$(roster_sessions_with_name "$STATE_DIR" "$_target")"
     if [ -n "$_held" ]; then
       while IFS='|' read -r _hsid _hstat; do
@@ -890,8 +881,7 @@ EOF
     [ -f "$_wt_lib" ] || _wt_lib="${HOOK_DIR}/../scripts/lib/worktree.sh"
     # shellcheck source=/dev/null
     [ -f "$_wt_lib" ] && . "$_wt_lib"
-    # shellcheck source=/dev/null
-    declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    bionic_need roster.sh roster_landed
     _mark_of() { declare -F roster_landed >/dev/null 2>&1 && roster_landed "$ROSTER_FILE" "$1" 2>/dev/null; }   # <name>
 
     # THE LIVE SET, read ONCE for the whole batch through the shared `read_panel` above the

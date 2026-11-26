@@ -923,6 +923,15 @@ GR_LINE="$(printf '%s\n' "$OUT" | /usr/bin/grep 'poker: RECONCILE' || :)"
 expect_eq "GREW-1 the tick over the grown plan says one RECONCILE line, naming the new row's entry and no other" \
   "poker: RECONCILE — the ## Tasks table grew since the last tick: add the task-list entry 4/T8: Add the row at the end of the list" "$GR_LINE"
 expect_eq "GREW-1b …and it asks for no delete and no recreate" "0" "$(printf '%s\n' "$GR_LINE" | /usr/bin/grep -c 'delete\|recreate\|rebuild')"
+# A row born ABOVE the table's last row owes its own entry too, and the tick names it, not the row at the table's end.
+# fails-when: the line names the table's last row (T8, held since the last tick) for a row put ahead of it.
+GR2_PLAN="$(sed -n 's/^plan=//p' "$(marker_of "$RSR")")"
+expect_true "GREW-2 precondition: the plan holds the row T8, which the last tick read" /usr/bin/grep -q '^| T8 |' "$GR2_PLAN"
+awk '/^\| *T1 *\|/ && !d { print "| T9 | 4 | build | Put the row above. It sits mid-table. | — | 30 | REQ-1 | lib/h.sh | — |"; d = 1 } { print }' "$GR2_PLAN" > "$GR2_PLAN.mid" && mv "$GR2_PLAN.mid" "$GR2_PLAN"
+poke "$RSR" tick
+GR2_LINE="$(printf '%s\n' "$OUT" | /usr/bin/grep 'poker: RECONCILE' || :)"
+expect_eq "GREW-2b the tick names the row put above the table's end, and not the last row" \
+  "poker: RECONCILE — the ## Tasks table grew since the last tick: add the task-list entry 4/T9: Put the row above at the end of the list" "$GR2_LINE"
 POKE_BOUND="$GR_BOUND_WAS"
 
 finish

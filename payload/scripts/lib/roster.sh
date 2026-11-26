@@ -916,6 +916,7 @@ roster_ack_ledger() {  # <roster> -> the sweeper ledger beside it, or nothing
 # the guard.
 RULING_TEXT_MAX=4000
 RULING_US=$'\037'
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 # This library's own directory, kept without a fork at source time: the plugin root every ruling's
 # acknowledgement call names is the one that holds this file (`ruling_plugin_root`).
 case "${BASH_SOURCE[0]}" in
@@ -976,7 +977,7 @@ $(awk -v w="$2" -v us="$RULING_US" "$_ROSTER_OPEN_AWK"'
 RULING_RUN
   [ -z "$_RULING_PLAN" ] || return 0
   sid="${f##*/roster-}"; sid="${sid%.state}"
-  declare -F session_plan >/dev/null 2>&1 || . "$_RULING_LIB_DIR/run.sh" >/dev/null 2>&1
+  bionic_need run.sh session_plan
   case "$f" in */.bionic/tmp/roster-?*.state) _RULING_PLAN="$(session_plan "${f%/.bionic/tmp/*}" "$sid" 2>/dev/null)" ;; esac
 }
 
@@ -987,8 +988,8 @@ _ruling_put() {  # <roster> <writer> id=<id> <key=value>...
   shift 2
   _ruling_run "$f" "$w"
   [ -n "$_RULING_PLAN" ] || return 1
-  declare -F log_append >/dev/null 2>&1 || . "$_RULING_LIB_DIR/log.sh" >/dev/null 2>&1 || return 1
-  declare -F reader_log >/dev/null 2>&1 || . "$_RULING_LIB_DIR/reader.sh" >/dev/null 2>&1 || return 1
+  bionic_need log.sh log_append || return 1
+  bionic_need reader.sh reader_log || return 1
   RUN_LOG="$(reader_log "$_RULING_PLAN" 2>/dev/null)" || return 1
   RUN_LOG="$RUN_LOG" log_append ruling "$1" "row=$_RULING_ROW" "writer=$w" "${@:2}"
 }
@@ -1019,8 +1020,7 @@ ruling_page_close() {  # <roster> <id>
   local f="${1:-}" base sid root
   case "$f" in */.bionic/tmp/roster-?*.state) ;; *) return 0 ;; esac
   base="${f##*/}"; sid="${base#roster-}"; sid="${sid%.state}"; root="${f%/.bionic/tmp/*}"
-  declare -F owed_close >/dev/null 2>&1 || { [ -r "$_RULING_LIB_DIR/owed.sh" ] && . "$_RULING_LIB_DIR/owed.sh"; } 2>/dev/null
-  declare -F owed_close >/dev/null 2>&1 || return 0
+  bionic_need owed.sh owed_close || return 0
   [ -n "$(OWED_ROOT="$root" OWED_SID="$sid" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep -xF "ruling:${2:-}")" ] || return 0
   OWED_ROOT="$root" OWED_SID="$sid" owed_close "ruling:$2" "ruling read" >/dev/null 2>&1
   return 0
@@ -1053,7 +1053,7 @@ ruling_fold() {  # <roster> [<writer>]
     { awk -v us="$RULING_US" "$_ROSTER_OPEN_AWK"'
         index($0, "roster-state/") == 1 { p = _roster_kv($0, "plan"); if (p != "" && p != "none") print p }' "$f"
       printf '%s\n' "$_RULING_PLAN"; } | awk 'NF && !seen[$0]++' | while IFS= read -r p; do
-      declare -F reader_facts >/dev/null 2>&1 || . "$_RULING_LIB_DIR/reader.sh" >/dev/null 2>&1 || break
+      bionic_need reader.sh reader_facts || break
       facts="$(reader_facts "$p" 2>/dev/null)" || continue
       printf '%s\n' "$facts" | /usr/bin/grep '^run/v1|ev=ruling|'
     done

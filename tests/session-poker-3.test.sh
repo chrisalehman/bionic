@@ -520,7 +520,8 @@ s42_unchanged "57v8 a question outside the set" 1 "$P57"
 CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive regression 'Ship it.'
 s42_unchanged "57v9 the regression is no question to waive: its whole run runs once" 1 "$P57"
 CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial $'two\nlines'
-s42_unchanged "57v10 a reply with a line break" 1 "$P57"
+expect_eq "57v10 a reply quoted with its line break is folded and written on one line (exit 0), the plan unwritten" "0|1|yes" \
+  "$RC|$(/usr/bin/grep -c '|question=adversarial|.*|said=two lines|' "$L57")|$(cmp -s "$TMPROOT/s42-before" "$P57" && echo yes)"
 CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial
 s42_unchanged "57v11 no reply (the usage error)" 2 "$P57"
 CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial '   '

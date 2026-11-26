@@ -257,30 +257,13 @@ handoff_render() {  # <composed> <section>
 # an entry too, `D<n> · put · <who> <date> · <title>`. With `times`, every round is one tab-separated line,
 # `D<n> verb date clock ampm wait title`, the clock and ampm empty when its instant names none and wait a put's line
 # under its heading: what the clock readers (`sitrep_ledger_times`, `pages_open`) read, so the sheet parses no heading.
-_sitrep_lib() {  # -> the library directory: BIONIC_LIB, else the one beside this file in the repository or the payload
-  local d c
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  for c in "${BIONIC_LIB:-}" "$d/../../payload/scripts/lib" "$d/../../scripts/lib"; do
-    [ -n "$c" ] && [ -f "$c/reader.sh" ] && { printf '%s\n' "$c"; return 0; }
-  done
-  return 1
-}
 _sitrep_log_in() {  # <record directory> -> the run's log in it, as the reader names it; nothing when the reader cannot be loaded
-  local lib
-  declare -F reader_log_in >/dev/null 2>&1 || {
-    lib="$(_sitrep_lib)" || return 0
-    # shellcheck source=/dev/null
-    . "$lib/reader.sh" >/dev/null 2>&1 || return 0
-  }
+  bionic_need reader.sh reader_log_in || return 0
   reader_log_in "$1"
 }
 _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledger's run, one decision fact per round
-  local led="$1" log lib plan
-  if ! declare -F reader_q_ledger >/dev/null 2>&1; then
-    lib="$(_sitrep_lib)" || return 0
-    # shellcheck source=/dev/null
-    . "$lib/reader.sh" >/dev/null 2>&1 || return 0
-  fi
+  local led="$1" log plan
+  bionic_need reader.sh reader_q_ledger || return 0
   log="$(_sitrep_log_in "${1%/*}")"
   [ -f "$log" ] && [ ! -L "$log" ] || return 0
   # THE LEDGER IS READ FROM THE FOLD ALREADY TAKEN when its run is one whose log is this ledger's: the fold this shell
@@ -485,7 +468,7 @@ decision_wait() {  # <plan> <D<n>> [<root>] [<rows the put names>] -> one senten
 # each once, as the plan's one reader of waits names them (lib/plan-read.sh `plan_read_waits`): a reads cell, a kind's
 # default, or a nine-cell row's deps alike. Every reader here of what waits on an approval or a decision asks this.
 sitrep_approval_waits() {
-  { declare -F plan_read_waits >/dev/null 2>&1 || . "$BIONIC_LIB/plan-read.sh"; } 2>/dev/null
+  bionic_need plan-read.sh plan_read_waits
   plan_read_waits "$1" 2>/dev/null | awk -F'\t' '$2 == "wait" && index($3, "approval:") == 1 && !s[$1, $3]++ { print $1 "\t" substr($3, 10) }'
 }
 
@@ -783,8 +766,7 @@ sitrep_list() {
 # finding's rating or a fixed finding is answered from them (lib/proof.sh `_proof_findings_hold`). The rows, their
 # reads and their states are the scheduler's (`units_rows`), never read again here.
 _sitrep_reader() {  # -> 0 once lib/proof.sh and the reader under it are loaded in this shell
-  { declare -F _proof_facts >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
-  declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load
+  bionic_need proof.sh _proof_facts && _proof_reader_load
 }
 _SITREP_FACTS_PLAN=""; _SITREP_FACTS=""; _SITREP_FACTS_FILE=""
 # A fold that failed (a process refused under memory pressure) is empty or short: held, every fact asked after would
@@ -862,7 +844,7 @@ sitrep_added() {
 sitrep_launches() {
   local key="" p r a c cs seen="" pk=""
   declare -F adopt_plan_key >/dev/null 2>&1 && key="$(adopt_plan_key "$1")"
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  bionic_need line.sh line_lines
   while IFS='	' read -r p r a c; do
     [ -n "$r" ] || continue
     case "$seen" in *"|$p|"*) ;; *) seen="$seen|$p|"; pk="$p"; declare -F adopt_plan_key >/dev/null 2>&1 && pk="$(adopt_plan_key "$p")" ;; esac
@@ -1099,7 +1081,7 @@ sitrep_card_puts() {
 # sitrep_bar -> the landing bar in minutes, lib/line.sh's LINE_LANDING_BAR, the one constant the scorecard's target
 # reads; loaded as the stop-run record loads line.sh; nothing when unread.
 sitrep_bar() {
-  [ -n "${LINE_LANDING_BAR:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  bionic_need line.sh line_lines
   case "${LINE_LANDING_BAR:-}" in ''|*[!0-9]*) return 0 ;; esac
   printf '%s\n' "$LINE_LANDING_BAR"
 }
@@ -1303,8 +1285,7 @@ sitrep_gather() {
   cur="$(_sitrep_ask "$plan" reader_q_step "$plan" | sed -n 's/^n=\([0-9][0-9]*\).*/\1/p')"
 
   # ---- the tasks, in execution order (THE TASKS, IN EXECUTION ORDER, above)
-  if { declare -F _line_fold >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-     && declare -F _line_fold >/dev/null 2>&1 && line_held "$rec"; then
+  if bionic_need line.sh _line_fold && line_held "$rec"; then
     lq="$(_line_fold "$rec" | awk -F'\t' 'NF >= 9 { m = 0; if ($9 != "none" && $9 != "") m = split($9, s, ","); printf "Q\t%s\t%s\t%s\t%d\t%d\n", $1, $5, $8, $12 + 0, m }')"
   fi
   # the run's open pull request, asked of the reader and of the tick's one predicate for whether it is still open
@@ -1631,7 +1612,7 @@ SITREP_RUNNING
   # draw too (lib/proof.sh `proof_whole_text`); a plan that owes no whole run says so, and no proof is not run yet.
   if [ "$(plan_regression "$plan" 2>/dev/null)" = no ]; then SG_T_WHOLE="not run (regression: no, Step 0)"
   else
-    { declare -F proof_whole_text >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
+    bionic_need proof.sh proof_whole_text
     SG_T_WHOLE="$(proof_whole_text "$plan" "$root" 2>/dev/null)"
     case "$SG_T_WHOLE" in none) SG_T_WHOLE="not run yet" ;; '') SG_T_WHOLE="unverified" ;; esac
   fi
@@ -1890,8 +1871,7 @@ sitrep_ask_words() {
 sitrep_tick_line() {
   local plan="${1:-}" root
   { [ -n "$plan" ] && [ -f "$plan" ] && [ ! -L "$plan" ]; } || return 0
-  declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
-  declare -F proof_plan_slug >/dev/null 2>&1 || return 0
+  bionic_need proof.sh proof_plan_slug || return 0
   root="$(cd "$(project_root "${plan%/*}")" 2>/dev/null && pwd -P)"
   [ -n "$root" ] || return 0
   sitrep_gather "$plan" "$root" line 2>/dev/null
@@ -1940,7 +1920,7 @@ sitrep_tick_line() {
       HO_ROOT="$PV_REPO"
       trap 'rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"} "$HO_CF"' EXIT
       if [ "$HO_MODE" = open ]; then
-        { declare -F plan_read_heading >/dev/null 2>&1 || . "$BIONIC_LIB/plan-read.sh"; } 2>/dev/null
+        bionic_need plan-read.sh plan_read_heading
         if ! plan_read_heading "$PV_PLAN" Tasks >/dev/null 2>&1; then
           die "REFUSED — the plan has no ## Tasks section, so there are no open tasks to hand off; the plan is unchanged."
           exit 1
@@ -1950,12 +1930,11 @@ sitrep_tick_line() {
           exit 1
         fi
       fi
-      if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-         || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+      if ! bionic_need proof.sh proof_plan_slug; then
         die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
         exit 2
       fi
-      { declare -F _line_entries >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } || :
+      bionic_need line.sh _line_entries || :
       HO_SLUG="$(proof_plan_slug "$PV_PLAN")"
       HO_RUNWORD="$HO_SLUG"
     else
@@ -2060,8 +2039,7 @@ sitrep_tick_line() {
         stopped\ *)  HO_PATROL="stopped without a word; this turn's end starts another" ;;
         *)           HO_PATROL="none yet; this turn's end starts it" ;;
       esac
-      { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-      if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$PV_PLAN")" = no ]; then
+      if bionic_need scale.sh scale_patrol && [ "$(scale_patrol "$PV_PLAN")" = no ]; then
         HO_PATROL="none — a task-scale run has no Patrol"
       fi
       HO_LEDGER="$(docs_root "$HO_ROOT")/record/$HO_SLUG/design-ledger.md"
@@ -2090,7 +2068,7 @@ sitrep_tick_line() {
     # open asks, which no plan says anything waits on.
     HO_RUNLINE=""; HO_ASKS=""; HO_BLOCKED=no
     if [ "$HO_MODE" != none ]; then
-      { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
+      bionic_need proof.sh proof_plan_slug
       HO_SRR="$(cd "$(project_root "${PV_PLAN%/*}")" 2>/dev/null && pwd -P)"
       if declare -F proof_plan_slug >/dev/null 2>&1 && [ -n "$HO_SRR" ]; then
         sitrep_gather "$PV_PLAN" "$HO_SRR" line 2>/dev/null
@@ -2222,8 +2200,7 @@ sitrep_tick_line() {
     # THE SCORECARD (wave-38 T15; D26): its reasoning is beside `scorecard_report`. It renders the sitrep's indicators,
     # which read the proof record, loaded as the sitrep verb loads it.
     if [ "$LR_SC" = yes ]; then
-      if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-         || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+      if ! bionic_need proof.sh proof_plan_slug; then
         die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
         exit 2
       fi
@@ -2346,8 +2323,7 @@ sitrep_tick_line() {
         die "REFUSED — $d is already $st: $(decisions_list "$led" | awk -F' · ' -v d="$d" '$1 == d { l = $0 } END { print l }'); put it again to open a new round; nothing is written."
         return 3 ;;
     esac
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
-    if ! declare -F user_said >/dev/null 2>&1; then
+    if ! bionic_need said.sh user_said; then
       die "REFUSED — who said the reply is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
       return 1
     fi
@@ -2410,8 +2386,7 @@ sitrep_tick_line() {
       die "REFUSED — this session has no run to read; bind its plan first, or read every run's: decisions --all."
       exit 2
     fi
-    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_plan_slug; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
       exit 2
     fi
@@ -2496,8 +2471,7 @@ sitrep_tick_line() {
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty); a resume binds ONE session."
       exit 3
     fi
-    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_plan_slug; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was bound."
       exit 2
     fi
@@ -2539,8 +2513,7 @@ sitrep_tick_line() {
     # THE PATROL IS THE SCALE'S (`scale_patrol`, lib/scale.sh): a scale whose profile has none, the task row, is not ticked
     # here and owes no watch. A plan with no `scale:` is watched.
     RS_PATROL=yes
-    { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-    if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$RS_PLAN")" = no ]; then
+    if bionic_need scale.sh scale_patrol && [ "$(scale_patrol "$RS_PLAN")" = no ]; then
       RS_PATROL=no
     fi
     rs_step 0 bind "$RS_PLAN"
@@ -2663,7 +2636,7 @@ sitrep_tick_line() {
   # the person owes it is read there: the sheet is its head, the plan's path and the asks (lib/owed.sh finds the log
   # through the seal). rc 1, nothing printed, when no seal stands, and the verb refuses as for no run.
   sitrep_gone() {  # <plan> <root>
-    { declare -F proof_plan_slug >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } 2>/dev/null || return 1
+    bionic_need proof.sh proof_plan_slug || return 1
     SG_ASKS="$(sitrep_asks "$1" "$2" "" "" "$(sitrep_now)")"
     [ -n "$SG_ASKS" ] || return 1
     printf '%s\nrun.plan-gone: %s\n' "$SITREP_SHEET_HEAD" "$1"
@@ -2705,8 +2678,7 @@ sitrep_tick_line() {
         exit 2
       fi
     fi
-    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_plan_slug; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
       exit 2
     fi
