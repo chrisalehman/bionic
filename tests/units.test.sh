@@ -42,6 +42,9 @@
 #   §POINT-RUN   a point's run is held by its own rows; an open point holds no whole run and writes no regression proof
 #   §POINT-RED   a suite red in a point's run is born as a fix row whose birth names the point and the rows it follows
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
+#   §LISTS     a list read where it is used follows its source: the rehearsal's measured keys are the sheet's own
+#              `sitrep_m` calls, the proof library's debt kinds are the debt library's, a kind planted in the source
+#              reaching the reader with no other edit
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1195,5 +1198,29 @@ expect_eq "HELD-4 the status pass: asked twice, and with a pending step that nam
   "$(printf '%s\n' "$HD_OUT" | head -3 | sort -u | wc -l | tr -d ' ')|$(printf '%s\n' "$HD_OUT" | sed -n 1p)|$(printf '%s\n' "$HD_OUT" | head -3 | grep -c 'state=dispatched')"
 expect_eq "HELD-5 a fact of a row set since is passed again and read: a second status pass, T1 landed" \
   "2|row=T1 state=landed name=w-T1 brief=b sum=s commit=c1" "$(hd_n status)|$(printf '%s\n' "$HD_OUT" | sed -n 4p)"
+
+section "§LISTS — a list read where it is used follows its source: the measured keys the sheet's calls, the debt kinds the debt library's"
+# fails-when: the rehearsal's list of measured keys or the proof library's list of debt kinds is a copy that a new
+# entry in its source does not reach, or the derived list drops an entry or changes the order the source holds.
+LS_SIT="$BIONIC_HOOKS_DIR/poker/sitrep.sh"
+# shellcheck disable=SC2016  # the child shell's script
+ls_keys() { bash -c '. "$1/tests/lib/rehearsal-read.sh"; rt_measured_keys "$2"' _ "$REPO_ROOT" "$1"; }   # <sitrep.sh> -> its keys
+LS_REAL="$(ls_keys "$LS_SIT")"
+expect_eq "LISTS-1 the measured keys are one per sitrep_m call of the sheet, none dropped (28 calls)" \
+  "$(grep -c '^  sitrep_m [a-z]' "$LS_SIT")" "$(printf '%s\n' "$LS_REAL" | wc -w | tr -d ' ')"
+expect_eq "LISTS-1b …the sheet's tests.cap among them, in the sheet's place between tests.whole-run and reviews" "yes" \
+  "$([[ " $LS_REAL " == *" tests.whole-run tests.cap reviews "* ]] && echo yes)"
+LS_PLANT="$SANDBOX/lists-sitrep.sh"
+awk '{ print } /^  sitrep_m waste.waiting-on-you / { print "  sitrep_m zz.planted \"$X\" \"what it measures\" \"unit\" \"source: a plant\"" }' "$LS_SIT" > "$LS_PLANT"
+expect_eq "LISTS-2 a measure planted in the sheet's calls is in the list, last, and nothing else moved" \
+  "$LS_REAL zz.planted" "$(ls_keys "$LS_PLANT")"
+LS_LIB="$SANDBOX/lists-lib"; cp -R "${LIB%/*}" "$LS_LIB"
+# shellcheck disable=SC2016  # the child shell's script
+ls_kinds() { BIONIC_LIB="" bash -c '. "$1/proof.sh" || exit 127; printf "%s|%s" "$PROOF_DEBT_KINDS" "$DEBT_KINDS"' _ "$1" 2>&1; }   # <lib dir>
+expect_eq "LISTS-3 the proof library's debt kinds are the debt table's three; the debt line's are those and hole" \
+  "duplicate unpinned-pair one-case-abstraction|duplicate unpinned-pair one-case-abstraction hole" "$(ls_kinds "${LIB%/*}")"
+sed 's/^DEBT_TABLE_KINDS="\(.*\)"$/DEBT_TABLE_KINDS="\1 planted-kind"/' "${LIB%/*}/debt.sh" > "$LS_LIB/debt.sh"
+expect_eq "LISTS-4 a kind planted in the debt library's table reaches the proof library's kinds and the debt line's, hole still last" \
+  "duplicate unpinned-pair one-case-abstraction planted-kind|duplicate unpinned-pair one-case-abstraction planted-kind hole" "$(ls_kinds "$LS_LIB")"
 
 finish
