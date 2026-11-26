@@ -151,6 +151,17 @@ _rh_do() {
   printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
   return 1
 }
+# _rh_ready <label> -> the row's ready, run from RH_CWD by _rh_do: 0 only when it printed LANDED. WAITING and BUSY exit
+# 0 as ordinary answers, so the landing is read from the line ready printed, never from its exit.
+_rh_ready() {
+  local why
+  _rh_do "$1" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
+  printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q '^LANDED ' && return 0
+  why="$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -m 1 -E '^(WAITING|BUSY) ')" || why="$(printf '%s\n' "$DOOR_OUT" | tail -n 1)"
+  printf 'rehearse %s: %s did not land: %s\n' "$RH_STATE" "$1" "$why" >&2
+  printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
+  return 1
+}
 _rh_poker() { local l="$1"; shift; _rh_do "$l" bash "$RH_ROOT/hooks/session-poker.sh" "$@"; }   # <label> <verb> [args]
 # _rh_refused <label> <cmd> [args] -> _rh_do's run of a command the state needs refused: 0 when it exits non-zero
 _rh_refused() {
@@ -258,7 +269,7 @@ _rh_build_ready() {
     > "$t/tests/rehearsal-row.test.sh"
   _rh_commit "$t" "a library change and its suite" || { echo "rehearse $RH_STATE: the build's commit in .worktrees/T1 failed" >&2; return 1; }
   _rh_hand code "T1's code and its suite, committed in .worktrees/T1"
-  RH_CWD="$t" _rh_do "the build row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
+  RH_CWD="$t" _rh_ready "the build row says ready" || return 1
   printf '# T1: the build\n\nThe library change and its suite.\n' > "$RH_REC/T1.md" || return 1
   _rh_hand record "T1's report record/wave-x/T1.md"
   _rh_stopped dw-T1
@@ -516,7 +527,7 @@ _rh_replay() {
     && _rh_commit "$t" "a caller reaches the library change" \
     || { echo "rehearse $RH_STATE: the fix's commit in .worktrees/T5 failed" >&2; return 1; }
   _rh_hand code "T5's suite, a caller of the library change, committed in .worktrees/T5"
-  RH_CWD="$t" _rh_do "the fix row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
+  RH_CWD="$t" _rh_ready "the fix row says ready" || return 1
   printf '# T5: the fix\n\nThe suite calls rehearsal_landed, so the library change has a caller.\n' > "$RH_REC/T5.md" || return 1
   _rh_hand record "T5's report record/wave-x/T5.md"
   _rh_stopped w-T5 || return 1

@@ -839,7 +839,7 @@ RN="$(ll_world)"; ll_launch "$RN" T1 c
 ( cd "$RN" && world_suite c green >/dev/null ) && git -C "$RN" add tests/c.test.sh && git -C "$RN" commit -qm "suite c"
 REQN="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
 ll_verb "$RN" T1 --within 60
-expect_eq "(n1) a suite promising 600 s with 60 s left: exit 75" "75" "$LL_RC"
+expect_eq "(n1) a suite promising 600 s with 60 s left: exit 0, an ordinary answer" "0" "$LL_RC"
 expect_eq "(n1) …printing WAITING and the same command (§WHY reads the reason after it)" "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$LL_OUT" | grep '^WAITING ' | head -n 1)"
 expect_eq "(n1) …nothing run: no verdict, no log, no gate request" "0 0 $REQN" \
   "$(ll_ev "$RN" verdict | awk 'END { print NR }') $(ls "$RN/.bionic/docs/record/wave-x/line" 2>/dev/null | wc -l | tr -d ' ') $(ls "$BIONIC_GATE_DIR/requests" | wc -l | tr -d ' ')"
@@ -854,14 +854,14 @@ expect_eq "(n2f) AC-4.2 the verdict carries promised=600 and actual= the gate's 
   "600 $(ll_req_last c.test.sh actual) yes" \
   "$(ll_field "$N2V" promised) $(ll_field "$N2V" actual) $(printf '%s\n' "$N2V" | grep -qE '\|width=[^|]+\|promised=600\|actual=[0-9]+\|at=' && echo yes)"
 # AC-4.3 WITH TWO SUITES: a (5 s) fits in 60 s, c (600 s) does not. ready prints the total, runs a, and waits c:
-# WAITING exit 75, a's verdict written, nothing started for c.
+# WAITING exit 0, a's verdict written, nothing started for c.
 RN5="$(ll_world)"; ll_launch "$RN5" T1 a,c
 ( cd "$RN5" && world_cost a.test.sh 5 && world_cost c.test.sh 600 )
 ( cd "$RN5" && world_suite a green >/dev/null && world_suite c green >/dev/null ) && git -C "$RN5" add tests/a.test.sh tests/c.test.sh \
   && git -C "$RN5" commit -qm "suites a and c"
 N5_C="$(grep -l '^key=c.test.sh$' "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | awk 'END { print NR }')"
 ll_verb "$RN5" T1 --within 60
-expect_eq "(n5) AC-4.3 a,c with 60 s: promised 605s of 60s first, then WAITING, exit 75" "75|promised 605s of 60s|WAITING T1 — run again: bash ${SPAWN} ready --within 60" \
+expect_eq "(n5) a,c with 60 s: promised 605s of 60s first, then WAITING, exit 0" "0|promised 605s of 60s|WAITING T1 — run again: bash ${SPAWN} ready --within 60" \
   "$LL_RC|$(printf '%s\n' "$LL_OUT" | head -n 1)|$(printf '%s\n' "$LL_OUT" | grep '^WAITING ' | head -n 1)"
 expect_eq "(n5) …waiting on c, whose promise the time left cannot hold" "waiting: suite c.test.sh promises 600s and" \
   "$(printf '%s\n' "$LL_OUT" | grep '^waiting: ' | head -n 1 | cut -d' ' -f1-6)"

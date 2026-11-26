@@ -31,6 +31,8 @@
 #   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
 #   BIONIC_TEST_PROGRESS=p.tsv bash tests/run.sh also append <UTC>TAB<label>TAB<rc>
 #                                    as each suite lands, so a long run can be watched
+#   BIONIC_NOT_ADMITTED=n bash tests/run.sh   append one line to n when the gate admitted nothing
+#                                    (the run then exits 0, having run nothing)
 #
 # The derived roster below is the roster in BOTH modes — the directory is the
 # only place a suite is named, and neither mode has a list of its own. In
@@ -284,6 +286,20 @@ else
 fi
 unset BIONIC_TEST_PROGRESS
 
+# ── THE NOT-ADMITTED NOTE, READ ONCE, HERE ───────────────────────────────────
+# A run the gate did not admit ran nothing, and that is an ordinary answer: the runner says so and
+# exits 0. A caller that needs to tell it from a green run (the shim, whose stamp would otherwise read
+# rc=0, and the poker's regression verb) names a file in BIONIC_NOT_ADMITTED, and the runner appends
+# one line to it at the end where it exits 0 having run nothing. Read once and unset, for the
+# progress knob's reason: a nested runner a suite drives would otherwise write its fixture's answer
+# into the caller's note.
+_NOT_ADMITTED_NOTE="${BIONIC_NOT_ADMITTED:-}"
+unset BIONIC_NOT_ADMITTED
+_not_admitted() {  # <what> — the note's one line, when a caller named a note
+  [ -z "$_NOT_ADMITTED_NOTE" ] || printf 'tests/run.sh: not admitted: %s\n' "$1" >>"$_NOT_ADMITTED_NOTE" 2>/dev/null
+  return 0
+}
+
 # ── THE TIMING KNOB, READ ONCE, HERE TOO (wave-26 T26; D20) ──────────────────
 # Same trade, same reason: a nested run inheriting `BIONIC_TEST_TIMING` wrote its fixture
 # labels into the real run's file (60 of 135 rows of one floor run). Unlike progress, only
@@ -342,6 +358,8 @@ while [ $# -gt 0 ]; do
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
       echo "  BIONIC_TEST_PROGRESS  a file to append to, one <UTC>TAB<label>TAB<rc>"
       echo "                        line per suite as it lands"
+      echo "  BIONIC_NOT_ADMITTED   a file to append one line to when the gate admitted"
+      echo "                        nothing (the run exits 0 then, having run nothing)"
       exit 0
       ;;
     *)
@@ -937,9 +955,11 @@ if [ "$SERIAL" -eq 0 ]; then
   _RUN_GATE_ID=""; _RUN_GATE_OWN=0
   if [ "$ONLY" -eq 0 ] && [ -s "$LAUNCH" ]; then
     if ! _gate_ask_for whole tests/run.sh; then
-      # A WHOLE RUN THE ASKING AGENT'S BUDGET DOES NOT CARRY (wave-33 T3; D7, AC-6.2): nothing ran.
+      # A WHOLE RUN THE ASKING AGENT'S BUDGET DOES NOT CARRY: nothing ran, an ordinary answer (exit 0),
+      # told to a caller that asked by its note.
       printf '%s\n' "$_GATE_REFUSAL"
-      exit 75
+      _not_admitted "the whole run"
+      exit 0
     fi
     _RUN_GATE_ID="$_GATE_ID"; _RUN_GATE_OWN="$_GATE_OWN"
     [ -z "$_RUN_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_RUN_GATE_ID"
@@ -1052,9 +1072,9 @@ fi
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
-  # EVERY FAILURE A BUDGET REFUSAL (wave-33 T3; D7): exit 75, the gate's own code for a run it did
-  # not start, so a caller tells "refused" from "red". A suite that failed is still exit 1.
-  [ "$budget" -ne "$fail" ] || exit 75
+  # EVERY FAILURE A BUDGET REFUSAL: nothing was judged, an ordinary answer (exit 0), and a caller tells
+  # "not run" from green by its note, never by the exit. A suite that failed is still exit 1.
+  if [ "$budget" -eq "$fail" ]; then _not_admitted "$(printf '%b' "$failed" | awk 'NF { printf "%s%s", (n++ ? " " : ""), $2 }')"; exit 0; fi
   exit 1
 fi
 echo "All gating suites green ✓"

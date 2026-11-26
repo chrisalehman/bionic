@@ -119,9 +119,15 @@ rt_ev given; rt_run
 expect_eq "O6 an order the log alone holds stops the runner, with its words, and the suite never ran again" "1|held in the log|1" \
   "$RC|$(printf '%s\n' "$OUT" | grep -o 'held in the log' | head -1)|$(rt_runs)"
 rt_ev lifted
-section "§FORK: a failed suite whose output holds the shell's own refusal of a process did not run: exit 75, its output shown"
+section "§FORK: a failed suite whose output holds the shell's own refusal of a process did not run: exit 0, its output shown, the caller's note written"
 rt_fk() { OUT="$(cd "$W" && env "${RT_ENV[@]}" CLAUDE_CODE_SESSION_ID="$SID" bash tests/run.sh --only "$1.test.sh" 2>&1)"; FK="$FK$?:$(printf '%s\n' "$OUT" | awk -v l="$1.test.sh" '$1 == l { print $3 }') "; }; FK=""; rt_fk f1; F1="$OUT"; rt_fk f2; rt_fk f3; rt_fk f4
-expect_eq "F1 refused, exit 1: not run (75), its line shown · exit 1 without it: red · refused, exit 0: green · quoted: red" "75:REFUSED 1:FAIL 0:PASS 1:FAIL 1" "$FK$(printf '%s\n' "$F1" | grep -c "^tests/f1.test.sh: $RF\$")"
+expect_eq "F1 refused, exit 1: not run (exit 0), its line shown · exit 1 without it: red · refused, exit 0: green · quoted: red" "0:REFUSED 1:FAIL 0:PASS 1:FAIL 1" "$FK$(printf '%s\n' "$F1" | grep -c "^tests/f1.test.sh: $RF\$")"
+# A caller that needs the answer names a file in BIONIC_NOT_ADMITTED: the runner that ran nothing writes it a line,
+# and a runner whose suite ran red leaves it empty. Read by its size, the one extractor, on both runs.
+rt_note() { : > "$TMPROOT/note"; ( cd "$W" && env "${RT_ENV[@]}" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOT_ADMITTED="$TMPROOT/note" \
+  bash tests/run.sh --only "$1.test.sh" >/dev/null 2>&1 ); local r=$?; printf '%s:%s ' "$r" "$([ -s "$TMPROOT/note" ] && echo written || echo empty)"; }
+expect_eq "F2 the runner that ran nothing writes the caller's note and exits 0 · one whose suite ran red leaves it empty and exits 1" \
+  "0:written 1:empty " "$(rt_note f1; rt_note f2)"
 section "§HELD: a suite the runner starts from inside a held command never inherits the command's hold, by the door or --serial"
 # A poker verb names its command's hold in BIONIC_HELD for every process it starts (lib/proof.sh proof_hold_begin), and the
 # regression verb starts this runner. A suite that inherited it would read and write the command's folder, not its own temp.
