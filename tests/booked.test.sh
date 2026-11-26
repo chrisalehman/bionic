@@ -21,6 +21,8 @@
 #   §SIGNALS  a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their
 #            defaults.
 #   §CLASS  a browser or compile run is asked as work with its class on the request; a bad class asks nothing.
+#   §EXPECT-RED  a run declared meant to fail exits 0 when its suite fails and 1 when it passes, while the
+#            stamp, the run log and the proof reader keep the suite's own code.
 #
 # The gate (gate.test.sh, slots.test.sh) owns the foreground shim; nothing here re-proves it.
 #
@@ -541,5 +543,63 @@ cl_run bad --class build
 expect_eq "CL.3 --class build exits 2 and asks nothing: no request in the store" "2 0" "$CL_RC $(ls "$CL_GD"/requests 2>/dev/null | wc -l | tr -d ' ')"
 expect_true "CL.3b …and its usage line names the option" grep -q 'usage:.*--class' "$CL_GD.out"
 world_machine 8 8192 10 0.5
+
+# =====================================================================================
+section "§EXPECT-RED — a run declared meant to fail: the console's code inverts, the record keeps the suite's own"
+# =====================================================================================
+# The wall reads `BIONIC_EXPECT=red` on a suite segment and hands the shim `--expect red`. The console then exits 0
+# when the suite failed and non-zero when it passed, while the stamp, the run log and the proof reader keep the
+# suite's own code, so a meant-to-fail run is never read as a green run of that suite. The suite is a stand-in
+# that prints the door's failing count and exits 1, run in the doctrine's shape: tee to a log, `rc=` appended, `exit $rc`.
+ER_STAMPS="$(git -C "$T1" rev-parse --absolute-git-dir 2>/dev/null)/bionic-stamps"
+printf '#!/bin/bash\necho "Gating: 0 passed, 1 failed"\necho "Failed: er-red.test.sh"\nexit 1\n' > "$D/er-red.sh"
+printf '#!/bin/bash\necho "Gating: 1 passed, 0 failed"\nexit 0\n' > "$D/er-green.sh"
+er_cmd() {  # <stand-in> <log> -> the doctrine-shaped line over it
+  printf "set -o pipefail; bash '%s' 2>&1 | tee '%s'; rc=\$?; echo \"rc=\$rc\" >> '%s'; exit \$rc" "$1" "$2" "$2"
+}
+er_stamp_rc() {  # <suite> -> the rc= of the newest stamp naming it
+  grep "|suites=$1|" "$ER_STAMPS" 2>/dev/null | tail -n 1 | sed -n 's/.*|rc=\([0-9]*\)|.*/\1/p'
+}
+er_proof() {  # <suite> -> the verdicts the proof reader takes from the tree's stamps for it, one per line
+  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_records "$T1" ) 2>/dev/null \
+    | awk -F'\t' -v s="$1" '$1 == "R" && $4 == s && $6 == "stamp" { print $5 }' | sort -u
+}
+
+( cd "$T1" && bash "$BOOKED" --agent wx-T1 --suites er-red.test.sh --expect red -- "$(er_cmd "$D/er-red.sh" "$D/er-red.log")" ) \
+  > "$D/er-red.out" 2> "$D/er-red.err"; ER_RC=$?
+expect_eq "ER.1 a run declared meant to fail whose suite fails exits 0" "0" "$ER_RC"
+expect_contains "ER.1b …and says on stderr that it failed as declared, with the suite's own code" "failed as declared (rc=1" \
+  "$(cat "$D/er-red.err" 2>/dev/null)"
+expect_eq "ER.2 the stamp holds the suite's own failure, rc=1" "1" "$(er_stamp_rc er-red.test.sh)"
+expect_contains "ER.3 the log holds the suite's failing count" "Gating: 0 passed, 1 failed" "$(cat "$D/er-red.log" 2>/dev/null)"
+expect_eq "ER.3b …and the suite's own rc line" "rc=1" "$(tail -n 1 "$D/er-red.log" 2>/dev/null)"
+expect_eq "ER.4 the proof reader reads that suite red at the head, from its stamp" "red" "$(er_proof er-red.test.sh)"
+
+( cd "$T1" && bash "$BOOKED" --agent wx-T1 --suites er-green.test.sh --expect red -- "$(er_cmd "$D/er-green.sh" "$D/er-green.log")" ) \
+  > "$D/er-green.out" 2> "$D/er-green.err"; ER_RC=$?
+expect_eq "ER.5 the same declaration over a suite that passes exits non-zero (1)" "1" "$ER_RC"
+expect_contains "ER.5b …and says the suite passed though it was declared meant to fail" "declared meant to fail, and it passed" \
+  "$(cat "$D/er-green.err" 2>/dev/null)"
+expect_eq "ER.6 the stamp keeps the pass, rc=0" "0" "$(er_stamp_rc er-green.test.sh)"
+expect_eq "ER.6b …which the proof reader reads green, the suite's own result" "green" "$(er_proof er-green.test.sh)"
+
+( cd "$T1" && bash "$BOOKED" --agent wx-T1 --suites er-plain.test.sh -- "$(er_cmd "$D/er-red.sh" "$D/er-plain.log")" ) \
+  > /dev/null 2>&1; ER_RC=$?
+expect_eq "ER.7 control: the same failing suite with no declaration exits its own 1" "1" "$ER_RC"
+
+( cd "$T1" && bash "$BOOKED" --agent wx-T1 --suites er-none.test.sh --expect red -- 'no-such-command-er' ) \
+  > /dev/null 2> "$D/er-none.err"; ER_RC=$?
+expect_eq "ER.8 a declared run whose command never ran (127) keeps its code: not run is never failed as declared" "127" "$ER_RC"
+expect_eq "ER.8b …and its stamp keeps 127" "127" "$(er_stamp_rc er-none.test.sh)"
+
+ER_OUT="$(cd "$T1" && bash "$BOOKED" --detach --agent wx-T2 --suites er-det.test.sh --expect red -- "$(er_cmd "$D/er-red.sh" "$D/er-det.log")" 2>"$D/er-det.err")"; ER_RC=$?
+ER_LOG="$(printf '%s\n' "$ER_OUT" | sed -n 's/^booked: started .*log=\([^ ]*\).*/\1/p' | head -n 1)"
+expect_eq "ER.9 detached and waited on: the caller of a declared run whose suite fails exits 0" "0" "$ER_RC"
+expect_true "ER.9a …the run's own log was named on its started line" test -f "$ER_LOG"
+expect_eq "ER.9b …while the run's end keeps the suite's own code, 1" "1" "$(cat "$ER_LOG.rc" 2>/dev/null)"
+expect_eq "ER.9c …and so does the log's last line" "rc=1" "$(tail -n 1 "$ER_LOG" 2>/dev/null)"
+
+( cd "$T1" && bash "$BOOKED" --suites er-bad.test.sh --expect green -- true ) > /dev/null 2>&1; ER_RC=$?
+expect_eq "ER.10 --expect with any word but red is usage, 2" "2" "$ER_RC"
 
 finish

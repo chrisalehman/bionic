@@ -782,6 +782,24 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       s = strip_leading(s)
       return (s ~ /^cd([ \t]|$)/)
     }
+    # A RUN MEANT TO FAIL (mode=expect): does this segment carry the assignment word
+    # `BIONIC_EXPECT=red` among the assignments and openers it starts with? Each assignment is
+    # one shell word, read by sw_word as the shell reads it, so a quoted value before it is
+    # skipped whole and the word inside a quoted value is never this one. Exact spelling only:
+    # a declaration the reader is unsure of is no declaration, and the run keeps its own exit.
+    function expect_red(s,   L, e) {
+      s = trim(s)
+      for (;;) {
+        if (match(s, /^[A-Za-z_][A-Za-z0-9_]*=/)) {
+          L = RLENGTH
+          e = sw_word(s, L + 1)
+          if (substr(s, 1, e - 1) == "BIONIC_EXPECT=red") return 1
+          s = trim(substr(s, e))
+        } else if (match(s, /^[({!][ \t]*/) || match(s, /^(then|else|elif|do|if|while|until)[ \t]+/)) {
+          s = trim(substr(s, RLENGTH + 1))
+        } else return 0
+      }
+    }
     function dequote_whole(s,   c) {
       s = trim(s); c = substr(s, 1, 1)
       if ((c == "'"'"'" || c == "\"") && length(s) > 1 && substr(s, length(s), 1) == c)
@@ -1721,6 +1739,8 @@ _cmd_class_awk() {  # <mode> ; command on stdin
               } else
               printf "%s\t%s\t%s\t%s\n", LAST_KIND, LAST_TARGET, LAST_RUN, LAST_PATH
             }
+          } else if (mode == "expect") {
+            if (cls == "suite") { EXN++; if (expect_red(t)) EXR++ }
           } else {
             printf "%s\t%s\n", cls, t
           }
@@ -1740,6 +1760,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         }
       }
       if (mode == "targets" && SPLIT) print "split"
+      if (mode == "expect") printf "%s", (EXN && EXR == EXN ? "red" : (EXR ? "mixed" : ""))
     }
   '
 }
@@ -2801,6 +2822,16 @@ cmd_backgrounded() {  # <command> -> 0 when the TEXT backgrounds it, 1 otherwise
 
 cmd_class_lines() {  # <command> -> "<class>\t<segment>" per non-empty segment
   printf '%s' "${1-}" | _cmd_class_awk lines
+}
+
+# cmd_expect <command> -> `red` when every suite-class segment opens on the assignment
+# `BIONIC_EXPECT=red` (a run meant to fail), `mixed` when only some do, else nothing. One exit
+# code speaks for the whole command, so it can be inverted only when every suite in it declared
+# the same. A command whose text never spells the word costs no awk pass: every declaration
+# contains it literally.
+cmd_expect() {
+  case "${1-}" in *BIONIC_EXPECT=red*) : ;; *) return 0 ;; esac
+  printf '%s' "$1" | _cmd_class_awk expect
 }
 
 cmd_suite_claims() {  # <command> [<repo root>] [<cwd>] -> "<kind>\t<target>\t<run>" per suite-class segment

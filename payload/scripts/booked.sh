@@ -6,7 +6,7 @@
 #   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
 #                                        [--max-wait <seconds>] [--shell <path>]
 #                                        [--stamp-dir <dir>] [--suites <names>] [--class browser|compile] [--runner]
-#                                        [--detach [--no-wait]]
+#                                        [--detach [--no-wait]] [--expect red]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -136,6 +136,19 @@
 # A browser or compile run is still `work`, carried with its class so the gate promises it the free
 # room until its own runs have measured it; it is owed its measured cost, never a quiet machine.
 #
+# --expect red: A RUN MEANT TO FAIL. The wall passes it when every suite segment of the command opens
+# on the assignment `BIONIC_EXPECT=red` (lib/cmd-class.sh `cmd_expect`): a failing-first run, whose red
+# is the point. It changes ONE thing, the code the console gets: 0 when the command failed, 1 when it
+# passed, each with one stderr line saying which. The stamp, the run log's rc line, `<log>.rc`, the
+# roster's run_rc= and the run's line in the landing record all keep the command's own code, so the
+# proof reader, which takes green from a stamp's rc=0 alone, never reads a meant-to-fail run as a
+# green run of its suite. A code that is no verdict on the suite is never "failed as declared" and goes
+# to the console as it is: 2 (usage, the door's unknown suite), 70 and 71 (a detached run lost or not
+# started), 75 (not admitted), 124 (over the short limit), 126 and 127 (the command never ran), and
+# 128 and above (a signal). Only the caller inverts: the detached side is never told, so a run's own
+# records cannot differ by who waits on it. The shim never reads BIONIC_EXPECT itself: the assignment
+# reaches every process the suite starts, and a nested shim reading it would invert twice.
+#
 # --kill-after <s>: once MORE than <s> seconds have passed since the shim started, the command's
 # whole process group is killed, one line says it is over the short limit and belongs in a
 # subagent, and the shim exits 124. The clock is `$SECONDS`, whole seconds, so the kill lands
@@ -246,9 +259,10 @@
 #   124  --kill-after fired during the run
 #   128+n  the shim itself was stopped by signal n (its command is killed with it)
 # 75 is EX_TEMPFAIL, "try again later", which is what a wait that ran out means.
+#   --expect red inverts the console's code of a verdict, above; never the stamp's
 # A command can exit 75 or 124 itself; the shim's own always comes after a `booked:` or
 # `gate:` line on stderr, and the stamp of either is never proof of a green run. The stamp's
-# `rc=` is the exit code.
+# `rc=` is the command's own exit code, whatever the shim returns.
 #
 # THE WAITS. The gate's wait polls every BIONIC_GATE_POLL seconds (lib/gate.sh) and prints one
 # line when it starts. The store follows BIONIC_GATE_DIR.
@@ -274,12 +288,12 @@ BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class <heavy class>] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class <heavy class>] [--runner] [--unplaced] [--detach [--no-wait]] [--expect red] -- <command>\n' >&2
   exit 2
 }
 
 kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; cls=""; agent=""; runner=0; unplaced=0
-detach=0; run_log=""; no_wait=0
+detach=0; run_log=""; no_wait=0; expect=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --agent)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; agent="$2"; shift 2 ;;
@@ -300,6 +314,8 @@ while [ "$#" -gt 0 ]; do
     --unplaced)     unplaced=1; shift ;;
     --detach)       detach=1; shift ;;
     --no-wait)      no_wait=1; shift ;;
+    --expect)       [ "$#" -ge 2 ] && [ "$2" = red ] || booked_usage; expect=red; shift 2 ;;
+    --expect=*)     [ "${1#--expect=}" = red ] || booked_usage; expect=red; shift ;;
     # THE DETACHED SIDE (internal): the caller of --detach starts this shim again with the log it
     # claimed; nobody types it.
     --run-log)      [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_log="$2"; shift 2 ;;
@@ -362,6 +378,29 @@ booked_stamp() {  # <rc>
     "$stamp_head" "${stamp_dirty:-0}" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$s" "$c" \
     >> "$stamp_file" 2>/dev/null
   return 0
+}
+
+# booked_exit <rc> — THE CONSOLE'S CODE, the one place a declared run meant to fail is inverted
+# (--expect red, above). Every record is written before this, with the command's own code.
+booked_exit() {
+  local rc="$1"
+  if [ "$expect" = red ]; then
+    case "$rc" in
+      0)
+        printf 'booked: declared meant to fail, and it passed (rc=0, kept in the record) — exit 1\n' >&2
+        rc=1 ;;
+      2|70|71|75|124|126|127)
+        printf 'booked: declared meant to fail, but rc=%s is no verdict on the suite — exit %s\n' "$rc" "$rc" >&2 ;;
+      *)
+        if [ "$rc" -ge 128 ]; then
+          printf 'booked: declared meant to fail, but rc=%s is a signal, no verdict on the suite — exit %s\n' "$rc" "$rc" >&2
+        else
+          printf 'booked: failed as declared (rc=%s, kept in the record) — exit 0\n' "$rc" >&2
+          rc=0
+        fi ;;
+    esac
+  fi
+  exit "$rc"
 }
 
 # ── running the command ──────────────────────────────────────────────────────
@@ -668,7 +707,7 @@ booked_follow() {
     rc="$(booked_rc_of "$log")" && {
       total="$(wc -l < "$log" | tr -d ' ')"
       [ "$((total - 1))" -le "$done_n" ] || sed -n "$((done_n + 1)),$((total - 1))p" "$log"
-      exit "$rc"
+      booked_exit "$rc"
     }
     total="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
     case "$total" in ''|*[!0-9]*) total=$done_n ;; esac
@@ -875,4 +914,4 @@ booked_run
 booked_end
 
 booked_stamp "$RUN_RC"
-exit "$RUN_RC"
+booked_exit "$RUN_RC"
