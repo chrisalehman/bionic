@@ -33,6 +33,7 @@ declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${
 # the file already pays nothing.
 bionic_need cmd-class.sh _cmd_class_awk
 bionic_need suite.sh bionic_suite_start
+bionic_need fields.sh line_field_clean
 
 # Values are pipe-delimited on one line, so a field carrying a newline or a `|` would forge a row. Never a
 # refusal: the ledger normalizes and records. The third argument is the field name: `files=`,
@@ -40,15 +41,14 @@ bionic_need suite.sh bionic_suite_start
 # every other field is prose or one path and keeps its cap. `re_executes=` keeps its `|`, which the row
 # writer (`roster_row`, lib/roster.sh) escapes for that field alone, because a declared run is read back and
 # compared to what an agent typed.
+# Every field but `re_executes=` is lib/fields.sh's `line_field_clean`; that one keeps its own fold, since it
+# keeps the `|`.
 sanitize() {  # <value> <max-chars> [<field name>]
-  local out _s1='\n\r\t|' _s2='    '
-  case "${3:-}" in re_executes) _s1='\n\r\t'; _s2='   ' ;; esac
-  out="$(printf '%s' "$1" \
-    | tr "$_s1" "$_s2" \
-    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')"
   case "${3:-}" in
-    files|suites_allowed|re_executes) printf '%s' "$out" ;;
-    *) printf '%s' "$out" | cut -c "1-$2" ;;
+    re_executes)
+      printf '%s' "$1" | tr '\n\r\t' '   ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//' ;;
+    files|suites_allowed) line_field_clean "$1" ;;
+    *) line_field_clean "$1" "$2" ;;
   esac
 }
 

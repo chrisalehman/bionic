@@ -7,7 +7,8 @@
 #   line_ev()       the line's event (`ev=`), or nothing on a line that is neither `line/v1|` nor `run/v1|`
 #   line_kv(k)      the value of the line's field <k>, or nothing
 #   line_kv_of(l,k) the same of a line <l> held in a variable, split on `|`
-# The awk readers skip the first field, the line's shape. A shell caller holding one line asks `line_field`. bash 3.2.
+# The awk readers skip the first field, the line's shape. A shell caller holding one line asks `line_field`, and a
+# writer folds a value onto one field with `line_field_clean`. bash 3.2.
 _LINE_FIELDS_AWK='
 function line_kv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
 function line_kv_of(l, k,   i, n, p) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], k "=") == 1) return substr(p[i], length(k) + 2); return "" }
@@ -34,4 +35,14 @@ line_field() {  # <line> <key> -> the value of its field <key>
   local _lf_v
   line_field_v _lf_v "${1:-}" "${2:-}" && printf '%s\n' "$_lf_v"
   return 0
+}
+
+# THE WRITER'S SIDE OF THE SAME FIELD. A value bound for a `|`-split line would forge a field with a `|` and a line
+# with a newline, so it is folded, never refused (a writer records what it saw): newline, return, tab, `|` and every
+# other control character become a space, runs of spaces one, the ends are trimmed, and with <max> only its first
+# <max> characters are kept. A cleaner that keeps a `|`, folds fewer characters or cuts in the shell is another
+# reading and keeps its own body beside its reason.
+line_field_clean() {  # <value> [<max chars>] -> the value as one field; print it through $(...)
+  printf '%s' "${1-}" | tr '\n\r\t|' '    ' \
+    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//' | cut -c "1-${2:-}"
 }

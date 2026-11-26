@@ -2636,7 +2636,7 @@ sg_deadline_stop() {
 }
 
 # The session's own subagent directory, `<transcript-dir>/<session-id>/subagents`: a session can only
-# stop its own tasks, and the recorder scopes its writes the same way.
+# stop its own tasks. This guard is its one reader.
 _sg_subagents_dir() {  # <transcript-path>
   local tr="$1"
   [ -n "$tr" ] || return 1

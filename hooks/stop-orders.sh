@@ -315,13 +315,9 @@ bionic_need fields.sh line_field_v
 
 # Values reach this file from a brief and from the operator's keyboard, and every record
 # here is pipe-delimited key=value. A `|`, a newline or a control character inside a value
-# forges a field, so they are folded to spaces exactly as hooks/session-sweeper.sh's
-# clean() folds them — the two must agree, because a name written by one is matched by the
-# other.
-clean() {  # <value>
-  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
-}
+# forges a field, so they are folded to spaces by lib/fields.sh's `line_field_clean`, cut at
+# 400 characters, which must agree with hooks/session-sweeper.sh's clean(): a name written by
+# one is matched by the other.
 
 # THE ROSTER IS FOLDED ONCE, not once per row. The roster is append-only and a contract
 # advances along it (`intended` → `confirmed` → `identified`), every writer copying the
@@ -361,7 +357,7 @@ fold_roster() {
   [ -L "$ROSTER_FILE" ] && return 0
   [ -f "$ROSTER_FILE" ] || return 0
   local _fn _frow
-  # The name is normalised here exactly as clean() normalises it, because that is what the
+  # The name is normalised here exactly as `line_field_clean` normalises it, because that is what the
   # per-line comparison this replaces did: control characters (a tab included, which would
   # otherwise forge the delimiter below) folded to spaces, runs squeezed, ends trimmed,
   # 400 characters kept. A `|` cannot survive into a field, having been the split point.
@@ -497,7 +493,7 @@ order_spellings() {  # <target> -> spellings, one per line
 case "$VERB" in
 
   order)
-    _target="$(clean "$ORDER_TARGET")"
+    _target="$(line_field_clean "$ORDER_TARGET" 400)"
     [ -n "$_target" ] || usage "order needs a non-empty target."
 
     mkdir -p "$STATE_DIR" 2>/dev/null
@@ -595,7 +591,7 @@ EOF
     # refused. AMBIGUOUS is always refused, naming the state. The ack this verb writes is
     # `--by human`, never `--by patrol` — this is a deliberate model-callable verb, not the
     # tick's own automated sweep, and the ledger's `by=` field says which one happened.
-    _target="$(clean "$ORDER_TARGET")"
+    _target="$(line_field_clean "$ORDER_TARGET" 400)"
     [ -n "$_target" ] || usage "stopped needs a non-empty target."
     if [ ! -f "$SWEEPER" ]; then
       die "REFUSED — the sweeper is not beside this script ($SWEEPER); nothing was acked."
@@ -789,8 +785,8 @@ EOF
         exit 2
         ;;
     esac
-    _target="$(clean "$ORDER_TARGET")"
-    _why="$(clean "$ORDER_WHY")"
+    _target="$(line_field_clean "$ORDER_TARGET" 400)"
+    _why="$(line_field_clean "$ORDER_WHY" 400)"
     [ -n "$_target" ] || usage "unrostered needs a non-empty target."
     [ -n "$_why" ] || usage "unrostered needs a reason: say why the roster never saw $_target."
     fold_roster
