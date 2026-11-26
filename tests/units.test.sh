@@ -42,6 +42,8 @@
 #   §POINT-RUN   a point's run is held by its own rows; an open point holds no whole run and writes no regression proof
 #   §POINT-RED   a suite red in a point's run is born as a fix row whose birth names the point and the rows it follows
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
+#   §KINDS     one list holds the kinds of row, the read-only kinds, and the role each kind draws or is offered; the tag's
+#              rule and the kind words are spelt in that library alone
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1195,5 +1197,35 @@ expect_eq "HELD-4 the status pass: asked twice, and with a pending step that nam
   "$(printf '%s\n' "$HD_OUT" | head -3 | sort -u | wc -l | tr -d ' ')|$(printf '%s\n' "$HD_OUT" | sed -n 1p)|$(printf '%s\n' "$HD_OUT" | head -3 | grep -c 'state=dispatched')"
 expect_eq "HELD-5 a fact of a row set since is passed again and read: a second status pass, T1 landed" \
   "2|row=T1 state=landed name=w-T1 brief=b sum=s commit=c1" "$(hd_n status)|$(printf '%s\n' "$HD_OUT" | sed -n 4p)"
+
+section "§KINDS — one list holds the kinds of row, which of them take a read-only slot, and the role each kind is run by"
+# fails-when: a kind reads a slot or a role other than the one its copies answered before the list, the validator's
+# refusal names other kinds, or the tag's rule or the kind words are spelt again outside the list's library.
+expect_eq "KD-1 the kinds, in the order the validator's refusal names them; the read-only kinds are verify and review" \
+  "build test verify review doc integrate close prototype|verify review|build test|review" \
+  "$(call units_kinds)|$(call units_kinds slot readonly)|$(call units_kinds role tag)|$(call units_kinds role questions)"
+KD_GOT=""
+for KD_K in build test verify review doc integrate close prototype '' nope 'build test'; do
+  for KD_T in 'a · complexity: complex' 'a · complexity: standard' 'a · complexity: huge' 'a' 'xcomplexity: complex'; do
+    KD_GOT="$KD_GOT${KD_K:-(none)}/${KD_T##* }=$(call units_kind_role "$KD_K" "$KD_T");"
+  done
+done
+expect_eq "KD-2 a build or a test row draws its role from the tag, complex the senior implementor and standard the implementor; no other kind, no tag, an undefined word or a word joined to the tag draws one" \
+  "build/complex=senior-implementor;build/standard=implementor;build/huge=;build/a=;build/complex=;test/complex=senior-implementor;test/standard=implementor;test/huge=;test/a=;test/complex=;verify/complex=;verify/standard=;verify/huge=;verify/a=;verify/complex=;review/complex=;review/standard=;review/huge=;review/a=;review/complex=;doc/complex=;doc/standard=;doc/huge=;doc/a=;doc/complex=;integrate/complex=;integrate/standard=;integrate/huge=;integrate/a=;integrate/complex=;close/complex=;close/standard=;close/huge=;close/a=;close/complex=;prototype/complex=;prototype/standard=;prototype/huge=;prototype/a=;prototype/complex=;(none)/complex=;(none)/standard=;(none)/huge=;(none)/a=;(none)/complex=;nope/complex=;nope/standard=;nope/huge=;nope/a=;nope/complex=;build test/complex=;build test/standard=;build test/huge=;build test/a=;build test/complex=;" \
+  "$KD_GOT"
+expect_eq "KD-3 the role offered a row that names none: the role its questions are dealt for a review row, the senior implementor for a doc row, the implementor for the rest and for a word the list does not hold" \
+  "implementor implementor implementor questions senior-implementor implementor implementor implementor implementor" \
+  "$(for KD_K in build test verify review doc integrate close prototype nope; do call units_kind_offer "$KD_K"; printf ' '; done | sed 's/ $//')"
+pt T1 4 nope b1 — a.sh T2 4 build b2 — b.sh
+expect_eq "KD-4 the validator refuses a kind the list does not hold, naming the list's kinds" \
+  "T1: kind nope is not one of build test verify review doc integrate close prototype" \
+  "$(call units_validate "$PT" | grep -F 'kind nope')"
+kd_spelt() {  # <fixed string> -> the code files under payload/scripts and hooks that spell it, paths from the tree
+  (cd "$REPO_ROOT" && /usr/bin/grep -rlF -- "$1" payload/scripts hooks 2>/dev/null | sort | paste -sd' ' -)
+}
+expect_eq "KD-5 the tag's rule is spelt in one file, the list's library" \
+  "payload/scripts/lib/units.sh" "$(kd_spelt 'complexity:[[:space:]]*([[:alpha:]]+)')"
+expect_eq "KD-5b …and the kinds in one line nowhere, so the validator's words are the list's" \
+  "" "$(kd_spelt 'build test verify review doc integrate close prototype')"
 
 finish

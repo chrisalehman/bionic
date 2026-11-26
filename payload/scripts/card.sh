@@ -2210,20 +2210,16 @@ _card_task_rows() {  # sets CARD_ROWS[] from WCARD_TROW[]
   done
 }
 
-# THE ROLE A TASK ASKS FOR is the one its cell's complexity tag names, on a row a writer runs: the plan step tags every
-# step-four task `complexity: complex` or `complexity: standard`, and the agent column says who is asked, so the person
-# approving a plan sees it before anything launches. This is the one home of the kinds whose role the card prints,
-# build and test; a review, a verify, a document, the merge and the close draw the dash whatever their tag says. A
-# launch in the log names the writer that came, not the role, and is not read here. A cell with no tag, or a word the
-# step does not define, draws the dash: no role is guessed.
-# lib/fill.sh `fill_readonly_ids` answers a different question, who takes a writer's slot, so it is not asked here.
+# THE ROLE A TASK ASKS FOR is the one its cell's complexity tag names: the plan step tags every step-four task
+# `complexity: complex` or `complexity: standard`, and the agent column says who is asked, so the person approving a
+# plan sees it before anything launches. Which kinds draw a role from the tag, and the role each tag names, are
+# lib/units.sh `units_kind_role`'s, which the start verb reads too; every other kind, a cell with no tag, or a word
+# the step does not define draws the dash: no role is guessed. A launch in the log names the writer that came, not
+# the role, and is not read here.
 _card_task_role() {  # <kind> <Tasks cell> -> senior-implementor, implementor or —, on stdout
-  local re='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
-  case "${1:-}" in build|test) ;; *) printf '—'; return 0 ;; esac
-  if [[ "${2:-}" =~ $re ]]; then
-    case "${BASH_REMATCH[2]}" in complex) printf 'senior-implementor'; return 0 ;; standard) printf 'implementor'; return 0 ;; esac
-  fi
-  printf '—'
+  local r
+  r="$(units_kind_role "${1:-}" "${2:-}")"
+  printf '%s' "${r:-—}"
 }
 
 # Consecutive ids in a depends cell are one range: four ids in a row print as the first and the last

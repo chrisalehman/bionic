@@ -156,10 +156,11 @@ poker_review_records() {
 # poker_questions_dealt <plan> <questions> -> rc 0 when the declared questions (comma-joined) are one reader's at the
 # plan's rigor and scale, else rc 1 with PQD_SAID the reason. A review row is one reader's: at double the auditor
 # holds `evidence` and the critic the other two, so a declaration across them has no reader, and the reason names the
-# deal. At single the critic holds all three, so any subset is one reader's. Set: PQD_SAID.
+# deal. At single the critic holds all three, so any subset is one reader's. Set: PQD_SAID, and PQD_ROLE the one
+# role that holds them, unprefixed, when rc is 0.
 poker_questions_dealt() {
   local plan="$1" decl="$2" rigor scale lvl owed role q deal fix="" r qs first="" mixed=""
-  PQD_SAID=""
+  PQD_SAID=""; PQD_ROLE=""
   bionic_need proof.sh facts_owed
   rigor="$(plan_frontmatter_get "$plan" rigor)"; scale="$(plan_frontmatter_get "$plan" scale)"
   lvl="$(rigor_level "$rigor" 2>/dev/null)" || lvl="${rigor:-none}"
@@ -193,6 +194,7 @@ EOF
     PQD_SAID="${decl//,/ and } are dealt to different roles at $lvl rigor ($fix), and a review row is one role's"
     return 1
   fi
+  PQD_ROLE="$first"
   return 0
 }
 
@@ -1434,15 +1436,27 @@ BRF_EOF
     st_cell() { printf '%s\n' "$ST_ROW" | sed -n "s/^$1=//p" | head -1; }
     ST_KIND="$(st_cell kind)"; ST_TASK="$(st_cell task)"; ST_STEP="$(st_cell step)"; ST_FILES="$(st_cell files)"
     ST_TITLE="$(clean_whole "$(plan_task_title "$ST_TASK")")"
-    # THE ROLE: the one --role names, else the row's agent cell, else the one the complexity tag of a build or a test row
-    # names, as the Step-3 card draws it (card.sh `_card_task_role`); a role nothing names is not guessed.
+    # THE ROLE: the one --role names, else the row's agent cell, else the one the row's kind draws from its complexity
+    # tag, as the Step-3 card draws it (units.sh `units_kind_role`); a role nothing names is not guessed. The refusal
+    # offers the role the kind is run by (`units_kind_offer`): for a review row, the role the plan's rigor deals its
+    # declared questions, and the critic when no one role holds them; the implementor where the kind's role is the tag.
     [ -n "$ST_ROLE" ] || { ST_ROLE="$(st_cell agent)"; ! poker_brief_none "$ST_ROLE" || ST_ROLE=""; }
-    ST_RE='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
-    if [ -z "$ST_ROLE" ] && { [ "$ST_KIND" = build ] || [ "$ST_KIND" = test ]; } && [[ "$ST_TASK" =~ $ST_RE ]]; then
-      case "${BASH_REMATCH[2]}" in complex) ST_ROLE=senior-implementor ;; standard) ST_ROLE=implementor ;; esac
-    fi
+    [ -n "$ST_ROLE" ] || ST_ROLE="$(units_kind_role "$ST_KIND" "$ST_TASK")"
     if [ -z "$ST_ROLE" ]; then
-      die_run "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. Name one, bionic:implementor for a standard row or bionic:senior-implementor for a complex one." "$ST_AGAIN --role bionic:implementor"
+      ST_OFFER="$(units_kind_offer "$ST_KIND")"; ST_WHY="the role a $(clean "$ST_KIND") row is run by"
+      if [ "$ST_OFFER" = questions ]; then
+        ST_QS="$(units_questions "$(printf '%s\t%s\t%s\t%s' "$ST_ID" "$ST_STEP" "$ST_KIND" "$ST_TASK")")"
+        ST_OFFER=critic; ST_WHY="the role of a review row whose questions no one role holds"
+        if [ -n "$ST_QS" ] && poker_questions_dealt "$PV_PLAN" "$ST_QS"; then
+          ST_OFFER="$PQD_ROLE"; ST_WHY="the role the plan's rigor deals its questions (${ST_QS//,/, })"
+        fi
+      fi
+      if [ "$ST_OFFER" = implementor ]; then
+        ST_SAY="Name one, bionic:implementor for a standard row or bionic:senior-implementor for a complex one."
+      else
+        ST_SAY="Name one: bionic:$ST_OFFER, $ST_WHY."
+      fi
+      die_run "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. $ST_SAY" "$ST_AGAIN --role bionic:$ST_OFFER"
       exit 1
     fi
     case "$ST_ROLE" in *:*) : ;; *) ST_ROLE="bionic:$ST_ROLE" ;; esac
