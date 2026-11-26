@@ -4,13 +4,34 @@
 # either reads a line's fields the same way. It is awk functions a program prefixes and runs with -F'|'. Every field is
 # read by its name, never by its place, so a field the writer adds or moves is still read; the first `<key>=` of a line
 # is its value. The body reads any line whose fields are split by FS, so a caller that also splits on a blank reads by name.
-#   line_ev()     the line's event (`ev=`), or nothing on a line that is neither `line/v1|` nor `run/v1|`
-#   line_kv(k)    the value of the line's field <k>, or nothing
-# A shell caller holding one line asks `line_value`. bash 3.2.
+#   line_ev()       the line's event (`ev=`), or nothing on a line that is neither `line/v1|` nor `run/v1|`
+#   line_kv(k)      the value of the line's field <k>, or nothing
+#   line_kv_of(l,k) the same of a line <l> held in a variable, split on `|`
+# The awk readers skip the first field, the line's shape. A shell caller holding one line asks `line_field`. bash 3.2.
 _LINE_FIELDS_AWK='
 function line_kv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+function line_kv_of(l, k,   i, n, p) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], k "=") == 1) return substr(p[i], length(k) + 2); return "" }
 function line_ev() { return (substr($0, 1, 8) == "line/v1|" || substr($0, 1, 7) == "run/v1|") ? line_kv("ev") : "" }
 '
 line_value() {  # <one record line> <key> -> the value of its field <key>, through line_kv
   printf '%s\n' "$1" | awk -F'|' -v k="$2" "$_LINE_FIELDS_AWK"'{ print line_kv(k); exit }'
+}
+
+# THE SHELL READER, in builtins so a caller reading a field per line starts no process. It walks every field, the first
+# too, and a newline breaks a field as `|` does. `line_field_v` sets the named variable, empty and status 1 on a miss;
+# `line_field` prints the value and a newline, or nothing on a miss, and returns 0.
+line_field_v() {  # <var> <line> <key>; status 1 when no field carries <key>
+  local _lfv_rest="${2:-}" _lfv_f _lfv_nl=$'\n'
+  _lfv_rest="${_lfv_rest//$_lfv_nl/|}|"
+  while [ -n "$_lfv_rest" ]; do
+    _lfv_f="${_lfv_rest%%|*}"; _lfv_rest="${_lfv_rest#*|}"
+    case "$_lfv_f" in "${3}="*) printf -v "$1" '%s' "${_lfv_f#"${3}="}"; return 0 ;; esac
+  done
+  printf -v "$1" '%s' ''
+  return 1
+}
+line_field() {  # <line> <key> -> the value of its field <key>
+  local _lf_v
+  line_field_v _lf_v "${1:-}" "${2:-}" && printf '%s\n' "$_lf_v"
+  return 0
 }

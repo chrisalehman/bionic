@@ -554,13 +554,12 @@ roster_row_for_id() {  # <roster> <id> -> the last roster-state/ row whose agent
 # backslashes in a path as escapes. Local arrays (`ACK`, `seen`, …) are fresh per call — that is
 # how a function resets its sets without `delete arr`, which the one-true-awk this machine runs
 # as `/usr/bin/awk` does not promise.
+# This text carries lib/fields.sh's, so a caller never prefixes both; `_roster_kv` is its callers' name for `line_kv_of`.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need fields.sh line_field_v
 # shellcheck disable=SC2016  # awk source, expanded by awk and never by the shell
-_ROSTER_OPEN_AWK='
-  function _roster_kv(line, key,   i, n, parts) {
-    n = split(line, parts, "|")
-    for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-    return ""
-  }
+_ROSTER_OPEN_AWK="$_LINE_FIELDS_AWK"'
+  function _roster_kv(line, key) { return line_kv_of(line, key) }
   function _roster_live(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
   # The one stamp shape both writers produce, spelled without an interval expression:
   # /usr/bin/awk here is the one-true-awk, and `{4}` is not a repetition count there.
@@ -816,12 +815,11 @@ roster_landed() {  # <roster> <name> -> commit<TAB>at; 1 when the current work c
   local f="${1:-}" name="${2:-}"
   [ -n "$name" ] || return 1
   { [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ]; } || return 1
-  awk -F'|' -v k="|name=${name}|" '
-    function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+  awk -F'|' -v k="|name=${name}|" "$_LINE_FIELDS_AWK"'
     index($0, "roster-state/") != 1 || !index($0 "|", k) { next }
-    { c = kv("landed") }
-    c != "" && !index($0, "|extended=") { m = c "\t" kv("landed_at"); seen[c] = 1; next }
-    c != "" && !(c in seen) { m = c "\t" kv("landed_at"); seen[c] = 1; next }
+    { c = line_kv("landed") }
+    c != "" && !index($0, "|extended=") { m = c "\t" line_kv("landed_at"); seen[c] = 1; next }
+    c != "" && !(c in seen) { m = c "\t" line_kv("landed_at"); seen[c] = 1; next }
     c != "" { seen[c] = 1 }
     index($0, "|extended=") || (index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|held=") && !index($0, "|adopted_from=")) { m = "" }
     END { if (m == "") exit 1; print m }' "$f" 2>/dev/null
@@ -916,7 +914,6 @@ roster_ack_ledger() {  # <roster> -> the sweeper ledger beside it, or nothing
 # the guard.
 RULING_TEXT_MAX=4000
 RULING_US=$'\037'
-declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 # This library's own directory, kept without a fork at source time: the plugin root every ruling's
 # acknowledgement call names is the one that holds this file (`ruling_plugin_root`).
 case "${BASH_SOURCE[0]}" in
@@ -1057,13 +1054,12 @@ ruling_fold() {  # <roster> [<writer>]
       facts="$(reader_facts "$p" 2>/dev/null)" || continue
       printf '%s\n' "$facts" | /usr/bin/grep '^run/v1|ev=ruling|'
     done
-  } | awk -F'|' -v want="${2:-}" -v us="$RULING_US" '
-    function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+  } | awk -F'|' -v want="${2:-}" -v us="$RULING_US" "$_LINE_FIELDS_AWK"'
     index($0, "ruling/v1|") != 1 && index($0, "run/v1|ev=ruling|") != 1 { next }
-    { id = kv("id"); if (id == "") next }
-    kv("recorded") != "" { if (!(id in W)) { W[id] = kv("writer"); R[id] = kv("recorded"); T[id] = kv("text"); order[++n] = id }; next }
-    { p = kv("pushed"); if (p != "" && !(id in P)) { P[id] = p; C[id] = kv("call") }
-      s = kv("shown");  if (s != "" && !(id in S)) { S[id] = s; B[id] = kv("by") } }
+    { id = line_kv("id"); if (id == "") next }
+    line_kv("recorded") != "" { if (!(id in W)) { W[id] = line_kv("writer"); R[id] = line_kv("recorded"); T[id] = line_kv("text"); order[++n] = id }; next }
+    { p = line_kv("pushed"); if (p != "" && !(id in P)) { P[id] = p; C[id] = line_kv("call") }
+      s = line_kv("shown");  if (s != "" && !(id in S)) { S[id] = s; B[id] = line_kv("by") } }
     END {
       for (i = 1; i <= n; i++) {
         id = order[i]
