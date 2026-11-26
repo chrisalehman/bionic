@@ -16,7 +16,7 @@
 # of the debt is the changelog: `release-check` prints each deferral stated (the sentence is in `CHANGELOG.md`) or
 # unstated.
 deferral_fold() {  # <text> -> its white space and control characters folded to single spaces, trimmed: lib/said.sh's one fold
-  declare -F said_fold >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/said.sh" ] && . "$BIONIC_LIB/said.sh"; }
+  bionic_need said.sh said_fold
   said_fold "$1"
 }
 # A PERSON'S MESSAGE QUOTED WHOLE is one field of the run's log only once its line breaks are gone, and lib/said.sh
@@ -40,7 +40,7 @@ deferral_escape() {  # <folded sentence> -> as the plan holds it: \ for a backsl
 # reading is no answer, so a waiver or a ruling over them is refused, never applied to none.
 review_readings() {
   local r
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } || return 0
+  [ -n "${_LINE_FIELDS_AWK:-}" ] || bionic_need line.sh line_event || return 0
   r="$( { . "$BIONIC_LIB/reader.sh" >/dev/null 2>&1 && reader_main "$1" reviews; } 2>/dev/null )" || return 2
   printf '%s\n' "$r" | awk -F'|' "$_LINE_FIELDS_AWK"'
     line_kv("ev") == "proof" && line_kv("question") != "" && (e = line_kv("evidence")) != "" {
@@ -252,7 +252,7 @@ walk_append() {
 # discharged, appended once the proofs are in. The hand-holds fold reads this line as nothing: the walk's verdicts are
 # a reader's, registered as the critic's are.
 walk_recorded() {  # <plan> <record docs-relative>
-  { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+  bionic_need line.sh line_event \
     && line_event "$1" walk "record=$2" "discharged=${WALK_N:-0}" >/dev/null 2>&1 \
     || say "the walk is registered, but the ev=walk line could not be appended to the landing record."
 }
@@ -326,7 +326,7 @@ whole_run_at_head() {
     AP_TIER="$(printf '%s\n' "$AP_CELLS" | awk -F'\037' -v c="$AP_NAME" '$1 == c { print ($4 == "" ? "-" : $4); exit }')"
     case "$AP_NAME" in plan|step0|step1|step2)
       # The gate's own placeholder test, asked of its library in a subshell as close-out asks it.
-      ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F is_placeholder_value >/dev/null 2>&1 || exit 9
+      ( bionic_need walls.sh is_placeholder_value || exit 9
         is_placeholder_value "$AP_REPLY" ); AP_RC=$?
       case "$AP_RC" in
         0) die "REFUSED — '$AP_REPLY' is a placeholder, not the user's reply; nothing was appended. Give their words verbatim: session-poker.sh approve $AP_NAME '<the user's reply>'"; exit 1 ;;
@@ -373,7 +373,7 @@ whole_run_at_head() {
     # EVERY APPROVAL IS THE PERSON'S TYPED WORD, whatever it names: held to lib/said.sh `user_said` as a reply to the release
     # card, a waiver and a move are, so an agent cannot record one alone and a prompt a program sent (no human origin) is
     # none. Asked last, so a reply refused for its shape or its name is refused for that.
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    bionic_need said.sh user_said
     if ! declare -F user_said >/dev/null 2>&1; then
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended."
       exit 2
@@ -459,8 +459,7 @@ whole_run_at_head() {
       die "REFUSED — this session (${sid:-no session key}) is bound to no run, so there is none to $1; nothing was written. Fix: run it in the session bound to the run."
       exit 1
     fi
-    if ! { declare -F seal_vouched >/dev/null 2>&1 || . "$BIONIC_LIB/seal.sh"; } 2>/dev/null || ! _proof_event_load \
-       || ! { declare -F user_said >/dev/null 2>&1 || . "$BIONIC_LIB/said.sh"; } 2>/dev/null; then
+    if ! bionic_need seal.sh seal_vouched || ! _proof_event_load || ! bionic_need said.sh user_said; then
       die "REFUSED — the seal, lib/reader.sh, the appender or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written. Fix: reinstall the plugin."
       exit 2
     fi
@@ -562,7 +561,7 @@ whole_run_at_head() {
     proof_pending
   }
   poker_verb_proof_add() {
-    if ! { declare -F proof_last >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_last \
        || ! declare -F proof_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
@@ -1067,7 +1066,7 @@ PF_PAIRS_LIST
   # when the libraries or the run's log cannot be reached.
   waive_criterion() {
     local who head why known ac="$WV_Q"
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    bionic_need said.sh user_said
     _proof_reader_load
     if ! declare -F user_said >/dev/null 2>&1 || ! declare -F reader_criteria >/dev/null 2>&1; then
       die "REFUSED — a criterion's waiver needs lib/said.sh and lib/reader.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
@@ -1123,7 +1122,7 @@ PF_PAIRS_LIST
   # a criterion go; the head is written when the working branch names one and is not required, for a criterion is not
   # judged at a head. Its ask, `waive:<criterion>`, the gate's matrix arm opens, closes as a question's does.
   poker_verb_waive() {
-    if ! { declare -F proof_waiver_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_waiver_event \
        || ! declare -F proof_waiver_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
@@ -1161,7 +1160,7 @@ PF_PAIRS_LIST
         exit 1 ;;
     esac
     # A QUESTION'S WAIVER LETS A FAILED REVIEW THROUGH ON THE PERSON'S WORD, held to lib/said.sh `user_said` as a criterion's is.
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    bionic_need said.sh user_said
     if ! declare -F user_said >/dev/null 2>&1; then
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written. run again: session-poker.sh waive $WV_Q '<the user's words>'"
       exit 2
@@ -1213,14 +1212,12 @@ PF_PAIRS_LIST
   # owed item closes, as `task-add --born` closes it. Its event is `finding ref=<record>#<n> to=fixed row=<T> by=<who>`.
   # Main thread only, by the existing arm's list (lib/walls.sh `_wall_poker_contract_verb`).
   poker_verb_finding_move() {
-    if ! { declare -F proof_finding_rating >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_finding_rating \
        || ! declare -F _proof_moved_to >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
-      . "$BIONIC_LIB/said.sh"
-    fi
+    bionic_need said.sh user_said
     if [ -z "$FM_ROW" ] && ! declare -F user_said >/dev/null 2>&1; then
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
@@ -1267,7 +1264,7 @@ FM_FINDING
     fi
     # A FINDING A LANDING SETTLED IS THE LANDING'S (lib/line.sh `line_settle`): the move is a correction of a cell the
     # landing wrote, and is refused naming that landing.
-    { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+    [ -n "${_LINE_FIELDS_AWK:-}" ] || bionic_need line.sh line_event
     if declare -F line_settled_by >/dev/null 2>&1 && FM_BY_LANDING="$(line_settled_by "$PV_PLAN" findings "$FM_ID")"; then
       die "REFUSED — $(clean "$FM_ID") was settled by the landing of ${FM_BY_LANDING% *} at ${FM_BY_LANDING#* }: that landing wrote it fixed and closed its ask, so no move corrects it; the plan is unchanged."
       exit 1
@@ -1359,8 +1356,7 @@ FM_FINDING
   # through `debt add`, run as a child. Nothing in the plan is written. The plan and the checkout are the caller's
   # (PV_PLAN, PV_REPO, from plan_verb_open). Facts that cannot be read are said on stderr, and the return is 2.
   finding_disposition() {
-    { declare -F proof_fixed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-      && declare -F proof_fixed >/dev/null 2>&1 \
+    bionic_need proof.sh proof_fixed \
       || { die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; no finding is read."; return 2; }
     DSP_DOCS="$(docs_root "$PV_REPO")"
     _proof_findings_load "$PV_PLAN" && DSP_FEV="$_PROOF_FINDINGS" && DSP_FIXED="$(proof_fixed "$PV_PLAN" "$PV_REPO")" \
@@ -1477,7 +1473,7 @@ DSP_READINGS
   poker_verb_release_check() {
     RC_CMD="$(config_value "$(project_root "$PWD")" release-check "" 2>/dev/null)"
     [ -n "$RC_CMD" ] || exit 0
-    if ! { declare -F proof_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_event \
        || ! declare -F proof_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run and the plan is unchanged."
       exit 2
@@ -1656,7 +1652,7 @@ DSP_READINGS
       exit 1
     fi
     FR_CMD="$(config_value "$FR_ROOT" regression-command "" 2>/dev/null)"
-    if ! { declare -F proof_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_state \
        || ! declare -F proof_state >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
       exit 2
@@ -1819,7 +1815,7 @@ DSP_READINGS
     # dirty count read before the run, its exit, and the log's sha256 (lib/proof.sh `_proof_sha256`), so `proof-add
     # floor` accepts this log, and this log as it is now, and no hand-written one.
     FR_SHA="$(_proof_sha256 "$FR_LOG")" || FR_SHA=""
-    declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+    bionic_need line.sh line_event
     if [ -z "$FR_SHA" ] || ! declare -F line_event >/dev/null 2>&1 \
        || ! line_run_event "$(line_log "$PV_PLAN")" "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" \
               "starter=$FR_STARTER" ${FR_REASON:+"reason=$FR_REASON"} 2>/dev/null; then
@@ -1906,14 +1902,12 @@ DSP_READINGS
         exit 2
       fi
     fi
-    if ! { declare -F proof_debt_items >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null; }; } \
-       || ! declare -F proof_debt_items >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_debt_items; then
       die "REFUSED — lib/proof.sh cannot be loaded, so the debt ledger cannot be read; reinstall the plugin."
       exit 2
     fi
     # THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): lib/debt.sh, which close-out and card.sh source too.
-    if ! { declare -F debt_line_ok >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/debt.sh" ] && . "$BIONIC_LIB/debt.sh" 2>/dev/null; }; } \
-       || ! declare -F debt_line_ok >/dev/null 2>&1; then
+    if ! bionic_need debt.sh debt_line_ok; then
       die "REFUSED — lib/debt.sh cannot be loaded, so no debt line can be held to its grammar; reinstall the plugin."
       exit 2
     fi
