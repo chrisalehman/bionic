@@ -48,7 +48,10 @@
 #           (BIONIC_LIB) is preferred over the loader's own folder; with none resolved, or a resolved folder
 #           that lacks the library, the loader's own folder serves; a library that is nowhere, or that is
 #           there and does not define the marker, answers nonzero and leaves the marker undefined; a
-#           library's own output is swallowed; sourcing the loader sets no BIONIC_LIB.
+#           library's own output is swallowed; sourcing the loader sets no BIONIC_LIB. The loader's own folder
+#           is the one it was sourced from, found under a PATH holding only bash and after the caller moves,
+#           whether it was sourced by an absolute, a relative or a bare path; neither a value an outer shell
+#           exported nor the folder of an earlier copy is read in its place.
 #
 # Usage: bash tests/loader.test.sh
 #   BIONIC_LOADER_LIB_UNDER_TEST=/tmp/mutant/loader.sh bash tests/loader.test.sh
@@ -523,5 +526,52 @@ expect_eq "NEED.6 a library nowhere answers nonzero and defines nothing" "1|none
   "$(need_run "$NEED_HOOK" absent.sh need_fn)"
 expect_eq "NEED.7 a library that does not define the marker answers nonzero" "1|none|" \
   "$(need_run "" nomarker.sh need_fn)"
+
+# The loader's own folder is noted when it is sourced, with builtins: a caller may run under a PATH with no
+# coreutils (detect-probes sources a library so), and a relative path read at the call is read against whatever
+# folder the caller has moved to since. Each case runs under /bin/bash, the 3.2 floor, and under the bash on
+# PATH when that is another interpreter. need_at reads its own output with builtins, so the only-bash PATH holds.
+# fails-when: bionic_need resolves its folder at the call (dirname absent: nothing loads; a relative source path
+# after a cd: nothing found), or a folder an outer shell set, or one noted by an earlier copy, is trusted.
+NEED_TWO="$WORK/need-two"; NEED_ONLY="$WORK/only-bash"
+mkdir -p "$NEED_TWO" "$NEED_ONLY"
+cp "$LOADER_LIB" "$NEED_TWO/loader.sh"
+printf 'need_fn() { echo two; }\n' > "$NEED_TWO/l.sh"
+need_at() {  # <bash> <PATH> <folder to source from> <loader as sourced> <folder to call from> [second loader] [outer value] -> "<rc>|<answer>|<output>"
+  env -i PATH="$2" HOME="$FAKE_HOME" WORK_O="$WORK/need-at.out" "$1" -c '
+    set -u
+    cd "$1" || exit 9
+    [ -z "$5" ] || export _bionic_loader_dir="$5"
+    . "$2"
+    [ -z "$4" ] || . "$4"
+    cd "$3" || exit 9
+    bionic_need l.sh need_fn >"$WORK_O" 2>&1; rc=$?
+    o=""; while IFS= read -r l || [ -n "$l" ]; do o="$o$l"; done < "$WORK_O"
+    a=none; declare -F need_fn >/dev/null 2>&1 && a="$(need_fn)"
+    printf "%s|%s|%s" "$rc" "$a" "$o"' _ "$3" "$4" "$5" "${6:-}" "${7:-}" 2>&1
+}
+NEED_SHS="/bin/bash"
+NEED_PATH_SH="$(command -v bash 2>/dev/null)" || NEED_PATH_SH=""
+if [ -n "$NEED_PATH_SH" ] && [ "$("$NEED_PATH_SH" -c 'echo "$BASH_VERSION"')" != "$(/bin/bash -c 'echo "$BASH_VERSION"')" ]; then
+  NEED_SHS="$NEED_SHS $NEED_PATH_SH"
+fi
+for NEED_SH in $NEED_SHS; do
+  NV="bash $("$NEED_SH" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')"
+  ln -sf "$NEED_SH" "$NEED_ONLY/bash"
+  expect_eq "NEED.8 ($NV) the only-bash PATH holds bash" "$NEED_ONLY/bash" \
+    "$(env -i PATH="$NEED_ONLY" "$NEED_SH" -c 'command -v bash')"
+  expect_eq "NEED.8 ($NV) the only-bash PATH holds no dirname" "absent" \
+    "$(env -i PATH="$NEED_ONLY" "$NEED_SH" -c 'command -v dirname >/dev/null 2>&1 && echo present || echo absent')"
+  expect_eq "NEED.9 ($NV) under a PATH holding only bash, with BIONIC_LIB unset, the loader's own folder serves" "0|own|" \
+    "$(need_at "$NEED_SH" "$NEED_ONLY" / "$NEED_OWN/loader.sh" /)"
+  expect_eq "NEED.10 ($NV) a loader sourced by a relative path still finds its folder after the caller moves" "0|own|" \
+    "$(need_at "$NEED_SH" /usr/bin:/bin "$WORK" need-own/loader.sh /)"
+  expect_eq "NEED.11 ($NV) a loader sourced by its bare name from its own folder finds it after the caller moves" "0|own|" \
+    "$(need_at "$NEED_SH" "$NEED_ONLY" "$NEED_OWN" loader.sh /)"
+  expect_eq "NEED.12 ($NV) a folder an outer shell exported under the loader's name is not trusted" "0|own|" \
+    "$(need_at "$NEED_SH" "$NEED_ONLY" / "$NEED_OWN/loader.sh" / "" "$NEED_TWO")"
+  expect_eq "NEED.13 ($NV) a loader sourced twice reads the folder of the copy sourced last" "0|two|" \
+    "$(need_at "$NEED_SH" "$NEED_ONLY" "$WORK" need-own/loader.sh / need-two/loader.sh)"
+done
 
 finish
