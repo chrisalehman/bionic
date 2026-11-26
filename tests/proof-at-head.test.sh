@@ -322,7 +322,7 @@ PF_TX="$SANDBOX/pf-cfg/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; pro
 jq -c '.message.content = "waive it, the person said"' "$REPO_ROOT/tests/fixtures/transcript-move/typed.jsonl" > "$PF_TX/pah-fold.jsonl"; : > "$PAH_P/.bionic/tmp/loaded-pah-fold.state"
 PF_PAT='question=structure head='; expect_eq "FOLD-5 a waiver over a fold that fails is refused, nothing written; whole, its event is written to the run's log" "2|0|1~0|1|0" "$(CLAUDE_CONFIG_DIR="$SANDBOX/pf-cfg" PF_POKE reader_facts waive structure 'waive it, the person said')~$(CLAUDE_CONFIG_DIR="$SANDBOX/pf-cfg" PF_POKE none waive structure 'waive it, the person said')"
 PF_SS="$(sed -n '/^SS_FACTS_PLAN=/p;/^ss_ask() {/,/^}/p;/^print_bound_line() {/,/^}/p' "$BIONIC_HOOKS_DIR/session-start.sh")"
-PF_B='BIONIC_LIB="$1"; DOCS=""; HOOK_ROOT=x; eval "$2"; print_bound_line "bound-open $3"'
+PF_B='BIONIC_LIB="$1"; DOCS=""; HOOK_ROOT=x; . "$1/loader.sh"; eval "$2"; print_bound_line "bound-open $3"'
 PF_PAT='current: 8$'; expect_eq "FOLD-6 the bound line over a fold that fails says the facts could not be read where the step stands; whole, the step" "0|0|1~0|1|0" \
   "$(pfu 0 "$(PAH_IN=reader_facts bash -c "$PF_B" _ "$PF_ST/payload/scripts/lib" "$PF_SS" "$PL_PLAN")" "$PF_PAT")~$(pfu 0 "$(bash -c "$PF_B" _ "$PF_ST/payload/scripts/lib" "$PF_SS" "$PL_PLAN")" "$PF_PAT")"
 PG_U='. "$1/units.sh"; _units_readings_state "$p"'; expect_eq "FOLD-7 the tick's words for the reviews over a fold that fails say it did not fold, not rigor and scale" \

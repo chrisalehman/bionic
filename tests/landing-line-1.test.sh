@@ -904,7 +904,7 @@ expect_eq "(bl3) a suite over the bar at a quiet load is refused at load 5" "too
 expect_eq "(bl4) …and at load 0, the same line" "too-long \`bash%20c.test.sh\` 1000s — split it|bar=1000" \
   "$(bl_ask 0 '`bash%20c.test.sh`' | paste -sd'|' -)"
 expect_contains "(bl5) the brief's bar reads the same quiet seconds, not the gate's promise at the load now" \
-  '_line_bar_seconds "$(_line_gate_key "$BRF_E")"' "$(cat "$REPO/hooks/poker/plan.sh")"
+  '_line_bar_seconds "$(_line_gate_key "$e")"' "$(cat "$REPO/hooks/poker/plan.sh")"
 
 # ---------------------------------------------------------------------------
 section "§GUARD (ready half): a row that commits .bionic is refused before any landing tree (AC-14.1)"
