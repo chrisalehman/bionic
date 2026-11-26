@@ -99,6 +99,9 @@
 
 # The loader, for `docs_path`'s load of roots.sh at call time. It defines functions and runs nothing.
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 
 # _bionic_root_abs <path> -> absolute, symlink-resolved path
 #
@@ -514,7 +517,7 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
 log_finding() {  # $1=check-id  $2=detail — never blocks, always returns 0
   local f
   if f=$(audit_path "$(bionic_finding_root)"); then
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) ${BIONIC_FINDING_CHANNEL:-} $1: $2 (${BIONIC_FINDING_SUBJECT:-})"
+    local line="- $(iso_now) ${BIONIC_FINDING_CHANNEL:-} $1: $2 (${BIONIC_FINDING_SUBJECT:-})"
     mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
   fi
   echo "canonical-sdlc [$1]: $2" >&2

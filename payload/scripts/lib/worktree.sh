@@ -31,6 +31,9 @@
 
 # shellcheck source=/dev/null
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 # roots.sh, THE SOFT SOURCE — the idiom this file already uses for git-argv.sh, taken at
 # source time because two of this file's roots are wanted on every path through it. Every
 # root resolver in the tree has one definition there (epic-22 wave-01, N1); this file is a
@@ -1344,7 +1347,7 @@ worktree_record_workspace() {  # <root> <sid> <name> <abs tree> <branch> <base s
   _wt_workspaces_unlinked "$root" "$f" || { printf 'workspace-file-symlinked'; return 1; }
   printf '%s|session=%s|name=%s|path=%s|branch=%s|base=%s|plan=%s|at=%s\n' \
     "$WORKSPACE_SCHEMA" "$sid" "$name" "$path" "$branch" "$base" "$plan" \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" 2>/dev/null \
+    "$(iso_now)" >> "$f" 2>/dev/null \
     || { printf 'workspace-file-unwritable'; return 1; }
 }
 
@@ -1414,7 +1417,7 @@ worktree_record_tree() {  # <root> <sid> <name> <abs tree>
     _wt_workspace_value_bad "$v" && { printf 'tree-field-unrecordable'; return 1; }
   done
   printf '%s|path=%s|plan=%s|row=%s|worker=%s|spawned-by=%s|at=%s\n' "$TREE_RECORD_SCHEMA" \
-    "$tree" "$plan" "$row" "$name" "$sid" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f.$$" 2>/dev/null \
+    "$tree" "$plan" "$row" "$name" "$sid" "$(iso_now)" > "$f.$$" 2>/dev/null \
     && mv -f "$f.$$" "$f" 2>/dev/null \
     || { rm -f "$f.$$"; printf 'tree-record-unwritable'; return 1; }
 }

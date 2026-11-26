@@ -39,6 +39,9 @@
 # `proof_plan_slug` is not yet defined. Sourced, never executed; bash 3.2.
 
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 HANDOFF_HOME=".bionic/docs/record/handoffs"
 HANDOFF_SECTIONS="Summary|Goal|State|Findings|Decisions|Ruled out|Open|Suggested skills|Next|Resume"
 
@@ -49,7 +52,7 @@ _handoff_root() {  # <plan> [<root>] -> the root the pointer resolves against
 
 handoff_home_file() {  # <root> <slug>
   local e day
-  case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) e="$(date +%s)" ;; *) e="$BIONIC_NOW_EPOCH" ;; esac
+  e="$(time_now)"
   day="$(date -r "$e" +%Y-%m-%d 2>/dev/null || date -d "@$e" +%Y-%m-%d 2>/dev/null)"
   printf '%s/%s/%s-%s.md\n' "$1" "$HANDOFF_HOME" "$day" "$2"
 }

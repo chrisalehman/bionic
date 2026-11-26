@@ -121,6 +121,9 @@ _dep_installed_json()   { echo "${BIONIC_INSTALLED_PLUGINS_FILE:-$(_dep_claude_h
 # machine it is most needed on.
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 bionic_need roots.sh plugin_root
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 
 # ccstatusline ships TWO halves (epic-18-w1 handoff §3.1): the `.statusLine`
 # command that RENDERS the line, and the layout file that command reads. The
@@ -1127,7 +1130,7 @@ dep_record_add() {  # <name> — one line, appended in a single write
   kind="$(dep_field "$name" kind)" || return 1
   file="$(dep_record_file)"
   mkdir -p "${file%/*}" 2>/dev/null || return 1
-  printf '%s\t%s\t%s\t%s\n' "$name" "$kind" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(_dep_bionic_version)" \
+  printf '%s\t%s\t%s\t%s\n' "$name" "$kind" "$(iso_now)" "$(_dep_bionic_version)" \
     >> "$file" 2>/dev/null
 }
 

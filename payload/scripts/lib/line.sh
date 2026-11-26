@@ -67,6 +67,9 @@
 _LINE_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
 # shellcheck source=/dev/null
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 bionic_need worktree.sh _wt_proofs_put
 # THE LIVENESS RULE IS slots.sh's (`_slots_alive`, `_slots_since`) and so is the lock's take-over
 # (`_slots_take_one`: mkdir, then a dead holder reaped under the store's reap lock, once).
@@ -94,7 +97,7 @@ LINE_BAR_LOAD=0
 # target; both read it through session-poker.sh `sitrep_bar`, and nothing else defines it.
 LINE_LANDING_BAR=15
 
-_line_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+_line_now() { iso_now; }
 _line_pid() { exec sh -c 'echo "$PPID"'; }   # as `$(_line_pid)`: this (sub)shell's own pid, which `$$` is not
 _line_me() {  # sets LINE_ME to `<pid>:<start>` of the calling (sub)shell; never call it inside `$( )`
   local p; p="$(_line_pid)"
@@ -693,7 +696,7 @@ _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothi
     inb && /^### / { t = $0; sub(/[[:space:]]+$/, "", t); if (t == "### The landing numbers") f = 1 }
     END { exit !f }' "$tmp/old" || { rm -rf "$tmp"; return 0; }
   now="$(date -u +%s)"
-  on="$(date -u -r "$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  on="$(epoch_iso "$((now - 1))")"
   # THE JUDGE'S COPY RENDERS. The release check compares the block with its own release-note, and the copy that runs
   # is the release base's (lib/worktree.sh `worktree_check_run`), so the block is rendered by that copy too, checked
   # out in a landing tree: a change to the renderer reaches the entry one release later, never refused by its own

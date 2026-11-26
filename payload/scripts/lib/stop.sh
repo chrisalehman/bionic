@@ -71,6 +71,9 @@
 # [WALL: tests/patrol-revive.test.sh]
 
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 bionic_need fold.sh bionic_fold
 
 # RESOURCES.SH IS SOURCED THE SAME WAY (wave-18 T2b, R1): `hooks/stop.sh`'s own
@@ -517,7 +520,7 @@ fi
 case "$s_occ" in ''|*[!0-9]*) s_occ="$OCCUPIED" ;; esac
 DELTA=$((OCCUPIED - s_occ))
 if [ "$DELTA" -ge 0 ]; then DELTA="+$DELTA"; fi
-LINE="- $(date -u +%Y-%m-%dT%H:%M:%SZ) context-spend step-$s_step: occupied=$OCCUPIED delta=$DELTA model=$MODEL ($PLAN)"
+LINE="- $(iso_now) context-spend step-$s_step: occupied=$OCCUPIED delta=$DELTA model=$MODEL ($PLAN)"
 if AUDIT_FILE=$(audit_path "$BIONIC_ROOT"); then
   mkdir -p "$(dirname "$AUDIT_FILE")" 2>/dev/null && printf '%s\n' "$LINE" >> "$AUDIT_FILE" 2>/dev/null
 fi
@@ -1000,7 +1003,7 @@ REFUSALS=""
 # would be user-facing text the ruled table does not carry.
 REFUSE_KIND=""
 
-NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+NOW=$(iso_now)
 
 while IFS=$'\t' read -r AID NAME KIND CFILES; do
   [ -n "$AID" ] && [ -n "$NAME" ] || continue
@@ -2539,7 +2542,7 @@ stop_guard_refuse() {  # <key> [facts...] -> never returns; an unknown key refus
 stop_guard_unrostered_write() {  # <roster> <sid> <name> <why> -> 0 written; 1 not
   local roster="$1" row
   row=$(roster_row status=closed "session=$2" "name=$3" agent_id= \
-    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "reason=$4" plan=none) || return 1
+    "launched_at=$(iso_now)" "reason=$4" plan=none) || return 1
   [ -n "$row" ] || return 1
   if [ ! -e "$roster" ]; then
     { roster_header >> "$roster"; } 2>/dev/null && chmod 600 "$roster" 2>/dev/null
