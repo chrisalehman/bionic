@@ -2430,8 +2430,8 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
 # registered, an owed reading unregistered at the working head
 # (lib/units.sh `_units_readings_state`, the tick's own reading), and the check-only advance to 6, 7 and 8, asked of the
 # advance's own judge once for the three (`session-poker.sh judge 6 7 8`, each answer what `current <N> --check` prints;
-# its exit is read and its verdict line is the reason, never a second judgment here). On the
-# first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
+# each step's code is read from the judge's closing line and its verdict line is the reason, never a second judgment
+# here). On the first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
 # on stdout, one `settles: <key>` line per item a red check owes that the page settles with a decision of the
 # user's (`waive:<question>` or `row:<AC>`), so the page opens each on the person's ledger.
 #
@@ -2525,16 +2525,18 @@ CF_POST
   # hooks/poker/judge.sh `advance_judge`) answers the three in one process, each step's answer the lines its checked
   # advance prints, closed by `judged <N> exit <rc>`. A red check is early unless every refusal it prints is one the
   # page settles with a decision (`_card_settles`): its lines are read as the judge printed them, never judged again
-  # here. An answer the ask did not close is read as that step's check exiting with the ask's own exit.
+  # here. The card reads the judge's text alone, never its exit: the judge exits 0 for a step that would refuse, as
+  # that is an answer, so only the closing line carries the step's code. A step the ask did not close is no answer and
+  # reads as one the judge could not deal (2), its whole output the reason.
   CF_SETTLE=""
-  local judged jrc
-  judged="$(_card_poke judge 6 7 8)"; jrc=$?
+  local judged
+  judged="$(_card_poke judge 6 7 8)"
   for n in 6 7 8; do
     out="$(printf '%s\n' "$judged" | awk -v n="$n" '
       index($0, "poker: judged ") == 1 { if ($3 == n) { printf "%s", b; exit } b = ""; next }
       { b = b $0 "\n" }')"
     rc="$(printf '%s\n' "$judged" | awk -v n="$n" 'index($0, "poker: judged ") == 1 && $3 == n && $4 == "exit" { print $5; exit }')"
-    [ -n "$rc" ] || { out="$judged"; rc="$jrc"; [ "$rc" -ne 0 ] || rc=2; }
+    [ -n "$rc" ] || { out="$judged"; rc=2; }
     [ "$rc" -eq 0 ] && continue
     _card_settles "$out" && continue
     line="$(printf '%s\n' "$out" | awk 'NF { print; exit }')"; line="${line#poker: }"
