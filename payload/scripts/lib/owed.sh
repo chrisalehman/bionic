@@ -64,27 +64,11 @@
 #
 # BASH 3.2. No associative arrays.
 
-_owed_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-_OWED_LIB_DIR="$(cd "$(_owed_self_dir)" && pwd -P)"
-if ! declare -F project_root >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/root.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_OWED_LIB_DIR/root.sh"
-fi
-if ! declare -F session_plan >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/run.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_OWED_LIB_DIR/run.sh"
-fi
-if ! declare -F notify_send >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/notify.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_OWED_LIB_DIR/notify.sh"
-fi
-if ! declare -F reader_ask_rounds >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/reader.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_OWED_LIB_DIR/reader.sh" >/dev/null 2>&1
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need root.sh project_root || :
+bionic_need run.sh session_plan || :
+bionic_need notify.sh notify_send || :
+bionic_need reader.sh reader_ask_rounds || :
 
 # owed_register <root> <plan> -> the run's log, `<docs>/record/<run>/run.log`, where its asks are kept, on stdout; rc 1
 # when <plan> names no run: a name that does not end `.plan.md` (a scratch copy's does not), or a plan gone with no
@@ -94,7 +78,7 @@ owed_register() {
   [ -n "$root" ] && [ -n "$plan" ] || return 1
   case "$plan" in *.plan.md) ;; *) return 1 ;; esac
   if [ ! -f "$plan" ]; then
-    { declare -F seal_verify >/dev/null 2>&1 || . "$_OWED_LIB_DIR/seal.sh"; } >/dev/null 2>&1 || return 1
+    bionic_need seal.sh seal_verify || return 1
     seal_verify "$plan" >/dev/null 2>&1
     [ -n "$SEAL_LOG" ] && printf '%s\n' "$SEAL_LOG"; return
   fi
@@ -206,7 +190,7 @@ _owed_act() {
   local f="$1" at="$2" key="$3" r="$4"
   shift 4
   _owed_dir_ok "$f" || return 1
-  declare -F log_append >/dev/null 2>&1 || . "$_OWED_LIB_DIR/log.sh" >/dev/null 2>&1 || return 1
+  bionic_need log.sh log_append || return 1
   [ "$at" != - ] || at="$(owed_now)"
   [ "$r" -gt 1 ] 2>/dev/null && set -- "round=$r" "$@"
   RUN_LOG="$f" LOG_AT="$at" log_append ask "key=$key" "$@" >/dev/null 2>&1

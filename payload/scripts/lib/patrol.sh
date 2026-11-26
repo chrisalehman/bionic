@@ -18,37 +18,25 @@ PATROL_WALL_SCHEMA="patrol-wall/v1"
 # poker's `interval` for the project's configured value and falls back to this when that refuses or cannot be asked.
 PATROL_INTERVAL_DEFAULT=1200
 
-_patrol_self_dir() { dirname "${BASH_SOURCE[0]:-$0}"; }
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 # roots.sh, THE SOFT SOURCE — the idiom lib/detect.sh uses for lib/deps.sh, taken at source
 # time because this file reaches for four of its roots. Every root resolver in the tree has
 # one definition there (epic-22 wave-01, N1); this file is a caller of `claude_home`,
 # `transcripts_dir`, `tmp_root`, `plugin_root` and `project_root`.
-if ! declare -F claude_home >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roots.sh"
-fi
+bionic_need roots.sh claude_home
 # roster.sh, THE SAME SOFT SOURCE, for `roster_open_names` (epic-23 wave-20 T17, D10):
 # `patrol_roster_state` asks the one close predicate every wall asks, and this file is sourced
 # by callers (doctor, the stop library, suites) that never declared roster.sh themselves.
-if ! declare -F roster_open_names >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roster.sh"
-fi
+bionic_need roster.sh roster_open_names
 # alive.sh, THE SAME SOFT SOURCE, for `alive_sessions`: whether a session is alive has one rule, and
 # the live set below is that rule's enumeration. Without it the live set is empty and the dead set
 # names nothing: a rule this process cannot read never sends a session's state to the sweep.
-if ! declare -F alive_sessions >/dev/null 2>&1 && [ -r "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/alive.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/alive.sh"
-fi
+bionic_need alive.sh alive_sessions || :
 # time.sh, THE SAME SOFT SOURCE, for `_TIME_ISO_AWK` (wave-39 T17; D18): an instant has one reader, and this file's
 # date arithmetic below is that reader's.
 # A copy of this file read away from its directory (a suite's mutant) finds no time.sh: it still loads, and only
 # its date readers come up empty, the fail-open direction every reader below already takes.
-if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/time.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/time.sh"
-fi
+bionic_need time.sh _time_epoch || :
 
 # Values ride on `|`-delimited lines read BY KEY, so a value carrying a pipe or
 # a newline would forge a field. Same normalisation the roster writer applies to
@@ -299,11 +287,9 @@ EOF
 # <plan> -> `<id><TAB><name><TAB><session id>` per row out, in table order; rc 2, nothing printed, when the rows or the
 # rosters' reader cannot be had, which no caller may read as "nobody is out".
 patrol_rows_out() {  # <plan>
-  local plan="${1:-}" rows d
+  local plan="${1:-}" rows
   [ -n "$plan" ] && [ -f "$plan" ] || return 2
-  d="$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )" || return 2
-  # shellcheck source=/dev/null
-  declare -F units_rows >/dev/null 2>&1 || . "$d/units.sh" >/dev/null 2>&1 || return 2
+  bionic_need units.sh units_rows || return 2
   declare -F _units_roster_libs >/dev/null 2>&1 && _units_roster_libs || return 2
   declare -F fill_held_ids >/dev/null 2>&1 || return 2
   rows="$(units_rows "$plan" 2>/dev/null)" || return 2

@@ -48,15 +48,8 @@ OBSERVE_ROSTER_VERSION="v1"
 # roster.sh, THE SOFT SOURCE (wave-28 T80) — the idiom lib/refuse.sh uses for lib/width.sh. The
 # roster walk below reads rows with roster.sh's `_roster_kv`, and stop-check.sh does not name
 # roster.sh in its BIONIC_LIB_WANT. roster.sh defines constants and functions and prints nothing.
-if [ -z "${_ROSTER_OPEN_AWK:-}" ]; then
-  case "${BASH_SOURCE[0]}" in
-    */*) _obs_self_dir="${BASH_SOURCE[0]%/*}" ;;
-    *)   _obs_self_dir="." ;;
-  esac
-  # shellcheck source=/dev/null
-  . "$(cd "$_obs_self_dir" && pwd -P)/roster.sh"
-  unset _obs_self_dir
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need roster.sh roster_open_names
 
 # The machine line's schema token, printed by `observe_machine_line`. Versioned so a reader
 # can refuse a shape it does not read rather than guess at it.

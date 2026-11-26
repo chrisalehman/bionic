@@ -38,7 +38,7 @@
 # NEEDS lib/root.sh and lib/roots.sh (both callers source them); loads lib/proof.sh from beside itself when
 # `proof_plan_slug` is not yet defined. Sourced, never executed; bash 3.2.
 
-_HANDOFF_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 HANDOFF_HOME=".bionic/docs/record/handoffs"
 HANDOFF_SECTIONS="Summary|Goal|State|Findings|Decisions|Ruled out|Open|Suggested skills|Next|Resume"
 
@@ -62,11 +62,7 @@ handoff_slug() {  # <text>
 handoff_pointer_of() {  # <plan> [<root>]
   local rel root
   [ -f "${1:-}" ] || return 0
-  if ! declare -F reader_main >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    [ -r "$_HANDOFF_LIB_DIR/reader.sh" ] && . "$_HANDOFF_LIB_DIR/reader.sh" >/dev/null 2>&1
-    declare -F reader_main >/dev/null 2>&1 || return 0
-  fi
+  bionic_need reader.sh reader_main || return 0
   rel="$(reader_main "$1" handoff 2>/dev/null)" || return 0
   rel="$(printf '%s\n' "$rel" | sed -n 's/^path=//p')"
   [ -n "$rel" ] || return 0
@@ -80,10 +76,7 @@ handoff_pointer_of() {  # <plan> [<root>]
 
 handoff_default_of() {  # <plan> [<root>]
   local root slug
-  if ! declare -F proof_plan_slug >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    [ -r "$_HANDOFF_LIB_DIR/proof.sh" ] && . "$_HANDOFF_LIB_DIR/proof.sh" >/dev/null 2>&1
-  fi
+  bionic_need proof.sh proof_plan_slug
   slug="$(proof_plan_slug "${1:-}")" || return 1
   root="$(_handoff_root "${1:-}" "${2:-}")"
   [ -n "$root" ] || return 1
