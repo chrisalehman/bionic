@@ -75,15 +75,6 @@ START_QUESTION="${1-}"
 # agreement battery in tests/cross-gate-agreement.test.sh §C.
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 
-# One field out of a versioned pipe-delimited line, BY KEY. Never by position —
-# a fixed-field-order parser broke undiagnosably the moment a field was added
-# (checklist A6), so an unknown extra field must be inert here. The same reader
-# serves the machine line and the roster row, which is why both artifacts carry
-# the same shape.
-line_field() {  # <line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
-}
-
 # DELIBERATELY DUPLICATED from hooks/dispatch-preflight.sh's sanitize(), pipeline
 # for pipeline, and for the same reason its comment gives: values are
 # pipe-delimited on one line, so a `|` forges a field and a newline forges a row.
@@ -218,6 +209,9 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 . "$BIONIC_LIB/session.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/resources.sh"
+# A field of a machine line or a roster row is read by key, never by place: `line_field` in the shell and `line_kv_of`
+# in awk, both lib/fields.sh's.
+bionic_need fields.sh line_field_v
 # THE ONE CLOSE PREDICATE (epic-23 wave-20 T20, REQ-10, D10): `roster_open_names`, asked by
 # the duplicate-start check below. STILL WANTED HERE (so the loader's directory pick still
 # requires it to exist beside the other five), but no longer sourced on this line — every
@@ -403,13 +397,8 @@ latest_launch_for_agent() {  # <agent-id> -> latest launched_at for that id this
 unplaced_carry() {  # <the placing row> <agent id> -> that row, carrying the id's amended set
   local _uc_up
   [ -n "$2" ] && [ -f "$ROSTER_FILE" ] || { printf '%s' "$1"; return 0; }
-  _uc_up=$(awk -v id="$2" -v sid="$BIONIC_SID" -v pre="roster-state/${ROSTER_VERSION}|" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    index($0, pre) == 1 && kv($0, "agent_id") == id && kv($0, "session") == sid && kv($0, "status") == "unplaced" { row = $0 }
+  _uc_up=$(awk -v id="$2" -v sid="$BIONIC_SID" -v pre="roster-state/${ROSTER_VERSION}|" "$_LINE_FIELDS_AWK"'
+    index($0, pre) == 1 && line_kv_of($0, "agent_id") == id && line_kv_of($0, "session") == sid && line_kv_of($0, "status") == "unplaced" { row = $0 }
     END { if (row != "") print row }' "$ROSTER_FILE" 2>/dev/null)
   [ -n "$_uc_up" ] || { printf '%s' "$1"; return 0; }
   printf '%s' "$1" | UC_SA="$(line_field "$_uc_up" suites_allowed)" UC_RX="$(line_field "$_uc_up" re_executes)" awk '
@@ -1208,22 +1197,17 @@ if [ -n "$IS_START" ]; then
   # where the ORIGINAL `confirmed` row was still on the append-only roster, in which case it
   # was joined a second time and a second `identified` row appended. Both of those are what
   # this replaces.
-  DUP_PRIOR=$(awk -F'|' -v id="$START_ID" -v sid="$BIONIC_SID" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
+  DUP_PRIOR=$(awk -F'|' -v id="$START_ID" -v sid="$BIONIC_SID" "$_LINE_FIELDS_AWK"'
     /^roster-state\/v1\|/ {
-      if (kv($0, "agent_id") != id) next
-      if (kv($0, "session") != sid) next
+      if (line_kv_of($0, "agent_id") != id) next
+      if (line_kv_of($0, "session") != sid) next
       # THE LAST ROW OF THIS ID, WHATEVER ITS STATUS. A RESUME is a fresh
       # intended/confirmed cycle for the same id, written moments ago by the dispatch wall
       # and ARM 2 — a contract deliberately re-opened, which this event is then the ordinary
       # identification of. A DUPLICATE START has no such cycle: the last thing said about
       # this id is that it already started. That difference is the whole predicate, and it
       # is read off the ordering of an append-only file.
-      row = $0; st = kv($0, "status")
+      row = $0; st = line_kv_of($0, "status")
       next
     }
     # A DUPLICATE-START ROW IS NOT A RE-CONTRACT EITHER. The predicate is "nothing has

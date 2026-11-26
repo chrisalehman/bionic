@@ -235,13 +235,8 @@ esac
 #
 # The payload's agent_id, read through THIS session's roster (the session id in the payload
 # is the lead's for every asker, measured); no agent_id is the lead. A first occurrence of a
-# key wins, as every by-key reader of the roster takes it.
-_pa_row_field() {  # <row> <key> -> the value of the first <key>= field
-  local rest="|${1#*|}|" k="|$2="
-  case "$rest" in *"$k"*) ;; *) return 0 ;; esac
-  rest="${rest#*"$k"}"
-  printf '%s' "${rest%%|*}"
-}
+# key wins, as every by-key reader of the roster takes it: lib/fields.sh's `line_field`.
+bionic_need fields.sh line_field_v
 
 PA_STAGE="finding who asked"
 PA_NAME=""
@@ -257,7 +252,7 @@ if [ -n "$PA_AGENT" ]; then
   fi
   PA_ROW="$(roster_row_for_id "$PA_ROSTER" "$PA_AGENT")" \
     || _pa_fail roster-no-row "$PA_AGENT"
-  PA_NAME="$(_pa_row_field "$PA_ROW" name)"
+  PA_NAME="$(line_field "$PA_ROW" name)"
   # An agent dispatched without a name has a real row whose name= is empty: that is a reader
   # (a tree is recorded for a name, and it has none), not a fault. It stays labelled by its id.
   [ -z "$PA_NAME" ] || PA_ASKER="$PA_NAME"
@@ -341,7 +336,7 @@ case "$PA_CLASS" in
     # whether the report lies inside it or the scratch); a report that names a directory is
     # not a file and is handed nothing (wave-25 T17, review S1).
     [ "$PA_BOUND" = 1 ] && _pa_root record "$(_pa_record_dir "$BIONIC_RUN_PLAN")"
-    PA_REPORT="$(_pa_row_field "$PA_ROW" deliverable)"
+    PA_REPORT="$(line_field "$PA_ROW" deliverable)"
     case "$PA_REPORT" in
       ''|/*) ;;
       *) PA_REPORT="$BIONIC_ROOT/$PA_REPORT" ;;

@@ -192,6 +192,9 @@ bionic_need gate.sh gate_room
 # reads.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/observe.sh"
+# THE RECORD'S FIELD READER, asked by name rather than reached through observe.sh: the awk programs of this file and
+# its parts read a roster row's field by `line_kv_of` (lib/fields.sh).
+bionic_need fields.sh line_field_v
 # THE PASTED POKER PATH. The STANDDOWN line and the
 # refusals print this script's path for a reader to paste; it is ONE shell
 # word, so a plugin root with a space pastes whole. refuse.sh's `refuse_shell_word` owns the rule.
@@ -1718,16 +1721,11 @@ handoff_dispatches_since() {  # <bound plan, raw> <state dir> <instant>
     seen="${seen:+$seen, }$nm"
     printf '%s\t%s\n' "$nm" "$la"
   done <<EOF
-$(for f in "$2"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk -v at="$3" '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
+$(for f in "$2"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk -v at="$3" "$_LINE_FIELDS_AWK"'
     { while ((getline line < $0) > 0) {
-        if (index(line, "roster-state/") != 1 || kv(line, "status") != "intended") continue
-        l = kv(line, "launched_at"); p = kv(line, "plan")
-        if (p != "" && p != "none" && l > at) print p "\t" kv(line, "name") "\t" l
+        if (index(line, "roster-state/") != 1 || line_kv_of(line, "status") != "intended") continue
+        l = line_kv_of(line, "launched_at"); p = line_kv_of(line, "plan")
+        if (p != "" && p != "none" && l > at) print p "\t" line_kv_of(line, "name") "\t" l
       }
       close($0) }' 2>/dev/null)
 EOF

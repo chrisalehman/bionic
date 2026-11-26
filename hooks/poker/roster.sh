@@ -312,32 +312,22 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
   # stands — no session filter, because every row on it carries the predecessor's own id.
   # Handed to awk through the environment rather than `-v`, which would read a backslash in
   # a name as an escape.
-  AF_OPEN="$(roster_open_names "$1" "$2")" AF_LISTS="$ROSTER_LIST_FIELDS" AF_SCHEMA="roster-state/${ROSTER_SCHEMA_VERSION}" awk '
-    function kv(line, key,   n, a, i, eq, k) {
-      n = split(line, a, "|")
-      for (i = 1; i <= n; i++) {
-        eq = index(a[i], "=")
-        if (eq == 0) continue
-        k = substr(a[i], 1, eq - 1)
-        if (k == key) return substr(a[i], eq + 1)
-      }
-      return ""
-    }
+  AF_OPEN="$(roster_open_names "$1" "$2")" AF_LISTS="$ROSTER_LIST_FIELDS" AF_SCHEMA="roster-state/${ROSTER_SCHEMA_VERSION}" awk "$_LINE_FIELDS_AWK"'
     BEGIN {
       no = split(ENVIRON["AF_OPEN"], ol, "\n")
       for (i = 1; i <= no; i++) if (ol[i] != "") isopen[ol[i]] = 1
       nl = split(ENVIRON["AF_LISTS"], lf, " ")
     }
     /^roster-state\/v1\|/ {
-      n = kv($0, "name"); if (n == "") next
+      n = line_kv_of($0, "name"); if (n == "") next
       if (!(n in seen)) { seen[n] = 1; order[++cnt] = n }
-      v = kv($0, "subagent_type"); if (v != "") stype[n] = v
-      v = kv($0, "deliverable");   if (v != "") deliv[n] = v
-      v = kv($0, "progress");      if (v != "") prog[n]  = v
-      v = kv($0, "cadence");       if (v != "") cad[n]   = v
-      v = kv($0, "launched_at");   if (v != "") launch[n] = v
-      v = kv($0, "session");       if (v != "") sess[n]   = v
-      v = kv($0, "adopted_from");  if (v != "") afrom[n]  = v
+      v = line_kv_of($0, "subagent_type"); if (v != "") stype[n] = v
+      v = line_kv_of($0, "deliverable");   if (v != "") deliv[n] = v
+      v = line_kv_of($0, "progress");      if (v != "") prog[n]  = v
+      v = line_kv_of($0, "cadence");       if (v != "") cad[n]   = v
+      v = line_kv_of($0, "launched_at");   if (v != "") launch[n] = v
+      v = line_kv_of($0, "session");       if (v != "") sess[n]   = v
+      v = line_kv_of($0, "adopted_from");  if (v != "") afrom[n]  = v
       # THE WAIVER, carried forward the same way the contract fields are (S17, AC-12 attempt
       # 2). Before this fix it was the one field this fold read off the source row and then
       # dropped: `adopt_write_row` hard-coded `waiver=` empty on every adopted row, so a
@@ -346,7 +336,7 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       # `waiver=` straight off the row (no marker involved) and calls a non-empty one WAIVED
       # before it ever asks about a deliverable, so an empty copy verdicted as an unmet
       # SILENT row instead.
-      v = kv($0, "waiver");        if (v != "") waiv[n]   = v
+      v = line_kv_of($0, "waiver");        if (v != "") waiv[n]   = v
       # THE LIST FIELDS (wave-37 T7, D11; was the three instrument fields wave-01 S13 named, then the
       # declared runs and the landing set one at a time), carried forward as the contract fields above
       # are: the merged value of each field of the set the roster library names once, in
@@ -356,26 +346,26 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       # an off-budget suite would go quiet for exactly the agents a clear leaves running longest;
       # one that lost `questions=` is no longer a reader of anything. `suites_source` is the one
       # scalar that travels beside them.
-      for (li = 1; li <= nl; li++) { v = kv($0, lf[li]); if (v != "") lv[n, lf[li]] = v }
-      v = kv($0, "suites_source");  if (v != "") ssrc[n]   = v
+      for (li = 1; li <= nl; li++) { v = line_kv_of($0, lf[li]); if (v != "") lv[n, lf[li]] = v }
+      v = line_kv_of($0, "suites_source");  if (v != "") ssrc[n]   = v
       # THE DONE MARKER (wave-24 T9, D3): the same contract, so its completion signal too.
-      v = kv($0, "done");           if (v != "") dmark[n]  = v
+      v = line_kv_of($0, "done");           if (v != "") dmark[n]  = v
       # THE LANDING KEYS (wave-28 T68; A-orch-216): `lands_on=` (a list field, above), `lands_red=`, `red_evidence=` and `row=` are what the
       # dispatch wall wrote from the brief, and what `ready` reads the suites and the declared debt from. Carried
       # forward as the instrument fields are, or an adopted row would be proved on its budget with its debt dropped.
-      v = kv($0, "lands_red");      if (v != "") lred[n]   = v
-      v = kv($0, "red_evidence");   if (v != "") revid[n]  = v
-      v = kv($0, "row");            if (v != "") lrow[n]   = v
+      v = line_kv_of($0, "lands_red");      if (v != "") lred[n]   = v
+      v = line_kv_of($0, "red_evidence");   if (v != "") revid[n]  = v
+      v = line_kv_of($0, "row");            if (v != "") lrow[n]   = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
       # field at all — a THIRD state, not an empty plan, and the caller partitions on the
       # difference (spec AC-2, A2). An apostrophe cannot appear in this comment: the awk
       # program is one single-quoted argument.
-      if (index($0, "|plan=") > 0) { plan[n] = kv($0, "plan"); hasplan[n] = 1 }
-      st = kv($0, "status")
+      if (index($0, "|plan=") > 0) { plan[n] = line_kv_of($0, "plan"); hasplan[n] = 1 }
+      st = line_kv_of($0, "status")
       if (st == "identified" || st == "confirmed") {
-        v = kv($0, "agent_id"); if (v != "") id[n] = v
+        v = line_kv_of($0, "agent_id"); if (v != "") id[n] = v
       }
       next
     }
@@ -409,14 +399,9 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
 # Set in hooks/session-poker.sh, before any part loads: ADOPT_READS_SCHEMA.
 adopt_read_baseline() {  # <reads> <id> <oldest epoch allowed> -> "<size> <epoch>" of the newest read at or before it
   [ -n "$1" ] || return 0
-  printf '%s\n' "$1" | awk -v id="$2" -v lim="$3" '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
-    index($0, "adopt-read/v1|") == 1 && kv($0, "id") == id {
-      e = kv($0, "epoch"); z = kv($0, "size")
+  printf '%s\n' "$1" | awk -v id="$2" -v lim="$3" "$_LINE_FIELDS_AWK"'
+    index($0, "adopt-read/v1|") == 1 && line_kv_of($0, "id") == id {
+      e = line_kv_of($0, "epoch"); z = line_kv_of($0, "size")
       if (e ~ /^[0-9]+$/ && z ~ /^[0-9]+$/ && e + 0 <= lim + 0 && e + 0 >= best + 0) { best = e; bz = z; got = 1 }
     }
     END { if (got) print bz " " best }'
@@ -428,14 +413,9 @@ adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
   tmp_dir_ok "${f%/*}" || return 1
   [ -L "$f" ] && return 1
   tmp="$f.$$"
-  { [ -f "$f" ] && cat "$f"; printf '%s\n' "$2"; } 2>/dev/null | awk -v now="$3" '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
+  { [ -f "$f" ] && cat "$f"; printf '%s\n' "$2"; } 2>/dev/null | awk -v now="$3" "$_LINE_FIELDS_AWK"'
     index($0, "adopt-read/v1|") == 1 {
-      id = kv($0, "id"); e = kv($0, "epoch")
+      id = line_kv_of($0, "id"); e = line_kv_of($0, "epoch")
       if (id == "" || e !~ /^[0-9]+$/ || e + 0 < now - 604800) next
       k = ++c[id]; r[id, k] = $0; if (!(id in seen)) { seen[id] = 1; ids[++n] = id }
     }

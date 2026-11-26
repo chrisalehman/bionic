@@ -1288,9 +1288,9 @@ FM_FINDING
       exit 1
     fi
     # A FINDING A LANDING SETTLED IS THE LANDING'S (lib/line.sh `line_settle`): the move is a correction of a cell the
-    # landing wrote, and is refused naming that landing.
-    [ -n "${_LINE_FIELDS_AWK:-}" ] || bionic_need line.sh line_event
-    if declare -F line_settled_by >/dev/null 2>&1 && FM_BY_LANDING="$(line_settled_by "$PV_PLAN" findings "$FM_ID")"; then
+    # landing wrote, and is refused naming that landing. The landing library is asked for by the function read here:
+    # the fields library loaded through another library holds the reader's text and not this function.
+    if bionic_need line.sh line_settled_by && FM_BY_LANDING="$(line_settled_by "$PV_PLAN" findings "$FM_ID")"; then
       die "REFUSED — $(clean "$FM_ID") was settled by the landing of ${FM_BY_LANDING% *} at ${FM_BY_LANDING#* }: that landing wrote it fixed and closed its ask, so no move corrects it; the plan is unchanged."
       exit 1
     fi

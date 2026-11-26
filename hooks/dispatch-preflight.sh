@@ -168,6 +168,8 @@ bionic_need owed.sh owed_open
 # THE SCALE PROFILE: the watch wall asks whether the plan's scale has a Patrol. Sourced
 # the same way: a library without it leaves the wall as it was. (The budget wall's cap comes from `fill_cap`.)
 bionic_need scale.sh scale_patrol
+# THE RECORD'S FIELD READER: a roster row's field is read by key, `line_kv_of` in awk (lib/fields.sh).
+bionic_need fields.sh line_field_v
 
 if [ -n "$DP_ADMITTED_ONLY" ]; then
   for _dp_a in $ROLE_READONLY_SET; do printf '%s\n' "$_dp_a"; done
@@ -1256,14 +1258,9 @@ if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; the
   # close without a live panel, which this wall does not have.
   DP_INFLIGHT=""
   if /usr/bin/grep -qxF -- "$AGENT_NAME" <<< "$(roster_open_names "$ROSTER_FILE" "$ACK_LEDGER_FILE")"; then
-    DP_INFLIGHT=$(/usr/bin/awk -v want="$AGENT_NAME" -v rpfx="roster-state/${ROSTER_VERSION}|" '
-      function kv(line, key,   i, n, parts) {
-        n = split(line, parts, "|")
-        for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-        return ""
-      }
-      index($0, rpfx) == 1 && kv($0, "name") == want {
-        st = kv($0, "status")
+    DP_INFLIGHT=$(/usr/bin/awk -v want="$AGENT_NAME" -v rpfx="roster-state/${ROSTER_VERSION}|" "$_LINE_FIELDS_AWK"'
+      index($0, rpfx) == 1 && line_kv_of($0, "name") == want {
+        st = line_kv_of($0, "status")
         if (st == "intended" || st == "confirmed" || st == "identified") last = st
       }
       END { print (last != "" ? last : "open") }
