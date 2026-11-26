@@ -8,6 +8,10 @@
 #     _TIME_ISO_AWK            the same reading as awk functions, for a program that reads many instants in one pass
 #                              (a fork per record is a cost nobody would accept): `iso2epoch(s)` is the epoch, -1 for
 #                              anything that is not an instant. Prefix it to the program: awk "$_TIME_ISO_AWK"'…'
+#     iso_now                  the machine clock's instant now; never the pinned clock
+#     epoch_iso <epoch>        that epoch as an instant; nothing, rc 1, for anything that is not digits
+#     time_now                 now in epoch seconds: BIONIC_NOW_EPOCH when it is digits, else the machine's clock
+#     file_mtime <path>        the path's modified time in epoch seconds; nothing, rc 1, when it cannot be stat'ed
 #
 # THE ONE READER (burns debt iso-to-epoch; critic-structure, wave 38). Three stood. hooks/session-poker.sh `iso_epoch`
 # asked BSD `date -j -f`, which reads `…Zx` with a warning, then GNU `date -d`, which reads almost anything. lib/patrol.sh
@@ -58,3 +62,28 @@ _time_epoch() {  # <ISO-8601 Z> -> epoch seconds; nothing, rc 1, when it is not 
   _TIME_ISO="${1:-}" awk "$_TIME_ISO_AWK"'BEGIN { e = iso2epoch(ENVIRON["_TIME_ISO"]); if (e < 0) exit 1; printf "%d\n", e }'
 }
 iso_epoch() { _time_epoch "${1:-}"; }   # <ISO-8601 Z> -> epoch seconds, empty if unreadable
+
+# The stamp a record writes. It reads the machine's clock alone: a suite's pinned clock dates what a verdict reasons
+# about, never the moment a line was written, so the stamp must not follow it.
+iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }   # -> the instant now, UTC
+
+# BSD `date -r` takes a word that is not a number as a file's name and prints that file's time, so only digits reach
+# it. BSD is asked first and GNU second, the order of every copy: GNU's `date -r <digits>` names a file too, but
+# fails when there is none, and so never prints a wrong time.
+epoch_iso() {  # <epoch seconds> -> that second as an instant, UTC; nothing, rc 1, when the argument is not digits
+  case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+}
+
+# A pin that is not a number is not a time: it is set aside and the machine's clock answers, so a mistyped pin can
+# never be handed on as now.
+time_now() {  # -> now, epoch seconds: BIONIC_NOW_EPOCH when it is digits, else the machine's clock
+  case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) date -u +%s ;; *) printf '%s\n' "$BIONIC_NOW_EPOCH" ;; esac
+}
+
+# GNU stat first: GNU's `stat -f` is the filesystem's status and prints it with exit 0, so asking BSD's form first
+# on GNU would read filesystem text as a time. BSD stat refuses `-c`, so on macOS the second form answers.
+file_mtime() {  # <path> -> its modified time, epoch seconds; nothing, rc 1, when it cannot be stat'ed
+  [ -n "${1:-}" ] || return 1
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null
+}

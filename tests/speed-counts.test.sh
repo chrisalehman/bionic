@@ -745,7 +745,10 @@ section "§LOG: a command reads the run's log whole no more often than its ceili
 # or raw as the landing record (`line_lines`), in its first process or any it starts. Each ceiling is the command's
 # count over this fixture, the same at n rows and 2n (§SCALE); a row that removes reads lowers it, and one that adds a
 # read raises it in this table, by name.
-SC_LOG_MOST="card=9 check=2 tick=15 resume=21 watch=18 wall=2 close=5"
+# The close's sixth read asks who writes the continuation: a close row the log ever dispatched owns it, even once its
+# launch was taken back, and a cancel takes the dispatch out of the fold, so close-out.sh `co_rows_sent` reads the
+# log's lines, which no other read of the close keeps.
+SC_LOG_MOST="card=9 check=2 tick=15 resume=21 watch=18 wall=2 close=6"
 SC_LOG_MOST_FCARD=13
 expect_eq "LOG-0 a raw read of the log is counted: the card counts both readers (the counter proved)" "yes yes" \
   "$([ "$(sc_count n card log)" -gt "$(sc_raw n card)" ] && echo yes) $([ "$(sc_raw n card)" -ge 1 ] && echo yes)"

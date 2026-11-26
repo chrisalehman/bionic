@@ -393,7 +393,7 @@ REC_ZERO=$(probe "$SANDBOX" "$(payload "$R_OPTIN")" CLAUDE_CODE_SESSION_ID="$SID
 expect_eq "BIONIC_CONTEXT_WANT_RUN=0 is not an ask" "unset" "$(field "$REC_ZERO" run_word)"
 
 # ============================================================
-section "5 — a session is judged when it engaged or its binding holds it to a plan"
+section "JUDGED — a session is judged when it engaged or its binding holds it to a plan"
 # bionic_judged reads the engagement value and the bound plan its caller read; the engagement value itself stays
 # the marker's alone, so the hooks that read it alone answer as before.
 judged() {  # <repo> [BIONIC_BOUND_PLAN] -> engaged=<value> judged=<yes|no>, after the real preamble in a child shell
