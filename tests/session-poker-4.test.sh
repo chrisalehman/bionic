@@ -689,6 +689,31 @@ poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question ad
 expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no reading before it (exit 0)" "0|1" \
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_C .* evidence=record/wave-01-fixture/past-waiver.md question=adversarial ")"
 
+# THE SECOND PASS REGISTERS THE FIRST TIME: the brief of a review row whose last proof is past the run's base prints that
+# range with scope: piece beside it, and a record that carries the range and the scope as the brief printed them is
+# taken. A record that says scope: whole over the same range is refused (the control, read by the same verb).
+VG_R9_ROW='| R9 | 6 | review | the critic reads it again · questions: adversarial | critic | — | 30 | REQ-1 | record/wave-01-fixture/second-pass.md | — | — | pending |'
+awk -v row="$VG_R9_ROW" '{ print } /^\| T5 \| 5 \| verify / { print row }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$SID" name=vg-crit2 agent_id=a-vg-crit2 \
+  subagent_type=bionic:critic files=.bionic/docs/record/wave-01-fixture/second-pass.md,.bionic/docs/record/wave-01-fixture/second-whole.md)" >> "$(roster_of "$RVG")"
+poke "$RVG" brief R9 vg-R9
+expect_eq "VG-2c the second pass's brief is rendered (exit 0)" "0" "$RC"
+VG_RANGE="$(sed -n 's/^Reviewed range: \([0-9a-f]*\)\.\.\([0-9a-f]*\) (scope: \([a-z]*\))$/\1 \2 \3/p' "$VG_DIR/briefs/vg-R9.md")"
+expect_eq "VG-2d …its range starts at the last reading's head, past the base, and says scope: piece" "$VG_C piece" "$(printf '%s\n' "$VG_RANGE" | awk '{ print $1, $3 }')"
+VG_D="$(s57_commit "$VG_WT" lib/a.sh D)"
+VG_PRINTED="$(printf '%s\n' "$VG_RANGE" | awk '{ print $1, $3 }')"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: whole\n' "$VG_C" "$VG_D" > "$VG_DIR/second-whole.md"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: %s\n' "${VG_PRINTED% *}" "$VG_D" "${VG_PRINTED#* }" > "$VG_DIR/second-pass.md"
+poke "$RVG" proof-add review record/wave-01-fixture/second-whole.md --question adversarial --reader vg-crit2
+expect_eq "VG-2e control: the same range under scope: whole is refused for its range (exit 1)" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'says scope: whole, but its range starts at')"
+poke "$RVG" proof-add review record/wave-01-fixture/second-pass.md --question adversarial --reader vg-crit2
+expect_eq "VG-2f a record carrying the scope the brief printed registers on its first try (exit 0)" "0|1" \
+  "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_D .* evidence=record/wave-01-fixture/second-pass.md question=adversarial ")"
+
+# The review row served the one brief and is taken off the plan again, so the rows below read the plan they were written for.
+/usr/bin/grep -v '^| R9 |' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+
 # ---------- §CUR7-COVERED: prose landed past the whole run is green, code landed past it is unproved ----------
 # The plan holds a whole-run row, a release row and an open integrate row reading the release; the user approves the
 # release at C2 and waives there, then two prose commits land: green, admitted with no word. A code commit after them
