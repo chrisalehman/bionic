@@ -38,6 +38,7 @@
 # Both exit 0 with an answer, 1 when there is none, 2 when the plan is not a file.
 #
 # bash 3.2 (ADR-001).
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 # A plan's line ends translated, never deleted: `eol(record, out)` splits one input record into the lines it
 # holds, a trailing CR dropped (CRLF) and each lone CR ending a line, and returns how many. Deleted, a
@@ -220,13 +221,9 @@ plan_read_criterion_faults() {
 # (`step:<n>`). A path's writers are found once per path, from each row's Files entries split once.
 plan_read_waits() {
   [ -f "${1:-}" ] || return 2
-  local rows d
+  local rows
   rows="$(plan_read_rows "$1" Tasks)" || return 1
-  if ! declare -F _units_cell_awk >/dev/null 2>&1; then
-    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-    # shellcheck source=/dev/null
-    . "$d/units.sh" || return 2
-  fi
+  bionic_need units.sh _units_cell_awk || return 2
   printf '%s\n' "$rows" | awk -F'\t' -v want="${2:-}" -v regno="$(_units_regno "$1")" "$(_units_files_awk)$(_units_cell_awk)"'
     function put(i, t,   j) { if (!((i, t) in said)) { said[i, t] = 1; printf "%s\t%s\n", id[i], t } }
     # row(j, o): row i waits on row j by its read o; a row named by two reads is one line naming both.

@@ -29,6 +29,7 @@
 # The goal readers also ask lib/units.sh `units_rows` and lib/proof.sh `proof_last_line` when loaded; without them a
 # one-file landing or a whole run reads as not measured.
 # Sourced, never executed; bash 3.2.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 # The read is the reader-owned parser's (lib/plan-read.sh): the header key, never a key under a heading of the body.
 plan_integration_branch() {  # <plan>
@@ -499,7 +500,7 @@ plan_goals_read() {
         fi ;;
       *' §'*)
         s="${r%% §*}"; s="${s##* }"; case "$s" in *.test.sh) ;; *) s="$s.test.sh" ;; esac
-        [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "${BASH_SOURCE[0]%/*}/line.sh" ] && . "${BASH_SOURCE[0]%/*}/line.sh"; } >/dev/null 2>&1
+        bionic_need line.sh line_lines
         v="$(line_lines "$rec" 2>/dev/null | awk -F'|' -v s="$s" "${_LINE_FIELDS_AWK:-}"'line_ev() == "verdict" && line_kv("suite") == s {
                r = line_kv("result"); if (r == "green" || r == "red") l = r "\t" substr(line_kv("commit"), 1, 8) } END { if (l != "") print l }' 2>/dev/null)"
         case "${v%%	*}" in

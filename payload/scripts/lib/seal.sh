@@ -135,11 +135,9 @@
 #
 # Sourcing defines functions and sets constants; it prints nothing. bash 3.2.
 
-_SEAL_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
-# shellcheck source=/dev/null
-declare -F git_common_dir >/dev/null 2>&1 || . "$_SEAL_LIB_DIR/root.sh"
-# shellcheck source=/dev/null
-declare -F _slots_lock >/dev/null 2>&1 || . "$_SEAL_LIB_DIR/slots.sh"
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need root.sh git_common_dir
+bionic_need slots.sh _slots_lock
 
 SEAL_HOME_NAME=bionic-seal
 _SEAL_EMPTY=4294967295   # POSIX cksum's crc of no bytes: the digest of a log sealed absent or empty

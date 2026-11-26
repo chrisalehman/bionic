@@ -70,25 +70,14 @@
 # [WALL: tests/patrol-duties-gate.test.sh]
 # [WALL: tests/patrol-revive.test.sh]
 
-_stop_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-_STOP_LIB_DIR="$(cd "$(_stop_self_dir)" && pwd -P)"
-
-if ! declare -F bionic_fold >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/fold.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need fold.sh bionic_fold
 
 # RESOURCES.SH IS SOURCED THE SAME WAY (wave-18 T2b, R1): `hooks/stop.sh`'s own
 # `BIONIC_LIB_WANT` does not name it, and this row's Files: declaration is this file
 # alone, so the dependency is met here rather than by widening the hook's want-list. The gate
 # (lib/gate.sh, which the fill duty asks through fill.sh) reads its readers.
-if ! declare -F _res_used_pct >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/resources.sh"
-fi
+bionic_need resources.sh _res_used_pct
 
 # ─── FILE SCOPE: hooks/context-spend.sh's audit path ─────────────────────────
 #
@@ -101,10 +90,7 @@ fi
 # SOURCED THE WAY fold.sh IS, ten lines above, and for the same reason: hooks/stop.sh already
 # sources root.sh at :153, above this library at :165, so in the shipped process this guard
 # never fires. It is here for the suites that drive this file directly.
-if ! declare -F audit_path >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/root.sh"
-fi
+bionic_need root.sh audit_path
 
 # ─── FILE SCOPE: the unbound advisory, said once per process ─────────────────
 #
@@ -122,10 +108,7 @@ fi
 #
 # run.sh IS SOURCED HERE for the suites that drive this file directly, the way root.sh is
 # above; hooks/stop.sh sources it first, so in the shipped process the guard never fires.
-if ! declare -F run_unbound_advisory >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/run.sh"
-fi
+bionic_need run.sh run_unbound_advisory
 stop_unbound_advise() {  # <plan> -> 0 staged · 1 already said in this process
   [ -z "${_STOP_UNBOUND_SAID:-}" ] || return 1
   _STOP_UNBOUND_SAID=1
@@ -145,10 +128,7 @@ stop_unbound_advise() {  # <plan> -> 0 staged · 1 already said in this process
 # already (the evidence gate's own process, a suite driving this library directly) pays
 # nothing. units.sh defines functions and runs nothing at source time, which is why sourcing
 # it here costs one parse and no forks.
-if ! declare -F units_rows >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/units.sh"
-fi
+bionic_need units.sh units_rows
 
 # ─── FILE SCOPE: the ready set, which this file must not compute twice ───────
 #
@@ -165,10 +145,7 @@ fi
 # which no verdict in that process reads directly — so in the shipped process the loader has
 # already checked it is readable and this guard is what a suite driving the library alone
 # pays. fill.sh sources units.sh under the same kind of guard, so the pair arrives together.
-if ! declare -F fill_ready_set >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/fill.sh"
-fi
+bionic_need fill.sh fill_ready_set
 
 # THE RUN'S FACTS, LOADED AS THE TICK LOADS THEM. The step, the Step-3 approval, the standing order and the newest
 # review proof are the reader's answers (`fill_facts_load`), so a fact the run's log alone holds is this wall's fact
@@ -183,20 +160,14 @@ stop_facts_load() {  # -> always 0
 }
 
 # THE TICK'S DIGEST AND THE WATCH RECORD: patrol.sh owns both readers.
-if ! declare -F tick_digest_path >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/patrol.sh"
-fi
+bionic_need patrol.sh tick_digest_path
 
 # THE PERSON'S LEDGER AND ITS ONE SENDER (epic-23 wave-33-workhorse, T11; REQ-2, D2): owed.sh
 # keeps what the person owes, and sources notify.sh beside it. NOT in hooks/stop.sh's
 # `BIONIC_LIB_WANT`, and sourced only when readable: the send is never a reason for this process
 # to step aside, and a library without it (a copy older than this wave) sends nothing and changes
 # nothing else.
-if ! declare -F owed_send >/dev/null 2>&1 && [ -r "$_STOP_LIB_DIR/owed.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/owed.sh"
-fi
+bionic_need owed.sh owed_send || :
 
 # ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
 #
@@ -1295,7 +1266,7 @@ return 2
 # for the open row it waits on. A version-15 page holds a task's waits in its deps cell, a row by its id and a ruling as
 # `approval:DN`; an older page in its reads cell, a row by its record, the ruling the same.
 stop_wait_cell() {
-  declare -F plan_read_header >/dev/null 2>&1 || . "$_STOP_LIB_DIR/plan-read.sh" >/dev/null 2>&1
+  bionic_need plan-read.sh plan_read_header
   case "$(plan_read_header "${1:-}" canonical_sdlc_version 2>/dev/null)" in
     canonical_sdlc_version=15) printf 'deps RID\n' ;;
     *) printf 'reads RECORD\n' ;;
@@ -2165,10 +2136,7 @@ stop_fill_ledger() {  # <event> -> always 0
   stop_turn_facts || return 0
   [ "$_ST_LIVE" = 1 ] || return 0
   local ready launched idle turn current
-  if ! declare -F line_event >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$_STOP_LIB_DIR/line.sh" 2>/dev/null && declare -F line_event >/dev/null 2>&1 || return 0
-  fi
+  bionic_need line.sh line_event || return 0
   ready="${_ST_READY// /,}"
   launched="$_ST_LAUNCHED"
   # THE ROWS THAT SAT IDLE: ready, not launched this turn, while a writer slot
@@ -2352,10 +2320,7 @@ esac
 # holds the path of. A plan whose scale cannot be read, or a library without scale.sh, judges as before: a Patrol
 # is assumed, so a wave-scale run loses nothing. Sourced here and not at file scope, behind the guard patrol.sh
 # carries below, for the same reason: a bystander turn does not parse a table it will not ask.
-if ! declare -F scale_patrol >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/scale.sh" 2>/dev/null || :
-fi
+bionic_need scale.sh scale_patrol || :
 if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$_RUN_PLAN")" = no ]; then
   return "$_adv"
 fi
@@ -2367,10 +2332,7 @@ fi
 # fixed order, so the dead watcher is read from the record whichever came first: a record still saying watching over
 # the dead process, or the new watcher's claim, which keeps the dead pid as `lost=`. `said=` on the record is what
 # keeps a later turn end from saying it again.
-if ! declare -F watch_lost >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/patrol.sh" 2>/dev/null || :
-fi
+bionic_need patrol.sh watch_lost || :
 if declare -F watch_lost >/dev/null 2>&1 && _lost="$(watch_lost "$BIONIC_ROOT" "$BIONIC_SID")"; then
   fold_advise "bionic watch: stopped — the watcher (pid ${_lost}) died without a word; this turn's end starts another"
   _adv=1

@@ -35,13 +35,13 @@
 #
 # bash 3.2 (ADR-001).
 
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 _READER_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
 # shellcheck source=/dev/null
 . "$_READER_LIB_DIR/fields.sh"
 # The reader calls nothing of the landing library, but its callers find that library loaded through it: their guards
 # read a set field reader as the landing library loaded, and call its record readers on that word.
-# shellcheck source=/dev/null
-declare -F line_lines >/dev/null 2>&1 || . "$_READER_LIB_DIR/line.sh"
+bionic_need line.sh line_lines
 # The record's field reader, read by name; `ev()` is its event, for the `run/v1` shape the fold prints.
 _READER_AWK="${_LINE_FIELDS_AWK}"'
 function ev() { return line_kv("ev") }
@@ -571,8 +571,7 @@ reader_q_verdicts() {  # <plan> [row] -> each suite's verdict standing, of <row>
 # shellcheck source=/dev/null
 . "$_READER_LIB_DIR/plan-read.sh"
 # A criterion's tier is its eval type through the scale profile's one map.
-# shellcheck source=/dev/null
-declare -F scale_tier_awk >/dev/null 2>&1 || . "$_READER_LIB_DIR/scale.sh"
+bionic_need scale.sh scale_tier_awk
 
 reader_question header value reader_q_header
 reader_q_header() {  # <plan> [key] -> key=value per header key, or the one named; 1 when it is absent

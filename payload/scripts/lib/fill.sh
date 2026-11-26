@@ -94,36 +94,23 @@
 # [WALL: tests/session-poker.test.sh]
 # [WALL: tests/patrol-duties-gate.test.sh]
 
-_fill_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-_FILL_LIB_DIR="$(cd "$(_fill_self_dir)" && pwd -P)"
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 # THE TABLE READER, SOURCED THE WAY payload/scripts/lib/stop.sh SOURCES IT and guarded on
 # the verb this file actually calls: a caller that already has it (the poker, whose
 # `BIONIC_LIB_WANT` names units.sh) pays nothing, and a caller that does not (hooks/stop.sh,
 # which wants this file alone) gets it here. units.sh defines functions and runs nothing at
 # source time, so the guard costs one parse and no forks.
-if ! declare -F units_ready >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_FILL_LIB_DIR/units.sh"
-fi
+bionic_need units.sh units_ready
 # THE GATE, SOURCED THE SAME WAY (wave-28 T13): `fill_gate_width` asks `gate_room`. A copy of
 # this file whose directory holds no gate.sh leaves it undefined, and the width is then the
 # open count alone: no room is offered on a gate nobody can read.
-if ! declare -F gate_room >/dev/null 2>&1 && [ -r "$_FILL_LIB_DIR/gate.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_FILL_LIB_DIR/gate.sh"
-fi
+bionic_need gate.sh gate_room || :
 
 # THE RUN'S REGISTER, SOURCED THE SAME WAY: `fill_merge_hold` reads it through `owed_list_plan`. A copy of this
 # file whose directory holds no owed.sh leaves the function undefined, and no merge is then held: a register nobody can
 # read holds nothing, the same posture `gate_room` takes above.
-if ! declare -F owed_list_plan >/dev/null 2>&1 && [ -r "$_FILL_LIB_DIR/owed.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_FILL_LIB_DIR/owed.sh"
-fi
+bionic_need owed.sh owed_list_plan || :
 
 # ── THE LEDGER'S OWN FIELD ────────────────────────────────────────────────────
 #
@@ -178,8 +165,7 @@ fill_current_forget() {  # -> drops the memo; the next reader parses whatever pa
 fill_facts_load() {
   local plan="${1:-}" got
   if [ -z "$plan" ] || [ ! -f "$plan" ]; then fill_current_forget; return 0; fi
-  declare -F _proof_ask >/dev/null 2>&1 || . "$_FILL_LIB_DIR/proof.sh" >/dev/null 2>&1
-  declare -F _proof_ask >/dev/null 2>&1 || return 1
+  bionic_need proof.sh _proof_ask || return 1
   got="$(_proof_ask "$plan" _fill_facts "$plan")" || return 1
   _FILL_CURRENT_VALUE="$(printf '%s\n' "$got" | sed -n 's/^n=//p')"
   _FILL_APPROVED="$(printf '%s\n' "$got" | sed -n 's/^approved=//p')"
@@ -210,8 +196,7 @@ _fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE and _FILL_APPR
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   # The step and the approval are the reader's (lib/proof.sh `proof_step_held`), never the plan's lines read here. A place
   # that cannot be read is no step and no approval, named by `fill_place_unread` so a caller refuses by name.
-  declare -F proof_step_held >/dev/null 2>&1 || . "$_FILL_LIB_DIR/proof.sh" >/dev/null 2>&1
-  if ! declare -F proof_step_held >/dev/null 2>&1 || ! got="$(proof_step_held "$plan")"; then _FILL_UNREAD="$plan"; return 1; fi
+  if ! bionic_need proof.sh proof_step_held || ! got="$(proof_step_held "$plan")"; then _FILL_UNREAD="$plan"; return 1; fi
   _FILL_CURRENT_VALUE="$(printf '%s\n' "$got" | sed -n 's/^n=//p')"
   case "$got" in *approved=1*) _FILL_APPROVED=1 ;; esac
   _FILL_CURRENT_PLAN="$plan"
@@ -458,7 +443,7 @@ fill_cap() {  # <plan>
   fi
   case "$c" in ''|*[!0-9]*) c="" ;; esac
   if [ -z "$c" ] && declare -F plan_frontmatter_get >/dev/null 2>&1; then
-    declare -F scale_cell >/dev/null 2>&1 || . "$_FILL_LIB_DIR/scale.sh" 2>/dev/null || :
+    bionic_need scale.sh scale_cell || :
     if declare -F scale_cell >/dev/null 2>&1; then
       scale="$(plan_frontmatter_get "${1:-}" scale 2>/dev/null)"
       c="$(scale_cell "$scale" writers 2>/dev/null)" || c=""
