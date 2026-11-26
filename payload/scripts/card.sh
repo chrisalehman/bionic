@@ -834,7 +834,7 @@ BEGIN { OFS = "\t"; ERRMSG = ""; enum = 0 }
   else if (h == "Design") { sec = "design"; sawdesign = 1 }
   else if (h == "Not Doing") sec = "nd"
   else if (h == "Tasks") { sec = "tasks"; sawtasks = 1 }
-  else if (h == "Eval design") { sec = "eval"; saweval = 1; erow = 0 }
+  else if (h == "Test design" || h == "Eval design") { sec = "eval"; saweval = 1; erow = 0 }
   else if (h ~ /^Requirements/) sec = "reqs"
   else sec = ""
   next
