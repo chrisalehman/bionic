@@ -1965,12 +1965,8 @@ identity_args() {  # <roster> <name> <the name's latest row> -> sets POKER_ID_AR
   POKER_ID_ARGS=(); POKER_ID=""
   tuid="$(line_field "$3" tool_use_id)"
   row="$(grep '^roster-state/' "$1" 2>/dev/null | grep -F "|name=${2}|" \
-    | POKER_TUID="$tuid" awk -F'|' '
-        { id = ""; tu = ""; gi = 0; gt = 0
-          for (i = 1; i <= NF; i++) {
-            if (!gi && index($i, "agent_id=") == 1)    { id = substr($i, 10); gi = 1 }
-            if (!gt && index($i, "tool_use_id=") == 1) { tu = substr($i, 13); gt = 1 }
-          }
+    | POKER_TUID="$tuid" awk -F'|' "$_LINE_FIELDS_AWK"'
+        { id = line_kv("agent_id"); tu = line_kv("tool_use_id")
           if (id != "" && (ENVIRON["POKER_TUID"] == "" || tu == ENVIRON["POKER_TUID"])) last = $0 }
         END { if (last != "") print last }')"
   [ -n "$row" ] || return 0

@@ -619,8 +619,8 @@ scorecard_report() {  # <plan> <project root> -> the eight lines; rc 0
       { e = iso2epoch($2); if (e > m && e - m > d) d = e - m }
       END { printf "%d\n", (d % 60 ? int(d / 60) + 1 : d / 60) }')"
   fi
-  widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk '
-    NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1) { m = substr($i, 9); if (m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } } }
+  widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk "$_LINE_FIELDS_AWK"'
+    NR > 1 && $2 == "queue" { m = line_kv("minutes"); if (m != "" && m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } }
     END { if (b != "") print r " " b " min" }')"
   sitrep_gather "$plan" "$root" sheet 2>/dev/null
   printf 'human stops (autonomous half): %s · target 1\n' "${stops:-unverified}"

@@ -335,10 +335,11 @@ BIONIC_RULINGS_UNREAD=""; BIONIC_RULINGS_WRITER=""
 case "$COMMAND" in
   *commit*)
     _bw_aid="$(bionic_jq .agent_id)"
-    if [ -n "$_bw_aid" ] && git_argv_has_sub "$COMMAND" commit && bionic_need roster.sh ruling_take_unread; then
+    if [ -n "$_bw_aid" ] && git_argv_has_sub "$COMMAND" commit && bionic_need roster.sh ruling_take_unread \
+      && bionic_need fields.sh line_value; then
       _bw_roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
       if _bw_row="$(roster_row_for_id "$_bw_roster" "$_bw_aid")"; then
-        BIONIC_RULINGS_WRITER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
+        BIONIC_RULINGS_WRITER="$(line_value "$_bw_row" name)"
         BIONIC_RULINGS_UNREAD="$(ruling_take_unread "$_bw_roster" "$BIONIC_RULINGS_WRITER" commit)"
       fi
     fi ;;
@@ -386,7 +387,7 @@ _bw_runs_ack() {  # <segment> -> 0 runs the verb · 1 does not
 BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_COUNT=0
 case "$COMMAND" in
   *ruling-ack*)
-    if _wall_poker_contract_verb "$COMMAND" ruling-ack && bionic_need roster.sh ruling_fold; then
+    if _wall_poker_contract_verb "$COMMAND" ruling-ack && bionic_need roster.sh ruling_fold && bionic_need fields.sh line_value; then
       BIONIC_ACK_ID="${_WALL_POKER_ARGS%%"$GIT_ARGV_US"*}"
       _bw_roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
       if [ -n "$BIONIC_ACK_ID" ]; then
@@ -394,7 +395,7 @@ case "$COMMAND" in
       fi
       BIONIC_ACK_AGENT="$(bionic_jq .agent_id)"
       if [ -n "$BIONIC_ACK_AGENT" ] && _bw_row="$(roster_row_for_id "$_bw_roster" "$BIONIC_ACK_AGENT")"; then
-        BIONIC_ACK_CALLER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
+        BIONIC_ACK_CALLER="$(line_value "$_bw_row" name)"
       fi
       while IFS= read -r _bw_l; do
         [ -z "$_bw_l" ] || ! _bw_runs_ack "$_bw_l" || BIONIC_ACK_COUNT=$((BIONIC_ACK_COUNT + 1))

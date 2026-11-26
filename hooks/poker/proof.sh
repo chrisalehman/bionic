@@ -505,7 +505,7 @@ whole_run_at_head() {
       ans=""
       rec="$(reader_log "$stub" 2>/dev/null)" && mkdir -p "${rec%/*}" && seal_vouched "$SW_PLAN" > "$rec" \
         && { ans="$(reader_main "$stub" sessions 2>/dev/null)" || ans=""; }
-      SAID_BOUND="$(printf '%s\n' "$ans" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) printf "%s ", substr($i, 9) }')"
+      SAID_BOUND="$(printf '%s\n' "$ans" | awk -F'|' "$_LINE_FIELDS_AWK"'{ s = line_kv("session") } s != "" { printf "%s ", s }')"
       rm -rf "$tmp"
     fi
     user_said "$SW_WORDS" "$SW_PLAN"; rc=$?
@@ -631,7 +631,7 @@ whole_run_at_head() {
       PF_BR="bionic-inherited/${PF_SUITE%.sh}-${PF_BASEH:0:12}-$$"
       PF_OK=""; [ -z "$PF_PARENT" ] || PF_OK="$(cd "$PV_REPO" && bash "$PF_SW" create "$PF_BASEH" "$PF_BR" "$PF_PARENT" 2>&1)"
       PF_WT="$(printf '%s
-' "$PF_OK" | awk '/^spawn-worktree: OK / { for (i = 3; i <= NF; i++) if (index($i, "path=") == 1) { print substr($i, 6); exit } }')"
+' "$PF_OK" | awk "$_LINE_FIELDS_AWK"'/^spawn-worktree: OK / && (p = line_kv("path")) != "" { print p; exit }')"
       _pf_drop() {
         [ -z "$PF_WT" ] || ( cd "$PV_REPO" && bash "$PF_SW" remove "$PF_WT" ) >/dev/null 2>&1
         git -C "$PV_REPO" branch -q -D "$PF_BR" >/dev/null 2>&1

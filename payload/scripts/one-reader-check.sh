@@ -67,9 +67,12 @@
 #     BASH_SOURCE on its line or the next. Each is a copy of lib/loader.sh `bionic_need`, outside that file;
 #     the one bootstrap line a library opens with, BOOT_LINE, is admitted when it is the whole line.
 #   - A LOOKUP is a line naming the flag `git-common-di[r]`, outside lib/root.sh, the home of `git_common_dir`.
-#   - A FIELD READER is, outside lib/fields.sh, an awk `index(<x>, <var> "=") == 1` whose key is a variable,
-#     or a shell case arm `"$<var>="*)` opening at a field: the reading `line_kv` and `line_value` do. A key
-#     spelt as a literal, or a word found between blanks, is none.
+#   - A FIELD READER is, outside lib/fields.sh, an awk `index(<x>, <var> "=") == 1` whose key is a variable;
+#     an awk `index(<f>, "<key>=") == 1` whose key is a literal, at a field the line walks to (`$i`, `f[i]`),
+#     when the same line takes its value by `substr(<f>,`; or a shell case arm `"$<var>="*)` opening at a
+#     field: the reading `line_kv` and `line_value` do. A literal key at a fixed place (`$2`, `$0`), a literal
+#     key the line only tests (a filter, which keeps or drops the field whole), or a word found between
+#     blanks, is none.
 #   Those three are read in hooks/ and payload/scripts/ alone, never under tests/.
 #   - AN UNHEARD FOLD is a line outside lib/proof.sh and the reader's files that calls _proof_facts,
 #     _proof_ask, reader_main, reader_facts, reader_events or the reader program and pipes it, feeds a
@@ -160,6 +163,11 @@ names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired v
 # the walk of a command a character at a time stops on a line that is no valid UTF-8.
 NAMED="$(names_standing)" BOOT_LINE="$BOOT_LINE" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " -v ruled=" $ruled_types " \
   -v kept=" $KEPT_COPIES " -v refusing=" $REFUSING " '
+  function litkv(s,   x) {  # 1 when s reads a literal key at a walked field and takes the value on the same line
+    if (!match(s, awklit)) return 0
+    x = substr(s, RSTART + 6, RLENGTH - 6); sub(/[ \t]*,.*/, "", x)
+    return index(s, "substr(" x ",") > 0
+  }
   function opname(s) {  # one operand token -> 1 when it names a plan, 2 a log
     if (s ~ /\.plan\.md"?$/) return 1
     if (s ~ /run\.log"?$/) return 2
@@ -271,6 +279,7 @@ NAMED="$(names_standing)" BOOT_LINE="$BOOT_LINE" LC_ALL=C awk -v q="'" -v admitt
     srcre = "(^|[;&|(){!]|[ \t](then|do|else))[ \t]*([.]|source)[ \t]+[\"$/A-Za-z_.~].*[.]sh([\"" q " \t;)|&]|$)"
     markre = "declare -F [A-Za-z_]|[[][[]? +-[nz] +\"?[$][{][A-Za-z_][A-Za-z0-9_]*:-[}]\"? +[]]"
     awkkv = "index[(][^,()]+,[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\"=\"[)][ \t]*==[ \t]*1"
+    awklit = "index[(]([$][A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*[[][A-Za-z_][A-Za-z0-9_]*[]])[ \t]*,[ \t]*\"[A-Za-z_][A-Za-z0-9_-]*=\"[)][ \t]*==[ \t]*1"
     shkv = "(^|[ \t(])\"[$][{]?[A-Za-z_0-9]+[}]?=\"[*][)]"
     lg = "use bionic_need (" loader ")" }
   FNR == 1 { depth = 0; fn[0] = "-"; ind[0] = -1; gopen = 0; pend = ""; readf[FILENAME] = 1 }
@@ -329,7 +338,7 @@ NAMED="$(names_standing)" BOOT_LINE="$BOOT_LINE" LC_ALL=C awk -v q="'" -v admitt
     }
     if (FILENAME != rootlib && line ~ /git-common-di[r]/) copy("git-home", "git_homes", wh, "lookup: use git_common_dir (" rootlib ")", fn[depth])
     if (FILENAME != fieldslib) {
-      if (line ~ awkkv) copy("field-reader", "field_readers", wh, "awk reader: use line_kv (" fieldslib ")", fn[depth])
+      if (line ~ awkkv || litkv(line)) copy("field-reader", "field_readers", wh, "awk reader: use line_kv (" fieldslib ")", fn[depth])
       else if (line ~ shkv) copy("field-reader", "field_readers", wh, "shell reader: use line_value (" fieldslib ")", fn[depth])
     }
   }

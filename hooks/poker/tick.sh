@@ -841,7 +841,7 @@ tick_waits_only_on_person() {
 # readers' RUN_* globals are not moved under the tick.
 tick_runs_out() (
   [ -f "${ROSTER_FILE:-}" ] && [ ! -L "$ROSTER_FILE" ] || exit 1
-  for n in $(awk -F'|' '/[|]run_log=/ { for (i = 1; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6) }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
+  for n in $(awk -F'|' "$_LINE_FIELDS_AWK"'/[|]run_log=/ && (n = line_kv("name")) != "" { print n }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
     run_load_row "$(run_row_of "$ROSTER_FILE" "$n")" "$ROSTER_FILE" || continue
     run_read
     [ "$RUN_STATE" != RUNNING ] || exit 0
@@ -1123,16 +1123,8 @@ tick_watch_facts() {  # <file>
           [ -z "${TICK_RUNS_KEY:-}" ] || printf '%s\n' "$TICK_RUNS_KEY"
           # Which arm names each NOTIFY row: a second arm naming a row already named is news.
           [ -z "${TICK_NOTIFY_ARMS:-}" ] || printf 'arms=%s\n' "$TICK_NOTIFY_ARMS"
-          printf '%s\n' "$VERDICT_OUT" | awk -F'|' '
-            $1 == "landing-verdict/v1" {
-              n = ""; st = ""; ak = ""
-              for (i = 2; i <= NF; i++) {
-                if (index($i, "name=") == 1) n = substr($i, 6)
-                else if (index($i, "state=") == 1) st = substr($i, 7)
-                else if (index($i, "acked=") == 1) ak = substr($i, 7)
-              }
-              print n "|" st "|" ak
-            }' | LC_ALL=C sort
+          printf '%s\n' "$VERDICT_OUT" | awk -F'|' "$_LINE_FIELDS_AWK"'
+            $1 == "landing-verdict/v1" { print line_kv("name") "|" line_kv("state") "|" line_kv("acked") }' | LC_ALL=C sort
           # A reader started without its checks: the whole line, and the ids beside it (T37; S1).
           [ -z "${US_NOTIFY_IDS:-}" ] || printf 'unchecked=%s\n' "$US_NOTIFY_IDS"
           awk '
@@ -1265,7 +1257,7 @@ tick_watch_facts() {  # <file>
     # is news, so the tick after it prints in full, and an unchanged tick stays the one line it is.
     TICK_RUNS_LINES=""; TICK_RUNS_KEY=""
     if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
-      for TR_NAME in $(awk -F'|' '/[|]run_log=/ { for (i = 1; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6) }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
+      for TR_NAME in $(awk -F'|' "$_LINE_FIELDS_AWK"'/[|]run_log=/ && (n = line_kv("name")) != "" { print n }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
         run_load_row "$(run_row_of "$ROSTER_FILE" "$TR_NAME")" "$ROSTER_FILE" || continue
         run_read
         [ "$RUN_STATE" = RUNNING ] || continue

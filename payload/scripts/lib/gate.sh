@@ -1023,16 +1023,12 @@ _gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_
     *) root="$_GATE_TREE"; [ -n "$root" ] || return 0 ;;
   esac
   # The roster library names the file; without it the roster reads as unreadable, and the call is admitted.
-  bionic_need roster.sh roster_path || return 0
+  bionic_need roster.sh roster_path && bionic_need fields.sh line_field_v || return 0
   roster="$(roster_path "$root" "$sid")"
   { [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; } || return 0
-  row="$(GATE_BUDGET_WHO="$agent" awk '
+  row="$(GATE_BUDGET_WHO="$agent" awk "$_LINE_FIELDS_AWK"'
     index($0, "roster-state/") == 1 {
-      n = split($0, p, "|"); nm = ""; id = ""; hn = 0; hi = 0
-      for (i = 2; i <= n; i++) {
-        if (!hn && index(p[i], "name=") == 1) { nm = substr(p[i], 6); hn = 1 }
-        else if (!hi && index(p[i], "agent_id=") == 1) { id = substr(p[i], 10); hi = 1 }
-      }
+      nm = line_kv_of($0, "name"); id = line_kv_of($0, "agent_id")
       sn = nm; gsub(/[^A-Za-z0-9._+-]/, "_", sn)
       w = ENVIRON["GATE_BUDGET_WHO"]
       if ((nm != "" && (nm == w || sn == w)) || (id != "" && id == w)) last = $0

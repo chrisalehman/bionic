@@ -1573,19 +1573,14 @@ _wt_workspace_paths() {  # <root> <sid> <name> <all: 1 or 0>
   _wt_workspaces_unlinked "$1" "$f" || return 2
   [ -e "$f" ] || return 1
   { [ -f "$f" ] && [ -r "$f" ]; } || return 2
-  out="$(WT_SID="$2" WT_NAME="$3" WT_ALL="$4" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
+  out="$(WT_SID="$2" WT_NAME="$3" WT_ALL="$4" awk -F'|' -v schema="$WORKSPACE_SCHEMA" "$_LINE_FIELDS_AWK"'
     BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; all = ENVIRON["WT_ALL"] }
     { sub(/\r$/, "") }
     $1 != schema { next }
     {
-      s = ""; n = ""; p = ""; hn = 0
-      for (i = 2; i <= NF; i++) {
-        if (index($i, "session=") == 1) s = substr($i, 9)
-        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
-        else if (index($i, "path=") == 1) p = substr($i, 6)
-      }
-      if (s != sid || substr(p, 1, 1) != "/") next
-      if (all == "1" || (hn && n == want)) print p
+      p = line_kv("path")
+      if (line_kv("session") != sid || substr(p, 1, 1) != "/") next
+      if (all == "1" || line_kv("name") == want) print p
     }' "$f" 2>/dev/null)" || return 2
   [ -n "$out" ] || return 1
   _wt_listed_trees "$1" "$out" "$4"
