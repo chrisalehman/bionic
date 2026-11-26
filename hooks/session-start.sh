@@ -315,8 +315,7 @@ SS_FACTS_PLAN=""; SS_FACTS=""; SS_ANSWER=""; SS_UNREAD="not read — the run's f
 ss_ask() {  # <plan> <reader question function> -> SS_ANSWER, its answer over the plan's facts; 2 when they cannot be read
   SS_ANSWER=""
   if [ "$SS_FACTS_PLAN" != "$1" ]; then
-    { declare -F _proof_facts >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
-    declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load || return 1
+    bionic_need proof.sh _proof_facts && _proof_reader_load || return 1
     SS_FACTS="$(_proof_facts "$1")" || { SS_FACTS=""; return 2; }
     SS_FACTS_PLAN="$1"
   fi

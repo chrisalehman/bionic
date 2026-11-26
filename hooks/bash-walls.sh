@@ -163,7 +163,7 @@ BIONIC_BOUND_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || 
 bw_open_asks() {
   [ -n "$BIONIC_WALL_OWED" ] || return 0
   case "$BIONIC_SID" in planverb-*) return 0 ;; esac
-  { declare -F owed_open >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/owed.sh" ] && . "$BIONIC_LIB/owed.sh"; }; } 2>/dev/null || return 0
+  bionic_need owed.sh owed_open || return 0
   while IFS=$'\t' read -r _bw_key _bw_title _bw_reply; do
     [ -n "$_bw_key" ] || continue
     OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" OWED_PLAN="${OWED_PLAN:-}" owed_open "$_bw_key" "$_bw_title" "$_bw_reply" >/dev/null 2>&1
@@ -343,8 +343,7 @@ BIONIC_RULINGS_UNREAD=""; BIONIC_RULINGS_WRITER=""
 case "$COMMAND" in
   *commit*)
     _bw_aid="$(bionic_jq .agent_id)"
-    if [ -n "$_bw_aid" ] && git_argv_has_sub "$COMMAND" commit && [ -r "$BIONIC_LIB/roster.sh" ] \
-       && { declare -F ruling_take_unread >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null; then
+    if [ -n "$_bw_aid" ] && git_argv_has_sub "$COMMAND" commit && bionic_need roster.sh ruling_take_unread; then
       _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
       if _bw_row="$(roster_row_for_id "$_bw_roster" "$_bw_aid")"; then
         BIONIC_RULINGS_WRITER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
@@ -395,8 +394,7 @@ _bw_runs_ack() {  # <segment> -> 0 runs the verb · 1 does not
 BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_COUNT=0
 case "$COMMAND" in
   *ruling-ack*)
-    if _wall_poker_contract_verb "$COMMAND" ruling-ack && [ -r "$BIONIC_LIB/roster.sh" ] \
-       && { declare -F ruling_fold >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null; then
+    if _wall_poker_contract_verb "$COMMAND" ruling-ack && bionic_need roster.sh ruling_fold; then
       BIONIC_ACK_ID="${_WALL_POKER_ARGS%%"$GIT_ARGV_US"*}"
       _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
       if [ -n "$BIONIC_ACK_ID" ]; then

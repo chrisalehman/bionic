@@ -95,7 +95,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh seal.sh; do
+for _co_lib in loader.sh roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh seal.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -109,6 +109,8 @@ if [ ! -f "${CO_SCRIPTS}/card.sh" ]; then
   exit 2
 fi
 
+# shellcheck source=/dev/null
+. "${CO_LIB}/loader.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/roots.sh"
 # shellcheck source=/dev/null
@@ -494,7 +496,7 @@ CO_MERGE_RC=2; CO_MERGE_COMMIT=""; CO_MERGE_REF=""; CO_MERGE_WHY=""; CO_MERGE_WS
 co_merge_read() {
   local out c
   CO_MERGE_COMMIT=""; CO_MERGE_WS="$(git -C "$ROOT" rev-parse --short "refs/heads/$WORKING" 2>/dev/null)"
-  if co_line_load && declare -F line_merge_seen >/dev/null 2>&1; then
+  if bionic_need line.sh line_merge_seen; then
     out="$(line_merge_seen "$PLAN" "$ROOT" --fetch)"; CO_MERGE_RC=$?
   else
     out="$(printf 'unread\t-\t%s\t%s/line.sh, the merge'"'"'s reader, cannot be loaded' "$INTEGRATION" "$CO_LIB")"; CO_MERGE_RC=2
@@ -547,7 +549,7 @@ co_tag_merge() {
   local out rc flag=""
   [ "${1:-run}" != check ] || flag=--check
   [ -n "$CO_MERGE_COMMIT" ] || { TAG_LINE="none — no merge was read, so there is no commit to tag"; return 0; }
-  if ! co_line_load || ! declare -F line_tag_merge >/dev/null 2>&1; then
+  if ! bionic_need line.sh line_tag_merge; then
     TAG_LINE="none — $CO_LIB/line.sh, the tag's writer, cannot be loaded"; return 0
   fi
   out="$(line_tag_merge "$PLAN" "$ROOT" "$CO_MERGE_COMMIT" $flag)"; rc=$?
@@ -613,7 +615,7 @@ act_lands() {  # <rows> -> each landed by one published event at the integration
   fi
   ih="$CO_MERGE_COMMIT"
   [ -n "$ih" ] || _co_refuse "no merge was read, so rows $rows have no commit to land at"
-  co_line_load || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
+  bionic_need line.sh line_published_event || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
   for id in $rows; do
     line_published_event "$PLAN" "row=$id" "commit=$ih" kind=close by=close-out why=merged >/dev/null \
       || _co_refuse "the landing of $id cannot be written to the run's log — rows before it are landed; run close-out again"
@@ -797,7 +799,7 @@ co_matrix_settle() {  # -> CO_MX_LINES, one `matrix: <AC> <state>` line per crit
   local acs ac
   CO_MX_LINES=""
   [ -f "${CO_LIB}/walls.sh" ] || return 0
-  acs="$( . "${CO_LIB}/walls.sh" >/dev/null 2>&1 && declare -F matrix_close_rows >/dev/null 2>&1 || exit 0
+  acs="$( bionic_need walls.sh matrix_close_rows || exit 0
           matrix_close_rows "$PLAN" )"
   for ac in $acs; do
     if ! /usr/bin/grep -qE '^hand-holds: total=0( |$)' <<< "$CO_HH_LINE"; then
@@ -837,19 +839,13 @@ co_scorecard() {  # -> sets CO_SC_LINES
 # part that already reads as rendered: nothing is made and no line is written.
 # Sets CO_RV_LINE (the `reviews:` line's words), CO_RV_COMMIT (the commit, made, not yet published), CO_RV_BASE.
 CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
-co_line_load() {  # -> 0 once lib/line.sh (the renderer, the landing record's writer and the checkout reader) is loaded
-  declare -F line_reviews_state >/dev/null 2>&1 && declare -F line_event >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$CO_LIB/line.sh" ] && . "$CO_LIB/line.sh" >/dev/null 2>&1
-  declare -F line_reviews_state >/dev/null 2>&1 && declare -F line_event >/dev/null 2>&1
-}
 co_reviews_prepare() {  # <check|run> -> CO_RV_LINE, and in run CO_RV_COMMIT; rc 1 when run cannot make the commit
   local mode="$1" tip tmp why
   CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
   [ -n "$RELEASE" ] || { CO_RV_LINE="none — the plan names no release:"; return 0; }
   tip="$(git -C "$ROOT" rev-parse --verify -q "refs/heads/${WORKING}^{commit}" 2>/dev/null)" \
     || { CO_RV_LINE="none — $WORKING is not a branch in $ROOT"; return 0; }
-  co_line_load || { CO_RV_LINE="not rendered — $CO_LIB/line.sh, the renderer and the landing record's writer, cannot be loaded"; return 1; }
+  bionic_need line.sh line_reviews_state || { CO_RV_LINE="not rendered — $CO_LIB/line.sh, the renderer and the landing record's writer, cannot be loaded"; return 1; }
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/close-out-reviews.XXXXXX")" || { CO_RV_LINE="not rendered — no temporary directory"; return 1; }
   if ! line_reviews_state "$PLAN" "$ROOT" "$tip" "$WORKING" "$tmp/new"; then
     rm -rf "$tmp"; CO_RV_LINE="not rendered — $LINE_RV_SAID"; return 1
@@ -1848,7 +1844,7 @@ co_close_step8() {
 CO_TARGET=""; CO_DEPLOY_NAMED=no; CO_DEPLOY_WHY=""; CO_DEPLOY_SAYS=""
 CO_DEPLOY_FIELDS=()
 co_walls_ask() {  # <lib/walls.sh function> [args] -> its exit status, asked of the gate's library in a subshell; 9 when it cannot be asked
-  ( . "${CO_LIB}/walls.sh" >/dev/null 2>&1 && declare -F "$1" >/dev/null 2>&1 || exit 9
+  ( bionic_need walls.sh "$1" || exit 9
     DEPLOY_TARGET="$CO_TARGET"
     "$@" )
 }

@@ -267,6 +267,8 @@ case "${BASH_SOURCE[0]}" in */*) : ;; *) BOOKED_SELF_DIR="$(pwd -P)" ;; esac
 # gate.sh brings the liveness rule (slots.sh) with it.
 # shellcheck disable=SC1091
 . "$BOOKED_SELF_DIR/lib/gate.sh" || exit 2
+# shellcheck disable=SC1091
+. "$BOOKED_SELF_DIR/lib/loader.sh" 2>/dev/null
 
 BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
@@ -817,12 +819,7 @@ booked_run_line() {
   case "$sid" in ''|*[!A-Za-z0-9_-]*) return 0 ;; esac
   r="$(booked_project_root)"
   [ -n "$r" ] && [ -f "$run_log" ] || return 0
-  # shellcheck disable=SC1091
-  { declare -F session_plan >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/run.sh"; } >/dev/null 2>&1 || return 0
-  # shellcheck disable=SC1091
-  { declare -F line_event >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/line.sh"; } >/dev/null 2>&1 || return 0
-  # shellcheck disable=SC1091
-  { declare -F _detect_sha256 >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/detect.sh"; } >/dev/null 2>&1 || return 0
+  bionic_need run.sh session_plan && bionic_need line.sh line_event && bionic_need detect.sh _detect_sha256 || return 0
   plan="$(session_plan "$r" "$sid" 2>/dev/null)" || return 0
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   sha="$(_detect_sha256 "$run_log")" || return 0
