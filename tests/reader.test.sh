@@ -17,7 +17,7 @@
 #             dispatched under a name.
 #   §HEADER     the plan's header keys, its body never read as one, CR-only line ends too.
 #   §ROW        a Tasks row is its nine authored cells, named by the table's header.
-#   §CRITERION  a criterion is its Eval design row, an escaped bar kept as a bar.
+#   §CRITERION  a criterion is its Test design row, an escaped bar kept as a bar.
 #   §NEW-WORDS  a plan whose criteria table is headed Test design, with Test type and Test, answers every reader of
 #               the table, each criterion with its type, and the Step 2 card draws its spec.
 #   §OLD-WORDS  the same plan under Eval design, with Eval type and Eval, gives every one of those answers unchanged.
@@ -370,9 +370,9 @@ ask row T9; expect_status "a row the table lacks answers no" 1 "$?"
 ask row; expect_status "row with no id is refused" 2 "$?"
 
 section "CRITERION"
-W=new; expect_eq "a criterion is its Eval design row, an escaped bar read as a bar" \
+W=new; expect_eq "a criterion is its Test design row, an escaped bar read as a bar" \
   "requirement=REQ-7 approach=planted criterion=AC-7.1 test-type=unit test=\`cell\` | \`row\` fails-when=none" "$(flat criterion AC-7.1)"
-ask criterion AC-9.9; expect_status "a criterion the Eval design lacks answers no" 1 "$?"
+ask criterion AC-9.9; expect_status "a criterion the Test design lacks answers no" 1 "$?"
 
 # One plan, written in the new words and in the old: the criteria table under `## Test design` with the columns
 # `Test type` and `Test`, or under `## Eval design` with `Eval type` and `Eval`. The readers of that table are the
@@ -501,7 +501,7 @@ cells() { local c; for c in 1 2 3 4 5; do printf '%s; ' "$(flat cell "AC-7.$c")"
 expect_eq "discharged only with a standing proof, waiver or approval naming the criterion" \
   "state=pending; state=discharged by=approval; state=pending; state=discharged by=proof; state=discharged by=waiver; " "$(cells)"
 every() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" && reader_cells "$D/plans/epic-x/$W.plan.md" "$@" ) | tr '\037\n' ',;'; }
-expect_eq "at 15 every criterion in one fold: its state, its tier by its eval type, its proof's evidence, the evidence review at the head (failed, a finding; no head, none), its approval" \
+expect_eq "at 15 every criterion in one fold: its state, its tier by its test type, its proof's evidence, the evidence review at the head (failed, a finding; no head, none), its approval" \
   "AC-7.1,pending,,T1,,CONFIRMED,,REQ-7;AC-7.2,discharged,approval,T1,,CONFIRMED,me 2026-11-01 AC-7.2,REQ-7;AC-7.3,pending,,T1,,CONFIRMED,,REQ-7;AC-7.4,discharged,proof,T1,record/new/e4.md,CONFIRMED,,REQ-7;AC-7.5,discharged,waiver,T1,,CONFIRMED,,REQ-7;|REFUTED|" "$(every "$H")|$(every "$G" | cut -d, -f6)|$(every | cut -d, -f6)"
 # The person's word comes after the proof: an approval naming a discharged criterion confirms it and never unseats the
 # proof or the waiver that discharged it; an approval alone still discharges.

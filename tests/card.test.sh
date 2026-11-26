@@ -21,7 +21,7 @@
 # the free cell inside its own column, and measures in columns through width.sh.
 # This suite is that file's wall.
 #
-# A FORMAT IS PINNED WHERE A CELL'S MEANING RESTS ON ITS COLUMN. A count under the Eval
+# A FORMAT IS PINNED WHERE A CELL'S MEANING RESTS ON ITS COLUMN. A count under the Test
 # design header is a bare number, so Section 2 renders that kind's header and rows from
 # its format by hand and the renderer must agree BYTE FOR BYTE: a label off its column
 # misstates which count is which. Section 5's header-only row holds the decision header
@@ -42,7 +42,7 @@ WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
 # ── the two formats card.sh owns that this suite renders by hand ──
 # The decision row gives its title cell 30 columns, a title being at most 30 characters
-# on every card; the eval-design format starts each count at its label's column.
+# on every card; the test-design format starts each count at its label's column.
 OLD_FMT_DEC='    %-4s %-30s %-14s %s'
 OLD_FMT_EVAL='    %-8s %-36s %-6s %-5s %-9s %-5s %-6s'
 
@@ -79,7 +79,7 @@ expect_true "4: card.sh parses under /bin/bash" /bin/bash -n "$CARD_SH"
 expect_eq "4a: …and /bin/bash is the 3.x this gate is about" "3" \
   "$(/bin/bash -c 'echo ${BASH_VERSINFO[0]}')"
 
-section "Section 2: the eval-design kind renders what its former printf format rendered"
+section "Section 2: the test-design kind renders what its former printf format rendered"
 
 # fmt_render — the row, built one field at a time from a format, the way the card
 # was hand-padded before this task. NOT `printf "$fmt"` itself: printf pads by
@@ -150,20 +150,20 @@ card() {  # <kind> — TSV rows on stdin
   bash "$CARD_SH" "$@" 2>/dev/null
 }
 
-# --- eval-design (five RIGHT-aligned count columns, and a total row) ---
+# --- test-design (five RIGHT-aligned count columns, and a total row) ---
 EVAL_VALS1=("REQ-<id>" "<how it is proven, one line>" "2" "1" "3" "0" "1")
 EVAL_VALS2=("REQ-<id>" "<how it is proven, one line>" "1" "0" "2" "1" "0")
 EVAL_VALS_T=("total" "" "3" "1" "5" "1" "1")
 # A row's last field pads on the left-aligned format and the card trims the line's end, so the hand-built rows trim theirs.
 EVAL_WANT="$(printf '%s\n' \
-  "$(hdr_build "Eval design" "$OLD_FMT_EVAL" "2:static" "3:unit" "4:hermetic" "5:live" "6:human")" \
+  "$(hdr_build "Test design" "$OLD_FMT_EVAL" "2:static" "3:unit" "4:hermetic" "5:live" "6:human")" \
   "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS1[@]}")" \
   "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS2[@]}")" \
   "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS_T[@]}")" | sed -e 's/ *$//')"
 EVAL_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS1[@]}"
                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS2[@]}"
-               printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS_T[@]}"; } | card eval-design)"
-expect_eq "9: the eval-design kind renders the card's own header and three rows" "$EVAL_WANT" "$EVAL_GOT"
+               printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS_T[@]}"; } | card test-design)"
+expect_eq "9: the test-design kind renders the card's own header and three rows" "$EVAL_WANT" "$EVAL_GOT"
 # THE COUNT STARTS UNDER ITS LABEL. Row 9 holds the format against itself; this row reads the
 # printed card, so a count right-aligned in its column, which ends under the label's end, goes red.
 EVAL_START_GOT="$(printf '%s\n' "$EVAL_GOT" | awk '
@@ -172,7 +172,7 @@ EVAL_START_GOT="$(printf '%s\n' "$EVAL_GOT" | awk '
     out = ""; line = $0
     for (i = 1; i <= n; i++) { out = out (out == "" ? "" : ",") (substr(line, start[i], 1) ~ /[0-9]/ && substr(line, start[i] - 1, 1) == " " ? "ok" : "off") }
     print out }')"
-expect_eq "9b: each count of the eval-design rows starts at the first column of its type's label" \
+expect_eq "9b: each count of the test-design rows starts at the first column of its type's label" \
   "$(printf 'ok,ok,ok,ok,ok\nok,ok,ok,ok,ok')" "$EVAL_START_GOT"
 
 section "Section 5: the edges"
@@ -264,9 +264,9 @@ OWN9_P="$(printf 'concept\towner\t%s\ttests/x.test.sh\n' "$PLAIN_FOLD" | card ow
 expect_eq "35: ownership — § — “ ” … in the surfaces cell do not move test" \
   "$(cols "${OWN9_P%%tests/x.test.sh*}")" "$(cols "${OWN9_G%%tests/x.test.sh*}")"
 
-EVAL9_G="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$GLYPH_FOLD" | card eval-design | tail -n +2)"
-EVAL9_P="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$PLAIN_FOLD" | card eval-design | tail -n +2)"
-expect_eq "36: eval-design — § — “ ” … in the description cell keep every count column aligned" \
+EVAL9_G="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$GLYPH_FOLD" | card test-design | tail -n +2)"
+EVAL9_P="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$PLAIN_FOLD" | card test-design | tail -n +2)"
+expect_eq "36: test-design — § — “ ” … in the description cell keep every count column aligned" \
   "$(cols "$EVAL9_P")" "$(cols "$EVAL9_G")"
 
 TASK9_G="$(printf 'T9\t%s\tREQ-9\tbuild\t—\timplementor\n' "$GLYPH_FOLD" | card task | grep -v '^  Tasks')"
@@ -571,7 +571,7 @@ whole_card step2 "$SPEC_FIX" ownership; S2_OWN="$WC_OUT"
 expect_contains "55: the Ownership sub-view carries the spec's own table rows" \
   "owner lib/first.sh" "$S2_OWN"
 expect_contains "55a: …and the second concept's test suite" "tests/second.test.sh" "$S2_OWN"
-expect_contains "56: the Eval design section counts REQ-1's criteria by type" "REQ-1" "$S2"
+expect_contains "56: the Test design section counts REQ-1's criteria by type" "REQ-1" "$S2"
 expect_contains "56a: …and carries a total row" "total" "$S2"
 
 whole_card step3 "$PLAN_FIX"; S3="$WC_OUT"
@@ -1302,9 +1302,9 @@ card_intree_cleanup
 section "§CONTENT: the Step-2 card's shape follows what the spec holds, never the scale (wave-43 D11; REQ-13 AC-13.2)"
 # ============================================================
 # Wave 42 and wave 43 both wrote a wave-shaped spec at task scale, and the renderer drew the
-# paragraph card for it, since one line keyed the shape on `scale:`. The decisions and the eval
+# paragraph card for it, since one line keyed the shape on `scale:`. The decisions and the test
 # counts the user was approving never reached the card, and wave 42 drew them by hand (A-orch.8).
-# The rule now: a spec that holds decision rows or an eval table gets the full card and its
+# The rule now: a spec that holds decision rows or a test table gets the full card and its
 # sub-views, whatever the scale; a spec that holds neither keeps the paragraph card, the
 # task-scale form. An ADR line naming several decisions, `(D1; D2; REQ-1)`, credits each.
 # fails-when: the dispatch keys on CARD_SCALE alone (CONTENT-2 to CONTENT-4, CONTENT-6), or
@@ -1316,13 +1316,13 @@ sed -e 's/^sdlc-step: 2$/sdlc-step: 2\nscale: task/' \
 expect_contains "CONTENT-0 precondition: the task spec declares scale: task" "scale: task" "$(cat "$TASK_SPEC")"
 expect_contains "CONTENT-0b precondition: its ADR line names D1 and D2" "(D1; D2; REQ-1)" "$(cat "$TASK_SPEC")"
 whole_card step2 "$TASK_SPEC"; S2_TASK="$WC_OUT"
-expect_eq "CONTENT-1 step2 exits 0 on a task-scale spec that holds decisions and evals" "0" "$WC_RC"
-expect_contains "CONTENT-2 …and the card carries the Decisions section with D1" "D1" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p')"
-expect_contains "CONTENT-2b …and D2" "D2" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p')"
-expect_contains "CONTENT-3 …and the Eval design section with its total row" "total" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Eval design/,/^  Artifacts/p')"
-expect_contains "CONTENT-4 …and the sub-view line, since the content is there to show" "show evals <req>" "$S2_TASK"
+expect_eq "CONTENT-1 step2 exits 0 on a task-scale spec that holds decisions and tests" "0" "$WC_RC"
+expect_contains "CONTENT-2 …and the card carries the Decisions section with D1" "D1" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Test design/p')"
+expect_contains "CONTENT-2b …and D2" "D2" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Test design/p')"
+expect_contains "CONTENT-3 …and the Test design section with its total row" "total" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Test design/,/^  Artifacts/p')"
+expect_contains "CONTENT-4 …and the sub-view line, since the content is there to show" "show tests <req>" "$S2_TASK"
 expect_eq "CONTENT-5 an ADR line naming D1 and D2 credits both decisions with the ADR" "2" \
-  "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p' | /usr/bin/grep -c 'adr-099-fixture.md')"
+  "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Test design/p' | /usr/bin/grep -c 'adr-099-fixture.md')"
 whole_card step2 "$TASK_SPEC" ownership
 expect_eq "CONTENT-6 the ownership sub-view is offered on that spec too" "0" "$WC_RC"
 expect_contains "CONTENT-6b …and carries the table's rows" "lib/first.sh" "$WC_OUT"
@@ -1347,10 +1347,10 @@ One small thing, designed in a paragraph.
 The one thing lives in one file and is read by one caller; nothing else changes.
 FIXEOF
 whole_card step2 "$PARA_SPEC"; S2_PARA="$WC_OUT"
-expect_eq "CONTENT-7 a task-scale spec holding neither decisions nor evals still exits 0" "0" "$WC_RC"
+expect_eq "CONTENT-7 a task-scale spec holding neither decisions nor tests still exits 0" "0" "$WC_RC"
 expect_contains "CONTENT-7b …and draws the paragraph card" "The one thing lives in one file" "$S2_PARA"
 expect_eq "CONTENT-7c …with no Decisions section and no sub-view line" "" \
-  "$(printf '%s\n' "$S2_PARA" | /usr/bin/grep -e '^  Decisions' -e 'show evals')"
+  "$(printf '%s\n' "$S2_PARA" | /usr/bin/grep -e '^  Decisions' -e 'show tests')"
 whole_card step2 "$PARA_SPEC" ownership
 expect_eq "CONTENT-7d …and refuses the sub-view, as before" "2" "$WC_RC"
 
@@ -1885,10 +1885,10 @@ expect_eq "DSENTENCE-7c …and a backtick in the detail after the sentence refus
   "$(/usr/bin/grep -c '`lib/sync.sh`' "$DS_TICK" | tr -d ' ')|$(printf '%s\n' "$WC_ERR" | /usr/bin/grep -c 'decision D1')"
 
 # ============================================================
-section "§APPROACH: the Eval design's Approach cell is one plain line of at most 60 columns per requirement"
+section "§APPROACH: the Test design's Approach cell is one plain line of at most 60 columns per requirement"
 # ============================================================
 # fails-when: an Approach cell over 60 columns, one carrying a backtick, or a second approach on one requirement
-# renders, the refusal does not name the row, a 60-column cell is refused, or the Eval design line stops printing it.
+# renders, the refusal does not name the row, a 60-column cell is refused, or the Test design line stops printing it.
 AP60="two phones meet — each keeps the other's edits, none is lost"
 expect_eq "APPROACH-0 precondition: the boundary approach is 60 columns and more than 60 bytes" "60|yes" \
   "$(cols "$AP60")|$([ "$(printf '%s' "$AP60" | wc -c | tr -d ' ')" -gt 60 ] && echo yes)"
@@ -1898,18 +1898,18 @@ expect_eq "APPROACH-0b precondition: both REQ-1 rows carry the 60-column approac
   "$(/usr/bin/grep -c "| REQ-1 | ${AP60} |" "$AP_SPEC" | tr -d ' ')"
 whole_card step2 "$AP_SPEC"; AP="$WC_OUT"
 expect_eq "APPROACH-1 a 60-column approach, the same on every row of its requirement, draws, silently" "0|" "$WC_RC|$WC_ERR"
-AP_EVAL="$(printf '%s\n' "$AP" | sed -n '/^  Eval design/,/^$/p')"
+AP_EVAL="$(printf '%s\n' "$AP" | sed -n '/^  Test design/,/^$/p')"
 printf 'REQ-1\t%s\t0\t1\t1\t0\t0\nREQ-2\tthe view draws one list\t0\t1\t0\t0\t0\ntotal\t\t0\t2\t1\t0\t0\n' "$AP60" \
-  | card eval-design > "${CARD_SANDBOX}/ap-tsv.txt"
+  | card test-design > "${CARD_SANDBOX}/ap-tsv.txt"
 printf '%s\n' "$AP_EVAL" | sed -e '/^$/d' > "${CARD_SANDBOX}/ap-whole.txt"
-expect_eq "APPROACH-1b …and the Eval design block prints the approach as the row kind always has (precondition: REQ-1 row)" "yes|same" \
+expect_eq "APPROACH-1b …and the Test design block prints the approach as the row kind always has (precondition: REQ-1 row)" "yes|same" \
   "$(printf '%s\n' "$AP_EVAL" | /usr/bin/grep -q '^    REQ-1 ' && echo yes)|$(cmp -s "${CARD_SANDBOX}/ap-tsv.txt" "${CARD_SANDBOX}/ap-whole.txt" && echo same)"
 AP_LONG="${CARD_SANDBOX}/wave-24-flock.spec.md"
 sed -e "s/| REQ-1 | ${AP60} |/| REQ-1 | ${AP60}. |/" "$AP_SPEC" > "$AP_LONG"
 whole_card step2 "$AP_LONG"
 expect_eq "APPROACH-2 an approach of 61 columns is refused: exit 64, no card on stdout" "64|" "$WC_RC|$WC_OUT"
 expect_contains "APPROACH-2b …naming the row, the width and the cap" \
-  "Eval design row REQ-1 AC-1.1: the Approach cell is 61 columns, the cap is 60" "$WC_ERR"
+  "Test design row REQ-1 AC-1.1: the Approach cell is 61 columns, the cap is 60" "$WC_ERR"
 AP_TICK="${CARD_SANDBOX}/wave-25-flock.spec.md"
 sed -e 's/| REQ-2 | the view draws one list |/| REQ-2 | the `view` draws one list |/' "$AP_SPEC" > "$AP_TICK"
 expect_eq "APPROACH-3 precondition: the planted REQ-2 approach carries a backtick" "1" \
@@ -1917,7 +1917,7 @@ expect_eq "APPROACH-3 precondition: the planted REQ-2 approach carries a backtic
 whole_card step2 "$AP_TICK"
 expect_eq "APPROACH-3a an approach carrying a backtick is refused: exit 64, no card on stdout" "64|" "$WC_RC|$WC_OUT"
 expect_contains "APPROACH-3b …naming the row and the cell whole" \
-  'Eval design row REQ-2 AC-2.1: the Approach cell carries a backtick: the `view` draws one list' "$WC_ERR"
+  'Test design row REQ-2 AC-2.1: the Approach cell carries a backtick: the `view` draws one list' "$WC_ERR"
 AP_TWO="${CARD_SANDBOX}/wave-26-flock.spec.md"
 sed -e "s/| REQ-1 | ${AP60} | AC-1.2/| REQ-1 | a merge fixture | AC-1.2/" "$AP_SPEC" > "$AP_TWO"
 expect_eq "APPROACH-4 precondition: REQ-1's second row carries a second approach" "1|1" \
@@ -1925,8 +1925,8 @@ expect_eq "APPROACH-4 precondition: REQ-1's second row carries a second approach
 whole_card step2 "$AP_TWO"
 expect_eq "APPROACH-4a two approaches on one requirement are refused: exit 64, no card on stdout" "64|" "$WC_RC|$WC_OUT"
 expect_contains "APPROACH-4b …naming the row and both approaches" \
-  "Eval design row REQ-1 AC-1.2: a second approach for REQ-1: a merge fixture (the first: ${AP60})" "$WC_ERR"
-whole_card step2 "$AP_TWO" evals REQ-1
+  "Test design row REQ-1 AC-1.2: a second approach for REQ-1: a merge fixture (the first: ${AP60})" "$WC_ERR"
+whole_card step2 "$AP_TWO" tests REQ-1
 expect_eq "APPROACH-4c …and the sub-views are refused with it" "64|" "$WC_RC|$WC_OUT"
 
 # ============================================================

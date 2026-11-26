@@ -570,7 +570,7 @@ reader_q_verdicts() {  # <plan> [row] -> each suite's verdict standing, of <row>
 # A row answers its authored cells alone, in either shape of the Tasks table: state is the log's.
 # shellcheck source=/dev/null
 . "$_READER_LIB_DIR/plan-read.sh"
-# A criterion's tier is its eval type through the scale profile's one map.
+# A criterion's tier is its test type through the scale profile's one map.
 bionic_need scale.sh scale_tier_awk
 
 reader_question header value reader_q_header
@@ -605,7 +605,7 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 }
 
 # reader_cells <plan> [head] -> one line per criterion, `<criterion>\037<state>\037<by>\037<tier>\037<evidence>\037
-# <auditor>\037<confirmed>\037<serves>`: the Eval design's criteria in its order. ONE FOLD answers every criterion, so a
+# <auditor>\037<confirmed>\037<serves>`: the Test design's criteria in its order. ONE FOLD answers every criterion, so a
 # caller that judges them all asks once; the cell question answers through it, and no question prints the further
 # fields: the bed pins the cell answer over the closed runs, and the fields are what the gate, the judge and the cards
 # weigh, never a fact a person asks for.
@@ -614,7 +614,7 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #               with no instant does not displace a waiver the log holds with one. An approval discharges only a
 #               criterion nothing else does: a person confirms after the proof, and their word never unseats the
 #               proof or waiver that came first.
-#   tier        the Eval design's eval type through lib/scale.sh.
+#   tier        the Test design's test type through lib/scale.sh.
 #   evidence    the discharging proof's or waiver's `evidence=`.
 #   auditor     the `auditor=` its discharging proof carries when that proof has no instant, else the evidence review
 #               standing at <head>, CONFIRMED when it passed and REFUTED when not. An untimed proof is one the act
@@ -622,15 +622,15 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #               so a verdict named on a proof written since is never read as one.
 #   confirmed   the approval naming the criterion, as `<by> <day> <its words>`, its giver folded to one word and the
 #               criterion standing for words it holds none of.
-#   serves      the Eval design's requirement.
+#   serves      the Test design's requirement.
 # 1 when the plan names no criterion; the fold's failure is its exit.
 reader_cells() {
   # Its names are its own: a caller that hands it the facts names its copy `facts`, which a local of that name would hide.
-  local _rc_plan="$1" _rc_head="${2:-}" _rc_eval _rc_facts
-  _rc_eval="$(plan_read_rows "$_rc_plan" "$PLAN_READ_CRITERIA" criterion 2>/dev/null)" || _rc_eval=""
-  [ -n "$_rc_eval" ] || return 1
+  local _rc_plan="$1" _rc_head="${2:-}" _rc_test _rc_facts
+  _rc_test="$(plan_read_rows "$_rc_plan" "$PLAN_READ_CRITERIA" criterion 2>/dev/null)" || _rc_test=""
+  [ -n "$_rc_test" ] || return 1
   _rc_facts="$(reader_facts "$_rc_plan")" || return
-  printf 'E\n%s\nF\n%s\n' "$_rc_eval" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
+  printf 'E\n%s\nF\n%s\n' "$_rc_test" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
     function cell(s, k,   n, i, c) { n = split(s, c, "\t"); for (i = 1; i <= n; i++) if (index(c[i], k "=") == 1) return substr(c[i], length(k) + 2); return "" }
     $0 == "E" || $0 == "F" { part = $0; next }
     $0 == "" { next }

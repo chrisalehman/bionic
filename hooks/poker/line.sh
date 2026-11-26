@@ -962,7 +962,7 @@ poker_verb_publish() {
 # notes are the orchestrator's words, written in `pr-summary.md` beside the run's log; Testing, Review, Known limits and
 # Decision records are the run's facts, printed by `pr-facts` from the reader and never typed:
 #   Testing           the newest whole regression's suites green of those it ran, each suite by its last verdict, and
-#                     the Eval design's criteria discharged of all (lib/reader.sh `reader_cells`)
+#                     the Test design's criteria discharged of all (lib/reader.sh `reader_cells`)
 #   Review            each question's newest review proof or waiver
 #   Known limits      each open deferral's stated sentence, the release entry's own reading (`known_limits_part`)
 #   Decision records  each ADR whose `wave:` is the run's, the register's own reading (sitrep.sh `decisions_all`)

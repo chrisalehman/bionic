@@ -1400,7 +1400,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
         esac
         _line_stale_say "$plan" "$row" "$root" "$base" "$c"; lc=$?
         if [ "$lc" != 0 ]; then
-          [ "$lc" != 1 ] || _wt_refuse "stale branch=${branch} — the row deletes what the eval of a criterion cites; restate the criterion or have it waived, land again"
+          [ "$lc" != 1 ] || _wt_refuse "stale branch=${branch} — the row deletes what the test of a criterion cites; restate the criterion or have it waived, land again"
           rc=2; break
         fi
         line_candidate_event "$plan" "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
@@ -1999,8 +1999,8 @@ EOF
         *) _wt_refuse "lint-unreadable row=${row} — ${c:-the lint printed nothing}"; return 2 ;;
       esac
     fi
-    # 3c. WHAT AN EVAL CITES, once per candidate and before any suite: a candidate that deletes a section or words a
-    # criterion's eval cites, while the criterion reads as at the row's dispatch and is not waived, returns the row.
+    # 3c. WHAT A TEST CITES, once per candidate and before any suite: a candidate that deletes a section or words a
+    # criterion's test cites, while the criterion reads as at the row's dispatch and is not waived, returns the row.
     if [ "$cited" != "$cand" ]; then
       _line_stale_say "$plan" "$row" "$root" "$cbase" "$cand"
       case $? in 0) cited="$cand" ;; 1) _line_run "$again"; return 1 ;; *) return 2 ;; esac
@@ -2335,7 +2335,7 @@ _line_lints() {  # <root> <tree> <base> <candidate> -> the row's hits; 0 none ·
   return 1
 }
 
-# A LANDING THAT REMOVES WHAT AN EVAL CITES. An eval names its proof in two shapes a landing can match: a section, the
+# A LANDING THAT REMOVES WHAT A TEST CITES. A test names its proof in two shapes a landing can match: a section, the
 # `§NAME` after the suite it names (`x.test.sh §NAME`), and words it quotes, in backticks or in double quotes. A
 # backtick span that names a suite or a section is the command around them, not words. Free prose is never read, so a
 # criterion written in it holds nothing here. The row's dispatch recorded each criterion's sum
@@ -2429,7 +2429,7 @@ _line_stale_say() {  # <plan> <row> <root> <base> <candidate> -> 0 nothing held 
     0) return 0 ;;
     1) line_returned_event "$1" "row=$2" why=stale "detail=$(printf '%s\n' "$out" | head -1 | tr '|\t' '/ ')" >/dev/null
        printf '%s\n' "$out" | while IFS=$'\t' read -r c w; do
-         printf 'STALE %s %s — the row deletes %s, which the eval of %s cites; restate its row in the Eval design of the plan, or have it waived, then land again\n' "$2" "$c" "$w" "$c"
+         printf 'STALE %s %s — the row deletes %s, which the test of %s cites; restate its row in the Test design of the plan, or have it waived, then land again\n' "$2" "$c" "$w" "$c"
        done
        return 1 ;;
     *) _wt_refuse "stale-unreadable row=$2 — ${out:-the check printed nothing}"; return 2 ;;

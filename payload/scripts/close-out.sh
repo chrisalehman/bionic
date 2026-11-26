@@ -42,7 +42,7 @@
 #
 # A ROW THE CLOSE ITSELF PROVES IS NOT OWED TO THE DRY-RUN. A matrix row owed at Step 9 is
 # judged by the gate only once the Step-9 line carries `delivered:` (lib/walls.sh
-# `matrix_row_deferred`), and the row whose eval is the hand-holds line is written by this script
+# `matrix_row_deferred`), and the row whose test is the hand-holds line is written by this script
 # after that line, from its last reading (`co_matrix_settle`). The pre-flight and the dry-run judge
 # the plan at current 8, before either, and owe it nothing.
 #
@@ -787,7 +787,7 @@ co_hand_holds_last() {
     { print }' "$CONT" > "$tmp" 2>/dev/null && mv -f "$tmp" "$CONT" || rm -f "$tmp"
 }
 # THE CLOSE PROVES THE CRITERIA ITS LAST READING MEASURES. A criterion is owed at the step whose task proves it. The
-# ones owed at Step 9 whose eval names `landing-report --hand-holds` (lib/walls.sh `matrix_close_rows`, the gate's own
+# ones owed at Step 9 whose test names `landing-report --hand-holds` (lib/walls.sh `matrix_close_rows`, the gate's own
 # readers, asked in a subshell as the facts judge asks them) are proved by the line `co_hand_holds_last` reads after
 # `delivered:`, so they are settled here, in the same act and before the archive move, while the plan still finds its
 # run's log: at total=0 one proof event naming each, its evidence the continuation where the line is kept, through the
