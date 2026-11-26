@@ -1777,10 +1777,10 @@ detect_probe_seconds() { echo "${BIONIC_DOCTOR_PROBE_SECONDS:-15}"; }
 # Supersedes A-4.S6.5's two-mechanism note.
 #
 # THE TEMPORARY FILE IS NOT A CHANGE TO THIS MACHINE. It lives under $TMPDIR,
-# carries the pid so two callers cannot collide, and is removed as it is read.
+# is made by the exclusive create (lib/root.sh `bionic_new`) so two callers, sibling
+# subshells among them, cannot collide, and is removed as it is read.
 # "Nothing on this machine is changed" is a claim about the user's configuration
 # — settings, plugins, dependencies — and no probe output ever reaches one.
-_DETECT_BOUND_SEQ=0
 
 _detect_bound_read() {  # <file> — pass on what the probe managed to say, then forget it
   local file="${1:-}" payload
@@ -1842,9 +1842,8 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
   local limit="${1:-15}"; shift
   local pid waited=0 tenths=0 micro=0 rc out_file had_monitor
 
-  _DETECT_BOUND_SEQ=$((_DETECT_BOUND_SEQ + 1))
-  out_file="${TMPDIR:-/tmp}/bionic-probe.$$.${_DETECT_BOUND_SEQ}"
-  : > "$out_file" 2>/dev/null || out_file="/dev/null"
+  out_file="/dev/null"
+  ! bionic_need root.sh bionic_new || ! bionic_new "${TMPDIR:-/tmp}/bionic-probe" || out_file="$BIONIC_NEW"
 
   case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
   # THE FORK'S OWN DIAGNOSTICS ARE NOT THE CALLER'S OUTPUT (T22). `set -m` ASKS the

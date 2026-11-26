@@ -233,7 +233,7 @@ bionic_need time.sh _time_epoch
 
 _GATE_KEEP_DEFAULT=86400   # seconds a request that is no longer open is kept (BIONIC_GATE_KEEP's default)
 _GD=""        # the store, set by each verb
-_GATE_ME=""   # the real pid of the shell taking the lock (a `$( )` subshell is not `$$`)
+_GATE_ME=""   # the real pid of the shell taking the lock, as lib/root.sh `bionic_id` reads it (a `$( )` subshell is not `$$`)
 
 gate_dir() {
   printf '%s\n' "${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
@@ -295,7 +295,7 @@ gate_width() {
 
 _gate_lock() {  # rc 0 holding $_GD/lock; rc 1 when it cannot be had in about ten seconds
   local lk="$_GD/lock" i=0
-  _GATE_ME="$(exec sh -c 'echo "$PPID"')"
+  _GATE_ME=""; ! bionic_need root.sh bionic_id || ! bionic_id || _GATE_ME="${BIONIC_ID%%.*}"
   while ! _slots_claim "$lk" "$_GATE_ME"; do
     i=$((i + 1))
     [ "$i" -lt 500 ] || return 1
@@ -1174,7 +1174,7 @@ _gate_term_arm() {  # before gate_ask's wait: TERM noted, the disposition found 
   _GATE_TERMED=0 _GATE_TERM_ARMED=0 _GATE_TERM_WAS=""
   shown="$(trap -p TERM)"
   case "$shown" in "trap -- '' SIGTERM"|"trap -- '' TERM") return 0 ;; esac
-  me="$(exec sh -c 'echo "$PPID"')"
+  me=""; ! bionic_need root.sh bionic_id || ! bionic_id || me="${BIONIC_ID%%.*}"
   [ "$me" != "$$" ] || _GATE_TERM_WAS="$shown"
   _GATE_TERM_ARMED=1
   trap '_GATE_TERMED=1' TERM
@@ -1192,7 +1192,7 @@ _gate_term_end() {  # <id> <admitted: 0|1> — TERM came while gate_ask waited: 
     echo "gate: request $1 handed back on TERM; it keeps its turn, ask again" >&2
   fi
   _gate_term_disarm
-  kill -TERM "$(exec sh -c 'echo "$PPID"')" 2>/dev/null
+  bionic_need root.sh bionic_id && bionic_id && kill -TERM "${BIONIC_ID%%.*}" 2>/dev/null
 }
 
 # _gate_landing_ok <key> — rc 0 when <key> is a landing key: lib/line.sh `landing_key_ok`, the one alphabet
@@ -1499,9 +1499,10 @@ _gate_lease_carrier() {
 _gate_lease_put() {
   local f
   f="$(_gate_lease_file "$1")"
+  bionic_need root.sh bionic_new && bionic_new "$f.tmp" || return 1
   { printf 'landing=%s\ncarrier=%s\nfirst=%s\nseq=%s\nspan=%s\n' "$1" "$2" "$3" "$4" "$5"
     [ -z "${6:-}" ] || printf 'left=%s\n' "$6"
-  } > "$f.tmp.$$" && mv "$f.tmp.$$" "$f"
+  } >| "$BIONIC_NEW" && mv "$BIONIC_NEW" "$f" || { rm -f "$BIONIC_NEW"; return 1; }
 }
 
 # _gate_lease_args <verb> <landing> <carrier> — the shared checks: rc 0 with the store loaded,
@@ -1557,7 +1558,9 @@ gate_landing_open() {
       [ "$_G_NUM" -le "$n" ] || n="$_G_NUM"
     done
     first="$now" seq=$((n + 1))
-    printf '%s\n' "$seq" > "$_GD/leases/seq.tmp.$$" && mv "$_GD/leases/seq.tmp.$$" "$_GD/leases/seq"
+    if bionic_need root.sh bionic_new && bionic_new "$_GD/leases/seq.tmp"; then
+      printf '%s\n' "$seq" >| "$BIONIC_NEW" && mv "$BIONIC_NEW" "$_GD/leases/seq" || rm -f "$BIONIC_NEW"
+    fi
   fi
   _gate_lease_put "$1" "$_G_CARRIER" "$first" "$seq" "$span"; rc=$?
   _gate_unlock

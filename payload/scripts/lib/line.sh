@@ -98,9 +98,9 @@ LINE_BAR_LOAD=0
 LINE_LANDING_BAR=15
 
 _line_now() { iso_now; }
-_line_pid() { exec sh -c 'echo "$PPID"'; }   # as `$(_line_pid)`: this (sub)shell's own pid, which `$$` is not
 _line_me() {  # sets LINE_ME to `<pid>:<start>` of the calling (sub)shell; never call it inside `$( )`
-  local p; p="$(_line_pid)"
+  local p=""   # this (sub)shell's own pid, which `$$` is not, as lib/root.sh `bionic_id` reads it
+  ! bionic_need root.sh bionic_id || ! bionic_id || p="${BIONIC_ID%%.*}"
   LINE_ME="${p}:$(_slots_since "$p")"
 }
 _line_alive() {  # <pid>:<start> -> 0 while that process lives and started then
@@ -325,12 +325,15 @@ line_tag_merge() {
 line_merge_ask_key() { printf 'pr-closed:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }
 _line_merge_ask() {  # <plan> <root> <mode> <working branch> <open|close> [<address>] -> always 0; acts under --fetch alone
   [ "$3" = --fetch ] && bionic_need owed.sh owed_close || return 0
-  local key; key="$(line_merge_ask_key "$4")"
+  local key sid="${CLAUDE_CODE_SESSION_ID:-}"; key="$(line_merge_ask_key "$4")"
+  # With no session, the store's stand-in is an id of this process (lib/root.sh `bionic_id`, its dots written `-` as
+  # a session id's alphabet asks), so two landings in sibling subshells never write under one.
+  [ -n "$sid" ] || { bionic_need root.sh bionic_id && bionic_id && sid="merge-seen-${BIONIC_ID//./-}"; } || return 0
   case "$5" in
-    open) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${CLAUDE_CODE_SESSION_ID:-merge-seen-$$}" owed_open "$key" \
+    open) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="$sid" owed_open "$key" \
             "the pull request was closed unmerged" \
             "$6 of $4 was closed without a merge: reopen it, or park the run with a ## Wake Note" >/dev/null 2>&1 ;;
-    close) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${CLAUDE_CODE_SESSION_ID:-merge-seen-$$}" owed_close "$key" "merge-seen" >/dev/null 2>&1 ;;
+    close) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="$sid" owed_close "$key" "merge-seen" >/dev/null 2>&1 ;;
   esac
   return 0
 }

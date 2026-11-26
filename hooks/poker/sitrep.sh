@@ -1740,12 +1740,14 @@ sitrep_plan_real() { printf '%s/%s\n' "$(cd "${1%/*}" 2>/dev/null && pwd -P)" "$
 sitrep_save() {
   local f
   f="$(sitrep_saved "$1" "$2")"
+  BIONIC_NEW=""
   if tmp_dir_ok "$1/.bionic/tmp" && mkdir -p "${f%/*}" 2>/dev/null && [ ! -L "${f%/*}" ] \
-     && sitrep_sheet > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" \
+     && bionic_need root.sh bionic_new && bionic_new "$f" \
+     && sitrep_sheet >| "$BIONIC_NEW" 2>/dev/null && mv -f "$BIONIC_NEW" "$f" \
      && printf '%s\t%s\n' "$(sitrep_now)" "$(sitrep_plan_real "$2")" > "$f.at" 2>/dev/null; then
     cat "$f"
   else
-    rm -f "$f.$$" 2>/dev/null
+    [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW" 2>/dev/null
     sitrep_sheet
   fi
 }
@@ -1925,7 +1927,7 @@ sitrep_tick_line() {
       HO_RUNWORD="$HO_SLUG"
     else
       HO_ROOT="$(project_root_or_refuse "$PWD")" || exit 2
-      trap 'rm -f "$HO_FILE.tmp.$$" "$HO_CF"' EXIT
+      HO_TMP=""; trap 'rm -f ${HO_TMP:+"$HO_TMP"} "$HO_CF"' EXIT
       HO_RUNWORD="no run bound"
     fi
     HO_PURPOSE="$(printf '%s' "$HO_ARG_PATH" | tr -d '[:cntrl:]' | handoff_redact /dev/null)"
@@ -2073,7 +2075,10 @@ sitrep_tick_line() {
     HO_TITLE="Handoff · $(clean "${HO_ROOT##*/}") · $(sitrep_date "$HO_E" '%A %-I:%M %p') · $HO_RUNWORD"
     [ -z "$HO_PURPOSE" ] || HO_TITLE="$HO_TITLE · for $(clean "$HO_PURPOSE")"
     if [ "$HO_MODE" = none ]; then HO_LAST="Read $HO_REL whole, then do Next 1."; else HO_LAST="/bionic:canonical-sdlc $HO_REL"; fi
-    HO_TMP="$HO_FILE.tmp.$$"; [ "$HO_MODE" = none ] || HO_TMP="$PV_NEW.2"
+    if [ "$HO_MODE" != none ]; then HO_TMP="$PV_NEW.2"
+    elif bionic_need root.sh bionic_new && bionic_new "$HO_FILE.tmp"; then HO_TMP="$BIONIC_NEW"
+    else die "REFUSED — no temporary file can be made beside $HO_FILE; nothing was written. Fix: make ${HO_FILE%/*} writable, then run the handoff again."; exit 2
+    fi
     ho_state() {  # -> the State section's lines, each with its fold indent
       printf '2\twritten: %s\n' "$(sitrep_clock "$HO_E" "$HO_E")"
       printf '2\tinstant: %s\n' "$HO_NOW"
@@ -2124,7 +2129,7 @@ sitrep_tick_line() {
         printf '0\tResume\n'
       } | handoff_redact "$HO_CF" | "${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" fold
       printf '%s\n' "$HO_LAST"
-    } > "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
+    } >| "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
     # WHAT IT SAYS IS HOW THE NEXT SESSION RESUMES, and nothing more: the resume line carries the file's path as its
     # operand, so no second line names it, and the counts, the redactions and the blocks left out are in the file
     # for whoever reads it. On success stdout is that one line and stderr is empty.
