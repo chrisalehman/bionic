@@ -5,6 +5,9 @@
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
 
+# THE ONE ENGLISH PLURAL (lib/english.sh): the release approval counts its commits and criteria with the noun's number.
+bionic_need english.sh english_plural
+
 # ---------------------------------------------------------------- the contract's reader
 #
 # `amend` widens a live contract and `task-add` judges a Files cell a brief is later rendered from; both
@@ -1634,7 +1637,7 @@ RR_MATRIX
     rows="$(git -C "$PV_REPO" rev-list --first-parent "$1..$RR_HEAD" 2>/dev/null \
       | units_rows_in_range "$PV_PLAN" "$1..$RR_HEAD" "$(proof_debt_record "$PV_PLAN" "$PV_REPO" 2>/dev/null)" 2>/dev/null | cut -f1 | paste -sd' ' -)"
     printf 'approved at %s' "${1:0:8}"
-    [ -z "$n" ] || printf ', %s landed since' "$(rr_plural "$n" commit commits)"
+    [ -z "$n" ] || printf ', %s landed since' "$(english_plural "$n" commit commits)"
     [ -z "$rows" ] || printf ' (%s)' "$rows"
   }
 
@@ -1710,10 +1713,6 @@ RR_MATRIX
   rr_word() {  # <label> -> the one word a reply names that choice by: its first, in lower case
     local w="${1%% *}"; w="${w%,}"
     printf '%s' "$w" | tr '[:upper:]' '[:lower:]'
-  }
-
-  rr_plural() {  # <n> <singular> <plural> -> `<n> <word>`
-    if [ "$1" -eq 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi
   }
 
   rr_fact() {  # <tag> <field>... -> one fact line, its fields tab-separated; a tab or newline inside a field is a space
@@ -1913,7 +1912,7 @@ RR_ROWS_EOF
       [ "$RR_ACC" -eq 0 ] || line="${line:+$line, }$RR_ACC owed by the close"
       [ "$RR_ACL" -eq 0 ] || line="${line:+$line, }$RR_ACL owed at a later step"
       if [ -z "$RR_MISS" ]; then RR_TACC="✅"; else RR_TACC="✖️"; fi
-      RR_TACC="$RR_TACC acceptance — $RR_ACP of $(rr_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
+      RR_TACC="$RR_TACC acceptance — $RR_ACP of $(english_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
     fi
 
     # FINDINGS: the disposition's one reading, one sentence each; a decision only when recommended against. A FINDING'S
@@ -2120,7 +2119,7 @@ RR_AGAINST_EOF
       h="$(rr_proof_field "$line" head)"; r="$(rr_proof_field "$line" result)"
       behind="$(git -C "$PV_REPO" rev-list --count "$h..$RR_HEAD" 2>/dev/null)" || behind=""
       if [ "$h" = "$RR_HEAD" ] || [ "$behind" = 0 ]; then nm="$role at this head"
-      elif [ -n "$behind" ]; then nm="$role at ${h:0:8}, $(rr_plural "$behind" commit commits) behind"
+      elif [ -n "$behind" ]; then nm="$role at ${h:0:8}, $(english_plural "$behind" commit commits) behind"
       else nm="$role at ${h:0:8}"; fi
       IFS=$'\t' read -r _ _ cst clands <<< "$(printf '%s\n' "$RR_COV" | awk -F'\t' -v q="$q" '$1 == q { print; exit }')"
       case "${clands:--}" in
