@@ -2155,25 +2155,15 @@ section "§UNPROVED: the release card prints the full pass's state at this head,
 # ============================================================
 # fails-when: the card prints green, or covered, over a whole run behind the head whose reds later landings greened;
 # the landings since the run go uncounted; or a whole run green at the head reads anything but green at it.
-# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name with the
-# close-out fixture's builders it stands on, out of tests/close-out.prelude.sh), so the card is drawn over the plan
-# and record the other surfaces print from; the card is the real `release-approval --preview`.
+# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, from tests/lib/proof-at-head-world.sh, with
+# the close-out fixture it stands on, tests/lib/close-out-fixture.sh), so the card is drawn over the plan and record
+# the other surfaces print from; the card is the real `release-approval --preview`.
 # fails-when, too: the card puts no merge-unproved decision over the red world, or puts one over the green; current 8
 # --check passes over the red world before the person's word is written, or refuses after it.
 # ANTI-VACUITY: UP-1 reads the red world and UP-2 the green one through the same extractor; UP-3 reads the decision
 # through up_ask before UP-3g and UP-4 read its absence through it; UP-3b refuses before UP-3f passes on one world.
-up_import() {  # <name> <file> -> the function, defined here, read out of <file>
-  local body
-  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$2")"
-  [ -n "$body" ] || { echo "up_import: no $1 in $2" >&2; return 1; }
-  eval "$body"
-}
-UP_MISSING=""
-for _f in in_fixture fixture_own fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to; do
-  up_import "$_f" "$(dirname "$0")/close-out.prelude.sh" || UP_MISSING="$UP_MISSING $_f"
-done
-for _f in pah_world pah_poke pah_card_state; do up_import "$_f" "$(dirname "$0")/proof-at-head.test.sh" || UP_MISSING="$UP_MISSING $_f"; done
-expect_eq "UP-0 the builders were all read out of their suites" "" "$UP_MISSING"
+. "$(dirname "$0")/lib/close-out-fixture.sh" || { echo "card.test.sh: cannot load lib/close-out-fixture.sh"; exit 1; }
+. "$(dirname "$0")/lib/proof-at-head-world.sh" || { echo "card.test.sh: cannot load lib/proof-at-head-world.sh"; exit 1; }
 SANDBOX="$CARD_SANDBOX/up"; mkdir -p "$SANDBOX"; SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 REPO_ROOT="$REPO"; UNITS_LIB="$REPO/payload/scripts/lib/units.sh"; PAH_LIB="$REPO/payload/scripts/lib"
 PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"; LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
@@ -2228,7 +2218,7 @@ section "§UNRUN: at 15 a criterion owed now and never run is the release card's
 # early, so no page is written and the person is never asked; or the card settles it by a loosened gate, so the advance
 # to 6 passes over the unrun criterion; or the waiver a reply gives is not the waiver event in the person's words; or
 # the other reply moves the run.
-# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), carried
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, tests/lib/close-out-fixture.sh's, loaded above), carried
 # from step 5 to 8 by the advance itself. The criterion is born late: a row the person adds to the Eval design once the
 # run stands at 8, naming no task, so it is owed now. The advance to 6 refuses a pending criterion owed now, and a proof
 # that discharged a criterion stands at every head, so a criterion born after the advance is how one reaches the card
@@ -2342,7 +2332,7 @@ section "§OWNCHECK: at 15 a proved criterion the person confirms, not yet confi
 # confirmation, so it puts a standing auditor's finding to waive or run and counts it the auditor's; the reply that
 # confirms writes no approval naming the criterion in the person's words, or one the advance to 8 does not take; the
 # reply that waives writes no waiver.
-# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), its one
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, tests/lib/close-out-fixture.sh's, loaded above), its one
 # criterion's eval type human, discharged by the fixture's own proof and confirmed by nobody. At double rigor the run
 # is carried from 5 to 7 by the advance itself, the advance to 8 refuses the criterion, and the card is asked there; at
 # single the advance takes it to 8, where the card is asked at the merge. The page is the real acting

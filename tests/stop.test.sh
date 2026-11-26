@@ -88,10 +88,9 @@ export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0
 
 # ---------- fixtures ----------
 
-# A FIXTURE'S PLAN AT 15 is the one the poker's prelude writes when asked: sp_at15, read from that file so the
-# rewrite of a page and its log has one source. A fixture here writes its page as before and then rewrites it.
-eval "$(sed -n '/^sp_at15() {/,/^}/p' "$(dirname "$0")/session-poker.prelude.sh")"
-declare -F sp_at15 >/dev/null || { echo "stop: sp_at15 not read from the poker's prelude — suite refuses to run"; exit 1; }
+# A FIXTURE'S PLAN AT 15 is the one the poker's prelude writes when asked: sp_at15, from tests/lib/plan-fixture.sh, so
+# the rewrite of a page and its log has one home. A fixture here writes its page as before and then rewrites it.
+. "$(dirname "$0")/lib/plan-fixture.sh" || { echo "stop: cannot load lib/plan-fixture.sh — suite refuses to run"; exit 1; }
 
 # RESOLVED (`pwd -P`): mktemp answers under /var, which is a symlink to /private/var
 # on this platform, and `project_root` answers with the physical path — so an
