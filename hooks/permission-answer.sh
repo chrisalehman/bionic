@@ -89,6 +89,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "permission-answer"; fi
 . "$BIONIC_LIB/git-argv.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/grant.sh"
+# The clock's one home, asked by name: no hook lists it among the libraries it wants.
+bionic_need time.sh _time_epoch
 
 # The run verdict is wanted: whether the lead is bound to an open run decides its class.
 BIONIC_CONTEXT_WANT_RUN=1
@@ -167,7 +169,7 @@ _pa_emit() {
 # _pa_log <decision> <reason> — the answer line (D9), through lib/root.sh's appender:
 # `<ISO-UTC>|<sid>|<asker>|<tool>|<decision>|<reason>|<first 120 chars of the command or path>`.
 _pa_log() {
-  log_answer "$BIONIC_ROOT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)|$(_pa_clean "$BIONIC_SID")|$(_pa_clean "$PA_ASKER")|$(_pa_clean "${PA_TOOL:-unknown}")|$1|$(_pa_clean "$2")|$(_pa_clean "$PA_HEAD" 120)"
+  log_answer "$BIONIC_ROOT" "$(iso_now)|$(_pa_clean "$BIONIC_SID")|$(_pa_clean "$PA_ASKER")|$(_pa_clean "${PA_TOOL:-unknown}")|$1|$(_pa_clean "$2")|$(_pa_clean "$PA_HEAD" 120)"
 }
 
 # _pa_finish <allow|deny-fix|deny-reserved> <reason> [<message>] — log, answer, exit 0. An
@@ -485,7 +487,7 @@ _pa_gate() {
       END { exit !found }' "$f" 2>/dev/null; then
     return 0
   fi
-  printf 'gate/v1|at=%s%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$key" >> "$f" 2>/dev/null
+  printf 'gate/v1|at=%s%s\n' "$(iso_now)" "$key" >> "$f" 2>/dev/null
 }
 
 PA_STAGE="answering"

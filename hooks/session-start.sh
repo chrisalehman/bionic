@@ -74,6 +74,8 @@ fi
 . "$BIONIC_LIB/roster.sh"   || exit 0   # roster_open_counts — the one close predicate (T17, D10)
 . "$BIONIC_LIB/binding.sh"  || exit 0   # bind_holders — who else's marker names the one run (T15)
 . "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
+# The clock's one home, asked by name: patrol.sh loads it only softly.
+bionic_need time.sh _time_epoch
 
 # THE STANDING DECISION LINE (wave-33 T27, AC-11.2). One line, printed first in every session this
 # hook runs in: engaged or not, a run open or not, a `.bionic` present or not. The rule that sends
@@ -186,7 +188,7 @@ SS_LOADED_FILES
   {
     printf 'root=%s\n' "$root"
     [ -n "$commit" ] && printf 'commit=%s\n' "$commit"
-    printf 'started=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'started=%s\n' "$(iso_now)"
     [ -n "$cwd" ] && printf 'cwd=%s\n' "$cwd"
     if [ "${#files[@]}" -gt 0 ]; then
       ( cd "$root" && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -- "${files[@]}"; else sha256sum -- "${files[@]}"; fi ) 2>/dev/null \
@@ -778,7 +780,7 @@ if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
         ;;
       *)
         printf 'sweep-failed/v1|at=%s|rc=%s\n' \
-          "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" "$SS_RC" > "$SWEEP_MARKER" 2>/dev/null
+          "$(iso_now)" "$SS_RC" > "$SWEEP_MARKER" 2>/dev/null
         SWEEP_FAIL_LINE="bionic: the automatic dead-session sweep failed (rc=${SS_RC}) — run /bionic:doctor for the fix"
         ;;
     esac

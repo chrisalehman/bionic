@@ -1828,8 +1828,7 @@ sitrep_idle_minutes() {
   _lr_reader || return 2
   lines="$(_lr_events "$plan")" || return 2
   run_open "$plan" && FR_OPEN=yes
-  FR_NOW="${BIONIC_NOW_EPOCH:-}"
-  case "$FR_NOW" in ''|*[!0-9]*) FR_NOW="$(date -u +%s)" ;; esac
+  FR_NOW="$(time_now)"
   FR_IDLE_S="$(printf '%s\n' "$lines" | awk -F'|' -v open="$FR_OPEN" -v now="$FR_NOW" "$_PATROL_ISO_AWK$_READER_AWK"'
     ev() == "stop" {
       e = iso2epoch(line_kv("at"))
@@ -2324,7 +2323,7 @@ sitrep_tick_line() {
       f["d"] == d && f["verb"] == "put" { for (k in st) if (k != d && st[k] == "put") prev = ""; m = (prev == "") ? f["at"] : prev }
       { st[f["d"]] = f["verb"]; prev = f["at"] }
       END { print m }')"
-    user_said "$raw" "$plan" "${after:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; said=$?
+    user_said "$raw" "$plan" "${after:-$(iso_now)}"; said=$?
     case "$said" in
       0)
         who="$(git -C "$root" config user.name 2>/dev/null)"
