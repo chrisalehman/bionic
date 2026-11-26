@@ -602,7 +602,7 @@ booked_ask() {
 # tree's project is the main checkout. Nothing outside git.
 booked_project_root() {
   local d="${BOOKED_ASK_DIR:-.}" c
-  c="$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  c="$(_gate_common_dir "$d")" || return 0
   case "$c" in
     */.git) printf '%s' "${c%/.git}" ;;
     *) git -C "$d" rev-parse --show-toplevel 2>/dev/null ;;

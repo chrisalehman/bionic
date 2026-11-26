@@ -1216,7 +1216,7 @@ tmp_dir_ok() {  # <.bionic/tmp path> -> 0 safe to write in, 1 refuse
     # target resolves inside this same repo — mirrors stop-guard's _bionic_symlink_in_repo.
     _repo="${d%/.bionic/tmp}"
     _target="$(cd "${d%/tmp}" 2>/dev/null && pwd -P)" || return 1
-    _common="$(git -C "$_repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+    _common="$(git_common_dir "$_repo")" || return 1
     _root="$(cd "${_common%/.git}" 2>/dev/null && pwd -P)" || return 1
     case "$_target/" in "$_root"/*) : ;; *) return 1 ;; esac
   fi

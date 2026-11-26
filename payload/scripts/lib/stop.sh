@@ -2676,7 +2676,7 @@ _sg_subagents_dir() {  # <transcript-path>
 _sg_symlink_in_repo() {  # <repo> -> 0 iff $repo/.bionic resolves under this repo's own root
   local repo="$1" target common root
   target="$(cd "$repo/.bionic" 2>/dev/null && pwd -P)" || return 1
-  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  common="$(git_common_dir "$repo")" || return 1
   root="$(cd "${common%/.git}" 2>/dev/null && pwd -P)" || return 1
   case "$target/" in "$root"/*) return 0 ;; *) return 1 ;; esac
 }
