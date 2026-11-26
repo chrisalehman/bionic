@@ -640,12 +640,7 @@ _setup_say_declined() {  # <rc> <tail sentence, already worded for "declined —
 # `-L` ALONE STILL LIES ABOUT ONE INPUT (delta 2 N4): on a DANGLING link BSD
 # `stat -L` falls back to the link and exits 0, reporting 755. `[ -e ]` turns that
 # into the empty "unknowable" answer the callers already handle.
-_setup_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
-  local mode
-  mode="$(stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null)"
-  [ -e "$1" ] || mode=""
-  printf '%s' "$mode"
-}
+# The capture is lib/markers.sh's `_markers_file_mode`, the one reader of it.
 
 # ONE STAGING ORDER, AND THE CHMOD IS AT THE END OF IT (critic delta 2 N5).
 # Create the tmp under `umask 077`, let the caller write the content into it, and
@@ -674,7 +669,7 @@ _setup_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then
 # replaces it.
 _setup_publish_tmp() {  # <tmp> <file>
   local tmp="$1" file="$2" mode
-  mode="$(_setup_file_mode "$file")"
+  mode="$(_markers_file_mode "$file")"
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file"
 }

@@ -40,6 +40,7 @@
 #   §10  the linked worktree's name is published as BIONIC_WORKTREE
 #   §11  path_normal folds . and .. lexically, and both walls' folders call it
 #   §12  a tree's lease and the paired lookup ask the one common directory
+#   §13  is_repo answers whether a directory is inside a git repository
 #
 # SIX TOPOLOGIES, BUILT FOR REAL — no mocked filesystem, no stubbed git. Every
 # fixture below is `mkdir`, `git init`, `git worktree add` and `ln -s` under one
@@ -600,5 +601,21 @@ expect_eq "12: a git that answers one line gives no pair, so a tree is never rea
 expect_eq "12: the paired lookup asks git once for both answers" \
   "1" "$( : > "$GIT_CALL_LOG"; BIONIC_GIT_CALL_LOG="$GIT_CALL_LOG" pair_at "$SANDBOX/t2/wt-a/sub" --git-dir "$GIT_SHIM" >/dev/null
           grep -c -- '--git-common-dir --git-dir' "$GIT_CALL_LOG")"
+
+section "13 — is_repo answers whether a directory is inside a git repository"
+is_repo_at() { bash -c '. "$1"; if is_repo "${2-}"; then printf yes; else printf no; fi' _ "$LIB" "$@" 2>/dev/null; }
+mkdir -p "$SANDBOX/t13/plain" "$SANDBOX/t13/repo/sub"
+git init -q "$SANDBOX/t13/repo" 2>/dev/null
+: > "$SANDBOX/t13/file"
+expect_eq "13: the top of a repository is one" "yes" "$(is_repo_at "$SANDBOX/t13/repo")"
+expect_eq "13: a subdirectory of a repository is one" "yes" "$(is_repo_at "$SANDBOX/t13/repo/sub")"
+expect_eq "13: a linked worktree is one" "yes" "$(is_repo_at "$SANDBOX/t2/wt-a/sub")"
+expect_eq "13: a directory outside every repository is not" "no" "$(is_repo_at "$SANDBOX/t13/plain")"
+expect_eq "13: a directory that does not exist is not" "no" "$(is_repo_at "$SANDBOX/t13/missing")"
+expect_eq "13: a file is not" "no" "$(is_repo_at "$SANDBOX/t13/file")"
+expect_eq "13: an empty argument is not" "no" "$(is_repo_at "")"
+expect_eq "13: no argument is not" "no" "$(bash -c '. "$1"; if is_repo; then printf yes; else printf no; fi' _ "$LIB" 2>/dev/null)"
+expect_eq "13: asking it leaves the caller's directory where it was" "$SANDBOX/t13/plain" \
+  "$(bash -c '. "$1"; cd "$2"; is_repo "$3"; pwd -P' _ "$LIB" "$SANDBOX/t13/plain" "$SANDBOX/t13/repo" 2>/dev/null)"
 
 finish
