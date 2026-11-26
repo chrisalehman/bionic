@@ -1959,12 +1959,7 @@ DSP_READINGS
   # file under the project's root. Whether that line holds the concept is the reader's to judge, not the verb's.
   # Exit 0 done; 1 refused, nothing written; 2 the run, the record or its log cannot be found or written.
   poker_verb_debt() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     DEBT_PLAN=""
     if [ -n "$DEBT_PLAN_ARG" ]; then
       DEBT_PLAN="$(docs_path "$REPO_REAL" "$DEBT_PLAN_ARG")"

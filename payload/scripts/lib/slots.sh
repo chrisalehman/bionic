@@ -35,6 +35,9 @@
 # [WALL: tests/slots.test.sh]
 # [WALL: tests/gate.test.sh]
 
+# The loader, for `_slots_drop`'s load of lib/root.sh at call time. It defines functions and runs nothing.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+
 SLOTS_ORPHAN_MIN=1   # a claim WITH a pid this many minutes old is stale (_slots_old)
 SLOTS_TAKING_SEC=5   # a claim with NO pid this many seconds old was left by a killed claimer
 _SLOTS_SINCE=""; _SLOTS_SINCE_PID=""
@@ -129,10 +132,15 @@ _slots_claim() {  # <dir> <pid> [<what>] — rc 0 when this call created <dir>
 }
 
 _slots_drop() {  # <store> <dir> — remove <dir> whole: rename first, then delete
-  local gone="$1/.gone.$$.$RANDOM"
-  if mv "$2" "$gone" 2>/dev/null; then
-    rm -rf "$gone"
+  # The rename's target is inside a directory this call made (lib/root.sh `bionic_new`), never a name a sibling
+  # could have drawn too: a mv onto a directory that exists moves into it.
+  bionic_need root.sh bionic_new && bionic_new "$1/.gone" dir || return 0
+  if mv "$2" "$BIONIC_NEW/d" 2>/dev/null; then
+    rm -rf "$BIONIC_NEW"
+  else
+    rmdir "$BIONIC_NEW" 2>/dev/null
   fi
+  return 0
 }
 
 # THE TAKE-OVER OF A DEAD HOLDER'S CLAIM (kept at wave-28 T12 for lib/line.sh's publish lock, which

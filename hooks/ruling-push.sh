@@ -66,7 +66,12 @@ _rp_name=""
 if _rp_row="$(roster_row_for_id "$_rp_roster" "$_rp_aid")"; then
   _rp_name="$(printf '%s\n' "$_rp_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
 fi
-[ -n "$_rp_call" ] || _rp_call="pid$$-$RANDOM"
+# A call the payload names no id for gets one made from this process's own pid (lib/root.sh `bionic_id`, loaded
+# through roster.sh's loader); with no id to claim by, nothing is pushed.
+if [ -z "$_rp_call" ]; then
+  { bionic_need root.sh bionic_id && bionic_id; } 2>/dev/null || exit 0
+  _rp_call="pid$BIONIC_ID"
+fi
 # A ruling already shown (acknowledged, or printed by a guard) is read, so it is never pushed.
 _rp_ctx=""
 while IFS="$RULING_US" read -r _rp_id _rp_w _rp_rec _rp_p _rp_c _rp_s _rp_b _rp_t; do

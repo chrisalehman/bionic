@@ -806,16 +806,11 @@ adopt_copy_marker() {  # <source roster> <own roster> <name> -> 0 copied/already
       exit 0
     fi
 
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     ADOPT_DIR="$REPO_REAL/.bionic/tmp"
     # The ONE file this verb writes: this session's own roster. Named here, once, so the
     # loop below cannot be read as writing anything it iterates over.
-    ADOPT_OWN_ROSTER="$ADOPT_DIR/roster-${SESSION_ID}.state"
+    ADOPT_OWN_ROSTER="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     ADOPT_ROWS=0
     ADOPT_SESSIONS=0
     ADOPT_NOW="$(now_epoch)"
@@ -1544,12 +1539,7 @@ ADOPT_WALK
     # state out from under itself.
     SESSION_ID="$(session_id)" || SESSION_ID=""
 
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     SWEEP_DIR="$REPO_REAL/.bionic/tmp"
 
     # THE SAME GUARD THE WRITERS TAKE, because a delete is a write. `tmp_dir_ok` is this
@@ -1874,11 +1864,7 @@ EOF
     fi
 
     REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
 
     # ABSOLUTE, BECAUSE THE MARKER IS READ FROM EVERY CWD IN THE FLEET. A relative operand is
     # taken against the PROJECT ROOT rather than `$PWD`: the plan path an operator has to
@@ -2026,13 +2012,8 @@ EOF
       exit 0
     fi
 
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
       die "REFUSED — no row named $EXTEND_NAME: this session has no roster at $ROSTER_FILE."
       exit 1
@@ -2098,13 +2079,8 @@ EOF
       say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
       exit 0
     fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
       die "REFUSED — no row named $HOLD_NAME: this session has no roster at $ROSTER_FILE."
       exit 1
@@ -2166,13 +2142,8 @@ EOF
       die "A ruling lives on ONE session's roster, so without the key there is nothing to read or write."
       exit 3
     fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
       die_run "REFUSED — this session has no roster at $ROSTER_FILE, so it has no writer to rule for." "bash ${HOOK_DIR}/session-poker.sh adopt"
       exit 2
@@ -2269,8 +2240,7 @@ EOF
   # `roster_mark_run`, so the run reads FINISHED rc=137, a stop, and not LOST. A run already ended or
   # LOST is reported and left alone. `--report-only` sends nothing.
   poker_verb_stop_run() {
-    REPO_REAL="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-    [ -n "$REPO_REAL" ] || { die "REFUSED — cannot resolve the working directory."; exit 2; }
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     SR_FOUND=no
     if run_find "$REPO_REAL" "$SR_ARG"; then run_read; SR_FOUND=yes; fi
     # A GATE REQUEST, when the operand names no detached run that still runs (wave-36 T11; D8): a request id,
@@ -2301,9 +2271,9 @@ EOF
     SR_GROUPS="$(run_groups "$RUN_PID")"
     kill -TERM -- "-$RUN_PID" 2>/dev/null || kill -TERM "$RUN_PID" 2>/dev/null
     _sr_i=0
-    while [ "$_sr_i" -lt 50 ] && run_live "$RUN_PID" "$RUN_OUT"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
+    while [ "$_sr_i" -lt 50 ] && alive_shim "$RUN_PID" "$RUN_OUT"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
     SR_HOW="TERM"
-    if run_live "$RUN_PID" "$RUN_OUT"; then
+    if alive_shim "$RUN_PID" "$RUN_OUT"; then
       SR_GROUPS="$SR_GROUPS
 $(run_groups "$RUN_PID")"
       for _sr_g in $(printf '%s\n' "$SR_GROUPS" | sort -u); do

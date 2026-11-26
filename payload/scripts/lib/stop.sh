@@ -2370,19 +2370,6 @@ STOP_WATCH_WAIT_DEFAULT=6
 STOP_WATCH_CLAIM_GRACE=3
 STOP_WATCH_SLACK=5
 
-_stop_watch_read() {  # <record> — sets _SW_STATE _SW_WHY _SW_AT _SW_PID; rc 1 when it is no record
-  local l
-  _SW_STATE=''; _SW_WHY=''; _SW_AT=''; _SW_PID=''
-  [ -f "$1" ] && [ ! -L "$1" ] || return 1
-  while IFS= read -r l; do
-    case "$l" in
-      state=*) _SW_STATE="${l#state=}" ;; why=*) _SW_WHY="${l#why=}" ;;
-      at=*) _SW_AT="${l#at=}" ;; pid=*) _SW_PID="${l#pid=}" ;;
-    esac
-  done < "$1"
-  [ -n "$_SW_STATE" ]
-}
-
 stop_said_path() {  # <root> <sid> -> the session's record of the last stop line said, or nothing
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   case "$2" in *[!A-Za-z0-9_-]*) return 1 ;; esac
@@ -2396,7 +2383,7 @@ stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
   declare -F watch_record_path >/dev/null 2>&1 || return 0
   local rec prompt bound grace fresh live said key tmp
   rec="$(watch_record_path "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
-  _stop_watch_read "$rec" || return 0
+  _watch_read "$rec" || return 0
   stop_turn_facts >/dev/null 2>&1
   prompt="${_ST_MARK_TS%%.*}"; prompt="${prompt%Z}"
   [ -n "$prompt" ] || return 0
@@ -2406,14 +2393,14 @@ stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
   grace="$STOP_WATCH_CLAIM_GRACE"; [ "$grace" -le "$bound" ] || grace="$bound"
   fresh="$(date -u -v-"$((SECONDS + STOP_WATCH_SLACK))"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null     || date -u -d "-$((SECONDS + STOP_WATCH_SLACK)) seconds" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   while :; do
-    case "$_SW_STATE" in
+    case "$_WR_STATE" in
       resting)
-        [[ "$_SW_AT" < "$prompt" ]] || break
+        [[ "$_WR_AT" < "$prompt" ]] || break
         [ "$SECONDS" -lt "$grace" ] || break ;;
       watching)
         live=no
-        case "$_SW_PID" in ''|*[!0-9]*) : ;; *) kill -0 "$_SW_PID" 2>/dev/null && live=yes ;; esac
-        if [ "$live" = yes ] && [ -n "$fresh" ] && ! [[ "$_SW_AT" < "$fresh" ]]; then
+        case "$_WR_PID" in ''|*[!0-9]*) : ;; *) kill -0 "$_WR_PID" 2>/dev/null && live=yes ;; esac
+        if [ "$live" = yes ] && [ -n "$fresh" ] && ! [[ "$_WR_AT" < "$fresh" ]]; then
           [ "$SECONDS" -lt "$bound" ] || break
         else
           [ "$live" = no ] && [ "$SECONDS" -lt "$grace" ] || break
@@ -2421,14 +2408,14 @@ stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
       *) [ "$SECONDS" -lt "$grace" ] || break ;;
     esac
     sleep 0.2
-    _stop_watch_read "$rec" || return 0
+    _watch_read "$rec" || return 0
   done
-  [ "$_SW_STATE" = resting ] && [ "$_SW_WHY" = person ] || return 0
-  [[ "$_SW_AT" < "$prompt" ]] && return 0
+  [ "$_WR_STATE" = resting ] && [ "$_WR_WHY" = person ] || return 0
+  [[ "$_WR_AT" < "$prompt" ]] && return 0
   [ -z "$(roster_open_names "$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state" \
     "$BIONIC_ROOT/.bionic/tmp/sweeper-$BIONIC_SID.state" "$BIONIC_SID" 2>/dev/null)" ] || return 0
   key="$(tick_digest_field "$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")" digest)"
-  key="digest=${key:-at $_SW_AT}"
+  key="digest=${key:-at $_WR_AT}"
   said="$(stop_said_path "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
   [ -f "$said" ] && [ ! -L "$said" ] && [ "$(cat "$said" 2>/dev/null)" = "$key" ] && return 0
   # Written whole beside it and renamed in, never through a link; a line that cannot be marked said is not said,
@@ -2676,7 +2663,7 @@ _sg_subagents_dir() {  # <transcript-path>
 _sg_symlink_in_repo() {  # <repo> -> 0 iff $repo/.bionic resolves under this repo's own root
   local repo="$1" target common root
   target="$(cd "$repo/.bionic" 2>/dev/null && pwd -P)" || return 1
-  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  common="$(git_common_dir "$repo")" || return 1
   root="$(cd "${common%/.git}" 2>/dev/null && pwd -P)" || return 1
   case "$target/" in "$root"/*) return 0 ;; *) return 1 ;; esac
 }

@@ -38,6 +38,7 @@ declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${
 # spawn-worktree.sh). `claude_home` is only the probe for "already loaded": D1 read session
 # files through it until wave-20 T8c, and reads processes now.
 bionic_need roots.sh claude_home
+bionic_need fields.sh line_field_v
 
 # Physical absolute path of a directory. No `realpath`: BSD's is flagless and it
 # is absent on some targets, and every path this file canonicalises is a
@@ -1193,28 +1194,8 @@ _wt_launch_row() {  # <roster> <key> <value> -> the line; 1 when none
 # under; the bare `<dir>` is accepted too, for a caller that names its rows
 # without the prefix.
 
-# One `|`-delimited field, BY KEY. Position would read the wrong value on a line
-# whose schema gained a field, which is the same reason every other reader in
-# this repo does it this way.
-#
-# FORK-FREE (wave-34 T11, D19): the walk is parameter expansion, not `tr` behind a `$( )`, and
-# `_wt_field_v` writes the answer into the caller's variable, so a caller that reads a field
-# per roster line (`_wt_row_discharged`, every tick) starts no process at all. A newline
-# separates fields as `|` does, which is what the `tr` this replaced made of one.
-_wt_field_v() {  # <var> <line> <key>
-  local _wtf_rest="${2:-}" _wtf_f _wtf_nl=$'\n'
-  _wtf_rest="${_wtf_rest//$_wtf_nl/|}|"
-  while [ -n "$_wtf_rest" ]; do
-    _wtf_f="${_wtf_rest%%|*}"; _wtf_rest="${_wtf_rest#*|}"
-    case "$_wtf_f" in "${3}="*) printf -v "$1" '%s' "${_wtf_f#"${3}="}"; return 0 ;; esac
-  done
-  printf -v "$1" '%s' ''
-}
-_wt_field() {  # <line> <key>
-  local _wtf_v
-  _wt_field_v _wtf_v "$@"
-  printf '%s' "$_wtf_v"
-}
+# A field is read by key through lib/fields.sh; lib/line.sh still calls `_wt_field`.
+_wt_field() { line_field "$@"; }  # <line> <key>
 
 # The discharge set: an ack, or a WAIVED, CLOSED or MET contract. hooks/stop-orders.sh and
 # `stop_guard` (lib/stop.sh) discharge on an ack, a WAIVED contract or a MET one that declared
@@ -1223,11 +1204,11 @@ _wt_field() {  # <line> <key>
 # same predicate as a sweeper verdict line.
 _wt_discharged() {  # <line>
   local v
-  _wt_field_v v "$1" acked
+  line_field_v v "$1" acked
   [ "$v" = "yes" ] && return 0
-  _wt_field_v v "$1" state
+  line_field_v v "$1" state
   case "$v" in MET|CLOSED|WAIVED) return 0 ;; esac
-  _wt_field_v v "$1" status
+  line_field_v v "$1" status
   case "$v" in MET|CLOSED|WAIVED) return 0 ;; esac
   return 1
 }
@@ -1237,7 +1218,7 @@ _wt_row_discharged() {  # <file> <row name>
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
     case "$line" in '#'*) continue ;; esac
-    _wt_field_v name "$line" name
+    line_field_v name "$line" name
     [ "$name" = "$2" ] || continue
     _wt_discharged "$line" && return 0
   done < "$1"
@@ -1493,7 +1474,7 @@ _wt_tree_rel() {  # <root> <abs tree> -> the tree from the root, as a tree event
 _wt_tree_record_plan() {  # <abs tree> -> the plan its own record names, read before the tree goes; nothing for none
   local l
   l="$(worktree_tree_record "${1:-}" 2>/dev/null)" || return 0
-  l="$(_wt_field "$l" plan)"; [ "$l" = none ] || printf '%s' "$l"
+  l="$(line_field "$l" plan)"; [ "$l" = none ] || printf '%s' "$l"
 }
 # A TREE REMOVED IS NO ROW'S TREE: each row whose latest tree event names it gets the event again with an empty path,
 # through the one writer above, in <plan> (the tree's own record's, read before the removal) or the session's bound
@@ -1523,7 +1504,7 @@ worktree_tree_record() {  # <tree>
   IFS= read -r line < "$f" || [ -n "$line" ] || return 1
   line="${line%$'\r'}"
   case "$line" in "${TREE_RECORD_SCHEMA}|"*) : ;; *) return 1 ;; esac
-  [ "$(_wt_field "$line" path)" = "$tree" ] || return 1
+  [ "$(line_field "$line" path)" = "$tree" ] || return 1
   printf '%s\n' "$line"
 }
 

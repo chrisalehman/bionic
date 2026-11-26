@@ -28,6 +28,7 @@
 #   alive_agent <sid> <transcript> <name>   rc 1 when <sid> is dead, else `live_row_open`'s code
 #   alive_holder <sid>                      -> the pid of the CLI process whose file names <sid> now
 #   alive_current <pid>                     -> the conversation the CLI process <pid> holds now
+#   alive_shim <pid> <log>                  rc 0 while <pid> is still <log>'s detached booked.sh shim
 #
 # BASH 3.2, jq for the CLI's files: without jq no session file is read, and only the caller's own
 # session reads alive.
@@ -42,6 +43,16 @@ alive_run() { _slots_live "${1:-}" "${2:-}"; }
 
 # The writer's half of the rule: a record that names a process stores this, and alive_run compares against it.
 alive_since() { _slots_since "${1:-}"; }
+
+# A run's pid file keeps no start, so its shim is known by `ps` naming booked.sh with that --run-log.
+alive_shim() {
+  local c
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null || return 1
+  c="$(ps -ww -o command= -p "$1" 2>/dev/null)" || return 1
+  case "$c" in *booked.sh*"--run-log $2"*) return 0 ;; esac
+  return 1
+}
 
 _alive_records() { printf '%s/bionic/alive' "$(claude_home)"; }
 

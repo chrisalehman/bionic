@@ -863,27 +863,23 @@ _eg_path_fold() {
 # COMMAND that only the caller can act on, and a command substitution would leave it in a subshell.
 _EG_MOVING=""
 _eg_commit_cwd() {
-  local _line _oldifs _hadf _p _c _gc
+  local _line _p _c _gc
   _EG_CWD=""; _EG_CWD_SRC=""; _EG_MOVING=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   # `env` in any letter case: the argv reader folds the prefix word (wave-25 T12), so
   # `ENV -C <dir> git commit` is placed by its directory exactly as `env -C <dir>` is.
   case " $COMMAND " in
     *" -C "*|*" -C"[\"\']*|*env*|*[Ee][Nn][Vv]*)
-      _oldifs="$IFS"; _hadf=0
       while IFS= read -r _line; do
         [ -n "$_line" ] || continue
         git_argv_parse "$_line" || continue
         [ "$GIT_SUB" = commit ] || continue
         _git_argv_skip "$_line"
         [ -n "$GIT_ARGV_REST" ] || break
-        case "$-" in *f*) _hadf=1 ;; esac
-        set -f
-        IFS="$GIT_ARGV_US"
+        git_argv_split_on
         # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
         set -- $GIT_ARGV_REST
-        IFS="$_oldifs"
-        [ "$_hadf" -eq 1 ] || set +f
+        git_argv_split_off
         shift   # argv[0], the git binary
         _gc=""
         while [ $# -gt 0 ]; do
@@ -930,19 +926,15 @@ _eg_commit_cwd() {
 # for every failure (no git, no repository, an unreadable root) — the caller judges those.
 _EG_JUR_TOP=""
 _eg_outside_root() {
-  local _d="${1:-}" _both _common _main
+  local _d="${1:-}" _common _main
   _EG_JUR_TOP=""
   case "$_d" in /*) : ;; *) return 1 ;; esac
-  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --show-toplevel 2>/dev/null)" || return 1
-  _common="${_both%%$'\n'*}"
-  [ "$_common" != "$_both" ] || return 1
-  _EG_JUR_TOP="${_both#*$'\n'}"
-  [ -n "$_common" ] && [ -n "$_EG_JUR_TOP" ] || { _EG_JUR_TOP=""; return 1; }
+  git_common_dir_and "$_d" --show-toplevel || return 1
+  _common="$BIONIC_GIT_COMMON"; _EG_JUR_TOP="$BIONIC_GIT_ALSO"
   if [ -d "$BIONIC_ROOT/.git" ]; then
     _main="$BIONIC_ROOT/.git"
   else
-    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { _EG_JUR_TOP=""; return 1; }
-    _main="${_main%%$'\n'*}"
+    _main="$(git_common_dir "$BIONIC_ROOT")" || { _EG_JUR_TOP=""; return 1; }
   fi
   if [ -z "$_main" ] || [ "$_common" = "$_main" ] || [ "$_common" -ef "$_main" ]; then
     _EG_JUR_TOP=""
@@ -961,7 +953,7 @@ _eg_outside_root() {
 _EG_COMMITS=0
 _EG_COMMIT_NC=0
 _eg_commit_count() {
-  local _line _oldifs="$IFS" _hadf
+  local _line
   _EG_COMMITS=0; _EG_COMMIT_NC=0
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
@@ -973,14 +965,10 @@ _eg_commit_count() {
     [ -n "$GIT_ARGV_REST" ] || continue
     # env's `-C`/`--chdir` is a directory override too (wave-20 T3, D3).
     [ -z "$GIT_ARGV_ENV_CHDIR" ] || _EG_COMMIT_NC=$((_EG_COMMIT_NC + 1))
-    _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     shift   # argv[0], the git binary
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -2457,21 +2445,10 @@ if [ ! -f "$PLAN" ]; then
   exit 0
 fi
 
-# Extract YAML frontmatter (between first two `---` lines at column 0)
-# if the plan has any. Used to read the version marker, the triple, and the
-# discriminator flags the checks below key off.
-#
-# CRLF/CR-only plans would otherwise defeat the exact-match `$0=="---"`
-# comparison ("---\r" != "---"), so line endings are normalized to \n before
-# every awk pass (normalize_newlines) — meaning every downstream parse
-# (frontmatter values, SECTION lines, CURRENT, evidence blocks) sees plain
-# \n text regardless of the file's original line-ending style.
-FRONTMATTER=$(normalize_newlines "$PLAN" | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f')
-
-frontmatter_get() {  # one reading of the grammar: lib/run.sh's `frontmatter_value_v` (wave-34 T11)
-  local v
-  if frontmatter_value_v v "$FRONTMATTER" "$1"; then printf '%s\n' "$v"; fi
-}
+# The plan's header, read once by its one parser (`plan_read_header`, line ends translated) and asked for each key
+# from that reading: the version marker, the triple and the flags the checks below key off.
+_EG_HEADER="$(plan_read_header "$PLAN")" || _EG_HEADER=""
+frontmatter_get() { plan_header_value "$_EG_HEADER" "$1" || :; }
 
 DEPLOY_TARGET=$(frontmatter_get deploy_target)
 SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
@@ -2483,7 +2460,7 @@ MULTI_AGENT=$(frontmatter_get multi_agent)
 
 _EG_V15=0
 case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
-_EG_MARKED=0; grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:' <<< "$FRONTMATTER" && _EG_MARKED=1
+_EG_MARKED=0; plan_header_value "$_EG_HEADER" canonical_sdlc_version >/dev/null && _EG_MARKED=1
 
 _eg_plan_named() {  # -> the path the plan takes when named for its directory: an incident's for it, any other for its stem
   local d="${PLAN%/*}"
@@ -2516,11 +2493,14 @@ Plan: $PLAN
 Fix: run the commit again; the fold's own line above names why it failed."
 }
 _eg_refuse_lowered() {
-  local s found="declares canonical_sdlc_version: $SDLC_VERSION"
+  local s l="" found="declares canonical_sdlc_version: $SDLC_VERSION"
   s="$(_run_place "$PLAN")" || _eg_v15_unreadable
   case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
   [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
-  [ -n "$FRONTMATTER" ] || found="has no header on its first line"
+  # The parser answers nothing both for a page with no header and for a header that holds no key, and the two are told
+  # apart by the page's first line alone, its line end translated as the parser translates it.
+  IFS= read -r l < "$PLAN" || :
+  [ "${l%%$'\r'*}" = --- ] || found="has no header on its first line"
   refuse exit2 commit "this run's plan is lowered below 15" "put its version back to 15" \
 "canonical-sdlc plan: this plan $found, and the run's log beside it holds a step, so it is a run's plan at 15 with its version line lowered or lost, and nothing of it is judged without it.
 Plan: $PLAN
@@ -3295,21 +3275,17 @@ _eg_wt_name() {
 _EG_GITWT=""
 _EG_GITWT_FOREIGN=""
 _eg_git_wt_name() {
-  local _d="${1:-}" _both _common _gitdir _main
+  local _d="${1:-}" _common _gitdir _main
   _EG_GITWT=""; _EG_GITWT_FOREIGN=""
   case "$_d" in /*) : ;; *) return 0 ;; esac
-  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 0
-  _common="${_both%%$'\n'*}"
-  _gitdir="${_both#*$'\n'}"
-  [ "$_common" != "$_both" ] || return 0
-  [ -n "$_common" ] && [ -n "$_gitdir" ] || return 0
+  git_common_dir_and "$_d" --git-dir || return 0
+  _common="$BIONIC_GIT_COMMON"; _gitdir="$BIONIC_GIT_ALSO"
   [ "$_common" != "$_gitdir" ] || return 0
   case "$_gitdir" in */worktrees/*) : ;; *) return 0 ;; esac
   if [ -d "$BIONIC_ROOT/.git" ]; then
     _main="$BIONIC_ROOT/.git"
   else
-    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-    _main="${_main%%$'\n'*}"
+    _main="$(git_common_dir "$BIONIC_ROOT")" || return 0
   fi
   [ -n "$_main" ] || return 0
   if [ "$_common" != "$_main" ] && ! [ "$_common" -ef "$_main" ]; then
@@ -4113,9 +4089,9 @@ log_finding_quiet() {  # $1=check-id  $2=detail
   return 0
 }
 
-_eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field; asked through _proof_ask
+_eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field, the proof read by lib/proof.sh `proof_fact`; asked through _proof_ask
   local f; f="$(reader_facts "$1")" || return 2
-  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "proof" && line_kv("kind") == "walk" { e = line_kv("environments") } END { print e }'
+  printf '%s\n' "$f" | awk -F'|' "$(proof_fact_awk)"'proof_fact() && PROOF_KIND == "walk" { e = line_kv("environments") } END { print e }'
 }
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
@@ -4825,20 +4801,16 @@ return 0
 # values; hooks/bash-walls.sh reads the acknowledgement's operand this way.
 _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
 _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <verb> (sets _WALL_POKER_VERB) · 1 not
-  local _line _oldifs _hadf _w _i _script _next _want="${2:-}"
+  local _line _oldifs _w _i _script _next _want="${2:-}"
   _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _git_argv_skip "$_line"
     [ -n "$GIT_ARGV_REST" ] || continue
-    _oldifs="$IFS"; _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     [ $# -gt 0 ] || continue
     _script=""
     # The runner word is a NAME, read through git-argv.sh's fold (wave-25 T12): `BASH x.sh`
@@ -5230,7 +5202,7 @@ _bsg_wrap_only() {
 # is exactly `<verb> <own row>`.
 _BSG_DL_OWN=""; _BSG_DL_TARGET=""
 _bsg_own_row() {
-  local _pick _seg _segs _l _n=0 _oldifs _hadf
+  local _pick _seg _segs _l _n=0
   _BSG_DL_OWN=""; _BSG_DL_TARGET=""
   wall_libs background-suite-guard roster.sh || return 1
   if _pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
@@ -5239,14 +5211,10 @@ _bsg_own_row() {
       case "$_seg" in row=*) _BSG_DL_OWN="${_seg#row=}"; break ;; esac
     done
   fi
-  _oldifs="$IFS"; _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_ARGS
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   _BSG_DL_TARGET="${1:-}"
   [ $# -eq 1 ] && [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_TARGET" = "$_BSG_DL_OWN" ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
@@ -5333,7 +5301,7 @@ _bsg_under() {
 # repository or directory, so cmd_place's answer is not where git commits; 1 otherwise. The verbs
 # and the option walk are `_eg_commit_count`'s reading of git's global options.
 _bsg_git_relocates() {
-  local _line _oldifs="$IFS" _hadf
+  local _line
   case "$COMMAND" in
     *GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
       _BSG_JUR_WHY="the command names GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR, which send a commit to a repository the placement check does not read"
@@ -5349,14 +5317,10 @@ _bsg_git_relocates() {
       return 0
     fi
     [ -n "$GIT_ARGV_REST" ] || continue
-    _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     shift   # argv[0], the git binary
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -5440,7 +5404,7 @@ _bsg_commit_outside() {
 # environment), so the staged flag is how the row says a writer widened it.
 _BSG_AM_OWN=""; _BSG_AM_TARGET=""; _BSG_AM_UPD=""
 _bsg_own_amend() {
-  local _pick _seg _segs _l _n=0 _oldifs _hadf _files=0 _reason=0 _cmd="" _w
+  local _pick _seg _segs _l _n=0 _files=0 _reason=0 _cmd="" _w
   _BSG_AM_UPD=""
   wall_libs background-suite-guard roster.sh || return 1
   if _pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
@@ -5449,14 +5413,10 @@ _bsg_own_amend() {
       case "$_seg" in name=*) _BSG_AM_OWN="${_seg#name=}"; break ;; esac
     done
   fi
-  _oldifs="$IFS"; _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_ARGS
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   _BSG_AM_TARGET="${1:-}"
   [ -n "$_BSG_AM_OWN" ] && [ "$_BSG_AM_TARGET" = "$_BSG_AM_OWN" ] || return 1
   shift
@@ -5473,14 +5433,10 @@ _bsg_own_amend() {
   [ "$_files" -ge 1 ] && [ "$_reason" -eq 1 ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
   [ "$_n" -eq 1 ] || return 1
-  _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_CALL
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   for _w in "$@"; do
     _wall_sh_word "$_w"
     _cmd="${_cmd:+$_cmd }$_WALL_WORD"

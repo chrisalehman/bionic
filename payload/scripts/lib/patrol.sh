@@ -24,6 +24,7 @@ declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${
 # one definition there (epic-22 wave-01, N1); this file is a caller of `claude_home`,
 # `transcripts_dir`, `tmp_root`, `plugin_root` and `project_root`.
 bionic_need roots.sh claude_home
+bionic_need fields.sh line_field_v
 # roster.sh, THE SAME SOFT SOURCE, for `roster_open_names` (epic-23 wave-20 T17, D10):
 # `patrol_roster_state` asks the one close predicate every wall asks, and this file is sourced
 # by callers (doctor, the stop library, suites) that never declared roster.sh themselves.
@@ -52,16 +53,6 @@ _patrol_clean() {  # <value> [max-chars]
     | tr '\n\r\t|' '    ' \
     | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')"
   printf '%s' "${v:0:${2:-200}}"
-}
-
-_patrol_field() {  # <line> <key>
-  local f
-  while IFS= read -r f; do
-    case "$f" in "${2}="*) printf '%s' "${f#"${2}="}"; return 0 ;; esac
-  done <<EOF
-$(printf '%s' "${1:-}" | tr '|' '\n')
-EOF
-  printf ''
 }
 
 # THE PROJECT ROOT A SESSION'S STATE FILES LIVE UNDER is `project_root`'s answer, called
@@ -518,9 +509,9 @@ patrol_report() {  # -> patrol-session/v1 … patrol-roster/v1 … patrol-wall/v
 
   while IFS= read -r sess; do
     [ -n "$sess" ] || continue
-    sid="$(_patrol_field "$sess" session)"
-    pid="$(_patrol_field "$sess" pid)"
-    cwd="$(_patrol_field "$sess" cwd)"
+    sid="$(line_field "$sess" session)"
+    pid="$(line_field "$sess" pid)"
+    cwd="$(line_field "$sess" cwd)"
     repo="$(project_root "$cwd")"
 
     tr="$(patrol_transcript "$sid")" || tr=""
@@ -551,7 +542,7 @@ EOF
     rline="$(patrol_roster_state "$repo" "$sid")"
     printf '%s|session=%s|%s\n' "$PATROL_ROSTER_SCHEMA" "$sid" "$rline"
 
-    dispatches="$(_patrol_field "$rline" rows)"
+    dispatches="$(line_field "$rline" rows)"
     case "$agents" in ''|*[!0-9]*) agents="" ;; esac
     if [ -z "$agents" ]; then
       printf '%s|session=%s|dispatched=|rostered=%s|blind=|refused=%s|cause=%s\n' \
@@ -607,6 +598,33 @@ tick_digest_field() {  # <digest file> <key>
 # THE CLAIM IS A HARD LINK OF A WHOLE FILE, so a reader never sees a half-written record and two ticks starting
 # together cannot both create it. Taking over a dead record is a rename over it, which two ticks starting together
 # over the same dead record can both do; then both run, as every tick did before the record existed.
+#
+# _patrol_claim <holder> <root> <sid> <pid> <record> <first line> [<line>...], the tick's claim and the watcher's: rc 0
+# the record names <pid>; rc 1 a live holder's `<pid> <start>` on stdout, as `<holder> <root> <sid>` prints it; rc 2 not
+# written (a link where it goes, no start to read, a directory that refuses). The caller judged the directory safe.
+_patrol_claim() {
+  local ask="$1" root="$2" sid="$3" pid="$4" f="$5" head="$6" start tmp held
+  shift 6
+  case "$pid" in ''|*[!0-9]*) return 2 ;; esac
+  [ -L "$f" ] && return 2
+  declare -F alive_since >/dev/null 2>&1 || return 2
+  start="$(alive_since "$pid")"
+  [ -n "$start" ] || return 2
+  [ -d "${f%/*}" ] || mkdir -p "${f%/*}" 2>/dev/null || return 2
+  tmp="${f%/*}/.${f##*/}"; tmp="${tmp%.state}.$pid"
+  { [ -z "$head" ] || printf '%s\n' "$head"; printf 'pid=%s\nstart=%s\n' "$pid" "$start"; [ "$#" -eq 0 ] || printf '%s\n' "$@"; } \
+    > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 2; }
+  if [ ! -e "$f" ] && ln "$tmp" "$f" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  if held="$("$ask" "$root" "$sid")"; then
+    rm -f "$tmp"
+    [ "${held%% *}" = "$pid" ] && return 0
+    printf '%s\n' "$held"
+    return 1
+  fi
+  [ -L "$f" ] && { rm -f "$tmp"; return 2; }
+  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 2; }
+}
+
 tick_run_path() {  # <project root> <session-id> -> absolute path, or nothing
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   printf '%s/.bionic/tmp/tick-run-%s.state' "$1" "$2"
@@ -633,31 +651,11 @@ tick_running() {
   printf '%s %s\n' "$_TR_PID" "$_TR_START"
 }
 
-# tick_run_claim <root> <sid> <pid> -> rc 0 the record names <pid>; rc 1 a live tick of the session holds it, its
-# `<pid> <start>` on stdout; rc 2 it could not be written (a link where it goes, a process with no start to read, a
-# directory that refuses the write). The caller has already judged the directory safe to write in.
+# tick_run_claim <root> <sid> <pid> -> `_patrol_claim`'s answers, a live tick the holder.
 tick_run_claim() {
-  local f d start tmp held
+  local f
   f="$(tick_run_path "${1:-}" "${2:-}")" || return 2
-  case "${3:-}" in ''|*[!0-9]*) return 2 ;; esac
-  [ -L "$f" ] && return 2
-  declare -F alive_since >/dev/null 2>&1 || return 2
-  start="$(alive_since "$3")"
-  [ -n "$start" ] || return 2
-  d="${f%/*}"
-  [ -d "$d" ] || mkdir -p "$d" 2>/dev/null || return 2
-  tmp="$d/.tick-run-$2.$3"
-  printf 'pid=%s\nstart=%s\n' "$3" "$start" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 2; }
-  if ln "$tmp" "$f" 2>/dev/null; then rm -f "$tmp"; return 0; fi
-  if held="$(tick_running "$1" "$2")"; then
-    rm -f "$tmp"
-    [ "${held%% *}" = "$3" ] && return 0
-    printf '%s\n' "$held"
-    return 1
-  fi
-  [ -L "$f" ] && { rm -f "$tmp"; return 2; }
-  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 2; }
-  return 0
+  _patrol_claim tick_running "$1" "$2" "${3:-}" "$f" ''
 }
 
 # tick_run_release <root> <sid> <pid> — removes the record when it names <pid>; one another tick took is left.
@@ -865,14 +863,14 @@ watch_record_path() {  # <project root> <session-id> -> absolute path, or nothin
   printf '%s/.bionic/tmp/watch-%s.state' "$1" "$2"
 }
 
-_watch_read() {  # <record> — sets _WR_STATE _WR_PID _WR_START _WR_WHY _WR_TOLD _WR_LOST _WR_SAID _WR_WOKE; rc 1 when no record
+_watch_read() {  # <record> — sets _WR_STATE _WR_PID _WR_START _WR_WHY _WR_AT _WR_TOLD _WR_LOST _WR_SAID _WR_WOKE; rc 1 when no record
   local l
-  _WR_STATE=''; _WR_PID=''; _WR_START=''; _WR_WHY=''; _WR_TOLD=''; _WR_LOST=''; _WR_SAID=''; _WR_WOKE=''
+  _WR_STATE=''; _WR_PID=''; _WR_START=''; _WR_WHY=''; _WR_AT=''; _WR_TOLD=''; _WR_LOST=''; _WR_SAID=''; _WR_WOKE=''
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
   while IFS= read -r l; do
     case "$l" in
       state=*) _WR_STATE="${l#state=}" ;; pid=*) _WR_PID="${l#pid=}" ;; start=*) _WR_START="${l#start=}" ;;
-      why=*) _WR_WHY="${l#why=}" ;; told=*) _WR_TOLD="${l#told=}" ;;
+      why=*) _WR_WHY="${l#why=}" ;; at=*) _WR_AT="${l#at=}" ;; told=*) _WR_TOLD="${l#told=}" ;;
       lost=*) _WR_LOST="${l#lost=}" ;; said=*) _WR_SAID="${l#said=}" ;; woke=*) _WR_WOKE="${l#woke=}" ;;
     esac
   done < "$1"
@@ -907,42 +905,22 @@ watch_state() {
   esac
 }
 
-# watch_claim <root> <sid> <pid> -> rc 0 the record names <pid>, watching; rc 1 a live watcher of the session holds it,
-# `<pid> <start>` on stdout; rc 2 it could not be written. The caller has judged the directory safe to write in.
+# watch_claim <root> <sid> <pid> -> `_patrol_claim`'s answers, a live watcher the holder.
 watch_claim() {
-  local f d start tmp held told='' lost='' said='' woke=''
+  local f s told='' lost='' said='' woke=''
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 2
-  case "${3:-}" in ''|*[!0-9]*) return 2 ;; esac
-  [ -L "$f" ] && return 2
-  declare -F alive_since >/dev/null 2>&1 || return 2
-  start="$(alive_since "$3")"
-  [ -n "$start" ] || return 2
-  d="${f%/*}"
-  [ -d "$d" ] || mkdir -p "$d" 2>/dev/null || return 2
-  tmp="$d/.watch-$2.$3"
-  if held="$(watch_state "$1" "$2")"; then
-    case "$held" in
-      "watching $3 "*) return 0 ;;
-      watching\ *) held="${held#watching }"; printf '%s\n' "$held"; return 1 ;;
-    esac
+  if s="$(watch_state "$1" "$2")"; then
     # A WATCHER THAT DIED WITHOUT A WORD IS NOT FORGOTTEN BY ITS SUCCESSOR. The turn end starts this claim and the
     # turn-end wall together, in no fixed order, so the record keeps the dead pid until that wall has said it.
     _watch_read "$f" && { told="$_WR_TOLD"; said="$_WR_SAID"; lost="$_WR_LOST"; woke="$_WR_WOKE"; }
-    case "$held" in stopped\ *) lost="${held#stopped }" ;; esac
+    case "$s" in stopped\ *) lost="${s#stopped }" ;; esac
   fi
-  printf 'state=watching\npid=%s\nstart=%s\nat=%s\n' "$3" "$start" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tmp" 2>/dev/null \
-    || { rm -f "$tmp"; return 2; }
-  [ -z "$told" ] || printf 'told=%s\n' "$told" >> "$tmp"
-  [ -z "$lost" ] || printf 'lost=%s\n' "$lost" >> "$tmp"
-  [ -z "$said" ] || printf 'said=%s\n' "$said" >> "$tmp"
-  [ -z "$woke" ] || printf 'woke=%s\n' "$woke" >> "$tmp"
-  if [ ! -e "$f" ] && ln "$tmp" "$f" 2>/dev/null; then rm -f "$tmp"; return 0; fi
-  if held="$(watch_state "$1" "$2")"; then
-    case "$held" in watching\ *) rm -f "$tmp"; held="${held#watching }"; printf '%s\n' "$held"; return 1 ;; esac
-  fi
-  [ -L "$f" ] && { rm -f "$tmp"; return 2; }
-  mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 2; }
-  return 0
+  _patrol_claim _watch_holder "$1" "$2" "${3:-}" "$f" state=watching "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    ${told:+"told=$told"} ${lost:+"lost=$lost"} ${said:+"said=$said"} ${woke:+"woke=$woke"}
+}
+_watch_holder() {  # <root> <sid> -> `<pid> <start>` while a live watcher holds the record
+  local s
+  s="$(watch_state "$1" "$2")" && case "$s" in watching\ *) printf '%s\n' "${s#watching }" ;; *) false ;; esac
 }
 
 # watch_holds <root> <sid> <pid> -> rc 0 while the record says <pid> is watching; a watcher asks before every pass.

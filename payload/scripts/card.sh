@@ -2286,7 +2286,7 @@ _card_step3_view() {  # <artifact path as given> <args...>
 # so in place of the level.
 _card_rigor_line() {  # <rigor word, as the plan carries it> -> the Verification block's rigor phrase
   [ -n "${1:-}" ] || { printf 'review rigor: not declared'; return 0; }
-  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (single or double)" "$1"
+  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (%s)" "$1" "$(write_gate_or "$WRITE_GATE_RIGORS")"
 }
 
 # A SECOND LINE WITH NO CELL AND NO LABEL WOULD PRINT AS A BLANK LINE, and a blank line inside a
@@ -3642,7 +3642,7 @@ case "$1" in
   rigor)
     [ "$#" -eq 2 ] || _card_usage "rigor takes exactly one word (got $(( $# - 1 )))"
     rigor_print "$2" && exit 0
-    printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2
+    printf "card.sh: '%s' is no review rigor — use %s\n" "$2" "$(write_gate_or "$WRITE_GATE_RIGORS")" >&2
     exit 1 ;;
   opening)
     # The version line is the version command's own print and has no second source here: a line composed in
@@ -3658,10 +3658,7 @@ case "$1" in
     fi
     [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || _card_usage "opening takes a rigor word and, with it, an intent and a scale (got $(( $# - 1 )) arguments)"
     _card_open_level="$(rigor_level "$2" 2>/dev/null)"
-    case "$_card_open_level" in
-      single|double) ;;
-      *) printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2; exit 1 ;;
-    esac
+    write_gate_has "$_card_open_level" "$WRITE_GATE_RIGORS" || { printf "card.sh: '%s' is no review rigor — use %s\n" "$2" "$(write_gate_or "$WRITE_GATE_RIGORS")" >&2; exit 1; }
     if [ "$#" -eq 4 ]; then
       printf 'Canonical SDLC engaged — %s · %s rigor · %s\n' "$3" "$_card_open_level" "$4"
     else
@@ -3677,7 +3674,7 @@ case "$1" in
       _card_owe 0 "${3:-}"
       exit 0
     fi
-    printf "card.sh: '%s' is no scale — use task, wave or epic\n" "$2" >&2
+    printf "card.sh: '%s' is no scale — use %s\n" "$2" "$(write_gate_or "$WRITE_GATE_SCALES")" >&2
     exit 1 ;;
   inherited)
     # THE READING CLOSE-OUT CARRIES FROM (T43): `card.sh inherited <requirements file>`. A path that

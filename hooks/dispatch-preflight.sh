@@ -831,34 +831,15 @@ ACK_LEDGER_FILE="$STATE_DIR/sweeper-${BIONIC_SID}.state"
 # from inside a tree is ledgered in one place by an author working in another, and the
 # tree's own lease has no row that accounts for the orchestrator sitting in it.
 #
-# THE TEST FOR "LINKED WORKTREE" IS THE ONE scripts/lib/worktree.sh's land verb USES: a
-# linked worktree's `.git` is a FILE pointing into the shared repository, the main
-# checkout's is a directory. One spelling of that distinction, not two.
+# THE TEST FOR "LINKED WORKTREE" IS lib/root.sh's `git_tree_lease`, which the plan write's
+# lease wall asks too: a linked worktree's `.git` is a FILE pointing into the shared
+# repository, the main checkout's is a directory. One spelling of that distinction, not two.
 #
 # AMBIGUITY PASSES, per §7. If the tree's main repository cannot be resolved, or the
 # project root is the tree itself (a tree carrying its own `.bionic` is its own project,
 # not a lease of this one), this wall has no main checkout to name and says nothing.
-if ! is_agent_context; then
-  LEASE_TOP=$(git -C "$BIONIC_CWD" rev-parse --show-toplevel 2>/dev/null) || LEASE_TOP=""
-  if [ -n "$LEASE_TOP" ] && [ -f "$LEASE_TOP/.git" ]; then
-    LEASE_TOP=$( cd "$LEASE_TOP" 2>/dev/null && pwd -P ) || LEASE_TOP=""
-  else
-    LEASE_TOP=""
-  fi
-  if [ -n "$LEASE_TOP" ] && [ "$LEASE_TOP" != "$BIONIC_ROOT" ]; then
-    # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
-    # answer against the tree, exactly as lib/root.sh's own walk does.
-    LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || LEASE_COMMON=""
-    if [ -z "$LEASE_COMMON" ]; then
-      LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --git-common-dir 2>/dev/null) || LEASE_COMMON=""
-      case "$LEASE_COMMON" in ""|/*) ;; *) LEASE_COMMON="$LEASE_TOP/$LEASE_COMMON" ;; esac
-    fi
-    LEASE_MAIN=""
-    [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
-    if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
-      dispatch_finding worktree "$BIONIC_CWD" "$LEASE_TOP" "$LEASE_MAIN"
-    fi
-  fi
+if ! is_agent_context && git_tree_lease "$BIONIC_CWD" "$BIONIC_ROOT"; then
+  dispatch_finding worktree "$BIONIC_CWD" "$BIONIC_LEASE_TOP" "$BIONIC_LEASE_MAIN"
 fi
 
 # ---------- the budget wall: a person's cap on writers ----------
@@ -1485,25 +1466,13 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # an ambiguity, and takes §7 direction — fall back to the lexical answer rather
 # than refuse on a question this gate cannot answer.
 resolve_in_repo() {  # <path> -> absolute, `.`/`..` folded, existing prefix physical
-  local p="$1" abs out part had_f head rest phys
+  local p="$1" out head rest phys
+  # lib/root.sh's lexical fold, the one the governing hook's fold_dots calls too.
   case "$p" in
-    /*) abs="$p" ;;
-    *)  abs="$BIONIC_ROOT/$p" ;;
+    /*) path_normal "$p" ;;
+    *)  path_normal "$BIONIC_ROOT/$p" ;;
   esac
-  case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
-  set -f   # a `*` inside a brief-supplied path is a character, never a glob
-  out=""
-  local IFS=/
-  for part in $abs; do
-    case "$part" in
-      ''|.) ;;
-      ..)   out="${out%/*}" ;;
-      *)    out="$out/$part" ;;
-    esac
-  done
-  unset IFS
-  [ "$had_f" -eq 1 ] || set +f
-  out="${out:-/}"
+  out="$PATH_NORMAL"
 
   head="$out"; rest=""
   while [ -n "$head" ] && [ ! -d "$head" ]; do

@@ -38,6 +38,8 @@
 #   §7   no git, no .bionic: the cwd answers
 #   §8   a worktree of a bare repository: the checkout is the only working tree
 #   §10  the linked worktree's name is published as BIONIC_WORKTREE
+#   §11  path_normal folds . and .. lexically, and both walls' folders call it
+#   §12  a tree's lease and the paired lookup ask the one common directory
 #
 # SIX TOPOLOGIES, BUILT FOR REAL — no mocked filesystem, no stubbed git. Every
 # fixture below is `mkdir`, `git init`, `git worktree add` and `ln -s` under one
@@ -505,5 +507,98 @@ expect_eq "10c: a linked worktree costs TWO — the one rev-parse plus rule 1's 
   "2" "$(git_calls "$SANDBOX/t2/wt-a/sub" "$HOME_DEFAULT")"
 expect_eq "10c: the one call asks for both paths at once" \
   "1" "$(git_calls "$SANDBOX/t1/ws/repo/src" "$HOME_DEFAULT" >/dev/null; grep -c -- '--git-common-dir .*--git-dir' "$GIT_CALL_LOG")"
+
+# ============================================================
+section "11 — path_normal folds . and .. lexically, and both walls' folders call it"
+# ============================================================
+# fails-when: a `..` climbs past the root or keeps its segment, a doubled or trailing slash
+# survives, a star in a path globs, a symlink is resolved, the caller's globbing or IFS is
+# changed, or a wall folds a path with a loop of its own.
+mkdir -p "$SANDBOX/t11/real/sub" "$SANDBOX/t11/glob"; : > "$SANDBOX/t11/glob/planted"
+ln -s "$SANDBOX/t11/real/sub" "$SANDBOX/t11/link"
+normal_of() {  # <absolute path> -> path_normal's answer, then the IFS and globbing after it
+  ( cd "$SANDBOX/t11/glob" || exit 1
+    . "$LIB" || exit 1
+    IFS=":"; set +f
+    path_normal "$1"
+    _pn_f=on; case "$-" in *f*) _pn_f=off ;; esac
+    printf '%s|[%s]|%s' "$PATH_NORMAL" "$IFS" "$_pn_f" )
+}
+expect_eq "11a: . and .. are folded, and the caller's IFS and globbing are as they were" \
+  "/a/c|[:]|on" "$(normal_of /a/./b/../c)"
+expect_eq "11b: doubled and trailing slashes are folded" "/x/y|[:]|on" "$(normal_of //x//y/)"
+expect_eq "11c: a climb past the root stops at the root" "/|[:]|on" "$(normal_of /a/b/../../..)"
+expect_eq "11d: a star is a character, never a glob" "/q/*|[:]|on" "$(normal_of '/q/./*')"
+expect_eq "11e: a symlink's .. folds to the link's parent, not its target's" \
+  "$SANDBOX/t11|[:]|on" "$(normal_of "$SANDBOX/t11/link/..")"
+# The two walls' folders, read by one extractor: a call of the home is the positive, the fold's
+# own `..` arm is the copy.
+fold_marks() {  # <hook>... -> `call <hook>` per call of path_normal, `fold <hook>` per `..` arm of a fold loop
+  awk '{ n = FILENAME; sub(/.*\//, "", n) }
+       /^[^#]*path_normal / { print "call " n }
+       /^[[:space:]]*\.\.\)[[:space:]]+[a-z_]+="\$\{[a-z_]+%\/\*\}"/ { print "fold " n }' "$@"
+}
+FOLD_MARKS="$(fold_marks "$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh" "$BIONIC_HOOKS_DIR/dispatch-preflight.sh")"
+expect_eq "11f: each wall's folder calls the home" "canonical-sdlc-governing-skill.sh dispatch-preflight.sh" \
+  "$(printf '%s\n' "$FOLD_MARKS" | sed -n 's/^call //p' | sort -u | paste -sd' ' -)"
+expect_eq "11g: neither wall folds a path with a loop of its own" "" \
+  "$(printf '%s\n' "$FOLD_MARKS" | sed -n 's/^fold //p' | sort -u | paste -sd' ' -)"
+
+# ============================================================
+section "12 — a tree's lease and the paired lookup ask the one common directory"
+# ============================================================
+# Two walls refuse an orchestrator working from a writer's tree, and two more ask git
+# for the common directory beside a second path. Each asked git for itself; they ask
+# the library now, so the answers are pinned here, on the same real topologies.
+
+# lease_at <dir> [<root>] -> "<rc>|<top>|<main>" after one git_tree_lease call
+lease_at() {
+  ( . "$LIB" || exit 1
+    git_tree_lease "$@"; printf '%s|%s|%s' "$?" "$BIONIC_LEASE_TOP" "$BIONIC_LEASE_MAIN" )
+}
+# pair_at <dir> <option> [<PATH prefix>] -> "<rc>|<common>|<also>" after one git_common_dir_and call
+pair_at() {
+  ( [ -z "${3:-}" ] || { PATH="$3:$PATH"; export PATH; }
+    . "$LIB" || exit 1
+    git_common_dir_and "$1" "$2"; printf '%s|%s|%s' "$?" "$BIONIC_GIT_COMMON" "$BIONIC_GIT_ALSO" )
+}
+
+expect_eq "12: from deep inside a linked worktree, the lease names the tree's top and its main checkout" \
+  "0|$SANDBOX/t2/wt-a|$T2_MAIN" "$(lease_at "$SANDBOX/t2/wt-a/sub")"
+expect_eq "12: the main checkout holds no lease, and both names are blank" \
+  "1||" "$(lease_at "$T2_MAIN")"
+expect_eq "12: a tree whose top is the project root is its own project and holds no lease" \
+  "1||" "$(lease_at "$SANDBOX/t2/wt-a/sub" "$SANDBOX/t2/wt-a")"
+expect_eq "12: another root leaves the same tree's lease in place" \
+  "0|$SANDBOX/t2/wt-a|$T2_MAIN" "$(lease_at "$SANDBOX/t2/wt-a/sub" "$T1_WS")"
+expect_eq "12: outside any repository there is no lease" \
+  "1||" "$(lease_at "$SANDBOX/t7/plain/deep")"
+# A checkout whose `.git` is a link to a directory kept elsewhere has a common directory
+# whose parent is not the checkout, yet it is no linked worktree: only a `.git` FILE is one.
+mkdir -p "$SANDBOX/t12/store"
+gitinit "$SANDBOX/t12/repo"
+mv "$SANDBOX/t12/repo/.git" "$SANDBOX/t12/store/repo.git" && ln -s ../store/repo.git "$SANDBOX/t12/repo/.git"
+mkdir -p "$SANDBOX/t12/repo/sub"
+expect_eq "12: the linked .git fixture is a repository whose common directory sits outside the checkout" \
+  "$SANDBOX/t12/store/repo.git" "$( . "$LIB" && git_common_dir "$SANDBOX/t12/repo/sub")"
+expect_eq "12: …and it holds no lease, because its .git is no file" \
+  "1||" "$(lease_at "$SANDBOX/t12/repo/sub")"
+
+expect_eq "12: the paired lookup answers the common directory and the tree's own git directory" \
+  "0|$T2_MAIN/.git|$T2_MAIN/.git/worktrees/wt-a" "$(pair_at "$SANDBOX/t2/wt-a/sub" --git-dir)"
+expect_eq "12: …and the toplevel beside it, from a nested repository's subdirectory" \
+  "0|$SANDBOX/t1/ws/repo/.git|$SANDBOX/t1/ws/repo" "$(pair_at "$SANDBOX/t1/ws/repo/src" --show-toplevel)"
+expect_eq "12: the common directory it answers is the one git_common_dir answers" \
+  "$( . "$LIB" && git_common_dir "$SANDBOX/t2/wt-a/sub")" "$(pair_at "$SANDBOX/t2/wt-a/sub" --git-dir | cut -d'|' -f2)"
+expect_eq "12: outside any repository it answers nothing" \
+  "1||" "$(pair_at "$SANDBOX/t7/plain/deep" --git-dir)"
+# One line back is no pair: a git that answers only the first question.
+ONE_LINE="$SANDBOX/one-line"; mkdir -p "$ONE_LINE"
+printf '#!/bin/bash\nprintf "%%s\\n" /one/answer\n' > "$ONE_LINE/git"; chmod +x "$ONE_LINE/git"
+expect_eq "12: a git that answers one line gives no pair, so a tree is never read as its own common directory" \
+  "1||" "$(pair_at "$SANDBOX/t2/wt-a/sub" --git-dir "$ONE_LINE")"
+expect_eq "12: the paired lookup asks git once for both answers" \
+  "1" "$( : > "$GIT_CALL_LOG"; BIONIC_GIT_CALL_LOG="$GIT_CALL_LOG" pair_at "$SANDBOX/t2/wt-a/sub" --git-dir "$GIT_SHIM" >/dev/null
+          grep -c -- '--git-common-dir --git-dir' "$GIT_CALL_LOG")"
 
 finish

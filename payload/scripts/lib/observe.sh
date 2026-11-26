@@ -50,6 +50,8 @@ OBSERVE_ROSTER_VERSION="v1"
 # roster.sh in its BIONIC_LIB_WANT. roster.sh defines constants and functions and prints nothing.
 declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 bionic_need roster.sh roster_open_names
+# fields.sh, the same soft source, for `line_field`, which this file and the stop library read a row with.
+bionic_need fields.sh line_field_v
 
 # The machine line's schema token, printed by `observe_machine_line`. Versioned so a reader
 # can refuse a shape it does not read rather than guess at it.
@@ -101,19 +103,6 @@ agent_log_newest() {  # <agent-id> <project-dir> -> newest matching path on stdo
   done
   [ -n "$newest" ] || return 1
   printf '%s' "$newest"
-  return 0
-}
-
-# One field out of a versioned pipe-delimited line, BY KEY, never by position (checklist
-# A6): a fixed-field-order parser breaks undiagnosably the moment a field is added, so an
-# unknown extra field must be inert here.
-# In builtins since wave-34 T11 (D19); hooks/session-sweeper.sh's copy says how.
-line_field() {  # <line> <key>
-  local _lf_rest="${1//$'\n'/|}|" _lf_f
-  while [ -n "$_lf_rest" ]; do
-    _lf_f="${_lf_rest%%|*}"; _lf_rest="${_lf_rest#*|}"
-    case "$_lf_f" in "$2="*) printf '%s\n' "${_lf_f#"$2="}"; return 0 ;; esac
-  done
   return 0
 }
 

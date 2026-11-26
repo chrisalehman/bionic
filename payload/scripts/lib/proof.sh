@@ -25,7 +25,7 @@
 # bash 3.2: no associative arrays, no `${var,,}`.
 
 # THE REGRESSION IS KIND `regression` (wave-38 T8; REQ-9, D6). A line 1.20.0 wrote, `kind=floor`, is read as it:
-# proof_fields normalises the kind through lib/alias.sh, the one map of the old spellings.
+# the one reading of a proof's fields (`proof_take`) normalises the kind through lib/alias.sh, the one map of the old spellings.
 # A WHOLE-RUN POINT'S RUN IS KIND `point`, carrying `point=<row>`: a run among the build, never the head's proof, so no
 # reader of the regression reads it.
 PROOF_KINDS="regression review task check walk point"
@@ -40,7 +40,7 @@ bionic_need alias.sh alias_read
 # not loaded. _proof_alias_born -> the born marker's spellings as an ERE alternation, the new one alone without it.
 _proof_alias_norm() { if declare -F alias_awk_norm >/dev/null 2>&1; then alias_awk_norm "$@"; else printf ' '; fi; }
 _proof_alias_born() { if declare -F alias_alt >/dev/null 2>&1; then alias_alt born; else printf 'regression'; fi; }
-# THE KIND'S STATEMENTS ARE WRITTEN ONCE, AT LOAD: proof_awk is pasted into every proof reader, so it costs no process.
+# THE KIND'S STATEMENTS ARE WRITTEN ONCE, AT LOAD: `proof_take` is pasted into every proof reader, so it costs no process.
 _PROOF_KIND_NORM="$(_proof_alias_norm kind PROOF_KIND)"
 # The questions a reading answers, the values its result and scope take, and the answers a
 # structure check takes (the Interfaces table of wave-27).
@@ -1607,34 +1607,28 @@ proof_base_id() {
   [ "${#1}" -ge 7 ] && [ "${#1}" -le 40 ]
 }
 
-# proof_awk -> the awk function `proof_fields(s)`, THE ONE READING OF A PROOF LINE (wave-26 T14;
-# review 7 F6): 1 when <s> is a proof line, its kind in PROOF_KIND and its head in PROOF_HEAD; a
-# reading's four fields in PROOF_QUESTION, PROOF_READER, PROOF_RESULT and PROOF_SCOPE, each empty
-# on a line that carries none (wave-27 T2), and its record in PROOF_EVIDENCE (wave-28 T72: the one
-# `evidence=` reader, where five programs each spelled their own).
-# A proof line starts `proved:` at the first column (a bulleted `- proved:` is prose, not the
-# line the writer writes), and carries `kind=<lower-case word>` and `head=<7 to 40 lower-case
-# hex>` among its space-separated fields (`head=none` is no head). `proof_last` and the
-# readiness program (units.sh) both read through it, so a line one counts the other counts.
-proof_awk() {
-  printf '%s' '
-    function proof_fields(s,   f, m, i) {
-      PROOF_KIND = ""; PROOF_HEAD = ""; PROOF_QUESTION = ""; PROOF_READER = ""; PROOF_RESULT = ""; PROOF_SCOPE = ""; PROOF_EVIDENCE = ""; PROOF_OWED = ""
-      if (s !~ /^proved:[ \t]/) return 0
-      m = split(s, f, /[ \t]+/)
-      for (i = 2; i <= m; i++) {
-        if (f[i] ~ /^kind=/) PROOF_KIND = substr(f[i], 6)
-        else if (f[i] ~ /^head=/) PROOF_HEAD = substr(f[i], 6)
-        else if (f[i] ~ /^question=/) PROOF_QUESTION = substr(f[i], 10)
-        else if (f[i] ~ /^reader=/) PROOF_READER = substr(f[i], 8)
-        else if (f[i] ~ /^result=/) PROOF_RESULT = substr(f[i], 8)
-        else if (f[i] ~ /^scope=/) PROOF_SCOPE = substr(f[i], 7)
-        else if (f[i] ~ /^evidence=/) PROOF_EVIDENCE = substr(f[i], 10)
-        else if (f[i] ~ /^owed=/) PROOF_OWED = substr(f[i], 6)
-      }
+# _PROOF_TAKE_AWK -> the awk function `proof_take(f, m)`, THE ONE READING OF A PROOF'S FIELDS: <f>[2..<m>] are its
+# `<key>=<value>` fields, the first of a key its value as lib/fields.sh `line_kv` reads it. It sets PROOF_KIND (through
+# lib/alias.sh's map) and PROOF_HEAD; a reading's PROOF_QUESTION, PROOF_READER, PROOF_RESULT and PROOF_SCOPE; the record
+# in PROOF_EVIDENCE, PROOF_OWED and a point's row in PROOF_POINT, each empty when absent; 1 when the kind is a
+# lower-case word and the head 7 to 40 lower-case hex (`head=none` is no head). A log fact (`proof_fact`) and a printed
+# line (`proof_fields`) both ask it, so a field one reads the other reads.
+_PROOF_TAKE_AWK='
+    function proof_take(f, m,   i, j, p) {
+      split("", p)
+      for (i = m; i >= 2; i--) if (j = index(f[i], "=")) p[substr(f[i], 1, j - 1)] = substr(f[i], j + 1)
+      PROOF_KIND = p["kind"]; PROOF_HEAD = p["head"]; PROOF_QUESTION = p["question"]; PROOF_READER = p["reader"]; PROOF_RESULT = p["result"]
+      PROOF_SCOPE = p["scope"]; PROOF_EVIDENCE = p["evidence"]; PROOF_OWED = p["owed"]; PROOF_POINT = p["point"]
       '"$_PROOF_KIND_NORM"'
       return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
-    }
+    }'
+# proof_awk -> the awk function `proof_fields(s)`, the view of a printed proof line (`proof_lines`) over the one reading
+# (`proof_take`): 1 when <s> is a proof line, its fields set as a log fact's are. A proof line starts `proved:` at the
+# first column (a bulleted `- proved:` is prose, not the line the writer writes) and carries its fields space-separated,
+# so it reads alike whatever field separator its caller's program splits on.
+proof_awk() {
+  printf '%s' "$_PROOF_TAKE_AWK"'
+    function proof_fields(s,   f) { split("", f); return proof_take(f, s ~ /^proved:[ \t]/ ? split(s, f, /[ \t]+/) : 0) }
   '
 }
 
@@ -1726,11 +1720,10 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
     _proof_facts_held "${1:-}" || return 2
     _proof_facts_send; return
   fi
-  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got evs rc=0 IFS=$' \t\n'
+  local plan="${1:-}" log="" dir="" stamp key cdir cache="" tmp got evs rc=0 IFS=$' \t\n'
   local -a deps
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf '_proof_facts: lib/reader.sh cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
-  lib="$_READER_LIB_DIR"
   # The lookup's exit tells a plan with no record (2), which has no event, from a lookup that died: that would send a
   # run with a log down the path for one without, so it is a failed fold.
   log="$(reader_log "$plan" 2>/dev/null)" || rc=$?
@@ -1741,10 +1734,12 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   esac
   # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
   # would leave the key blind to its changes. A fresh fold is still the run's facts, so that is not worth a word.
-  deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
-  [ -z "$log" ] || [ ! -f "$log" ] || deps+=("$log")
+  deps=("$plan"); [ -z "$log" ] || [ ! -f "$log" ] || deps+=("$log")
+  _proof_facts_libsum || :
   _proof_count_fresh; _proof_count sum _proof_facts
-  stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
+  stamp=""
+  [ -z "$_PROOF_FACTS_LIBSUM" ] || { stamp="$(cksum "${deps[@]}" 2>/dev/null)" \
+    && stamp="$(printf '%s\n' "$stamp" "$_PROOF_FACTS_LIBSUM" | cksum)" || stamp=""; }
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
   key="$plan $stamp $_PROOF_FACTS_LAYOUT"
   if [ "$_PROOF_FACTS_KEY" = "$key" ] && { [ -z "${_PROOF_FRESH:-}" ] || [ -n "$_PROOF_FACTS_LOG" ]; }; then _proof_facts_out; return; fi
@@ -1845,42 +1840,57 @@ _proof_facts_held() {  # <plan> -> 0 with _PROOF_HELD_FOLD its fold's file (empt
   # THE ONE FOLD: the log is read once into the directory, the facts folded from that read, and the finding events and
   # the inherited proofs taken from it whole in one pass, since a finding is read from all of its events. A fold that
   # failed is short or empty: it is an error to whoever asked, and nothing of it is kept.
-  ev="$d/.events-$id.$$.$RANDOM"
-  if [ -n "$log" ]; then reader_events "$plan" > "$ev" 2>/dev/null || rc=$?; else : > "$ev"; fi
+  # Its scratch files are named off one made by the exclusive create, so a sibling folding the same plan writes its own.
+  ev=""
+  if bionic_need root.sh bionic_new && bionic_new "$d/.events-$id"; then ev="$BIONIC_NEW"; else rc=2; fi
+  if [ "$rc" -ne 0 ]; then :; elif [ -n "$log" ]; then reader_events "$plan" >| "$ev" 2>/dev/null || rc=$?; else : >| "$ev"; fi
   [ "$rc" -ne 0 ] || ( set -o pipefail; reader_events() { cat "$ev"; }; reader_facts "$plan" ) > "$ev.f" || rc=$?
-  : > "$ev.n"; : > "$ev.i"
+  [ "$rc" -ne 0 ] || { : > "$ev.n"; : > "$ev.i"; }
   [ "$rc" -ne 0 ] || awk -v fo="$ev.n" -v io="$ev.i" 'index($0, "run/v1|ev=finding|") == 1 { print > fo }
     index($0, "run/v1|ev=proof|kind=inherited|") == 1 { print > io }' "$ev" || rc=$?
   if [ "$rc" -eq 0 ]; then
     mv -f "$ev.f" "$d/fold-$id" && mv -f "$ev.n" "$d/findings-$id" && mv -f "$ev.i" "$d/inherited-$id" || rc=2
   fi
-  rm -f "$ev" "$ev.f" "$ev.n" "$ev.i"
+  [ -z "$ev" ] || rm -f "$ev" "$ev.f" "$ev.n" "$ev.i"
   if [ "$rc" -ne 0 ]; then
     _PROOF_FACTS_KEY=""; _PROOF_FACTS_LOG=""; _PROOF_HELD_ID=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""
     rm -f "$d/key-$id" "$d/made-$id"
-    printf '_proof_facts: lib/reader.sh exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2
+    if [ -z "$ev" ]; then printf '_proof_facts: no scratch file could be made in %s to fold the facts of %s; nothing is kept\n' "$d" "$plan" >&2
+    else printf '_proof_facts: lib/reader.sh exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2; fi
     return 2
   fi
   if [ -n "$key" ]; then printf '%s\n' "$key" > "$d/made-$id" && printf '%s\n' "$key" > "$d/key-$id"; else rm -f "$d/key-$id" "$d/made-$id"; fi
   _proof_held_take "$d" "$id" "$key" fold
 }
-# _proof_facts_libsum -> 0 with _PROOF_FACTS_LIBSUM the cksum and size of each reader library this process folds with,
-# taken once a process (counted `libs`); 1 when one cannot be read. The libraries are the loaded reader's, or, before it
-# is loaded, the ones beside this file that `_proof_reader_load` would load. A file's path is left out of the sum, so
-# the key is the same wherever a process names the same bytes from, and taking it costs no process but the one cksum.
+# _proof_facts_libsum -> 0 with the code each kept key covers, decided here alone and summed once a process (counted
+# `libs`): _PROOF_FACTS_LIBSUM the reader's libraries, _PROOF_PLACE_LIBS proof.sh and those, _PROOF_DERIVE_LIBSUM
+# proof.sh and units.sh, which derive an answer; 1 when a reader library cannot be read. A sum whose file cannot be read
+# is empty, so what it keys is made at every ask. The reader's libraries are the loaded reader's, else the ones beside
+# this file; units.sh the loaded one, else the one beside. A sum leaves out the path, so a key is the same wherever a
+# process names the same bytes from, and costs the one cksum.
+_PROOF_DERIVE_LIBSUM=""
 _proof_facts_libsum() {
   [ -z "$_PROOF_FACTS_LIBSUM" ] || return 0
-  local lib="${BASH_SOURCE[0]%/*}" f out c n sum="" IFS=$' \t\n'
-  local -a deps=()
+  local lib="${BASH_SOURCE[0]%/*}" own f out c n p i=0 nr sum="" IFS=$' \t\n'
+  local -a deps=() sums=()
   [ "$lib" != "${BASH_SOURCE[0]}" ] || lib=.
+  own="$lib"
   ! declare -F reader_facts >/dev/null 2>&1 || lib="$_READER_LIB_DIR"
   for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
+  nr="${#deps[@]}"; deps+=("$own/proof.sh" "${_UNITS_DIR:-$own}/units.sh")
   _proof_count libs _proof_facts
-  out="$(cksum "${deps[@]}" 2>/dev/null)" || return 1
-  while read -r c n _; do sum="$sum${sum:+ }$c $n"; done <<PROOF_LIBSUM
+  # cksum names each file it read, in the order handed, and none it could not: a file absent from its lines is unread.
+  out="$(cksum "${deps[@]}" 2>/dev/null)" || :
+  while read -r c n p; do
+    while [ "$i" -lt "${#deps[@]}" ] && [ "$p" != "${deps[$i]}" ]; do i=$((i + 1)); done
+    [ "$i" -ge "${#deps[@]}" ] || sums[$i]="$c $n"; i=$((i + 1))
+  done <<PROOF_LIBSUM
 $out
 PROOF_LIBSUM
+  i=0; while [ "$i" -lt "$nr" ]; do [ -n "${sums[$i]:-}" ] || return 1; sum="$sum${sum:+ }${sums[$i]}"; i=$((i + 1)); done
   _PROOF_FACTS_LIBSUM="$sum"
+  _PROOF_PLACE_LIBS="${sums[$nr]:+${sums[$nr]} $sum}"
+  _PROOF_DERIVE_LIBSUM=""; [ -z "${sums[$nr]:-}" ] || [ -z "${sums[$((nr + 1))]:-}" ] || _PROOF_DERIVE_LIBSUM="${sums[$nr]} ${sums[$((nr + 1))]}"
 }
 # _proof_held_take <dir> <id> <key> [fold] -> the fold under <key> held by this shell: its files named, its findings and
 # inherited proofs read in, with no process. A fold this shell did not make itself is counted (`held`).
@@ -1912,8 +1922,8 @@ _proof_facts_read() {
   _proof_facts_awk "$@"
 }
 
-# The kept file's layout, shared by the kept file and the command's held fold: the key, the facts, then the finding
-# events and the inherited proofs, each part after a line of one \036.
+# The kept file's layout, read and written by `_proof_facts` alone (a held fold keeps each part in a file of its own):
+# the key, the facts, then the finding events and the inherited proofs, each part after a line of one \036.
 _proof_kept_write() {  # <key> -> the layout of the fold this shell holds
   printf '%s\n' "$1"; printf '%s' "$_PROOF_FACTS"; printf '\036\n%s' "$_PROOF_FINDINGS"; printf '\036\n%s' "$_PROOF_INHERITED"
 }
@@ -1972,10 +1982,11 @@ proof_hold_end() {  # -> the directory proof_hold_begin opened removed, and noth
 # The row states, the proofs, the born rows, the fixed findings, the proved release heads, the floor judge at a head and
 # the whole pass's line at a head are computed from the run's facts, the plan, and commits that never change. Inside a
 # held command each is computed once for its key and kept in the command's directory, and every later ask, in any
-# process of the command, reads it back with no process. The key is the answer's name, its arguments and the key of
-# the facts it was computed from, as the facts' own files hold it (`made-` beside the fold, `.key` beside an overlay),
-# so an answer computed before the command appended to the log, or over other pending lines, is never served after,
-# and a judgment that folds afresh is served only what the same facts give. A caller that holds the units library's
+# process of the command, reads it back with no process. The key is the answer's name, its arguments, the sum of the
+# code that derives it (`_proof_facts_libsum`) and the key of the facts it was computed from, as the facts' own files
+# hold it (`made-` beside the fold, `.key` beside an overlay), so an answer computed before the command appended to
+# the log, or over other pending lines, or by another copy of that code, is never served after, and a judgment that
+# folds afresh is served only what the same facts give. A caller that holds the units library's
 # facts (`_units_fold`) adds their key the same way; facts held as a string have no key, so their answer is computed.
 # Only an answer that exited 0 is kept, so a failure is heard again at every ask. Outside a held command every ask
 # computes, as before. Each compute counts `derive <name> <key>` (tests/speed-counts.test.sh), `-` for an unkept one.
@@ -2008,31 +2019,22 @@ _proof_derive() {
 # _proof_derive_file <index> <answer> -> 0 with _PROOF_DERIVE_FILE a file beside <index> made new for <answer> and
 # holding it; 1, nothing made, when none can be. NO KEPT ANSWER IS WRITTEN OVER: a subshell shares its parent's $$,
 # and under bash 3.2 the children of a subshell that drew $RANDOM each draw the same next value, so two answers made
-# in sibling subshells draw one name. Each file is made exclusively (noclobber's O_EXCL), and a name another holds is
-# drawn again, so an index line names only the answer written for its own key.
+# in sibling subshells would draw one name. Each file is made by lib/root.sh `bionic_new`, an exclusive create that
+# draws again while a name is held, so an index line names only the answer written for its own key.
 _PROOF_DERIVE_FILE=""
 _proof_derive_file() {
-  local p n=0 off=1
   _PROOF_DERIVE_FILE=""
-  case "$-" in *C*) off=0 ;; esac
-  set -C
-  while [ "$n" -lt 8 ]; do
-    p="$1.$$.$RANDOM.$n"
-    if { printf '%s' "$2" > "$p"; } 2>/dev/null; then
-      [ "$off" = 0 ] || set +C
-      _PROOF_DERIVE_FILE="$p"; return 0
-    fi
-    n=$((n + 1))
-  done
-  [ "$off" = 0 ] || set +C
-  return 1
+  bionic_need root.sh bionic_new && bionic_new "$1" || return 1
+  if { printf '%s' "$2" >| "$BIONIC_NEW"; } 2>/dev/null; then _PROOF_DERIVE_FILE="$BIONIC_NEW"; return 0; fi
+  rm -f "$BIONIC_NEW"; return 1
 }
-# _proof_derive_key <key> -> 0 with _PROOF_DERIVE_KEY <key> and the key of each view of the facts the caller holds, one
-# line; 1 when a view has none
+# _proof_derive_key <key> -> 0 with _PROOF_DERIVE_KEY <key>, the sum of the code that derives the answer and the key
+# of each view of the facts the caller holds, one line; 1 when that code or a view has none
 _proof_derive_key() {
   local k="$1" f
+  _proof_facts_libsum && [ -n "$_PROOF_DERIVE_LIBSUM" ] || return 1
   _proof_facts_ident "${_PROOF_FACTS_FILE:-}" || return 1
-  k="$k"$'\035'"facts=$_PROOF_IDENT"; f="$_PROOF_IDENT"
+  k="$k"$'\035'"code=$_PROOF_DERIVE_LIBSUM"$'\035'"facts=$_PROOF_IDENT"; f="$_PROOF_IDENT"
   # The units view adds to the key only where it holds other facts than the reader's: the same facts give one answer.
   if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then
     _proof_facts_ident "${_UNITS_FACTS_FILE:-}" || return 1
@@ -2206,9 +2208,7 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   # The libraries are summed once a shell and the place's directory is judged once a shell, since neither changes
   # under a process; the plan and its log are summed at every ask.
   if [ -z "$_PROOF_PLACE_LIBS" ]; then
-    deps=("$_READER_LIB_DIR/proof.sh"); for f in $_PROOF_FACTS_LIBS; do deps+=("$_READER_LIB_DIR/$f"); done
-    _PROOF_PLACE_LIBS="$(cksum "${deps[@]}" 2>/dev/null)" || _PROOF_PLACE_LIBS=""
-    _PROOF_PLACE_LIBS="${_PROOF_PLACE_LIBS//$'\n'/ }"
+    _proof_facts_libsum || :
     # A directory of its own beside the kept fold's, never inside it: a sweep of the kept folds meets no entry it
     # did not write. Trusted as the kept fold is, owned by this user and writable by no one else.
     _PROOF_PLACE_DIR="${TMPDIR:-/tmp}/bionic-place-${UID:-0}"
@@ -2307,20 +2307,14 @@ _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and e
 }
 
 # proof_fact_awk -> awk source over `run/v1` facts, beside lib/line.sh's `line_kv` and the reader's `ev()`: the
-# function `proof_fact()`, 1 when the record is a proof whose kind is a lower-case word and whose head is 7 to 40
-# lower-case hex, as `proof_fields` holds a proof line, with the same PROOF_* fields set and the kind read through
-# lib/alias.sh's map. `proof_fact_line()` prints the fact as the `proved:` line its writer writes, for a caller that
-# quotes the line.
+# function `proof_fact()`, the one reading (`proof_take`) of the record when it is a proof event, 0 for any other.
+# `proof_fact_line()` prints the fact as the `proved:` line its writer writes, for a caller that quotes the line.
 proof_fact_awk() {
   _proof_reader_load
-  printf '%s' "$_READER_AWK"'
-    function proof_fact() {
-      PROOF_KIND = ""; PROOF_HEAD = ""; PROOF_QUESTION = ""; PROOF_READER = ""; PROOF_RESULT = ""; PROOF_SCOPE = ""; PROOF_EVIDENCE = ""; PROOF_OWED = ""
-      if (ev() != "proof") return 0
-      PROOF_KIND = line_kv("kind"); PROOF_HEAD = line_kv("head"); PROOF_QUESTION = line_kv("question"); PROOF_READER = line_kv("reader")
-      PROOF_RESULT = line_kv("result"); PROOF_SCOPE = line_kv("scope"); PROOF_EVIDENCE = line_kv("evidence"); PROOF_OWED = line_kv("owed")
-      '"$_PROOF_KIND_NORM"'
-      return (PROOF_KIND ~ /^[a-z]+$/ && PROOF_HEAD ~ /^[0-9a-f]+$/ && length(PROOF_HEAD) >= 7 && length(PROOF_HEAD) <= 40)
+  printf '%s' "$_READER_AWK$_PROOF_TAKE_AWK"'
+    function proof_fact(   f, i, m) {
+      split("", f); if (ev() == "proof") for (m = i = NF; i >= 2; i--) f[i] = $i
+      return proof_take(f, m)
     }
     function proof_fact_line(   l) {
       l = "proved: kind=" line_kv("kind") " head=" PROOF_HEAD " at=" line_kv("at") " evidence=" PROOF_EVIDENCE
@@ -2328,7 +2322,7 @@ proof_fact_awk() {
       else if (PROOF_RESULT != "") l = l " result=" PROOF_RESULT
       if (PROOF_OWED != "") l = l " owed=" PROOF_OWED
       if (line_kv("run") != "") l = l " run=" line_kv("run") " head=" PROOF_HEAD " rc=" line_kv("rc")
-      if (line_kv("point") != "") l = l " point=" line_kv("point")
+      if (PROOF_POINT != "") l = l " point=" PROOF_POINT
       return l
     }
   '
@@ -2374,8 +2368,7 @@ proof_points() {
   local pl
   pl="$(proof_lines "${1:-}")" || return 2
   printf '%s\n' "$pl" | awk "$(proof_awk)"'
-    proof_fields($0) && PROOF_KIND == "point" && match($0, / point=[^ ]+/) {
-      printf "%s\t%s\t%s\t%s\n", substr($0, RSTART + 7, RLENGTH - 7), PROOF_HEAD, PROOF_EVIDENCE, PROOF_OWED }'
+    proof_fields($0) && PROOF_KIND == "point" && PROOF_POINT != "" { printf "%s\t%s\t%s\t%s\n", PROOF_POINT, PROOF_HEAD, PROOF_EVIDENCE, PROOF_OWED }'
 }
 
 # proof_last <plan> <kind> [<question>] -> the head of the NEWEST standing proof of <kind> the reader holds for the
@@ -2773,17 +2766,13 @@ _proof_floor_judge() {
   _proof_derive _proof_floor_judge "$_PROOF_TREE_KEY" _proof_floor_made "$@"
 }
 _proof_floor_made() {
-  local plan="$1" tree="$2" c="$3" h owed open why based=1 behind=0
+  local plan="$1" tree="$2" c="$3" h owed why based=1 behind=0
   _proof_floor_base "$plan" "$tree" || based=0
   h="$_PF_H"; owed="$_PF_OWED"
   c="$(git -C "$tree" rev-parse --verify -q "${c}^{commit}" 2>/dev/null)" || c=""
   [ "$based" = 0 ] || [ -z "$c" ] || [ "$h" = "$c" ] || ! git -C "$tree" merge-base --is-ancestor "$h" "$c" 2>/dev/null || behind=1
-  # Only the closes are asked here, never the commits: a commit no run proved must not hide a red still open. A walk
-  # git cannot list closes nothing, so every red stays open.
-  if [ -n "$owed" ] && [ "$behind" = 1 ]; then
-    open="$(_proof_past_f "$plan" "$tree" "$h" "$c" "$owed" closes)"
-    case $? in 0) owed="" ;; 2) owed="$open" ;; esac
-  fi
+  # Only the closes are asked here, never the commits: a commit no run proved must not hide a red still open.
+  [ -z "$owed" ] || [ "$behind" = 0 ] || owed="$(_proof_open_reds "$plan" "$tree" "$h" "$c" "$owed")"
   [ -z "$owed" ] || { printf 'owed\t%s\n' "$owed"; return 0; }
   [ "$based" = 1 ] || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }
   [ -n "$c" ] || { printf 'uncovered\tthe head %s is not a commit here\n' "$3"; return 0; }
@@ -2797,16 +2786,15 @@ _proof_floor_made() {
 # _proof_past_f <plan> <tree> <F> <head> <owed> [<only>] -> exit 0, printing nothing, when every commit on the first-parent line
 # F..<head> is excused or proved and every suite of <owed> (comma-joined) is closed; exit 2 printing the suites still
 # open, comma-joined; exit 1 printing one sentence naming the first commit that is not proved and what it lacks.
-# EXCUSED: its tree is its first parent's; or every path it changed is docs (on the prose list, lib/prose.sh, or under the docs
-# root or the tracked docs home); or every path is in the release set (`_proof_release_path`) and a check passed at it (`proof_check_passes`).
+# EXCUSED: its class on the walk (`_proof_path_walk`) is prose, a tree that is its first parent's among them; or
+# release, and a check passed at it (`proof_check_passes`).
 # PROVED: each suite its row's landing names (the row's last `ready` before the `published` event naming the commit;
 # with no such event, the suites the landing verdicts at it name) has a newest record at it that is green. A record is
 # at the commit it ran at, or at the row head a merge commit brought in as its second parent.
 # CLOSED: a red of F has a newest landing verdict (never a stamp, never a whole run) green at a commit after F.
-# With <only> `closes` the commits are not judged: exit 0 or 2 says only which suites of <owed> are still open, the one
-# reading of the closes the judge and the health line share (`proof_health_line`).
+# With <only> `closes` the commits are not judged: exit 0 or 2 says only which suites of <owed> are still open.
 _proof_past_f() {
-  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs plist files="" c f isdoc isrel chk
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs chk
   walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
     printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
@@ -2814,23 +2802,34 @@ _proof_past_f() {
   # The closes alone ask nothing of the paths or the checks: each commit's proof is skipped below.
   [ "$only" != closes ] || { printf '%s\n%s\n' "$walk" "$recs" | _proof_past_f_awk closes "$owed"; return $?; }
   _proof_roots_load
+  chk="$(proof_check_passes "$plan" "$tree")" || { printf 'the run'"'"'s facts cannot be read, so no check at a commit past %s is known' "${from:0:12}"; return 1; }
+  _proof_path_walk "$tree" "$from" "$to" || :
+  printf '%s\n%s\n%s\n%s\n' "$walk" "$recs" "$_PROOF_WALK" "$(printf '%s\n' "$chk" | sed '/^$/d; s/^/K	/')" \
+    | _proof_past_f_awk all "$owed"
+}
+
+# _proof_path_walk <tree> <from> <to> -> 0, _PROOF_WALK a `C<TAB><commit><TAB><prose><TAB><release>` line per
+# first-parent commit past <from>, oldest first, a class 1 when every path it touched is prose (`prose_path`) or in the
+# release set (`_proof_release_path`), so CHANGELOG.md spoils neither; 1, empty, when git cannot list the range. THE
+# ONE WALK of the cover (`_facts_walk`) and the regression (`_proof_past_f`), in the caller's shell.
+_proof_path_walk() {
+  local tree="$1" files f c="" prose=1 rel=1 plist
+  _PROOF_WALK=""
   # The prose list, the docs homes among its entries, is read once for the walk and asked per path with no fork.
   _proof_prose_load
   plist="$(prose_list "$tree" 2>/dev/null)"
+  files="$(git -C "$tree" log --reverse --first-parent -m --no-renames --name-only --format='%x01%H' "$2..$3" 2>/dev/null)" || return 1
   while IFS= read -r f; do
-    case "$f" in '') continue ;; $'\001'*) c="${f#?}"; continue ;; esac
-    # Each path is asked both questions, as the judge's cover asks them: CHANGELOG.md is docs and in the release set,
-    # so it spoils neither a docs commit's excuse nor a release commit's, which its passing check gives.
-    isdoc=0; isrel=0
-    ! prose_path "$f" "$plist" || isdoc=1
-    ! _proof_release_path "$f" || isrel=1
-    files="$files${files:+$'\n'}C	$c	$isdoc	$isrel"
-  done <<PROOF_PAST_FILES
-$(git -C "$tree" log --no-renames --first-parent -m --name-only --format='%x01%H' "$from..$to" 2>/dev/null)
-PROOF_PAST_FILES
-  chk="$(proof_check_passes "$plan" "$tree")" || { printf 'the run'"'"'s facts cannot be read, so no check at a commit past %s is known' "${from:0:12}"; return 1; }
-  printf '%s\n%s\n%s\n%s\n' "$walk" "$recs" "$files" "$(printf '%s\n' "$chk" | sed '/^$/d; s/^/K	/')" \
-    | _proof_past_f_awk all "$owed"
+    case "$f" in
+      '') continue ;;
+      $'\001'*) [ -z "$c" ] || _PROOF_WALK="$_PROOF_WALK"$'\n'"C	$c	$prose	$rel"; c="${f#?}"; prose=1; rel=1; continue ;;
+    esac
+    [ "$rel" = 0 ] || _proof_release_path "$f" || rel=0
+    [ "$prose" = 0 ] || prose_path "$f" "$plist" || prose=0
+  done <<PROOF_PATH_WALK
+$files
+PROOF_PATH_WALK
+  [ -z "$c" ] || _PROOF_WALK="$_PROOF_WALK"$'\n'"C	$c	$prose	$rel"
 }
 
 # _proof_past_f_awk <all|closes> <owed> -> the fold `_proof_past_f` judges its walk, records, paths and checks with, on
@@ -2880,19 +2879,27 @@ _proof_past_f_awk() {
     }'
 }
 
+# _proof_open_reds <plan> <tree> <F> <head> <owed> -> the suites of <owed> still open past F, F behind <head>, by
+# `_proof_past_f`'s closes; all of them when those cannot be read. THE ONE FOLD of the judge and the health line.
+_proof_open_reds() {
+  local open
+  open="$(_proof_past_f "$@" closes)"
+  case $? in 0) : ;; 2) printf '%s\n' "$open" ;; *) printf '%s\n' "$5" ;; esac
+}
+
 # proof_health_line <plan> <tree> [<record plan>] -> the matrix head's `stack-health:` value, one line, exit 0: the judge's
 # fact about the plan's last regression proof, rendered, so every writer of the line writes the same words.
 #   pending                                                     the plan has no regression proof
 #   green head=<F>[ pass=<n> total=<m>] evidence=<logs>          the whole run at F left nothing owed
 #   red head=<F>[ pass=<n> total=<m>] owed=<open>[ closed=<closed>] evidence=<logs>   otherwise
 # GREEN MEANS THE FULL PASS RAN GREEN AT THAT HEAD: a landing that greens a suite F left red closes it (`closed=`, the
-# judge's own closes, `_proof_past_f` at `closes`) and drops it from `owed=`, which may end empty, and the line stays red.
+# judge's own closes, `_proof_open_reds`) and drops it from `owed=`, which may end empty, and the line stays red.
 # The owed set is the proof line's own, inherited debt included, since the pass at F was not green with it. pass= and
 # total= are summed over the proof's logs (`proof_run_counts`) and dropped when any log carries no `Gating:` count. The
 # closes are read from F to the working branch's head; a head git cannot place after F closes nothing. <record plan> is
 # the plan whose landing record and working branch are read, for a <plan> that is the copy a verb writes (default <plan>).
 proof_health_line() {
-  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" f fc owed ev docs log n pass=0 total=0 counted=1 open="" closed="" c rc
+  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" f fc owed ev docs log n pass=0 total=0 counted=1 open="" closed="" c
   # The proof is the run's, read from the plan whose record holds its log (a verb's copy names none), with the proof the
   # verb is registering pending in it (`proof_pending`).
   f="$(proof_last "$rplan" regression)" && owed="$(_proof_last_read "$rplan" regression owed)" \
@@ -2916,8 +2923,7 @@ PROOF_HEALTH_LOGS
   fc="$(git -C "$tree" rev-parse --verify -q "${f}^{commit}" 2>/dev/null)" || fc=""
   c="$(proof_branch_head "$rplan" "$tree" 2>/dev/null)" || c=""
   if [ -n "$fc" ] && [ -n "$c" ] && [ "$fc" != "$c" ] && git -C "$tree" merge-base --is-ancestor "$fc" "$c" 2>/dev/null; then
-    rc=0; open="$(_proof_past_f "$rplan" "$tree" "$fc" "$c" "$owed" closes)" || rc=$?
-    case "$rc" in 0) open="" ;; 2) : ;; *) open="$owed" ;; esac
+    open="$(_proof_open_reds "$rplan" "$tree" "$fc" "$c" "$owed")"
   fi
   closed="$(PROOF_O=",$open," awk -F, '{ for (i = 1; i <= NF; i++) if ($i != "" && !index(ENVIRON["PROOF_O"], "," $i ",")) o = o (o == "" ? "" : ",") $i; print o }' <<PROOF_HEALTH_OWED
 $owed
@@ -3590,27 +3596,18 @@ PROOF_BORN
 # <last head>; nothing printed and 1 when <last head> is not on <head>'s history, or git cannot answer: uncovered is
 # the safe direction. Both heads are compared as the commits they resolve to, never as strings (T45; review pass 13 F10).
 _facts_walk() {
-  local tree="$1" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0 plist
+  local tree="$1" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh k c prose rel rc=0
   [ -n "$tree" ] || return 1
-  _proof_prose_load
-  plist="$(prose_list "$tree" 2>/dev/null)"
   lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
   hh="$(git -C "$tree" rev-parse --verify -q "$4^{commit}" 2>/dev/null)" || return 1
   [ "$lh" != "$hh" ] || return 0
   git -C "$tree" merge-base --is-ancestor "$lh" "$hh" 2>/dev/null || return 1
-  files="$(git -C "$tree" log --reverse --first-parent -m --no-renames --name-only --format='%x01%H' "$lh..$hh" 2>/dev/null)" || return 1
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    case "$f" in
-      $'\001'*) [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" "$rel" "$chk" || rc=1; c="${f#?}"; prose=1; rel=1; continue ;;
-    esac
-    [ "$rel" = 0 ] || _proof_release_path "$f" || rel=0
-    [ "$prose" = 1 ] || continue
-    prose_path "$f" "$plist" || prose=0
+  _proof_path_walk "$tree" "$lh" "$hh" || return 1
+  while IFS='	' read -r k c prose rel; do
+    [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" "$rel" "$chk" || rc=1
   done <<PROOF_DOCS_FILES
-$files
+$_PROOF_WALK
 PROOF_DOCS_FILES
-  [ -z "$c" ] || _facts_basis "$c" "$prose" "$born" "$q" "$rel" "$chk" || rc=1
   return "$rc"
 }
 

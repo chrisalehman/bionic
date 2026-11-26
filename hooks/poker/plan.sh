@@ -611,13 +611,8 @@ pv_header_cells() {
       say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
       exit 0
     fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
       die_run "REFUSED — no row named $AMEND_NAME: this session has no roster at $ROSTER_FILE." "bash ${HOOK_DIR}/session-poker.sh adopt"
       exit 1
@@ -1227,7 +1222,7 @@ EOF
 
     # THE NAME IS THE DISPATCH'S: a re-dispatch gets its own file beside the first, so the record keeps what each
     # agent was given. It must be a name the dispatch wall binds to this row (the id, or the id behind a prefix).
-    [ -n "${BRF_NAME:-}" ] || BRF_NAME="$(fill_name "$PV_REPO/.bionic/tmp/roster-$(session_id).state" "$BRF_ID")"
+    [ -n "${BRF_NAME:-}" ] || BRF_NAME="$(fill_name "$(roster_path "$PV_REPO" "$(session_id)")" "$BRF_ID")"
     if ! plan_verb_id_ok "$BRF_NAME" || ! fill_row_launched "$BRF_ID" "$BRF_NAME"; then
       die "REFUSED — '$(clean "$BRF_NAME")' is not a name of row $BRF_ID: the dispatch wall binds a name to the row it ends with (the id, or <prefix>-$BRF_ID, with -r<n> for a re-dispatch). Nothing was written. Run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID <prefix>-$BRF_ID"
       exit 1
@@ -1451,7 +1446,7 @@ BRF_EOF
       exit 1
     fi
     case "$ST_ROLE" in *:*) : ;; *) ST_ROLE="bionic:$ST_ROLE" ;; esac
-    [ -n "$ST_NAME" ] || ST_NAME="$(fill_name "$PV_REPO/.bionic/tmp/roster-$(session_id).state" "$ST_ID")"
+    [ -n "$ST_NAME" ] || ST_NAME="$(fill_name "$(roster_path "$PV_REPO" "$(session_id)")" "$ST_ID")"
     if ! plan_verb_id_ok "$ST_NAME" || ! fill_row_launched "$ST_ID" "$ST_NAME"; then
       die_run "REFUSED — '$(clean "$ST_NAME")' is not a name of row $ST_ID: the dispatch wall binds a name to the row it ends with (the id, or <prefix>-$ST_ID, with -r<n> for a re-dispatch). Nothing was done." "bash ${HOOK_DIR}/session-poker.sh start $ST_ID" 
       exit 1
@@ -1816,7 +1811,7 @@ RR_MATRIX
     # THE TITLE'S FACTS: the project, the release, the tasks landed. Every fact of the run is a reader answer over the
     # kept fold (lib/proof.sh `_proof_ask`), so the page says what the log holds at this instant, and the plan's rows
     # are the scheduler's (`units_rows`).
-    RR_PROJ="$(git -C "$PV_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+    RR_PROJ="$(git_common_dir "$PV_REPO")"
     case "$RR_PROJ" in */.git) RR_PROJ="${RR_PROJ%/.git}"; RR_PROJ="${RR_PROJ##*/}" ;; *) RR_PROJ="${PV_REPO##*/}" ;; esac
     RR_AGAIN="release-approval$([ "$RR_PREVIEW" != yes ] || printf ' --preview') $PV_PLAN"
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_header release; RR_REL="$(printf '%s\n' "$RR_ANS" | sed -n 's/^release=//p')"
@@ -2434,11 +2429,7 @@ RP_TABLE
         exit 1 ;;
     esac
     sid="$(session_id 2>/dev/null)" || sid=""
-    root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-    if [ -z "$root" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    root="$(project_root_or_refuse "$PWD")" || exit 2
     if [ -n "$sid" ] && engaged_session "$root" "$sid"; then
       run="$(session_run "$root" "$sid")"
       case "$run" in 'bound-open '*) mode=plan; plan="${run#bound-open }" ;; esac

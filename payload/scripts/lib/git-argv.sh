@@ -65,6 +65,21 @@ GIT_ARGV_LIB_LOADED=1
 # would not: quoted tokens contain both).
 GIT_ARGV_US=$'\037'
 
+# git_argv_split_on / _off — around one `set -- $list` of a US-joined list: on saves IFS and the
+# globbing state, sets IFS to US and turns globbing off; off puts both back. The `set --` stays in
+# the caller (a function cannot set its caller's "$@"), and nothing else runs between the two.
+_GIT_ARGV_SAVED_IFS=""; _GIT_ARGV_SAVED_F=0
+git_argv_split_on() {
+  _GIT_ARGV_SAVED_IFS="$IFS"; _GIT_ARGV_SAVED_F=0
+  case "$-" in *f*) _GIT_ARGV_SAVED_F=1 ;; esac
+  set -f
+  IFS="$GIT_ARGV_US"
+}
+git_argv_split_off() {
+  IFS="$_GIT_ARGV_SAVED_IFS"
+  [ "$_GIT_ARGV_SAVED_F" -eq 1 ] || set +f
+}
+
 # The scanner. It runs as ONE awk process per command — a bash character loop
 # over `${s:i:1}` is quadratic in practice, and protect-main.sh runs on every
 # Bash tool call in the session.
@@ -351,17 +366,14 @@ git_argv_segments() {
 GIT_ARGV_ENV_CHDIR=""
 GIT_ARGV_ENV_SPLIT=""
 _git_argv_skip() {
-  local _line="$1" _oldifs="$IFS" _hadf=0 _o _c _v
+  local _line="$1" _oldifs="$IFS" _o _c _v
   GIT_ARGV_ENV_CHDIR=""
   GIT_ARGV_ENV_SPLIT=""
 
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_line
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
 
   while [ $# -gt 0 ]; do
     # THE OPENERS ARE READ AS TYPED; every other arm compares the word's fold (wave-25 T12):
@@ -602,18 +614,15 @@ git_argv_is_git() {
 git_argv_parse() {
   GIT_SUB=""
   GIT_ARGS=""
-  local _oldifs="$IFS" _hadf=0 _n=0 _a
+  local _n=0 _a
 
   _git_argv_skip "$1"
   [ -n "$GIT_ARGV_REST" ] || return 1
 
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $GIT_ARGV_REST
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
 
   [ $# -gt 0 ] || return 1
   git_argv_is_git "$1" || return 1
@@ -654,7 +663,7 @@ git_argv_parse() {
 # libraries were written in one wave and disagreed about it until R-12
 # (critic-step6.md §C-5).
 git_argv_inner() {
-  local _oldifs="$IFS" _hadf=0 _b _out="" _n=0 _w
+  local _b _out="" _n=0 _w
 
   _git_argv_skip "$1"
   # `env -S '<string>' [args]` runs the split string with the remaining words
@@ -669,13 +678,10 @@ git_argv_inner() {
   fi
   [ -n "$GIT_ARGV_REST" ] || return 1
 
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $GIT_ARGV_REST
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
 
   [ $# -gt 0 ] || return 1
   cmd_word_fold "${1##*/}"
@@ -789,15 +795,12 @@ git_argv_has_any_sub() {
 git_push_targets() {
   GIT_DESTS=""
   GIT_FORCE=0
-  local _oldifs="$IFS" _hadf=0 _n=0 _w _d _src
+  local _n=0 _w _d _src
 
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $GIT_ARGS
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
 
   while [ $# -gt 0 ]; do
     _w="$1"
@@ -844,17 +847,16 @@ git_push_targets() {
 # to read (`-a` with paths) and an interactive one (`-p`, `--interactive`) stage nothing here: what
 # cannot be read is judged on the index as it stands. Prints nothing when the call stages nothing.
 git_commit_stage() {
-  local _line _oldifs="$IFS" _hadf _out="" _pend="" _c _w _all _x _pf _paths _u="$GIT_ARGV_US"
+  local _line _out="" _pend="" _c _w _all _x _pf _paths _u="$GIT_ARGV_US"
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     git_argv_parse "$_line" || continue
     case "$GIT_SUB" in add|stage|commit) ;; *) continue ;; esac
     _git_argv_skip "$_line"
-    _hadf=0; case "$-" in *f*) _hadf=1 ;; esac
-    set -f; IFS="$_u"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"; [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     shift; _c=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -865,11 +867,10 @@ git_commit_stage() {
       esac
     done
     if [ "$GIT_SUB" != commit ]; then _pend="$_pend${_c}add${GIT_ARGS:+$_u$GIT_ARGS}"$'\n'; continue; fi
-    _hadf=0; case "$-" in *f*) _hadf=1 ;; esac
-    set -f; IFS="$_u"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGS
-    IFS="$_oldifs"; [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     _all=0; _x=0; _pf=""; _paths=""
     while [ $# -gt 0 ]; do
       _w="$1"; shift

@@ -112,6 +112,9 @@ bionic_need gate.sh gate_room || :
 # read holds nothing, the same posture `gate_room` takes above.
 bionic_need owed.sh owed_list_plan || :
 
+# THE FIELD READER, SOURCED THE SAME WAY, for `adopt_cross_acks`.
+bionic_need fields.sh line_field_v
+
 # ── THE LEDGER'S OWN FIELD ────────────────────────────────────────────────────
 #
 # _fill_current_field <plan> -> the run's step as the reader answers it, its sub-step letter kept, or "" when the run
@@ -652,27 +655,22 @@ adopt_cross_acks() {  # <state dir> -> one line per ack in any ledger of the roo
     [ -f "$l" ] && [ ! -L "$l" ] || continue
     /usr/bin/grep -q '|event=ack|' "$l" 2>/dev/null || continue
     printf '%s\n' "$l"
-  done | awk '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
+  done | awk "$_LINE_FIELDS_AWK"'
     {
       led = $0; sid = led; sub(/^.*\/sweeper-/, "", sid); sub(/\.state$/, "", sid)
       ros = led; sub(/sweeper-[^\/]*$/, "roster-" sid ".state", ros)
       split("", ids); split("", nids); split("", noid)
       while ((getline line < ros) > 0) {
         if (index(line, "roster-state/") != 1) continue
-        nm = kv(line, "name"); if (nm == "") continue
-        id = kv(line, "agent_id")
+        nm = line_kv_of(line, "name"); if (nm == "") continue
+        id = line_kv_of(line, "agent_id")
         if (id == "") { noid[nm] = 1; continue }
         if (!((nm SUBSEP id) in ids)) { ids[nm SUBSEP id] = 1; nids[nm]++; one[nm] = id }
       }
       close(ros)
       while ((getline line < led) > 0) {
-        if (index(line, "sweeper-ledger/v1|") != 1 || kv(line, "event") != "ack") continue
-        nm = kv(line, "name"); at = kv(line, "at"); if (nm == "" || at == "") continue
+        if (index(line, "sweeper-ledger/v1|") != 1 || line_kv_of(line, "event") != "ack") continue
+        nm = line_kv_of(line, "name"); at = line_kv_of(line, "at"); if (nm == "" || at == "") continue
         sig = ""
         if ((nm in noid) || (nm in nids)) sig = ((nm in noid) || nids[nm] != 1) ? "*" : "=" one[nm]
         printf "%s\t%s\t%s\t%s\n", nm, at, sig, sid

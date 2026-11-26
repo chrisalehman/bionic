@@ -422,6 +422,41 @@ expect_eq "LANDS-12 the close row dispatched owns the continuation: run exits 0,
   "0|landed|$LW_CK" "$CO_RC|$(lands_state "$PLW" T4)|$(cksum < "$PLW/$CONT_REL")"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -8 | sed 's/^/    | /'
 expect_contains "LANDS-12b …and the card says whose it is" "continuation: ${CONT_REL#.bionic/docs/} is the close row T4's" "$CO_OUT"
+# A writer once dispatched began the continuation, and the stand-down took its launch back: no dispatch stands, but the
+# file is still that writer's, so the close writes none of it.
+# fails-when: the close appends to a continuation whose writer's dispatch was taken back.
+PLK="$(mk_fixture lands-taken-back)"; advance_to "$PLK" 8; lands_rows "$PLK"
+awk -v c="$CONT_REL" '/^\| T4 \|/ { print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-1 | " c " | — |"; next } { print }' \
+  "$PLK/$PLAN_REL" > "$PLK/t4" && mv "$PLK/t4" "$PLK/$PLAN_REL"
+LK_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf 'run/v1|ev=dispatch|row=T4|name=w-T4|at=%s\nrun/v1|ev=cancel|of=dispatch|row=T4|name=w-T4|at=%s\n' "$LK_AT" "$LK_AT" >> "$PLK/$LOG_REL"
+seal_fixture "$PLK/$PLAN_REL" "$PLK/$LOG_REL"; lands_bind "$PLK" "$LA_SID"
+mkdir -p "$PLK/${CONT_REL%/*}"; printf '# continuation — begun by the close row T4\n\nthe writer'"'"'s words\n' > "$PLK/$CONT_REL"
+LK_CK="$(cksum < "$PLK/$CONT_REL")"
+expect_eq "LANDS-13 precondition: T4's launch was taken back, so no dispatch of it stands and it reads pending" "pending" "$(lands_state "$PLK" T4)"
+run_close_as "$LA_SID" "$PLK" run
+expect_eq "LANDS-13a a close row whose dispatch was taken back still owns the continuation: run exits 0 and the file is as its writer left it" \
+  "0|$LK_CK" "$CO_RC|$(cksum < "$PLK/$CONT_REL")"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -8 | sed 's/^/    | /'
+expect_contains "LANDS-13b …and the card says whose it is" "continuation: ${CONT_REL#.bionic/docs/} is the close row T4's" "$CO_OUT"
+# A close row whose record does not stand is not finished, so the merge does not land it: it stays open, named on the
+# card, and the integrate row beside it lands as before.
+# fails-when: the merge writes a landing for a close row whose record was never written.
+PLR="$(mk_fixture lands-no-record)"; advance_to "$PLR" 8; lands_rows "$PLR"
+LR_REC="record/wave-01-fixture/T4.md"
+awk -v c="$LR_REC" '/^\| T4 \|/ { print "| T4 | 9 | close | close-out, the close record | — | 10 | AC-1 | " c " | — |"; next } { print }' \
+  "$PLR/$PLAN_REL" > "$PLR/t4" && mv "$PLR/t4" "$PLR/$PLAN_REL"
+seal_fixture "$PLR/$PLAN_REL" "$PLR/$LOG_REL"; lands_bind "$PLR" "$LA_SID"
+LR_MAIN="$(fixture_git "$PLR" rev-parse --verify -q main)"
+expect_eq "LANDS-14 precondition: T4's record is not on disk and T3 and T4 read pending" "no|pending|pending" \
+  "$([ -e "$PLR/.bionic/docs/$LR_REC" ] && echo yes || echo no)|$(lands_state "$PLR" T3)|$(lands_state "$PLR" T4)"
+run_close_as "$LA_SID" "$PLR" run
+expect_eq "LANDS-14a a close row with no record reads open after the close, with no landing, and the integrate row lands" \
+  "0|landed|$LR_MAIN close close-out|pending|" \
+  "$CO_RC|$(lands_state "$PLR" T3)|$(lands_pub "$PLR" T3)|$(lands_state "$PLR" T4)|$(lands_pub "$PLR" T4)"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -8 | sed 's/^/    | /'
+expect_contains "LANDS-14b …and the card names it left open, beside the row it landed" \
+  "rows-landed: T3 at main @ ${LR_MAIN:0:7}; T4 left open — no record it names stands" "$CO_OUT"
 
 # ============================================================
 section "§PARKED — wave-38 T15 (REQ-4 AC-4.3; D17): close-out closes a parked wave without the merge act"
