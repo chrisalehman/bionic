@@ -211,7 +211,7 @@ expect_eq "plugin_root survives a relative source followed by a cd" \
 # deeper answers with that copy's payload root, not with the shipped one.
 DEEP="$SANDBOX/deep/payload/scripts/lib"
 mkdir -p "$DEEP"
-cp "$LIB_DIR/roots.sh" "$LIB_DIR/root.sh" "$DEEP/"
+cp "$LIB_DIR/roots.sh" "$LIB_DIR/root.sh" "$LIB_DIR/loader.sh" "$DEEP/"
 expect_eq "…and it is genuinely the SOURCED file's location, not a constant" \
   "$SANDBOX/deep/payload" \
   "$( /bin/bash -c 'unset BIONIC_PLUGIN_ROOT CLAUDE_PLUGIN_ROOT

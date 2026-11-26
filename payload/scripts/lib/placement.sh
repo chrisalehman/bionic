@@ -64,20 +64,14 @@
 # COST. One awk reading, whatever the command's length: the shell side is a fixed handful of
 # commands, so a 2 KB and a 200 KB quoted body cost the same.
 #
-# LOADING. Sources cmd-class.sh from its own directory unless it is already loaded. A library
+# LOADING. Loads cmd-class.sh through lib/loader.sh unless it is already loaded. A library
 # that cannot load leaves cmd_place undefined and the source returns 1, so a caller can fail
 # closed on it.
 #
 # BASH 3.2. [WALL: tests/placement.test.sh]
 
-if ! declare -F _cmd_class_awk >/dev/null 2>&1; then
-  case "${BASH_SOURCE[0]}" in
-    */*) _PLACEMENT_LIB_DIR="${BASH_SOURCE[0]%/*}" ;;
-    *)   _PLACEMENT_LIB_DIR="." ;;
-  esac
-  # shellcheck source=cmd-class.sh
-  . "$_PLACEMENT_LIB_DIR/cmd-class.sh" || return 1
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need cmd-class.sh _cmd_class_awk || return 1
 
 cmd_place() {  # <command> <cwd> [<target>] -> the tree (rc 0), `moving <segment>` (rc 1); rc 2 bad cwd, rc 3 no such target
   case "${2-}" in

@@ -138,14 +138,8 @@ if [ -n "${GRANT_LIB_LOADED:-}" ]; then
   return 0 2>/dev/null || true
 fi
 
-case "${BASH_SOURCE[0]}" in
-  */*) _GRANT_LIB_DIR="${BASH_SOURCE[0]%/*}" ;;
-  *) _GRANT_LIB_DIR="." ;;
-esac
-if ! declare -F git_argv_expand >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_GRANT_LIB_DIR/git-argv.sh" || return 1
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need git-argv.sh git_argv_expand || return 1
 GRANT_LIB_LOADED=1
 
 GRANT_TAB=$'\t'

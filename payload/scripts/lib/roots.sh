@@ -83,10 +83,8 @@ _ROOTS_PAYLOAD_DIR="$(cd "$_ROOTS_LIB_DIR/../.." && pwd -P)"
 
 # root.sh, THE SOFT SOURCE — see the header. Guarded on the function and not on the
 # file, so a caller that already sourced root.sh pays nothing.
-if ! declare -F project_root >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_ROOTS_LIB_DIR/root.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need root.sh project_root
 
 # ─── The one config reader ───────────────────────────────────────────────────
 #
