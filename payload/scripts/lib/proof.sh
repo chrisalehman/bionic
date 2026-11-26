@@ -1720,11 +1720,10 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
     _proof_facts_held "${1:-}" || return 2
     _proof_facts_send; return
   fi
-  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got evs rc=0 IFS=$' \t\n'
+  local plan="${1:-}" log="" dir="" stamp key cdir cache="" tmp got evs rc=0 IFS=$' \t\n'
   local -a deps
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf '_proof_facts: lib/reader.sh cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
-  lib="$_READER_LIB_DIR"
   # The lookup's exit tells a plan with no record (2), which has no event, from a lookup that died: that would send a
   # run with a log down the path for one without, so it is a failed fold.
   log="$(reader_log "$plan" 2>/dev/null)" || rc=$?
@@ -1735,10 +1734,12 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   esac
   # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
   # would leave the key blind to its changes. A fresh fold is still the run's facts, so that is not worth a word.
-  deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
-  [ -z "$log" ] || [ ! -f "$log" ] || deps+=("$log")
+  deps=("$plan"); [ -z "$log" ] || [ ! -f "$log" ] || deps+=("$log")
+  _proof_facts_libsum || :
   _proof_count_fresh; _proof_count sum _proof_facts
-  stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
+  stamp=""
+  [ -z "$_PROOF_FACTS_LIBSUM" ] || { stamp="$(cksum "${deps[@]}" 2>/dev/null)" \
+    && stamp="$(printf '%s\n' "$stamp" "$_PROOF_FACTS_LIBSUM" | cksum)" || stamp=""; }
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
   key="$plan $stamp $_PROOF_FACTS_LAYOUT"
   if [ "$_PROOF_FACTS_KEY" = "$key" ] && { [ -z "${_PROOF_FRESH:-}" ] || [ -n "$_PROOF_FACTS_LOG" ]; }; then _proof_facts_out; return; fi
@@ -1861,23 +1862,35 @@ _proof_facts_held() {  # <plan> -> 0 with _PROOF_HELD_FOLD its fold's file (empt
   if [ -n "$key" ]; then printf '%s\n' "$key" > "$d/made-$id" && printf '%s\n' "$key" > "$d/key-$id"; else rm -f "$d/key-$id" "$d/made-$id"; fi
   _proof_held_take "$d" "$id" "$key" fold
 }
-# _proof_facts_libsum -> 0 with _PROOF_FACTS_LIBSUM the cksum and size of each reader library this process folds with,
-# taken once a process (counted `libs`); 1 when one cannot be read. The libraries are the loaded reader's, or, before it
-# is loaded, the ones beside this file that `_proof_reader_load` would load. A file's path is left out of the sum, so
-# the key is the same wherever a process names the same bytes from, and taking it costs no process but the one cksum.
+# _proof_facts_libsum -> 0 with the code each kept key covers, decided here alone and summed once a process (counted
+# `libs`): _PROOF_FACTS_LIBSUM the reader's libraries, _PROOF_PLACE_LIBS proof.sh and those, _PROOF_DERIVE_LIBSUM
+# proof.sh and units.sh, which derive an answer; 1 when a reader library cannot be read. A sum whose file cannot be read
+# is empty, so what it keys is made at every ask. The reader's libraries are the loaded reader's, else the ones beside
+# this file; units.sh the loaded one, else the one beside. A sum leaves out the path, so a key is the same wherever a
+# process names the same bytes from, and costs the one cksum.
+_PROOF_DERIVE_LIBSUM=""
 _proof_facts_libsum() {
   [ -z "$_PROOF_FACTS_LIBSUM" ] || return 0
-  local lib="${BASH_SOURCE[0]%/*}" f out c n sum="" IFS=$' \t\n'
-  local -a deps=()
+  local lib="${BASH_SOURCE[0]%/*}" own f out c n p i=0 nr sum="" IFS=$' \t\n'
+  local -a deps=() sums=()
   [ "$lib" != "${BASH_SOURCE[0]}" ] || lib=.
+  own="$lib"
   ! declare -F reader_facts >/dev/null 2>&1 || lib="$_READER_LIB_DIR"
   for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
+  nr="${#deps[@]}"; deps+=("$own/proof.sh" "${_UNITS_DIR:-$own}/units.sh")
   _proof_count libs _proof_facts
-  out="$(cksum "${deps[@]}" 2>/dev/null)" || return 1
-  while read -r c n _; do sum="$sum${sum:+ }$c $n"; done <<PROOF_LIBSUM
+  # cksum names each file it read, in the order handed, and none it could not: a file absent from its lines is unread.
+  out="$(cksum "${deps[@]}" 2>/dev/null)" || :
+  while read -r c n p; do
+    while [ "$i" -lt "${#deps[@]}" ] && [ "$p" != "${deps[$i]}" ]; do i=$((i + 1)); done
+    [ "$i" -ge "${#deps[@]}" ] || sums[$i]="$c $n"; i=$((i + 1))
+  done <<PROOF_LIBSUM
 $out
 PROOF_LIBSUM
+  i=0; while [ "$i" -lt "$nr" ]; do [ -n "${sums[$i]:-}" ] || return 1; sum="$sum${sum:+ }${sums[$i]}"; i=$((i + 1)); done
   _PROOF_FACTS_LIBSUM="$sum"
+  _PROOF_PLACE_LIBS="${sums[$nr]:+${sums[$nr]} $sum}"
+  _PROOF_DERIVE_LIBSUM=""; [ -z "${sums[$nr]:-}" ] || [ -z "${sums[$((nr + 1))]:-}" ] || _PROOF_DERIVE_LIBSUM="${sums[$nr]} ${sums[$((nr + 1))]}"
 }
 # _proof_held_take <dir> <id> <key> [fold] -> the fold under <key> held by this shell: its files named, its findings and
 # inherited proofs read in, with no process. A fold this shell did not make itself is counted (`held`).
@@ -1909,8 +1922,8 @@ _proof_facts_read() {
   _proof_facts_awk "$@"
 }
 
-# The kept file's layout, shared by the kept file and the command's held fold: the key, the facts, then the finding
-# events and the inherited proofs, each part after a line of one \036.
+# The kept file's layout, read and written by `_proof_facts` alone (a held fold keeps each part in a file of its own):
+# the key, the facts, then the finding events and the inherited proofs, each part after a line of one \036.
 _proof_kept_write() {  # <key> -> the layout of the fold this shell holds
   printf '%s\n' "$1"; printf '%s' "$_PROOF_FACTS"; printf '\036\n%s' "$_PROOF_FINDINGS"; printf '\036\n%s' "$_PROOF_INHERITED"
 }
@@ -1969,10 +1982,11 @@ proof_hold_end() {  # -> the directory proof_hold_begin opened removed, and noth
 # The row states, the proofs, the born rows, the fixed findings, the proved release heads, the floor judge at a head and
 # the whole pass's line at a head are computed from the run's facts, the plan, and commits that never change. Inside a
 # held command each is computed once for its key and kept in the command's directory, and every later ask, in any
-# process of the command, reads it back with no process. The key is the answer's name, its arguments and the key of
-# the facts it was computed from, as the facts' own files hold it (`made-` beside the fold, `.key` beside an overlay),
-# so an answer computed before the command appended to the log, or over other pending lines, is never served after,
-# and a judgment that folds afresh is served only what the same facts give. A caller that holds the units library's
+# process of the command, reads it back with no process. The key is the answer's name, its arguments, the sum of the
+# code that derives it (`_proof_facts_libsum`) and the key of the facts it was computed from, as the facts' own files
+# hold it (`made-` beside the fold, `.key` beside an overlay), so an answer computed before the command appended to
+# the log, or over other pending lines, or by another copy of that code, is never served after, and a judgment that
+# folds afresh is served only what the same facts give. A caller that holds the units library's
 # facts (`_units_fold`) adds their key the same way; facts held as a string have no key, so their answer is computed.
 # Only an answer that exited 0 is kept, so a failure is heard again at every ask. Outside a held command every ask
 # computes, as before. Each compute counts `derive <name> <key>` (tests/speed-counts.test.sh), `-` for an unkept one.
@@ -2014,12 +2028,13 @@ _proof_derive_file() {
   if { printf '%s' "$2" >| "$BIONIC_NEW"; } 2>/dev/null; then _PROOF_DERIVE_FILE="$BIONIC_NEW"; return 0; fi
   rm -f "$BIONIC_NEW"; return 1
 }
-# _proof_derive_key <key> -> 0 with _PROOF_DERIVE_KEY <key> and the key of each view of the facts the caller holds, one
-# line; 1 when a view has none
+# _proof_derive_key <key> -> 0 with _PROOF_DERIVE_KEY <key>, the sum of the code that derives the answer and the key
+# of each view of the facts the caller holds, one line; 1 when that code or a view has none
 _proof_derive_key() {
   local k="$1" f
+  _proof_facts_libsum && [ -n "$_PROOF_DERIVE_LIBSUM" ] || return 1
   _proof_facts_ident "${_PROOF_FACTS_FILE:-}" || return 1
-  k="$k"$'\035'"facts=$_PROOF_IDENT"; f="$_PROOF_IDENT"
+  k="$k"$'\035'"code=$_PROOF_DERIVE_LIBSUM"$'\035'"facts=$_PROOF_IDENT"; f="$_PROOF_IDENT"
   # The units view adds to the key only where it holds other facts than the reader's: the same facts give one answer.
   if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then
     _proof_facts_ident "${_UNITS_FACTS_FILE:-}" || return 1
@@ -2193,9 +2208,7 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   # The libraries are summed once a shell and the place's directory is judged once a shell, since neither changes
   # under a process; the plan and its log are summed at every ask.
   if [ -z "$_PROOF_PLACE_LIBS" ]; then
-    deps=("$_READER_LIB_DIR/proof.sh"); for f in $_PROOF_FACTS_LIBS; do deps+=("$_READER_LIB_DIR/$f"); done
-    _PROOF_PLACE_LIBS="$(cksum "${deps[@]}" 2>/dev/null)" || _PROOF_PLACE_LIBS=""
-    _PROOF_PLACE_LIBS="${_PROOF_PLACE_LIBS//$'\n'/ }"
+    _proof_facts_libsum || :
     # A directory of its own beside the kept fold's, never inside it: a sweep of the kept folds meets no entry it
     # did not write. Trusted as the kept fold is, owned by this user and writable by no one else.
     _PROOF_PLACE_DIR="${TMPDIR:-/tmp}/bionic-place-${UID:-0}"
