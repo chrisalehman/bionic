@@ -586,6 +586,25 @@ tick_record_stands() {
   return 1
 }
 
+# tick_point_land <row> <proof: row, head, evidence, owed> -> the point's row landed at the working head on its run's proof:
+# one `published` event of the record kind naming the run's log, then the landing's writes (lib/line.sh), as a record
+# row's own landing makes them. Prints what it landed on, rc 0; rc 1, printing why, when it could not be written.
+tick_point_land() {
+  local id="$1" ph ev ow head
+  IFS=$'\t' read -r _ ph ev ow <<< "$2"
+  { declare -F line_published_event >/dev/null 2>&1 || . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  if ! declare -F line_published_event >/dev/null 2>&1 || ! declare -F proof_branch_head >/dev/null 2>&1; then
+    printf 'the landing record (lib/line.sh) or the proof record cannot be loaded from %s' "$BIONIC_LIB"; return 1
+  fi
+  head="$(proof_branch_head "$POKER_RUN_PLAN" "$REPO_REAL" 2>/dev/null)" || head=""
+  case "$head" in [0-9a-f]*) [ "${#head}" -eq 40 ] || head="" ;; *) head="" ;; esac
+  [ -n "$head" ] || { printf 'the working branch names no commit, so there is no head to land %s at' "$id"; return 1; }
+  line_published_event "$POKER_RUN_PLAN" "row=$id" "commit=$head" kind=record by=orchestrator "why=$ev" >/dev/null 2>&1 \
+    || { printf 'the run'"'"'s log cannot take the landing of %s' "$id"; return 1; }
+  line_landing_writes "$POKER_RUN_PLAN" "$id" "$head" "$(iso_now)" >/dev/null 2>&1 || :
+  printf 'its run at %s, %s%s, at the working head %s' "${ph:0:12}" "$ev" "${ow:+, red: $ow owed to the rows born of it}" "${head:0:12}"
+}
+
 # tick_unlanded_tree <row> <writer> <Files cell> <tree> -> says one NOT-LANDED line for a writer that has met its record
 # and committed in its tree and has not landed, naming the commit and the landing command. A row with a tree lands
 # through `ready`, from that tree, and a writer's record is the first file it writes, so MET alone finds one still at
@@ -1631,8 +1650,9 @@ BACKSTOP_ROWS
       # own. Until its record and the registration its kind owes stand it is offered as before; a reason is told once,
       # and none while its record is still to be written. The ready set is asked only once some such row's record
       # stands, so a tick with none pays no second schedule.
-      TICK_OWN="$(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' '$10 == "pending" && $11 !~ /[A-Za-z0-9]/ \
-          && $3 ~ /^(test|verify|review|doc|integrate)$/ && ($5 == "" || $5 == "-" || $5 == "—" || tolower($5) == "orchestrator") {
+      # A whole-run point is none of these: it lands on its own run's proof, below.
+      TICK_OWN="$(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' "$(_units_cell_awk)"'$10 == "pending" && $11 !~ /[A-Za-z0-9]/ \
+          && $3 ~ /^(test|verify|review|doc|integrate)$/ && !($3 == "test" && marked($4)) && ($5 == "" || $5 == "-" || $5 == "—" || tolower($5) == "orchestrator") {
         printf "%s\t%s\t%s\n", $1, $3, $9 }')"
       TICK_OWN_STANDS=""; TICK_DOCS="$(docs_root "$REPO_REAL" 2>/dev/null)"
       while IFS=$'\t' read -r BS_ID BS_KIND BS_FILES; do
@@ -1657,6 +1677,23 @@ BACKSTOP_ROWS
             tick_told_once "landing:$BS_ID" "$BS_WHY" && say "NOT-LANDED $BS_ID — the orchestrator's $BS_KIND row waits: $(clean "$BS_WHY")"
           fi
         done <<< "$TICK_OWN_STANDS"
+      fi
+      # A WHOLE-RUN POINT LANDS ON ITS RUN'S PROOF: an open point whose `point` proof stands (lib/proof.sh `proof_points`)
+      # is landed by the tick at the working head, one `published` event of the record kind naming the run's log, red or
+      # green: a red's suites are owed to the fix rows born of it, never to the point.
+      if [ -n "$(units_points "$POKER_RUN_PLAN" 2>/dev/null)" ]; then
+        { declare -F proof_points >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
+        TICK_PTS="$(proof_points "$POKER_RUN_PLAN" 2>/dev/null)"
+        while IFS=$'\t' read -r BS_ID BS_ST; do
+          case "$BS_ST" in pending|active) : ;; *) continue ;; esac
+          BS_PL="$(printf '%s\n' "$TICK_PTS" | awk -F'\t' -v r="$BS_ID" '$1 == r { l = $0 } END { print l }')"
+          [ -n "$BS_PL" ] || continue
+          if BS_OUT="$( tick_point_land "$BS_ID" "$BS_PL" 2>&1 )"; then
+            say "LANDED $BS_ID — the point's run; the tick landed it: $(clean "$BS_OUT")"
+          else
+            tick_told_once "landing:$BS_ID" "$BS_OUT" && say "NOT-LANDED $BS_ID — the point's run is recorded, and its landing waits: $(clean "$BS_OUT")"
+          fi
+        done <<< "$(units_points "$POKER_RUN_PLAN" 2>/dev/null)"
       fi
       # THE PAGE CLOSES WHEN NO ROW WAITS ON IT (wave-34 T4; REQ-3 AC-3.1, D13). An open `ruling:<id>`
       # stands while its ruling is unread and some active row's writer (`row_writer`, the backstop's own
@@ -2265,6 +2302,80 @@ EOF
       fi
     }
 
+    # tick_point_start <plan> <head> -> rc 1 when no point is ready and unproved; else rc 0, the first such point's run
+    # started, or one line saying why not. A POINT IS ASKED ITS OWN RULES: it is ready only once the rows it follows have
+    # landed, so no other ready row and no other writer holds it back; its run is held by the rows it follows
+    # (`units_floor_holds` of its id), a dirty checkout, a whole run running at the gate, its log at this head, and its
+    # roster object `point-<row>@<h8>`, kept as `regression@<h8>` is below. The gate admits its whole run alone, so a
+    # later landing waits for it. The detached call records the run with proof-add point, and the row lands on that proof.
+    tick_point_start() {
+      local plan="$1" head="$2" pt="" id pts h8 name hold wb co docs rel l row poker cmd out log
+      declare -F units_points >/dev/null 2>&1 && declare -F proof_points >/dev/null 2>&1 || return 1
+      pts=" $(proof_points "$plan" 2>/dev/null | cut -f1 | tr '\n' ' ') "
+      while IFS=$'\t' read -r id _; do
+        [ -n "$id" ] || continue
+        case " ${SCHED_READY_ALL:-} " in *" $id "*) : ;; *) continue ;; esac
+        case "$pts" in *" $id "*) continue ;; esac
+        pt="$id"; break
+      done <<< "$(units_points "$plan" 2>/dev/null)"
+      [ -n "$pt" ] || return 1
+      h8="${head:0:8}"; name="point-$pt@$h8"
+      hold="$(units_floor_holds "$plan" "$pt" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s", (n++ ? ", " : ""), $1 }')"
+      if [ -n "$hold" ]; then say "point $pt: not started — a row it follows has not landed: $hold; starts when it lands"; return 0; fi
+      wb="$(plan_working_branch "$plan" 2>/dev/null)"
+      co="$(proof_checkout "$REPO_REAL" "$wb")" || return 0
+      if [ -n "$(_wt_piece_dirt "$co" 2>/dev/null)" ]; then
+        say "point $pt: not started — the working checkout has uncommitted changes; starts when it is committed or cleaned"
+        return 0
+      fi
+      docs="$(docs_root "$REPO_REAL" 2>/dev/null)"; [ -n "$docs" ] || return 0
+      rel="record/$(proof_plan_slug "$plan")/point-run-$pt-$head.log"
+      for l in "$docs/${rel%.log}"*.log; do
+        [ -f "$l" ] || continue
+        say "point $pt: not started — its run at $h8 left its log (${l#"$docs"/}) and no proof; starts when it is recorded: proof-add point ${l#"$docs"/}"
+        return 0
+      done
+      if declare -F gate_whole_open >/dev/null 2>&1 && gate_whole_open "$co"; then
+        say "point $pt: not started — a whole run is running at the gate; starts when it ends"
+        return 0
+      fi
+      if run_load_row "$(run_row_of "$ROSTER_FILE" "$name")" "$ROSTER_FILE"; then
+        run_read
+        case "$RUN_STATE" in
+          RUNNING) return 0 ;;
+          FINISHED)
+            if [ "$RUN_RC" != 75 ]; then
+              say "point $pt: not started — $name ran at this head and ended ${RUN_RC:+with exit $RUN_RC }without a proof; starts when the head moves past it"
+              return 0
+            fi
+            say "regression-run waiting — the gate has no room for the point's run" ;;
+        esac
+      fi
+      if [ -L "$ROSTER_FILE" ] || ! tmp_dir_ok "${ROSTER_FILE%/*}" \
+         || { [ ! -f "$ROSTER_FILE" ] && ! roster_header > "$ROSTER_FILE" 2>/dev/null; }; then
+        say "point $pt: not started — the roster file cannot be written safely; starts when it can"
+        return 0
+      fi
+      row="$(roster_row status=run session="$SESSION_ID" name="$name" agent_id= launched_at="$(iso_now)" \
+        subagent_type=bionic:test-runner model= deliverable= source= duration= progress= claims= cadence= absent= \
+        waiver="a point's whole run the tick started, not an agent: its log and its proof are its record" \
+        suites_allowed=run.sh suites_source=DECLARED tool_use_id= plan="$plan")" || return 0
+      printf '%s\n' "$row" >> "$ROSTER_FILE" 2>/dev/null || return 0
+      poker="$HOOK_DIR/session-poker.sh"
+      cmd="cd $(printf '%q' "$REPO_REAL") || exit 1; bash $(printf '%q' "$poker") regression-run --point $(printf '%q' "$pt") --starter tick; rc=\$?"
+      cmd="$cmd; if [ -f $(printf '%q' "$docs/$rel") ]; then bash $(printf '%q' "$poker") proof-add point $(printf '%q' "$rel") || :"
+      cmd="$cmd; elif [ \"\$rc\" -ne 75 ]; then rc=69; fi; exit \"\$rc\""
+      out="$( cd "$REPO_REAL" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$BIONIC_LIB/../booked.sh" \
+        --detach --no-wait --agent "$name" --suites run.sh --stamp-dir "$co" -- "$cmd" 2>&1 </dev/null )"
+      log="$(printf '%s\n' "$out" | sed -nE 's/^booked: (started|attached) pid=[0-9]+ log=(.*) run=[^ ]*$/\2/p' | head -n 1)"
+      if [ -z "$log" ]; then
+        die "WARN — the point $pt's run at ${h8} could not be started detached: $(clean "$(printf '%s' "$out" | head -n 1)")"
+        return 0
+      fi
+      say "regression-run started $name (log $log)"
+      return 0
+    }
+
     # ─────────────────────────────────────── the whole run, started by the tick
     #
     # THE TICK STARTS THE WHOLE RUN ITSELF. A head no whole run has run at is not proved green, and the
@@ -2303,6 +2414,8 @@ EOF
       declare -F proof_branch_head >/dev/null 2>&1 && declare -F proof_checkout >/dev/null 2>&1 || return 0
       head="$(proof_branch_head "$plan" "$REPO_REAL" 2>/dev/null)" || return 0
       case "$head" in [0-9a-f]*) : ;; *) return 0 ;; esac
+      # A READY POINT IS RUN BEFORE THE WHOLE RUN IS WEIGHED, by its own rules alone (`tick_point_start`).
+      tick_point_start "$plan" "$head" && return 0
       ph="$(proof_last "$plan" regression 2>/dev/null)"
       if [ -n "$ph" ]; then case "$head" in "$ph"*) return 0 ;; esac; fi
       h8="${head:0:8}"; name="regression@$h8"

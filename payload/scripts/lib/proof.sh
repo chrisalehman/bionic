@@ -3,7 +3,7 @@
 #
 # WHAT IT OWNS. One fact per proof: which commit a test pass or a review read. A proof is one event in the run's log,
 #
-#     run/v1|ev=proof|kind=<regression|review|task|check|walk|inherited>|head=<40-hex>|evidence=<path under record/>|…|at=
+#     run/v1|ev=proof|kind=<regression|review|task|check|walk|inherited|point>|head=<40-hex>|evidence=<path under record/>|…|at=
 #
 # appended by `proof_event` alone, and read through the reader's facts (`proof_last`). A `check`
 # is written only by `session-poker.sh release-check`, the verb that runs the project's declared command, and its
@@ -26,7 +26,9 @@
 
 # THE REGRESSION IS KIND `regression` (wave-38 T8; REQ-9, D6). A line 1.20.0 wrote, `kind=floor`, is read as it:
 # proof_fields normalises the kind through lib/alias.sh, the one map of the old spellings.
-PROOF_KINDS="regression review task check walk"
+# A WHOLE-RUN POINT'S RUN IS KIND `point`, carrying `point=<row>`: a run among the build, never the head's proof, so no
+# reader of the regression reads it.
+PROOF_KINDS="regression review task check walk point"
 # Every library below is loaded once through lib/loader.sh `bionic_need`; a caller that sourced this file alone gets
 # the loader from beside it.
 # shellcheck source=/dev/null
@@ -2326,6 +2328,7 @@ proof_fact_awk() {
       else if (PROOF_RESULT != "") l = l " result=" PROOF_RESULT
       if (PROOF_OWED != "") l = l " owed=" PROOF_OWED
       if (line_kv("run") != "") l = l " run=" line_kv("run") " head=" PROOF_HEAD " rc=" line_kv("rc")
+      if (line_kv("point") != "") l = l " point=" line_kv("point")
       return l
     }
   '
@@ -2362,6 +2365,17 @@ proof_fact_lines() {
 _proof_facts_proofs() {
   if [ -n "$_PROOF_FACTS_FILE" ]; then proof_fact_lines "$_PROOF_FACTS_FILE"
   elif [ -n "$_PROOF_FACTS_TEXT" ]; then printf '%s' "$_PROOF_FACTS_TEXT" | proof_fact_lines; fi
+}
+
+# proof_points <plan> -> `<row><TAB><head><TAB><evidence><TAB><owed>` for each point proof of the plan's run, in the order
+# the proofs were last set, so a row's newest is its last line: THE ONE READER of a point's proof, which its row lands on
+# and a fix row born of its red names. Exit 2 when the facts cannot be read.
+proof_points() {
+  local pl
+  pl="$(proof_lines "${1:-}")" || return 2
+  printf '%s\n' "$pl" | awk "$(proof_awk)"'
+    proof_fields($0) && PROOF_KIND == "point" && match($0, / point=[^ ]+/) {
+      printf "%s\t%s\t%s\t%s\n", substr($0, RSTART + 7, RLENGTH - 7), PROOF_HEAD, PROOF_EVIDENCE, PROOF_OWED }'
 }
 
 # proof_last <plan> <kind> [<question>] -> the head of the NEWEST standing proof of <kind> the reader holds for the

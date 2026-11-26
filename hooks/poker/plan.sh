@@ -64,10 +64,12 @@ poker_additions_judged() {
   [ -z "$POKER_BRIEF_WORDS" ]
 }
 
-# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`regression`, `standing@<12-hex>` or `run@<12-hex>`) and rc 0 when a
-# red the machine recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH set for the
-# refusal's words. THE THREE FACTS, asked in this order: (a) the plan's newest regression proof owes the suite (lib/proof.sh
-# `_proof_last_read` regression owed, the reader `proof-add inherited` asks), (b) the run's landing record
+# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`regression`, `point@<12-hex>`, `standing@<12-hex>` or `run@<12-hex>`)
+# and rc 0 when a red the machine recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH
+# set for the refusal's words. THE FACTS, asked in this order: (a) the plan's newest regression proof owes the suite (lib/proof.sh
+# `_proof_last_read` regression owed, the reader `proof-add inherited` asks), (a2) a point's proof owes it, the newest such
+# (lib/proof.sh `proof_points`), which sets BFB_POINT to the point and BFB_ROWS to the rows it follows, so the birth names
+# them, (b) the run's landing record
 # (`proof_debt_record`) holds an `ev=standing` event for the suite whose head is a commit on the working branch's ref
 # (`proof_branch_head`), the newest such event first, or (c) it holds the `ev=verdict row=regression result=red` line a
 # whole run left for the suite at such a commit, which `regression-run` writes before any proof-add: a run the machine
@@ -78,7 +80,14 @@ poker_additions_judged() {
 born_floor_backing() {
   local plan="$1" repo="$2" suite="$3" rec bh h
   BFB_OF=""; BFB_OWED="$(_proof_last_read "$plan" regression owed)"; BFB_BRANCH="$(plan_working_branch "$plan" 2>/dev/null)"
+  BFB_POINT=""; BFB_ROWS=""
   case ",$BFB_OWED," in *",$suite,"*) BFB_OF=regression; return 0 ;; esac
+  h="$(proof_points "$plan" 2>/dev/null | awk -F'\t' -v s="$suite" 'index("," $4 ",", "," s ",") { r = $1; h = $2 } END { if (r != "") print r "\t" h }')"
+  if [ -n "$h" ]; then
+    BFB_POINT="${h%%$'\t'*}"; BFB_OF="point@$(printf '%s' "${h#*$'\t'}" | cut -c1-12)"
+    BFB_ROWS="$(units_point_rows "$plan" "$BFB_POINT")"
+    return 0
+  fi
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && line_held "$rec" 2>/dev/null || return 1
   bh="$(proof_branch_head "$plan" "$repo")" || return 1
@@ -1101,7 +1110,8 @@ EOF
       TA_CELL_TASK="$TA_CELL_TASK · born: review"
     fi
     # A FLOOR-BORN MARKER NAMES ITS RED: the marker is admitted only with a red the machine recorded behind it
-    # (`born_floor_backing`), and it records which, ` of=regression`, ` of=standing@<12-hex>` or ` of=run@<12-hex>`.
+    # (`born_floor_backing`), and it records which, ` of=regression`, ` of=point@<12-hex>`, ` of=standing@<12-hex>` or
+    # ` of=run@<12-hex>`; a point's red also names the point and the rows it follows.
     TA_BORN_OF=""
     if [ -n "$TA_BORN_SUITE" ]; then
       if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_SUITE"; then
@@ -1141,7 +1151,7 @@ EOF
     # its findings, or the regression and its record).
     case "$TA_BORN_MARK" in *" promoted") TA_PROMOTED=1 ;; *) TA_PROMOTED="" ;; esac
     if ! units_born_event "$TA_PLAN" "$TA_ID" "${TA_BORN}${TA_BORN_SUITE:+regression $TA_BORN_SUITE}" \
-         "${TA_BORN_IDS}${TA_BORN_SUITE:+$TA_BORN_OF}" "$TA_PROMOTED"; then
+         "${TA_BORN_IDS}${TA_BORN_SUITE:+$TA_BORN_OF}" "$TA_PROMOTED" "${TA_BORN_SUITE:+$BFB_POINT}" "${TA_BORN_SUITE:+$BFB_ROWS}"; then
       die "task-add — the born event of $TA_ID could not be appended to the run's log; the row reads as born by no review or regression until it is. Run task-add $TA_ID again."
       exit 1
     fi
@@ -1149,7 +1159,7 @@ EOF
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_REV_ART" ] || say "task-add — $TA_ID is a review row: its Files carry one record per question it is dealt${TA_ART_CELL:+, its artifact cell the first, $TA_ART_CELL}."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN); say so in the review findings disposition · $TA_COUNT_SAID"
-    [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF: its landing holds every review's cover (D9), and it counts against no fix-cap."
+    [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF${BFB_POINT:+, a red of the run of point $BFB_POINT, after ${BFB_ROWS//,/, }}: its landing holds every review's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
     for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
