@@ -349,7 +349,7 @@ plan_read_heading() {
     END { exit !found }'
 }
 
-# WHAT A VERSION-15 PLAN HOLDS is what a person wrote: its header, Goal, Problem, Design, Eval design, Tasks and a
+# WHAT A VERSION-15 PLAN HOLDS is what a person wrote: its header, Goal, Problem, Design, Test design, Tasks and a
 # section per task. The machine's sections are gone to the log (the verification matrix, the state and the handoff), a
 # Tasks row is its nine authored cells, and a header key stays only if the reader answers from it. The keys below were
 # the run's own state written into its header (an abandon, a clean-up, the current step and its approvals), which the

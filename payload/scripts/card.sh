@@ -8,7 +8,7 @@
 #
 # WHAT IT OWNS. The six row shapes the Step-1, Step-2 and Step-3 approval cards are
 # made of — the requirement row, the decision row, the ownership row, the
-# eval-design row and the task row — their column widths, their column headers, and
+# test-design row and the task row — their column widths, their column headers, and
 # what happens to a cell too wide for its column.
 #
 # WHY IT EXISTS, WHICH IS NOT "TO TIDY THE WIDTHS AWAY". Until this file the widths
@@ -43,7 +43,7 @@
 # column and carry nothing else. Every emitted line fits BIONIC_LINE_WIDTH.
 #
 # USAGE
-#     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
+#     bash card.sh <requirement|decision|ownership|test-design|task>  < rows.tsv
 #     bash card.sh <step0|step1|step2|step3> <artifact> (the whole card; no stdin)
 #     bash card.sh rigor <word>                         (a rigor level, printed with its meaning)
 #     bash card.sh opening [<rigor> [<intent> <scale>]]   (the method's opening: the version line, the engaged line, the rigor line; with no rigor, the version line and that the triple is not yet declared)
@@ -114,7 +114,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh task-cell <id> <cell> [<id> <cell>]..., or card.sh release with its facts on stdin, or card.sh <sitrep|sitrep-check> <sheet file> with the judgment or the card on stdin, or card.sh fold with its lines on stdin\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|test-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh task-cell <id> <cell> [<id> <cell>]..., or card.sh release with its facts on stdin, or card.sh <sitrep|sitrep-check> <sheet file> with the judgment or the card on stdin, or card.sh fold with its lines on stdin\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -175,8 +175,8 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
       # line 1 is `ownership`'s own, so the two kinds never disagree about a column.
       _card_spec ownership || return 1
       CARD_LINES=2; CARD_FMT_2='    reuses %s'; CARD_NF_2=1; CARD_FOLD_2=0 ;;
-    eval-design)
-      CARD_SECTION="Eval design"
+    test-design)
+      CARD_SECTION="Test design"
       CARD_HDRCOLS="2:static 3:unit 4:hermetic 5:live 6:human"
       # A COUNT STARTS UNDER ITS LABEL: the header puts each label at its field's first column,
       # so a count padded on the left would end under the label's end and read as off by its own width.
@@ -836,7 +836,7 @@ BEGIN { OFS = "\t"; ERRMSG = ""; enum = 0 }
   else if (h == "Design") { sec = "design"; sawdesign = 1 }
   else if (h == "Not Doing") sec = "nd"
   else if (h == "Tasks") { sec = "tasks"; sawtasks = 1 }
-  else if (h == "Test design" || h == "Eval design") { sec = "eval"; saweval = 1; erow = 0 }
+  else if (h == "Test design" || h == "Eval design") { sec = "test"; sawtest = 1; erow = 0 }
   else if (h ~ /^Requirements/) sec = "reqs"
   else sec = ""
   next
@@ -883,7 +883,7 @@ sub2 == "worth" {
 # paragraph only: a design section is a document, the card is a line, and the artifact
 # path is the depth. A wave-scale spec runs through here too and nothing reads DESIGN on
 # that card, because the wave card already renders the decisions, the ownership and the
-# eval design the wave design is MADE of.
+# test design the wave design is MADE of.
 sec == "design" && designdone != 1 {
   if (trim($0) == "") { if (DESIGN != "") designdone = 1 }
   else DESIGN = DESIGN (DESIGN == "" ? "" : " ") clean($0)
@@ -911,7 +911,7 @@ sec == "reqs" && rid != "" {
 # a backticked token is an identifier where the cell is the proof said in plain words. Both are refused here,
 # naming the row by its requirement and criterion; the width is measured in columns by the loader, which owns
 # the width library, from the first row of each requirement (`EAPP`).
-sec == "eval" && /^[ \t]*\|/ {
+sec == "test" && /^[ \t]*\|/ {
   erow++
   if (erow <= 2) next
   n = cells($0, c)
@@ -919,7 +919,7 @@ sec == "eval" && /^[ \t]*\|/ {
   r = c[1]
   ncrit++; crow[ncrit] = r OFS c[3] OFS c[4] OFS c[5] OFS c[6]
   if (verb == "step2") {
-    erowid = c[3]; sub(/[ \t].*$/, "", erowid); erowid = "Eval design row " r " " erowid
+    erowid = c[3]; sub(/[ \t].*$/, "", erowid); erowid = "Test design row " r " " erowid
     if (craw[2] ~ /`/) err(erowid ": the Approach cell carries a backtick: " craw[2])
     else if ((r in eapp) && eapp[r] != c[2]) err(erowid ": a second approach for " r ": " c[2] " (the first: " eapp[r] ")")
     if (!(r in eapp)) print "EAPP" OFS erowid OFS c[2]
@@ -958,10 +958,10 @@ END {
   flush_all()
   if (!sawgoal) err("the artifact has no ## Goal section")
   if (verb == "step3" && !sawtasks) err("the plan has no ## Tasks ledger")
-  # THE EVAL TABLE IS A WAVE OBLIGATION (D8). At task scale the design is a paragraph in
-  # the session plan and there is no eval-design wall at all, so demanding the table here
+  # THE TEST TABLE IS A WAVE OBLIGATION. At task scale the design is a paragraph in
+  # the session plan and there is no test-design wall at all, so demanding the table here
   # refused the very artifact the arm exists to render (research R3: exit 64 at d7e841c).
-  if (verb == "step2" && !saweval && scale != "task") err("the spec has no ## Eval design table")
+  if (verb == "step2" && !sawtest && scale != "task") err("the spec has no ## Test design table")
   if (ERRMSG != "") { print "ERR" OFS ERRMSG; exit 0 }
   print "META" OFS "design" OFS DESIGN
   print "META" OFS "approach" OFS APPROACH
@@ -989,7 +989,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_ADRK=(); WCARD_ADRV=()
   local out line key rest k v wide="" _wc_rc
   # THE HEADER IS THE READER-OWNED PARSER'S (lib/plan-read.sh `plan_read_header`), one read of every key: what the
-  # artifact points at, its scale, rigor and walk. The scale goes to the parse, which owes an Eval design unless it is task.
+  # artifact points at, its scale, rigor and walk. The scale goes to the parse, which owes a Test design unless it is task.
   while IFS= read -r line; do
     k="${line%%=*}"; v="${line#*=}"
     case "$k" in
@@ -1104,7 +1104,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
 # sentence end, or its first ` · `, where a tag (` · complexity:`, ` · born:`) begins, or the cell's end. A
 # cell that is its title alone, or its title and a tag, has none.
 CARD_TITLE_CAP=30
-# The Eval design's Approach cell is one line on the card, so its cap is a width, in columns (see the eval arm).
+# The Test design's Approach cell is one line on the card, so its cap is a width, in columns (see the test arm).
 CARD_APPROACH_CAP=60
 
 _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
@@ -1908,15 +1908,15 @@ _card_step1_view() {  # <artifact path as given> <args...>
 
 # THE PARAGRAPH CARD IS FOR A DESIGN THAT IS ONE (D8), AND THE SHAPE FOLLOWS THE SPEC, NEVER
 # THE SCALE (wave-43 D11; AC-13.2). A wave design is a document with decisions, an ownership
-# table and an eval-design table, and the card renders those three batches. A task run may write
+# table and a test-design table, and the card renders those three batches. A task run may write
 # "a design paragraph per non-trivial task, in the session plan" (steps/2.md:60), and for that
-# spec there are no decisions to tabulate and no eval design to count: the card shows the
-# paragraph, names the artifact, and asks its question, and does NOT offer `show evals` or
+# spec there are no decisions to tabulate and no test design to count: the card shows the
+# paragraph, names the artifact, and asks its question, and does NOT offer `show tests` or
 # `explain <decision>`, because a card that offers an affordance over content it is not carrying
 # is the same lying surface the regression line was. But a task-scale run that writes the full
 # spec (waves 42 and 43 did) gets the full card: keying the shape on `scale:` alone drew the
-# paragraph over nine decisions and 37 evals, and the decisions reached the user by hand
-# (wave-42 A-orch.8). `_card_step2_paragraph` is the one test: no decision row and no eval row.
+# paragraph over nine decisions and 37 tests, and the decisions reached the user by hand.
+# `_card_step2_paragraph` is the one test: no decision row and no test row.
 _card_step2_paragraph() { [ "${#WCARD_DROW[@]}" -eq 0 ] && [ "${#WCARD_EROW[@]}" -eq 0 ]; }
 
 _card_step2_task() {  # <citation path>
@@ -2001,7 +2001,7 @@ _card_path_line() {  # <label> <path>
 # ONE CARD THE DESIGN IS APPROVED ON (wave-26 D13). The head says what is being built and why
 # it is shaped so (Goal, Approach, Risks); the tables below it say what is decided and
 # how each criterion is proven; the Artifacts say where each piece lives, by the path a reader
-# opens. Ownership and one requirement's evals are not on it — they are asked for, as the
+# opens. Ownership and one requirement's tests are not on it — they are asked for, as the
 # sub-views the last line offers.
 _card_step2() {  # <artifact path>
   if [ "$CARD_SCALE" = "task" ] && _card_step2_paragraph; then _card_step2_task "$1"; return 0; fi
@@ -2030,7 +2030,7 @@ _card_step2() {  # <artifact path>
   _card_render_batch decision
   printf '\n'
   CARD_ROWS=( ${WCARD_EROW[@]+"${WCARD_EROW[@]}"} )
-  _card_render_batch eval-design
+  _card_render_batch test-design
   dp="$(_card_docs_prefix)"
   printf '\n  Artifacts\n    spec  %s\n' "$1"
   _card_artifact_lines design "$WCARD_DPTR" "$dp"
@@ -2038,7 +2038,7 @@ _card_step2() {  # <artifact path>
   _card_artifact_lines ledger "$WCARD_LEDGER" "$dp"
   _card_artifact_lines reqs "$WCARD_REQS" "$dp"
   printf '\n%s\n' "$CARD_Q_STEP2"
-  printf 'show evals <req> · explain <decision> · show ownership\n'
+  printf 'show tests <req> · explain <decision> · show ownership\n'
 }
 
 # One entry of a block (a risk, a Not Doing item, a criterion): its first line flush at the block's
@@ -2058,8 +2058,8 @@ _card_entry() {  # <text>
 }
 
 # ── THE STEP-2 SUB-VIEWS (wave-26 D13) ───────────────────────────────────────
-# `card.sh step2 <spec> ownership` is the Ownership table and nothing else; `… evals <REQ>` is
-# one requirement's Eval design rows. Both read the same parse the whole card reads, and the
+# `card.sh step2 <spec> ownership` is the Ownership table and nothing else; `… tests <REQ>` is
+# one requirement's Test design rows. Both read the same parse the whole card reads, and the
 # table goes through the same row kind it always did.
 _card_step2_ownership() {
   CARD_ROWS=( ${WCARD_OROW[@]+"${WCARD_OROW[@]}"} )
@@ -2085,16 +2085,16 @@ _card_labelled() {  # <indent> <label> <text> [<label width, 12 by default>]
   done < <(bionic_wrap "$text" $(( BIONIC_LINE_WIDTH - ind - lw )))
 }
 
-_card_step2_evals() {  # <REQ id>
+_card_step2_tests() {  # <REQ id>
   local row crit typ ev fails
-  printf '  Eval design · %s\n' "$1"
+  printf '  Test design · %s\n' "$1"
   for row in ${WCARD_CROW[@]+"${WCARD_CROW[@]}"}; do
     _card_split "$row"
     [ "${CARD_CELLS[0]:-}" = "$1" ] || continue
     crit="${CARD_CELLS[1]:-}"; typ="${CARD_CELLS[2]:-}"; ev="${CARD_CELLS[3]:-}"; fails="${CARD_CELLS[4]:-}"
     _card_fold_at 4 "$crit"
     _card_labelled 6 type "$typ"
-    _card_labelled 6 eval "$ev"
+    _card_labelled 6 test "$ev"
     _card_labelled 6 "fails when" "$fails"
   done
 }
@@ -2114,10 +2114,10 @@ _card_step2_refuse() {  # <what was wrong>
     case "$r" in total|'') continue ;; esac
     ids="${ids}${ids:+ }${r}"
   done
-  _card_view_refuse "$1" "step2 <spec> · step2 <spec> ownership · step2 <spec> evals <REQ-id>${ids:+ (REQ-id: ${ids})} · step2 <spec> explain <D-id>"
+  _card_view_refuse "$1" "step2 <spec> · step2 <spec> ownership · step2 <spec> tests <REQ-id>${ids:+ (REQ-id: ${ids})} · step2 <spec> explain <D-id>"
 }
 
-# `step2 <spec> [ownership | evals <REQ-id>]`, the arguments after the artifact. The paragraph
+# `step2 <spec> [ownership | tests <REQ-id>]`, the arguments after the artifact. The paragraph
 # card offers neither view, so it refuses both; a task-scale spec holding the tables has them.
 _card_step2_view() {  # <artifact path as given> <args...>
   shift
@@ -2127,14 +2127,14 @@ _card_step2_view() {  # <artifact path as given> <args...>
     ownership)
       [ "$#" -eq 1 ] || _card_step2_refuse "ownership takes no argument"
       _card_step2_ownership ;;
-    evals)
-      [ "$#" -eq 2 ] || _card_step2_refuse "evals takes one requirement id"
+    tests)
+      [ "$#" -eq 2 ] || _card_step2_refuse "tests takes one requirement id"
       for row in ${WCARD_EROW[@]+"${WCARD_EROW[@]}"}; do
         r="${row%%"$CARD_TAB"*}"
         [ "$r" = "$2" ] && [ "$r" != "total" ] && known=1
       done
-      [ "$known" -eq 1 ] || _card_step2_refuse "no requirement '$2' in the Eval design"
-      _card_step2_evals "$2" ;;
+      [ "$known" -eq 1 ] || _card_step2_refuse "no requirement '$2' in the Test design"
+      _card_step2_tests "$2" ;;
     explain)
       [ "$#" -eq 2 ] || _card_step2_refuse "explain takes one decision id"
       _card_step2_explain "$2" ;;
@@ -2172,7 +2172,7 @@ _card_step2_explain() {  # <D-id or number>
 #
 # STEP 3 APPROVES THE PLAN AND THE MATRIX ONLY (wave-26 D12, D13). The design was approved on the
 # Step-2 card, so this card cites it by path and repeats neither its purpose (the Goal paragraph)
-# nor its eval counts. What it adds is the plan's own shape: each task with the criteria it
+# nor its test counts. What it adds is the plan's own shape: each task with the criteria it
 # serves, and the longest chain and the peak width the derived graph gives, at every scale.
 _card_step3() {  # <citation path> <artifact path as given>
   # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column, and the
@@ -2194,7 +2194,7 @@ _card_step3() {  # <citation path> <artifact path as given>
   printf '\n  Artifacts\n    plan  %s\n' "$1"
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
   printf '\n%s\n' "$CARD_Q_STEP3"
-  printf 'show evals <req> · show task <n> · explain <decision>\n'
+  printf 'show task <n> · explain <decision>\n'
 }
 
 # THE TASK ROWS: the title alone, `serves` in a column of its own, the depends cell with each run of

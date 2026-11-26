@@ -1275,7 +1275,7 @@ EXIT_WALLS="$REPO/payload/scripts/lib/walls.sh"
 EXIT_LIVE="$(LC_ALL=C awk '/^matrix_live_row_exit\(\)/ { on = 1 } on { print } on && /^}/ { exit }' "$EXIT_WALLS")"
 expect_contains "EXIT-3b the Verify gate's live-row exit in payload/scripts/lib/walls.sh names the walk's registration for a row the walk proved" \
   'session-poker.sh proof-add walk <its record>' "$EXIT_LIVE"
-expect_contains "…the person's change of the Eval design row for a row whose eval cannot fire" 'its ## Eval design row changed' "$EXIT_LIVE"
+expect_contains "…the person's change of the Test design row for a row whose test cannot fire" 'its ## Test design row changed' "$EXIT_LIVE"
 expect_contains "…and the user's waiver otherwise" 'needs: the user — a waiver' "$EXIT_LIVE"
 expect_eq "…and the live row's three evidence refusals each carry it" "3" \
   "$(LC_ALL=C grep -cF '"${live_exit:-' "$EXIT_WALLS")"

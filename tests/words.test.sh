@@ -30,6 +30,10 @@
 # so the sitrep card, the handoff head and the Patrol line are also read as printed, over one
 # fixture run, every line whole (§RENDERED).
 #
+# A CHECK IS A TEST. The Step 2 and Step 3 cards, the Step 2 views and their refusals are drawn over a SYNTHESIZED
+# spec and plan, and every line of the hooks and scripts is read, for the old word "eval" naming a check; the shell
+# builtin of the same spelling and the old heading a page written before the rename still carries pass (§TEST-WORD).
+#
 # FIXTURE FIDELITY (see .claude/rules/test-harness.md, "Fixture fidelity"). §TEXTS reads the
 # shipped files in place. §PLANT and §SENSE are SYNTHESIZED: each copies a shipped surface into
 # scratch and appends one line, so the lint reads the real file plus the plant; each copy proves
@@ -44,7 +48,7 @@
 #
 # Usage: bash tests/run.sh --only words.test.sh
 #
-# pins: agents-src/blocks/implementor-mechanics.md agents/implementor.md agents/senior-implementor.md skills/canonical-sdlc/steps/0.md agents-src/templates/skills/canonical-sdlc/steps/0.md.tmpl skills/canonical-sdlc/steps/5.md agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl skills/canonical-sdlc/steps/7.md agents-src/templates/skills/canonical-sdlc/steps/7.md.tmpl skills/canonical-sdlc/operational-rules.md payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl hooks/dispatch-preflight.sh hooks/poker/tick.sh skills/sitrep/SKILL.md payload/scripts/card.sh
+# pins: agents-src/blocks/implementor-mechanics.md agents/implementor.md agents/senior-implementor.md skills/canonical-sdlc/steps/0.md agents-src/templates/skills/canonical-sdlc/steps/0.md.tmpl skills/canonical-sdlc/steps/5.md agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl skills/canonical-sdlc/steps/7.md agents-src/templates/skills/canonical-sdlc/steps/7.md.tmpl skills/canonical-sdlc/operational-rules.md payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl hooks/dispatch-preflight.sh hooks/poker/tick.sh skills/sitrep/SKILL.md payload/scripts/card.sh payload/scripts/lib/cmd-class.sh payload/scripts/lib/git-argv.sh payload/scripts/lib/grant.sh payload/scripts/lib/plan-read.sh
 
 set -uo pipefail
 
@@ -403,5 +407,132 @@ expect_eq "PG5b …and it names no push or pull request" "0" "$(printf '%s\n' "$
 PG_OPEN="$(/usr/bin/grep -F -- 'card.sh opening' "$PG_DIR/SKILL.md" | head -1)"
 expect_nonempty "PG6 the opening line is read from SKILL.md" "$PG_OPEN"
 expect_eq "PG6b …and it spells the rigor as optional, never as required" "1|0" "$(printf '%s\n' "$PG_OPEN" | /usr/bin/grep -c -F 'card.sh opening [<rigor>' || true)|$(printf '%s\n' "$PG_OPEN" | /usr/bin/grep -c -F 'card.sh opening <rigor>' || true)"
+
+# ── §TEST-WORD ───────────────────────────────────────────────────────────────
+section "§TEST-WORD: the cards, their views and refusals, and every line the hooks and scripts print call a check a test"
+
+# A check is a test: deterministic, it passes or it fails. "Eval" names a test of a model, which bionic does not write,
+# so no surface the tool prints may call a criterion's check one. The cards are drawn through the real verb over a
+# SYNTHESIZED spec and plan, each in the shipped shape, the spec written once in the new words and once in the old,
+# since a page written before the rename must draw the same card. The printed lines are read in place.
+# fails-when: the card, a reply word, a refusal or a report prints the old word for a check.
+tw_word() { awk '{ l = tolower($0); if (l ~ /(^|[^a-z0-9_$-])evals?([^a-z0-9_=-]|$)/) print }'; }   # lines naming the old word
+tw_new() { awk '{ l = tolower($0); if (l ~ /(^|[^a-z0-9_$-])tests?([^a-z0-9_=.-]|$)/) print }'; }   # lines naming the new word
+expect_eq "TW0 the two extractors tell the words apart: each finds its own line and not the other's" "show evals <req>|show tests <req>" \
+  "$(printf 'show evals <req>\nshow tests <req>\nevaluate it\n' | tw_word)|$(printf 'show evals <req>\nshow tests <req>\ntests.sh\n' | tw_new)"
+TW="$TMP/tw"; mkdir -p "$TW"
+tw_spec() {  # <file> <heading> <type column> <check column>
+  {
+    printf -- '---\nsdlc-step: 2\nworking-branch: wave/99-tw\nintegration-branch: main\nbase-sha: abc1234\n---\n\n# fixture wave 99 · spec\n\n'
+    printf '## Goal\n\nAnswer one requirement with a design small enough to read whole.\n\n## Design\n\n'
+    printf '### 2. Component boundaries and interfaces\n\n- **`lib/first.sh`** The first file owns the first thing. (D1; REQ-1)\n\n'
+    printf '### 3. Ownership table\n\n| concept | owning module (SSoT) | rendering surfaces | agreement test |\n|---|---|---|---|\n'
+    printf '| first thing | `lib/first.sh` | `card.sh` rows | `tests/first.test.sh` |\n\n'
+    printf '## %s\n\n| Requirement | Approach | Criterion | %s | %s | Fails when |\n|---|---|---|---|---|---|\n' "$2" "$3" "$4"
+    printf '| REQ-1 | a fixture run | AC-1.1 the first criterion | hermetic | `bash tests/first.test.sh` | it reds |\n'
+    printf '| REQ-1 | a fixture run | AC-1.2 the second criterion | unit | `bash tests/second.test.sh` | it reds |\n'
+  } > "$1"
+}
+tw_card() {  # <args to card.sh…> -> TW_OUT, TW_ERR, TW_RC
+  TW_RC=0
+  bash "$REPO/payload/scripts/card.sh" "$@" > "$TW/out" 2> "$TW/err" 0<&- || TW_RC=$?
+  TW_OUT="$(cat "$TW/out")"; TW_ERR="$(cat "$TW/err")"
+}
+tw_spec "$TW/new.spec.md" 'Test design' 'Test type' Test; tw_spec "$TW/old.spec.md" 'Eval design' 'Eval type' Eval
+for tw_w in new old; do
+  tw_card step2 "$TW/$tw_w.spec.md"
+  expect_eq "TW1 $tw_w words: the Step 2 card draws (exit 0), headed Test design over the type labels" "0|1" \
+    "$TW_RC|$(printf '%s\n' "$TW_OUT" | /usr/bin/grep -c '^  Test design  *static  *unit  *hermetic  *live  *human$' || true)"
+  expect_eq "TW1b $tw_w words: …and its last line offers show tests <req>" "show tests <req> · explain <decision> · show ownership" "$(printf '%s\n' "$TW_OUT" | tail -1)"
+  expect_nonempty "TW1c $tw_w words: …the new word is on the card (the control for the absence below)" "$(printf '%s\n' "$TW_OUT" | tw_new)"
+  expect_empty "TW1d $tw_w words: …and the old word is not" "$(printf '%s\n' "$TW_OUT" | tw_word)"
+  tw_card step2 "$TW/$tw_w.spec.md" tests REQ-1
+  expect_eq "TW2 $tw_w words: the tests view of a requirement draws (exit 0), titled Test design · REQ-1" "0|  Test design · REQ-1" "$TW_RC|$(printf '%s\n' "$TW_OUT" | head -1)"
+  expect_eq "TW2b $tw_w words: …each criterion's check under the label test" "2" \
+    "$(printf '%s\n' "$TW_OUT" | /usr/bin/grep -c '^      test  *bash tests/[a-z]*\.test\.sh$' || true)"
+  expect_empty "TW2c $tw_w words: …and the old word is not on the view" "$(printf '%s\n' "$TW_OUT" | tw_word)"
+done
+tw_card step2 "$TW/new.spec.md" bogus
+expect_eq "TW3 an unknown view is refused (exit 2), naming the tests form among the valid ones" "2|1" "$TW_RC|$(printf '%s\n' "$TW_ERR" | /usr/bin/grep -c -F 'step2 <spec> tests <REQ-id> (REQ-id: REQ-1)' || true)"
+TW_REF="$TW_ERR"
+tw_card step2 "$TW/new.spec.md" tests
+expect_eq "TW3b the tests view with no id is refused (exit 2) in the new word" "2|1" "$TW_RC|$(printf '%s\n' "$TW_ERR" | /usr/bin/grep -c 'tests takes one requirement id' || true)"
+TW_REF="$TW_REF"$'\n'"$TW_ERR"
+tw_card step2 "$TW/new.spec.md" tests REQ-9
+expect_eq "TW3c a requirement the table lacks is refused (exit 2), naming the Test design" "2|1" "$TW_RC|$(printf '%s\n' "$TW_ERR" | /usr/bin/grep -c "no requirement 'REQ-9' in the Test design" || true)"
+TW_REF="$TW_REF"$'\n'"$TW_ERR"
+sed -e '/^## Test design$/,$d' "$TW/new.spec.md" > "$TW/none.spec.md"
+tw_card step2 "$TW/none.spec.md"
+expect_eq "TW3d a wave spec with no table is refused (exit 64), naming the new heading" "64|1" "$TW_RC|$(printf '%s\n' "$TW_ERR" | /usr/bin/grep -c -F 'the spec has no ## Test design table' || true)"
+TW_REF="$TW_REF"$'\n'"$TW_ERR"
+sed -e 's/| REQ-1 | a fixture run | AC-1.2/| REQ-1 | a second run | AC-1.2/' "$TW/new.spec.md" > "$TW/two.spec.md"
+tw_card step2 "$TW/two.spec.md"
+expect_eq "TW3e a second approach is refused (exit 64), naming the row as a Test design row" "64|1" "$TW_RC|$(printf '%s\n' "$TW_ERR" | /usr/bin/grep -c -F 'Test design row REQ-1 AC-1.2: a second approach for REQ-1' || true)"
+TW_REF="$TW_REF"$'\n'"$TW_ERR"
+expect_empty "TW3f …and none of those refusals names the old word" "$(printf '%s\n' "$TW_REF" | tw_word)"
+tw_card step2 "$TW/new.spec.md" evals REQ-1
+expect_eq "TW3g the old view word is no view: refused (exit 2), with the tests form named" "2|1" "$TW_RC|$(printf "%s\n" "$TW_ERR" | /usr/bin/grep -F "unknown sub-view 'evals'" | /usr/bin/grep -c -F "step2 <spec> tests <REQ-id>" || true)"
+{
+  printf -- '---\nsdlc-step: 3\nwalk: required\nrigor: double\ncanonical_sdlc_version: 15\nworking-branch: wave/99-tw\nintegration-branch: main\nbase-sha: abc1234\n---\n\n# fixture wave 99 · plan\n\n'
+  printf '## Goal\n\nLand the one requirement.\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | REQ-1: the first task. It has its own sentence. complexity: standard | — | 30 | REQ-1 | lib/first.sh | — |\n\n'
+  printf '## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n'
+  printf '| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | it is wrong |\n'
+} > "$TW/tw.plan.md"
+tw_card step3 "$TW/tw.plan.md"
+expect_eq "TW4 the Step 3 card draws (exit 0) and its last line offers only the views it takes" "0|show task <n> · explain <decision>" "$TW_RC|$(printf '%s\n' "$TW_OUT" | tail -1)"
+expect_empty "TW4b …and offers no view of the checks, by either word" "$(printf '%s\n' "$TW_OUT" | tail -1 | tw_word)"
+
+# THE PRINTED LINES. Every shell file of the hooks and the scripts, read as §TEXTS reads one: a comment is cut, every
+# printed string and every line of code is read. The shell builtin is the same four letters, so `eval` as a command, the
+# word followed by a quoted or expanded argument, passes; a line naming it any other way, or reading the old heading of
+# a page written before the rename, is answered by an allow entry, which must still match its line (TW6).
+TW_ALLOW="$TMP/tw-allow"
+cat > "$TW_ALLOW" <<'TW_ALLOW_EOF'
+payload/scripts/lib/cmd-class.sh|exec|eval|source|if|the builtin, named among the words that move or replace the shell
+payload/scripts/lib/cmd-class.sh|match(h, /^eval[ \t]+/)|the builtin, matched at the head of a command
+payload/scripts/lib/cmd-class.sh|A[1] == "eval"|the builtin, matched as a command's first word
+payload/scripts/lib/cmd-class.sh|if (b == "eval") { fx_unk("eval runs text|the builtin, named in the class of a command it cannot read
+payload/scripts/lib/git-argv.sh|exec|eval|source)|the builtin, named among the words that move or replace the shell
+payload/scripts/lib/git-argv.sh|    eval)|the builtin, matched as a command's first word
+payload/scripts/lib/grant.sh|ash|eval|env)|the builtin, named among the runners of a text
+payload/scripts/card.sh|h == "Eval design"|the old heading, read so a page written before the rename still draws
+payload/scripts/lib/plan-read.sh|PLAN_READ_CRITERIA='Test design|Eval design'|the old heading, read so a page written before the rename still reads
+payload/scripts/lib/plan-read.sh|(k == "eval") ?|the old column, mapped to its key so a page written before the rename still reads
+TW_ALLOW_EOF
+tw_hits() {  # <file> <path from the repo root> -> "<path>:<line>: <text>" for each line naming the old word, its allow entries cut
+  words_text "$1" | awk -F'\t' -v rel="$2" -v allow="$TW_ALLOW" '
+    BEGIN {
+      while ((getline e < allow) > 0) {
+        p = index(e, "|"); if (!p) continue
+        rest = substr(e, p + 1); q = 0
+        for (j = length(rest); j > 0; j--) if (substr(rest, j, 1) == "|") { q = j; break }
+        if (q < 2 || substr(e, 1, p - 1) != rel) continue
+        n++; A[n] = substr(rest, 1, q - 1)
+      }
+    }
+    {
+      t = $0; sub(/^[0-9]+\t/, "", t)
+      for (i = 1; i <= n; i++) while ((c = index(t, A[i])) > 0) t = substr(t, 1, c - 1) substr(t, c + length(A[i]))
+      gsub(/(^|[^a-zA-Z0-9_$-])eval[ \t]+["\047$]/, " ", t)
+      l = tolower(t)
+      if (l ~ /(^|[^a-z0-9_$-])evals?([^a-z0-9_=-]|$)/) printf "%s:%s:\t%s\n", rel, $1, t
+    }'
+}
+TW_SH="$(cd "$REPO" && ls hooks/*.sh hooks/poker/*.sh payload/scripts/*.sh payload/scripts/lib/*.sh 2>/dev/null)"
+expect_eq "TW5 precondition: the printed lines are read from the hooks, the poker, the scripts and their libraries" "yes|yes|yes|yes" \
+  "$(for d in 'hooks/[a-z-]*\.sh' 'hooks/poker/' 'payload/scripts/[a-z-]*\.sh' 'payload/scripts/lib/'; do printf '%s\n' "$TW_SH" | /usr/bin/grep -q "^$d" && printf yes; printf '|'; done | sed 's/|$//')"
+TW_HITS=""
+while IFS= read -r f; do TW_HITS="$TW_HITS$(tw_hits "$REPO/$f" "$f")"$'\n'; done <<< "$TW_SH"
+expect_empty "TW5b no line the hooks and scripts print calls a check an eval" "$(printf '%s' "$TW_HITS" | /usr/bin/grep -v '^$' || true)"
+mkdir -p "$TW/plant/payload/scripts/lib"; cp "$REPO/payload/scripts/lib/walls.sh" "$TW/plant/payload/scripts/lib/walls.sh"
+printf '%s\n' 'die "PLANT the eval of this criterion cannot fire"' 'eval "$PLANT_BUILTIN"' >> "$TW/plant/payload/scripts/lib/walls.sh"
+TW_PL="$(tw_hits "$TW/plant/payload/scripts/lib/walls.sh" payload/scripts/lib/walls.sh)"
+expect_eq "TW5c a planted printed eval on a copy of walls.sh is refused, and the builtin planted beside it passes" "1|0" \
+  "$(printf '%s\n' "$TW_PL" | /usr/bin/grep -c 'PLANT the eval' || true)|$(printf '%s\n' "$TW_PL" | /usr/bin/grep -c 'PLANT_BUILTIN' || true)"
+while IFS= read -r e; do
+  tw_p="${e%%|*}"; tw_s="${e#*|}"; tw_s="${tw_s%|*}"
+  expect_true "TW6 allow entry '$tw_s': $tw_p still holds it" /usr/bin/grep -qF -- "$tw_s" "$REPO/$tw_p"
+done < "$TW_ALLOW"
 
 finish
