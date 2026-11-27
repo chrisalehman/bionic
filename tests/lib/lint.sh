@@ -19,8 +19,9 @@
 #   STOP      a shared setup or a tests/lib file that calls maker_stop and does not load tests/lib/maker-stop.sh
 #   REFUSALS  a refusal call, as payload/scripts/one-reader-check.sh finds one, in a registered hook's own file
 #   ONEHOME   a copy of an idiom whose home is elsewhere (a load-once guard or self-dir, a common-directory lookup, a
-#             field-by-key reader), as the same check finds one in a changed file, named with its home: only for an
-#             idiom whose count that check's REFUSING list holds, so a count is turned on there and nowhere else
+#             field-by-key reader, a merged concept's shape), as the same check finds one in a changed file, named with
+#             its home: only for an idiom whose count that check's REFUSING list holds, so a count is turned on there
+#             and nowhere else
 #
 # What a row changed decides what is read: a changed ceiling widens EXIT to every file it names, a changed allow file
 # is read for its own faults, and a changed hooks/hooks.json widens REFUSALS to every hook.
@@ -595,7 +596,7 @@ lint_refusals() {  # <root> <paths file>
 
 # A copy is a property of its line, so the changed scripts and hooks copied into a root of their own are judged as the
 # tree would judge them. The check prints a refusal only for a count its REFUSING list holds, and this check names
-# exactly the copies it refuses, with the home its finding gives; with none of the three counts there, it names none.
+# exactly the copies it refuses, with the home its finding gives; with none of the four counts there, it names none.
 lint_onehome() {  # <root> <paths file>
   local o="$LINT_TMP/onehome" p n=0 out rc
   # A root with no copy check holds no list of refusing counts, so no copy there is refused.
@@ -612,7 +613,7 @@ lint_onehome() {  # <root> <paths file>
   # The refusals first, `<kind> <file>:<line>` after the check's prefix, then the findings that carry the home.
   printf '%s\n' "$out" | LC_ALL=C awk -F'\t' -v p="one-reader-check: refused — " '
     FILENAME != "-" { if (index($0, p) == 1) r[substr($0, length(p) + 1)] = 1; next }
-    ($1 == "load-guard" || $1 == "git-home" || $1 == "field-reader") && (($1 " " $2) in r) { print "ONEHOME " $2 " — " $3 }' \
+    $1 ~ /^(load-guard|git-home|field-reader|home)$/ && (($1 " " $2) in r) { print "ONEHOME " $2 " — " $3 }' \
     "$LINT_TMP/onehome.err" -
 }
 

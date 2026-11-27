@@ -617,8 +617,7 @@ tick_unlanded_tree() {
   recs="$(printf '%s\n' "$3" | tr ',' '\n' | /usr/bin/grep 'record/' | paste -sd, -)"
   units_record_stands "$POKER_RUN_PLAN" "$id" "$recs" "$tree" "$(docs_root "$tree" 2>/dev/null)" || return 0
   th="$(git -C "$tree" rev-parse --verify -q HEAD 2>/dev/null)" || return 0
-  { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
-  declare -F proof_branch_head >/dev/null 2>&1 || return 0
+  bionic_need proof.sh proof_branch_head >/dev/null 2>&1 || return 0
   wh="$(proof_branch_head "$POKER_RUN_PLAN" "$REPO_REAL" 2>/dev/null)" && [ -n "$wh" ] || return 0
   n="$(git -C "$tree" rev-list --count "$wh..$th" 2>/dev/null)"
   case "$n" in ''|*[!0-9]*|0) return 0 ;; esac
