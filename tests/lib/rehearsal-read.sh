@@ -101,9 +101,12 @@ rt_elapsed_min() {  # <sheet> -> the minutes clock.elapsed says have passed sinc
 }
 rt_taskline() { printf '%s\n' "$1" | /usr/bin/grep "^task: id=$2 "; }   # <sheet> <id> -> its task line
 
-RT_MEASURED="clock.now clock.approved clock.forecast clock.elapsed clock.elapsed-share work.planned work.added work.dropped work.landed work.left work.width work.task-time pace.time-used pace.work-landed close.chain close.predicted close.unscaled close.waits-on-you tests.suites-run tests.suites-total tests.whole-run reviews findings.open waste.dropped waste.runs-discarded waste.ready-unstarted waste.waiting-on-you"
+# rt_measured_keys <sitrep.sh> -> the keys of its sitrep_m calls, in order
+rt_measured_keys() { sed -n 's/^[[:space:]]*sitrep_m \([a-z][a-z.-]*\) .*/\1/p' "$1" | paste -sd' ' -; }
+RT_MEASURED="$(rt_measured_keys "$BIONIC_HOOKS_DIR/poker/sitrep.sh")"
 rt_unlabelled() {  # <sheet> -> each measured key with no line, or whose line names no measure, unit and source (or basis)
   local k l
+  [ -n "$RT_MEASURED" ] || { printf 'no-measured-keys '; return 0; }
   for k in $RT_MEASURED; do
     l="$(printf '%s\n' "$1" | /usr/bin/grep -F "$k: " | head -1)"
     case "$l" in "$k: "?*' — '?*' · unit: '*' · source: '?*|"$k: "?*' — '?*' · unit: '*' · basis: '?*) ;; *) printf '%s ' "$k" ;; esac

@@ -97,6 +97,12 @@
 # Pinned by tests/root.test.sh (seven on-disk topologies, each rule-bearing one
 # paired with a differential control).
 
+# The loader, for `docs_path`'s load of roots.sh at call time. It defines functions and runs nothing.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
+
 # _bionic_root_abs <path> -> absolute, symlink-resolved path
 #
 # Falls back up the chain when the path does not exist yet: a hook is handed a
@@ -161,6 +167,27 @@ _bionic_root_abs() {
   ( cd "$p" 2>/dev/null && pwd -P ) || printf '%s\n' "$p"
 }
 
+# path_normal <absolute path> -> PATH_NORMAL: `.`, `..` and doubled slashes folded LEXICALLY
+# (`<link>/..` is the link's parent: a wall asks which tree a path names), `/` when none is left.
+# A `*` is a character, so globbing is off for the split; the caller's state is kept.
+PATH_NORMAL=""
+path_normal() {
+  local part had_f=0
+  case "$-" in *f*) had_f=1 ;; esac
+  set -f
+  PATH_NORMAL=""
+  local IFS=/
+  for part in $1; do
+    case "$part" in
+      ''|.) ;;
+      ..)   PATH_NORMAL="${PATH_NORMAL%/*}" ;;
+      *)    PATH_NORMAL="$PATH_NORMAL/$part" ;;
+    esac
+  done
+  [ "$had_f" -eq 1 ] || set +f
+  PATH_NORMAL="${PATH_NORMAL:-/}"
+}
+
 # _bionic_root_is_home_or_above <path> <home> -> 0 when <path> is <home> or an
 # ancestor of it. Rule 4. The pattern half of the `case` is quoted, so a path
 # carrying a glob character is compared literally.
@@ -210,13 +237,11 @@ _bionic_root_start() {
   # order the options were given, so the two questions rule 1 has always asked cost
   # one process instead of two. Measured at the parent (R3 §5): 11.7 ms + 10.8 ms,
   # 19% of the whole bash-walls run, on EVERY hook event of every session.
-  both="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || both=""
-  common="${both%%$'\n'*}"
-  gitdir="${both#*$'\n'}"
-  # Fewer than two lines is not an answer: a one-line `both` splits into two copies
-  # of itself, which would read as "git dir equals common dir" — a linked worktree
-  # silently demoted to an ordinary checkout. Blank both and let the arm below ask.
-  [ "$common" = "$both" ] && { common=""; gitdir=""; }
+  # Fewer than two lines is no answer from `git_common_dir_and`, so a linked worktree is
+  # never silently demoted to an ordinary checkout; the arm below asks again.
+  git_common_dir_and "$cwd" --git-dir
+  common="$BIONIC_GIT_COMMON"
+  gitdir="$BIONIC_GIT_ALSO"
 
   if [ -z "$common" ] || [ -z "$gitdir" ]; then
     # OLDER GIT (< 2.31) HAS NO `--path-format`, so the whole call above failed and
@@ -319,6 +344,22 @@ project_root() {
   return 0
 }
 
+# project_root_or_refuse [cwd] -> the project root with every symlink resolved, rc 0; rc 2 and nothing
+# on stdout when that root cannot be entered, after the one refusal every verb and hook gives for it.
+#
+# The refusal goes through the caller's own `die`, so it carries that hook's prefix, as each copy
+# this replaced did; a caller with no `die` gets the bare line on stderr. Run in a command
+# substitution, it cannot end the caller, so the caller exits:
+#     REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+project_root_or_refuse() {
+  local r
+  r="$(cd "$(project_root "${1:-$PWD}")" 2>/dev/null && pwd -P)"
+  [ -n "$r" ] && { printf '%s\n' "$r"; return 0; }
+  set -- "REFUSED — cannot resolve the working directory."
+  if declare -F die >/dev/null 2>&1; then die "$1"; else printf '%s\n' "$1" >&2; fi
+  return 2
+}
+
 # git_common_dir [dir] -> the repository's common git directory, absolute and symlink-resolved;
 # rc 1 and nothing printed when <dir> is in no repository.
 #
@@ -345,6 +386,41 @@ git_common_dir() {
   _bionic_root_abs "$c"
 }
 
+# git_common_dir_and <dir> <path option> -> rc 0 with BIONIC_GIT_COMMON and BIONIC_GIT_ALSO set to git's answers
+# to `--git-common-dir` and to <path option> (`--git-dir`, `--show-toplevel`), from ONE ask of git; rc 1 and both
+# blank when git fails or answers fewer than two lines, or either answer is empty.
+#
+# For a caller that wants a second path beside the common directory: two questions in one `rev-parse` cost one
+# process where `git_common_dir` and a second ask cost two, on paths every hook event walks. The answers are git's
+# own `--path-format=absolute` lines, not resolved further, so a caller compares them with `-ef` or with each other;
+# an older git without the option fails here and the caller declines, or asks again itself. Set by variable, so no
+# subshell carries them away. One line back is not two answers: it would read as "git dir equals common dir".
+git_common_dir_and() {
+  local both
+  BIONIC_GIT_COMMON=""; BIONIC_GIT_ALSO=""
+  both="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir "$2" 2>/dev/null)" || return 1
+  case "$both" in *$'\n'*) ;; *) return 1 ;; esac
+  [ -n "${both%%$'\n'*}" ] && [ -n "${both#*$'\n'}" ] || return 1
+  BIONIC_GIT_COMMON="${both%%$'\n'*}"; BIONIC_GIT_ALSO="${both#*$'\n'}"
+}
+
+# git_tree_lease <dir> [<root>] -> rc 0 when <dir> sits in a linked worktree whose main checkout is another
+# directory, with BIONIC_LEASE_TOP set to the tree's top and BIONIC_LEASE_MAIN to the main checkout, both physical;
+# rc 1 and both blank otherwise. A linked worktree's `.git` is a FILE pointing into the shared repository and the
+# main checkout's is a directory, the test lib/worktree.sh's land verb makes too. A tree whose top is <root> is a
+# project of its own and holds no lease, so it answers rc 1 before the common directory is asked.
+git_tree_lease() {
+  local top common main
+  BIONIC_LEASE_TOP=""; BIONIC_LEASE_MAIN=""
+  top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ] && [ -f "$top/.git" ] || return 1
+  top="$(cd "$top" 2>/dev/null && pwd -P)" && [ -n "$top" ] || return 1
+  [ "$top" != "${2:-}" ] || return 1
+  common="$(git_common_dir "$top")" || return 1
+  main="$(cd "$common/.." 2>/dev/null && pwd -P)" && [ -n "$main" ] || return 1
+  [ "$main" != "$top" ] || return 1
+  BIONIC_LEASE_TOP="$top"; BIONIC_LEASE_MAIN="$main"
+}
+
 # git_linked_dir [dir] -> the tree's OWN git directory (`<main>/.git/worktrees/<name>`), absolute, on stdout, where
 # a linked worktree keeps what belongs to that tree alone. rc 1 when <dir> is no directory or in no repository, rc 2 with nothing
 # printed when it is the main checkout, whose own git directory is the common one `git_common_dir` answers.
@@ -358,6 +434,11 @@ git_linked_dir() {
   printf '%s\n' "$gd"
 }
 
+# is_repo <dir> -> rc 0 when <dir> is a directory inside a git repository, rc 1 otherwise (a missing path, a file, an
+# empty or absent argument included). The ask runs in a subshell, so the caller's directory is never changed. The doctor
+# and the version line each ask it of the tree the registry names.
+is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
+
 # ─── THE AUDIT STREAM: where a project's findings land, and who writes one ───
 # docs_heads -> the directories a path is spelled from when it is written from the docs root.
 docs_heads() { printf '%s\n' record specs adrs plans; }
@@ -368,7 +449,7 @@ docs_heads() { printf '%s\n' record specs adrs plans; }
 docs_path() {
   local root="$1" p="${2#./}" d h
   case "$p" in '') return 1 ;; /*) printf '%s\n' "$p"; return 0 ;; esac
-  declare -F docs_root >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/roots.sh" >/dev/null 2>&1
+  bionic_need roots.sh docs_root
   d="$(docs_root "$root")"
   if [ ! -e "$root/$p" ]; then
     [ -e "$d/$p" ] && { printf '%s/%s\n' "$d" "$p"; return 0; }
@@ -441,7 +522,7 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
 log_finding() {  # $1=check-id  $2=detail — never blocks, always returns 0
   local f
   if f=$(audit_path "$(bionic_finding_root)"); then
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) ${BIONIC_FINDING_CHANNEL:-} $1: $2 (${BIONIC_FINDING_SUBJECT:-})"
+    local line="- $(iso_now) ${BIONIC_FINDING_CHANNEL:-} $1: $2 (${BIONIC_FINDING_SUBJECT:-})"
     mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
   fi
   echo "canonical-sdlc [$1]: $2" >&2
@@ -470,4 +551,48 @@ log_answer() {  # $1=project root  $2=the answer line — appends it; rc 1 when 
   f=$(answers_path "$1") || return 1
   mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
   printf '%s\n' "$2" >> "$f" 2>/dev/null
+}
+
+# NAMES NO TWO PROCESSES SHARE. A subshell shares its parent's $$, and under bash 3.2 the children of a subshell
+# that has drawn $RANDOM each draw the same next value; a counter is copied by the fork with the rest. So no name
+# is made from those alone. A scratch file or directory is made by an exclusive create that draws again while the
+# name is held, which costs no process for a file; an id carries the asking process's own pid. Pinned by
+# tests/names.test.sh.
+
+# bionic_new <prefix> [dir] -> 0 with BIONIC_NEW naming the empty file (with `dir`, the directory) this call
+# created, <prefix>.<$$>.<draw>.<try>; 1, nothing made and BIONIC_NEW empty, when <prefix>'s folder is not there or
+# 32 tries made none. A file is created under noclobber, whose open fails on a name that exists; the caller's own
+# noclobber setting is left as it was.
+bionic_new() {
+  local p n=0 c=1
+  BIONIC_NEW=""
+  case "$1" in */*) [ -d "${1%/*}" ] || return 1 ;; esac
+  case "$-" in *C*) c=0 ;; esac
+  while [ "$n" -lt 32 ]; do
+    p="$1.$$.$RANDOM.$n"
+    if [ "${2:-}" = dir ]; then
+      if mkdir "$p" 2>/dev/null; then BIONIC_NEW="$p"; return 0; fi
+    else
+      set -C
+      if { : > "$p"; } 2>/dev/null; then [ "$c" = 0 ] || set +C; BIONIC_NEW="$p"; return 0; fi
+      [ "$c" = 0 ] || set +C
+    fi
+    n=$((n + 1))
+  done
+  return 1
+}
+
+# bionic_id -> 0 with BIONIC_ID set to <pid>.<draw>.<count>: the asking process's own pid, a draw, and how many ids
+# this process has made. Two processes alive at once differ by pid, two ids of one process by the count, and a pid
+# the system hands out again later by the draw. bash 3.2 has no $BASHPID, so the pid is read as the parent of a
+# child this process starts: a `$( )` holding one exec runs it in the forked child, whose parent is the asker.
+# 1, BIONIC_ID empty, when the pid cannot be read.
+bionic_id() {
+  local p=""
+  BIONIC_ID=""
+  [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] || p="${BASHPID:-}"
+  [ -n "$p" ] || p="$(exec /bin/sh -c 'echo "$PPID"')"
+  case "$p" in ''|*[!0-9]*) return 1 ;; esac
+  _BIONIC_ID_N=$(( ${_BIONIC_ID_N:-0} + 1 ))
+  BIONIC_ID="$p.$RANDOM.$_BIONIC_ID_N"
 }

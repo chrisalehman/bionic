@@ -1,4 +1,5 @@
 - **Re-read code after editing, especially when moving patterns between contexts.**
+- **A run meant to fail leads its suite segment**: `BIONIC_EXPECT=red tests/run.sh --only <suite>.test.sh`.
 - **Run only the suites the brief's `Suites:` names.** `cd <tree> || exit 1` guards the WHOLE
   command, so a failed `cd` cannot run the rest of it against the wrong tree.
 - **Reuse before you write:** before adding a function, file, type or configuration key, search

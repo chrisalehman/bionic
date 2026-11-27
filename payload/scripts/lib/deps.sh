@@ -117,16 +117,13 @@ _dep_installed_json()   { echo "${BIONIC_INSTALLED_PLUGINS_FILE:-$(_dep_claude_h
 # note here used to explain the duplication by saying each file is sourced on its own by
 # something, so none may assume a sibling came first. That is still true, and the soft
 # source below is what makes it survivable without a second copy (epic-22 wave-01, N1). No
-# `dirname`/`basename` in the self-locator either — it has to survive the half-broken
+# `dirname`/`basename` in the bootstrap line either — it has to survive the half-broken
 # machine it is most needed on.
-_dep_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-if ! declare -F plugin_root >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_dep_self_dir)" && pwd -P)/roots.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need roots.sh plugin_root
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 
 # ccstatusline ships TWO halves (epic-18-w1 handoff §3.1): the `.statusLine`
 # command that RENDERS the line, and the layout file that command reads. The
@@ -1133,7 +1130,7 @@ dep_record_add() {  # <name> — one line, appended in a single write
   kind="$(dep_field "$name" kind)" || return 1
   file="$(dep_record_file)"
   mkdir -p "${file%/*}" 2>/dev/null || return 1
-  printf '%s\t%s\t%s\t%s\n' "$name" "$kind" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(_dep_bionic_version)" \
+  printf '%s\t%s\t%s\t%s\n' "$name" "$kind" "$(iso_now)" "$(_dep_bionic_version)" \
     >> "$file" 2>/dev/null
 }
 

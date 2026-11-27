@@ -43,13 +43,10 @@
 #
 # bash 3.2 (ADR-001).
 
-_LOG_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
-if ! declare -F line_value >/dev/null 2>&1 || ! declare -F _wt_proofs_put >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_LOG_LIB_DIR/line.sh"
-fi
-# shellcheck source=/dev/null
-declare -F seal_write >/dev/null 2>&1 || . "$_LOG_LIB_DIR/seal.sh"
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need line.sh line_event
+bionic_need worktree.sh _wt_proofs_put
+bionic_need seal.sh seal_write
 
 LOG_TYPES=" ready candidate verdict published returned stalled standing admitted void run walk step approval"
 LOG_TYPES="${LOG_TYPES} proof finding waiver decision order bind handoff dispatch tree born ask stop debt abandon cancel hand drop ruling "
@@ -144,12 +141,7 @@ _log_plan() {
   return 1
 }
 
-_log_reader() {  # -> 0 once lib/reader.sh, beside this file, is loaded
-  declare -F reader_main >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$_LOG_LIB_DIR/reader.sh" >/dev/null 2>&1
-  declare -F reader_main >/dev/null 2>&1
-}
+_log_reader() { bionic_need reader.sh reader_main; }  # -> 0 once lib/reader.sh, beside this file, is loaded
 
 # _log_open <plan> -> 0 when the run is open, by lib/run.sh `run_open`'s rule (state open, at a step 0 to 9) over a
 # fresh fold of the log: the kept answer `run_open` serves is a fact kept between asks, and a seal is made from the

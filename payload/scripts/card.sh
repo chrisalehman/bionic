@@ -8,7 +8,7 @@
 #
 # WHAT IT OWNS. The six row shapes the Step-1, Step-2 and Step-3 approval cards are
 # made of — the requirement row, the decision row, the ownership row, the
-# eval-design row and the task row — their column widths, their column headers, and
+# test-design row and the task row — their column widths, their column headers, and
 # what happens to a cell too wide for its column.
 #
 # WHY IT EXISTS, WHICH IS NOT "TO TIDY THE WIDTHS AWAY". Until this file the widths
@@ -43,7 +43,7 @@
 # column and carry nothing else. Every emitted line fits BIONIC_LINE_WIDTH.
 #
 # USAGE
-#     bash card.sh <requirement|decision|ownership|eval-design|task>  < rows.tsv
+#     bash card.sh <requirement|decision|ownership|test-design|task>  < rows.tsv
 #     bash card.sh <step0|step1|step2|step3> <artifact> (the whole card; no stdin)
 #     bash card.sh rigor <word>                         (a rigor level, printed with its meaning)
 #     bash card.sh opening [<rigor> [<intent> <scale>]]   (the method's opening: the version line, the engaged line, the rigor line; with no rigor, the version line and that the triple is not yet declared)
@@ -75,6 +75,11 @@ set -u
 CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/width.sh"
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/loader.sh"
+# THE ONE ENGLISH LIST AND PLURAL (lib/english.sh): a card names its rows as prose and counts them with the noun's own number.
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/english.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/root.sh"
 # THE TWO LIBRARIES THE STEP-3 CARD ASKS ITS LAST TWO QUESTIONS OF (epic-23
@@ -112,7 +117,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh task-cell <id> <cell> [<id> <cell>]..., or card.sh release with its facts on stdin, or card.sh <sitrep|sitrep-check> <sheet file> with the judgment or the card on stdin, or card.sh fold with its lines on stdin\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|test-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh task-cell <id> <cell> [<id> <cell>]..., or card.sh release with its facts on stdin, or card.sh <sitrep|sitrep-check> <sheet file> with the judgment or the card on stdin, or card.sh fold with its lines on stdin\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -173,10 +178,12 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
       # line 1 is `ownership`'s own, so the two kinds never disagree about a column.
       _card_spec ownership || return 1
       CARD_LINES=2; CARD_FMT_2='    reuses %s'; CARD_NF_2=1; CARD_FOLD_2=0 ;;
-    eval-design)
-      CARD_SECTION="Eval design"
+    test-design)
+      CARD_SECTION="Test design"
       CARD_HDRCOLS="2:static 3:unit 4:hermetic 5:live 6:human"
-      CARD_FMT_1='    %-8s %-36s %6s %5s %9s %5s %6s';  CARD_NF_1=7; CARD_FOLD_1=1 ;;
+      # A COUNT STARTS UNDER ITS LABEL: the header puts each label at its field's first column,
+      # so a count padded on the left would end under the label's end and read as off by its own width.
+      CARD_FMT_1='    %-8s %-36s %-6s %-5s %-9s %-5s %-6s';  CARD_NF_1=7; CARD_FOLD_1=1 ;;
     task)
       CARD_SECTION="Tasks"
       CARD_HDRCOLS="2:serves 3:kind 4:depends 5:agent"
@@ -832,7 +839,7 @@ BEGIN { OFS = "\t"; ERRMSG = ""; enum = 0 }
   else if (h == "Design") { sec = "design"; sawdesign = 1 }
   else if (h == "Not Doing") sec = "nd"
   else if (h == "Tasks") { sec = "tasks"; sawtasks = 1 }
-  else if (h == "Eval design") { sec = "eval"; saweval = 1; erow = 0 }
+  else if (h == "Test design" || h == "Eval design") { sec = "test"; sawtest = 1; erow = 0 }
   else if (h ~ /^Requirements/) sec = "reqs"
   else sec = ""
   next
@@ -879,7 +886,7 @@ sub2 == "worth" {
 # paragraph only: a design section is a document, the card is a line, and the artifact
 # path is the depth. A wave-scale spec runs through here too and nothing reads DESIGN on
 # that card, because the wave card already renders the decisions, the ownership and the
-# eval design the wave design is MADE of.
+# test design the wave design is MADE of.
 sec == "design" && designdone != 1 {
   if (trim($0) == "") { if (DESIGN != "") designdone = 1 }
   else DESIGN = DESIGN (DESIGN == "" ? "" : " ") clean($0)
@@ -907,7 +914,7 @@ sec == "reqs" && rid != "" {
 # a backticked token is an identifier where the cell is the proof said in plain words. Both are refused here,
 # naming the row by its requirement and criterion; the width is measured in columns by the loader, which owns
 # the width library, from the first row of each requirement (`EAPP`).
-sec == "eval" && /^[ \t]*\|/ {
+sec == "test" && /^[ \t]*\|/ {
   erow++
   if (erow <= 2) next
   n = cells($0, c)
@@ -915,7 +922,7 @@ sec == "eval" && /^[ \t]*\|/ {
   r = c[1]
   ncrit++; crow[ncrit] = r OFS c[3] OFS c[4] OFS c[5] OFS c[6]
   if (verb == "step2") {
-    erowid = c[3]; sub(/[ \t].*$/, "", erowid); erowid = "Eval design row " r " " erowid
+    erowid = c[3]; sub(/[ \t].*$/, "", erowid); erowid = "Test design row " r " " erowid
     if (craw[2] ~ /`/) err(erowid ": the Approach cell carries a backtick: " craw[2])
     else if ((r in eapp) && eapp[r] != c[2]) err(erowid ": a second approach for " r ": " c[2] " (the first: " eapp[r] ")")
     if (!(r in eapp)) print "EAPP" OFS erowid OFS c[2]
@@ -954,10 +961,10 @@ END {
   flush_all()
   if (!sawgoal) err("the artifact has no ## Goal section")
   if (verb == "step3" && !sawtasks) err("the plan has no ## Tasks ledger")
-  # THE EVAL TABLE IS A WAVE OBLIGATION (D8). At task scale the design is a paragraph in
-  # the session plan and there is no eval-design wall at all, so demanding the table here
+  # THE TEST TABLE IS A WAVE OBLIGATION. At task scale the design is a paragraph in
+  # the session plan and there is no test-design wall at all, so demanding the table here
   # refused the very artifact the arm exists to render (research R3: exit 64 at d7e841c).
-  if (verb == "step2" && !saweval && scale != "task") err("the spec has no ## Eval design table")
+  if (verb == "step2" && !sawtest && scale != "task") err("the spec has no ## Test design table")
   if (ERRMSG != "") { print "ERR" OFS ERRMSG; exit 0 }
   print "META" OFS "design" OFS DESIGN
   print "META" OFS "approach" OFS APPROACH
@@ -985,7 +992,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_ADRK=(); WCARD_ADRV=()
   local out line key rest k v wide="" _wc_rc
   # THE HEADER IS THE READER-OWNED PARSER'S (lib/plan-read.sh `plan_read_header`), one read of every key: what the
-  # artifact points at, its scale, rigor and walk. The scale goes to the parse, which owes an Eval design unless it is task.
+  # artifact points at, its scale, rigor and walk. The scale goes to the parse, which owes a Test design unless it is task.
   while IFS= read -r line; do
     k="${line%%=*}"; v="${line#*=}"
     case "$k" in
@@ -1100,7 +1107,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
 # sentence end, or its first ` · `, where a tag (` · complexity:`, ` · born:`) begins, or the cell's end. A
 # cell that is its title alone, or its title and a tag, has none.
 CARD_TITLE_CAP=30
-# The Eval design's Approach cell is one line on the card, so its cap is a width, in columns (see the eval arm).
+# The Test design's Approach cell is one line on the card, so its cap is a width, in columns (see the test arm).
 CARD_APPROACH_CAP=60
 
 _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
@@ -1391,8 +1398,7 @@ _card_batch_rows() {  # <plan> -> `<batch>\t<step>\t<id>` per row, in table orde
 _card_project_open() {
   local copy="${2:-}/.bionic/docs/plans/run/${1##*/}"
   git init -q "${2:-}" >/dev/null 2>&1 && mkdir -p "${copy%/*}" && cp "${1:-}" "$copy" || return 1
-  declare -F proof_approval_event >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/proof.sh" >/dev/null 2>&1 || return 1
-  declare -F line_log >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/line.sh" >/dev/null 2>&1 || return 1
+  bionic_need proof.sh proof_approval_event && bionic_need line.sh line_log || return 1
   # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and the fill offers nothing to a run
   # whose plan stands unapproved, so a copy without the approval would answer every batch with nothing.
   proof_approval_event "$copy" step3 by=card said=projected || return 1
@@ -1905,15 +1911,15 @@ _card_step1_view() {  # <artifact path as given> <args...>
 
 # THE PARAGRAPH CARD IS FOR A DESIGN THAT IS ONE (D8), AND THE SHAPE FOLLOWS THE SPEC, NEVER
 # THE SCALE (wave-43 D11; AC-13.2). A wave design is a document with decisions, an ownership
-# table and an eval-design table, and the card renders those three batches. A task run may write
+# table and a test-design table, and the card renders those three batches. A task run may write
 # "a design paragraph per non-trivial task, in the session plan" (steps/2.md:60), and for that
-# spec there are no decisions to tabulate and no eval design to count: the card shows the
-# paragraph, names the artifact, and asks its question, and does NOT offer `show evals` or
+# spec there are no decisions to tabulate and no test design to count: the card shows the
+# paragraph, names the artifact, and asks its question, and does NOT offer `show tests` or
 # `explain <decision>`, because a card that offers an affordance over content it is not carrying
 # is the same lying surface the regression line was. But a task-scale run that writes the full
 # spec (waves 42 and 43 did) gets the full card: keying the shape on `scale:` alone drew the
-# paragraph over nine decisions and 37 evals, and the decisions reached the user by hand
-# (wave-42 A-orch.8). `_card_step2_paragraph` is the one test: no decision row and no eval row.
+# paragraph over nine decisions and 37 tests, and the decisions reached the user by hand.
+# `_card_step2_paragraph` is the one test: no decision row and no test row.
 _card_step2_paragraph() { [ "${#WCARD_DROW[@]}" -eq 0 ] && [ "${#WCARD_EROW[@]}" -eq 0 ]; }
 
 _card_step2_task() {  # <citation path>
@@ -1998,7 +2004,7 @@ _card_path_line() {  # <label> <path>
 # ONE CARD THE DESIGN IS APPROVED ON (wave-26 D13). The head says what is being built and why
 # it is shaped so (Goal, Approach, Risks); the tables below it say what is decided and
 # how each criterion is proven; the Artifacts say where each piece lives, by the path a reader
-# opens. Ownership and one requirement's evals are not on it — they are asked for, as the
+# opens. Ownership and one requirement's tests are not on it — they are asked for, as the
 # sub-views the last line offers.
 _card_step2() {  # <artifact path>
   if [ "$CARD_SCALE" = "task" ] && _card_step2_paragraph; then _card_step2_task "$1"; return 0; fi
@@ -2027,7 +2033,7 @@ _card_step2() {  # <artifact path>
   _card_render_batch decision
   printf '\n'
   CARD_ROWS=( ${WCARD_EROW[@]+"${WCARD_EROW[@]}"} )
-  _card_render_batch eval-design
+  _card_render_batch test-design
   dp="$(_card_docs_prefix)"
   printf '\n  Artifacts\n    spec  %s\n' "$1"
   _card_artifact_lines design "$WCARD_DPTR" "$dp"
@@ -2035,7 +2041,7 @@ _card_step2() {  # <artifact path>
   _card_artifact_lines ledger "$WCARD_LEDGER" "$dp"
   _card_artifact_lines reqs "$WCARD_REQS" "$dp"
   printf '\n%s\n' "$CARD_Q_STEP2"
-  printf 'show evals <req> · explain <decision> · show ownership\n'
+  printf 'show tests <req> · explain <decision> · show ownership\n'
 }
 
 # One entry of a block (a risk, a Not Doing item, a criterion): its first line flush at the block's
@@ -2055,8 +2061,8 @@ _card_entry() {  # <text>
 }
 
 # ── THE STEP-2 SUB-VIEWS (wave-26 D13) ───────────────────────────────────────
-# `card.sh step2 <spec> ownership` is the Ownership table and nothing else; `… evals <REQ>` is
-# one requirement's Eval design rows. Both read the same parse the whole card reads, and the
+# `card.sh step2 <spec> ownership` is the Ownership table and nothing else; `… tests <REQ>` is
+# one requirement's Test design rows. Both read the same parse the whole card reads, and the
 # table goes through the same row kind it always did.
 _card_step2_ownership() {
   CARD_ROWS=( ${WCARD_OROW[@]+"${WCARD_OROW[@]}"} )
@@ -2082,16 +2088,16 @@ _card_labelled() {  # <indent> <label> <text> [<label width, 12 by default>]
   done < <(bionic_wrap "$text" $(( BIONIC_LINE_WIDTH - ind - lw )))
 }
 
-_card_step2_evals() {  # <REQ id>
+_card_step2_tests() {  # <REQ id>
   local row crit typ ev fails
-  printf '  Eval design · %s\n' "$1"
+  printf '  Test design · %s\n' "$1"
   for row in ${WCARD_CROW[@]+"${WCARD_CROW[@]}"}; do
     _card_split "$row"
     [ "${CARD_CELLS[0]:-}" = "$1" ] || continue
     crit="${CARD_CELLS[1]:-}"; typ="${CARD_CELLS[2]:-}"; ev="${CARD_CELLS[3]:-}"; fails="${CARD_CELLS[4]:-}"
     _card_fold_at 4 "$crit"
     _card_labelled 6 type "$typ"
-    _card_labelled 6 eval "$ev"
+    _card_labelled 6 test "$ev"
     _card_labelled 6 "fails when" "$fails"
   done
 }
@@ -2111,10 +2117,10 @@ _card_step2_refuse() {  # <what was wrong>
     case "$r" in total|'') continue ;; esac
     ids="${ids}${ids:+ }${r}"
   done
-  _card_view_refuse "$1" "step2 <spec> · step2 <spec> ownership · step2 <spec> evals <REQ-id>${ids:+ (REQ-id: ${ids})} · step2 <spec> explain <D-id>"
+  _card_view_refuse "$1" "step2 <spec> · step2 <spec> ownership · step2 <spec> tests <REQ-id>${ids:+ (REQ-id: ${ids})} · step2 <spec> explain <D-id>"
 }
 
-# `step2 <spec> [ownership | evals <REQ-id>]`, the arguments after the artifact. The paragraph
+# `step2 <spec> [ownership | tests <REQ-id>]`, the arguments after the artifact. The paragraph
 # card offers neither view, so it refuses both; a task-scale spec holding the tables has them.
 _card_step2_view() {  # <artifact path as given> <args...>
   shift
@@ -2124,14 +2130,14 @@ _card_step2_view() {  # <artifact path as given> <args...>
     ownership)
       [ "$#" -eq 1 ] || _card_step2_refuse "ownership takes no argument"
       _card_step2_ownership ;;
-    evals)
-      [ "$#" -eq 2 ] || _card_step2_refuse "evals takes one requirement id"
+    tests)
+      [ "$#" -eq 2 ] || _card_step2_refuse "tests takes one requirement id"
       for row in ${WCARD_EROW[@]+"${WCARD_EROW[@]}"}; do
         r="${row%%"$CARD_TAB"*}"
         [ "$r" = "$2" ] && [ "$r" != "total" ] && known=1
       done
-      [ "$known" -eq 1 ] || _card_step2_refuse "no requirement '$2' in the Eval design"
-      _card_step2_evals "$2" ;;
+      [ "$known" -eq 1 ] || _card_step2_refuse "no requirement '$2' in the Test design"
+      _card_step2_tests "$2" ;;
     explain)
       [ "$#" -eq 2 ] || _card_step2_refuse "explain takes one decision id"
       _card_step2_explain "$2" ;;
@@ -2169,7 +2175,7 @@ _card_step2_explain() {  # <D-id or number>
 #
 # STEP 3 APPROVES THE PLAN AND THE MATRIX ONLY (wave-26 D12, D13). The design was approved on the
 # Step-2 card, so this card cites it by path and repeats neither its purpose (the Goal paragraph)
-# nor its eval counts. What it adds is the plan's own shape: each task with the criteria it
+# nor its test counts. What it adds is the plan's own shape: each task with the criteria it
 # serves, and the longest chain and the peak width the derived graph gives, at every scale.
 _card_step3() {  # <citation path> <artifact path as given>
   # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column, and the
@@ -2191,7 +2197,7 @@ _card_step3() {  # <citation path> <artifact path as given>
   printf '\n  Artifacts\n    plan  %s\n' "$1"
   _card_artifact_lines spec "$WCARD_SPEC" "$(_card_docs_prefix)"
   printf '\n%s\n' "$CARD_Q_STEP3"
-  printf 'show evals <req> · show task <n> · explain <decision>\n'
+  printf 'show task <n> · explain <decision>\n'
 }
 
 # THE TASK ROWS: the title alone, `serves` in a column of its own, the depends cell with each run of
@@ -2207,20 +2213,16 @@ _card_task_rows() {  # sets CARD_ROWS[] from WCARD_TROW[]
   done
 }
 
-# THE ROLE A TASK ASKS FOR is the one its cell's complexity tag names, on a row a writer runs: the plan step tags every
-# step-four task `complexity: complex` or `complexity: standard`, and the agent column says who is asked, so the person
-# approving a plan sees it before anything launches. This is the one home of the kinds whose role the card prints,
-# build and test; a review, a verify, a document, the merge and the close draw the dash whatever their tag says. A
-# launch in the log names the writer that came, not the role, and is not read here. A cell with no tag, or a word the
-# step does not define, draws the dash: no role is guessed.
-# lib/fill.sh `fill_readonly_ids` answers a different question, who takes a writer's slot, so it is not asked here.
+# THE ROLE A TASK ASKS FOR is the one its cell's complexity tag names: the plan step tags every step-four task
+# `complexity: complex` or `complexity: standard`, and the agent column says who is asked, so the person approving a
+# plan sees it before anything launches. Which kinds draw a role from the tag, and the role each tag names, are
+# lib/units.sh `units_kind_role`'s, which the start verb reads too; every other kind, a cell with no tag, or a word
+# the step does not define draws the dash: no role is guessed. A launch in the log names the writer that came, not
+# the role, and is not read here.
 _card_task_role() {  # <kind> <Tasks cell> -> senior-implementor, implementor or —, on stdout
-  local re='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
-  case "${1:-}" in build|test) ;; *) printf '—'; return 0 ;; esac
-  if [[ "${2:-}" =~ $re ]]; then
-    case "${BASH_REMATCH[2]}" in complex) printf 'senior-implementor'; return 0 ;; standard) printf 'implementor'; return 0 ;; esac
-  fi
-  printf '—'
+  local r
+  r="$(units_kind_role "${1:-}" "${2:-}")"
+  printf '%s' "${r:-—}"
 }
 
 # Consecutive ids in a depends cell are one range: four ids in a row print as the first and the last
@@ -2283,7 +2285,7 @@ _card_step3_view() {  # <artifact path as given> <args...>
 # so in place of the level.
 _card_rigor_line() {  # <rigor word, as the plan carries it> -> the Verification block's rigor phrase
   [ -n "${1:-}" ] || { printf 'review rigor: not declared'; return 0; }
-  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (single or double)" "$1"
+  rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (%s)" "$1" "$(write_gate_or "$WRITE_GATE_RIGORS")"
 }
 
 # A SECOND LINE WITH NO CELL AND NO LABEL WOULD PRINT AS A BLANK LINE, and a blank line inside a
@@ -2402,7 +2404,7 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
     case "$n" in 1|2) [ "$(_card_stem "$art")" = "$(_card_stem "$plan")" ] || return 0 ;; *) return 0 ;; esac
   fi
   _card_settled "$n" "$plan" && return 0
-  declare -F owed_open >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/owed.sh" 2>/dev/null || return 0
+  bionic_need owed.sh owed_open || return 0
   case "$n" in
     0) q="$CARD_Q_STEP0"; t="approval: Step 0 configuration" ;;
     1) q="$CARD_Q_STEP1"; t="approval: Step 1 requirements" ;;
@@ -2427,21 +2429,14 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
 # registered, an owed reading unregistered at the working head
 # (lib/units.sh `_units_readings_state`, the tick's own reading), and the check-only advance to 6, 7 and 8, asked of the
 # advance's own judge once for the three (`session-poker.sh judge 6 7 8`, each answer what `current <N> --check` prints;
-# its exit is read and its verdict line is the reason, never a second judgment here). On the
-# first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
+# each step's code is read from the judge's closing line and its verdict line is the reason, never a second judgment
+# here). On the first that fails it prints `CARD-EARLY — <reason>` on stderr and exits 0, an ordinary answer a caller
+# reads by that line. When all three hold it exits 0 and prints,
 # on stdout, one `settles: <key>` line per item a red check owes that the page settles with a decision of the
 # user's (`waive:<question>` or `row:<AC>`), so the page opens each on the person's ledger.
 #
 # THE SESSION'S OWN RUN. The checks act on the run the session is bound to, so a plan that is not that run is
 # refused by name rather than judged against another run's advances.
-_card_early_load() {  # -> 0 when the owed ledger and the roster readers are loaded beside this file
-  # shellcheck source=/dev/null
-  declare -F owed_list >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/owed.sh" 2>/dev/null
-  # shellcheck source=/dev/null
-  declare -F roster_open_names >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/roster.sh" 2>/dev/null
-  declare -F owed_list >/dev/null 2>&1 && declare -F roster_open_names >/dev/null 2>&1
-}
-
 _card_early_ctx() {  # <plan as given> -> 0 and the CF_* context, or 1 and CF_ERR
   local bound=""
   CF_ERR=""
@@ -2475,7 +2470,7 @@ _card_early() {  # -> 0 when the page may render; 1 and CARD_EARLY_WHY on the fi
   local roster ledger names n type st q head8 out rc line
   CARD_EARLY_WHY=""
   # (1) AN OPEN READER: the roster's open names (lib/roster.sh, the one closing rule), each read by its latest row's role.
-  roster="$CF_ROOT/.bionic/tmp/roster-$CF_SID.state"
+  roster="$(roster_path "$CF_ROOT" "$CF_SID")"
   if [ -f "$roster" ] && [ ! -L "$roster" ]; then
     ledger="$(roster_ack_ledger "$roster")"
     names="$(roster_open_names "$roster" "$ledger" "$CF_SID")"
@@ -2530,16 +2525,18 @@ CF_POST
   # hooks/poker/judge.sh `advance_judge`) answers the three in one process, each step's answer the lines its checked
   # advance prints, closed by `judged <N> exit <rc>`. A red check is early unless every refusal it prints is one the
   # page settles with a decision (`_card_settles`): its lines are read as the judge printed them, never judged again
-  # here. An answer the ask did not close is read as that step's check exiting with the ask's own exit.
+  # here. The card reads the judge's text alone, never its exit: the judge exits 0 for a step that would refuse, as
+  # that is an answer, so only the closing line carries the step's code. A step the ask did not close is no answer and
+  # reads as one the judge could not deal (2), its whole output the reason.
   CF_SETTLE=""
-  local judged jrc
-  judged="$(_card_poke judge 6 7 8)"; jrc=$?
+  local judged
+  judged="$(_card_poke judge 6 7 8)"
   for n in 6 7 8; do
     out="$(printf '%s\n' "$judged" | awk -v n="$n" '
       index($0, "poker: judged ") == 1 { if ($3 == n) { printf "%s", b; exit } b = ""; next }
       { b = b $0 "\n" }')"
     rc="$(printf '%s\n' "$judged" | awk -v n="$n" 'index($0, "poker: judged ") == 1 && $3 == n && $4 == "exit" { print $5; exit }')"
-    [ -n "$rc" ] || { out="$judged"; rc="$jrc"; [ "$rc" -ne 0 ] || rc=2; }
+    [ -n "$rc" ] || { out="$judged"; rc=2; }
     [ "$rc" -eq 0 ] && continue
     _card_settles "$out" && continue
     line="$(printf '%s\n' "$out" | awk 'NF { print; exit }')"; line="${line#poker: }"
@@ -2552,7 +2549,7 @@ CF_POST
 # _card_t4_confirm_key -> the key a T4 row's block carries beside `evidence:`, the user's confirmation of the row's own
 # check, as walls.sh `keys_for_tier` names it; nothing when walls.sh cannot be loaded, so the refusal stays early.
 _card_t4_confirm_key() {
-  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F keys_for_tier >/dev/null 2>&1 || exit 1
+  ( bionic_need walls.sh keys_for_tier || exit 1
     for _ck in $(keys_for_tier T4); do [ "$_ck" = evidence ] || { printf '%s' "$_ck"; break; }; done )
 }
 
@@ -2571,11 +2568,11 @@ _card_judge_line() {
 # (payload/scripts/lib/walls.sh `eg_review_unanswered_fact`, `eg_review_failing_line`), read in a subshell. Nothing
 # when walls.sh cannot be loaded, and then no line is settled as that refusal, so the page stays early.
 _card_review_fact() {
-  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F eg_review_unanswered_fact >/dev/null 2>&1 || exit 1
+  ( bionic_need walls.sh eg_review_unanswered_fact || exit 1
     eg_review_unanswered_fact )
 }
 _card_review_failing() {
-  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F eg_review_failing_line >/dev/null 2>&1 || exit 1
+  ( bionic_need walls.sh eg_review_failing_line || exit 1
     eg_review_failing_line )
 }
 
@@ -2584,7 +2581,7 @@ _card_review_failing() {
 # the criterion. Nothing when walls.sh cannot be loaded, and then no refusal is settled as that one, so the page stays
 # early.
 _card_live_exit() {
-  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F matrix_live_row_exit >/dev/null 2>&1 || exit 1
+  ( bionic_need walls.sh matrix_live_row_exit || exit 1
     matrix_live_row_exit '%s' )
 }
 
@@ -2738,20 +2735,6 @@ _card_hang() {  # <hang> <text>
   printf '%s\n' "$line"
 }
 
-_card_list() {  # <cap> <word>... -> `A`, `A and B`, `A, B and C`, the first <cap> named and the rest counted
-  local cap="$1"; shift
-  awk -v cap="$cap" 'BEGIN {
-    n = ARGC - 1; if (n < 1) exit
-    m = (n > cap) ? cap : n
-    for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m && n == m) ? " and " : ", ")) ARGV[i]
-    if (n > m) s = s " and " (n - m) " more"
-    print s }' "$@"
-}
-
-_card_plural() {  # <n> <singular> <plural> -> `<n> <word>`
-  if [ "$1" -eq 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi
-}
-
 _card_release_dec_of() {  # <key> -> the decision number the card gives it; 1 when none
   local i=0
   while [ "$i" -lt "$RL_N" ]; do
@@ -2817,23 +2800,23 @@ _card_release_bottom() {
   if [ -n "$RL_EARLY" ]; then _card_hang 2 "- Not ready for your decisions: $RL_EARLY."
   elif [ "$RL_N" -gt 0 ]; then _card_hang 2 "- Ready for your decisions: every check holds at $RL_H8."
   else _card_hang 2 "- Every check holds at $RL_H8."; fi
-  [ "${#RL_CHK[@]}" -eq 0 ] || _card_hang 2 "- This release changes the release check: $(_card_list 6 "${RL_CHK[@]}")."
+  [ "${#RL_CHK[@]}" -eq 0 ] || _card_hang 2 "- This release changes the release check: $(english_list 6 "${RL_CHK[@]}")."
   if [ "${#RL_MISS[@]}" -gt 0 ]; then
-    l="$(_card_plural "${#RL_MISS[@]}" criterion criteria) not proved: $(_card_list 6 "${RL_MISS[@]}")"
+    l="$(english_plural "${#RL_MISS[@]}" criterion criteria) not proved: $(english_list 6 "${RL_MISS[@]}")"
     for p in "${RL_MISS[@]}"; do n="$(_card_release_dec_of "row:$p")" && nums[${#nums[@]}]="$n"; done
     # A run of decision numbers is said as a range.
     if [ "${#nums[@]}" -eq 1 ]; then l="$l (decision ${nums[0]})"
     elif [ "${#nums[@]}" -gt 1 ]; then
       n="${nums[$(( ${#nums[@]} - 1 ))]}"
       if [ "$(( n - nums[0] + 1 ))" -eq "${#nums[@]}" ]; then l="$l (decisions ${nums[0]} to $n)"
-      else l="$l (decisions $(_card_list 6 "${nums[@]}"))"; fi
+      else l="$l (decisions $(english_list 6 "${nums[@]}"))"; fi
     fi
     _card_hang 2 "- $l."
   fi
   # A CRITERION OWED BY THE CLOSE OR AT A LATER STEP IS PENDING: it is named as owed, and the line that says the
   # criteria are proved speaks of the others alone, so the card never says all are while the reader answers one pending.
-  [ "${#RL_OWC[@]}" -eq 0 ] || _card_hang 2 "- $(_card_plural "${#RL_OWC[@]}" criterion criteria) owed by the close: $(_card_list 6 "${RL_OWC[@]}")."
-  [ "${#RL_OWL[@]}" -eq 0 ] || _card_hang 2 "- $(_card_plural "${#RL_OWL[@]}" criterion criteria) owed at a later step: $(_card_list 6 "${RL_OWL[@]}")."
+  [ "${#RL_OWC[@]}" -eq 0 ] || _card_hang 2 "- $(english_plural "${#RL_OWC[@]}" criterion criteria) owed by the close: $(english_list 6 "${RL_OWC[@]}")."
+  [ "${#RL_OWL[@]}" -eq 0 ] || _card_hang 2 "- $(english_plural "${#RL_OWL[@]}" criterion criteria) owed at a later step: $(english_list 6 "${RL_OWL[@]}")."
   n=$(( ${#RL_OWC[@]} + ${#RL_OWL[@]} )); l=""; [ "$n" -eq 0 ] || l=" other"
   if [ "${#RL_MISS[@]}" -gt 0 ]; then :
   elif [ "$n" -gt 0 ] && [ "$RL_ACT" -le "$n" ]; then :
@@ -2843,9 +2826,9 @@ _card_release_bottom() {
   # An early run puts no decision: the acting render refuses it, so a preview says what the user will owe, never that
   # they owe it now, and the card says one thing.
   if [ "$RL_N" -gt 0 ] && [ -n "$RL_EARLY" ]; then
-    _card_hang 2 "- Once the run is ready, you will owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
+    _card_hang 2 "- Once the run is ready, you will owe $(english_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
   elif [ "$RL_N" -gt 0 ]; then
-    _card_hang 2 "- You owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
+    _card_hang 2 "- You owe $(english_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
   else
     _card_hang 2 "- You owe nothing: every approval and waiver is recorded."
   fi
@@ -2864,14 +2847,14 @@ _card_release_bottom() {
     elif [ "${RL_DPICK[$i]}" = default ]; then ph[${#ph[@]}]="${RL_DPH[$i]}"
     else ph[${#ph[@]}]="${RL_OPH[$i]}"; fi
     if [ "${RL_DKIND[$i]}" = row ] && { [ "$((i + 1))" -eq "$RL_N" ] || [ "${RL_DKIND[$((i + 1))]}" != row ]; }; then
-      [ "${#cf[@]}" -eq 0 ] || ph[${#ph[@]}]="confirm $(_card_list 6 "${cf[@]}")"
-      [ "${#wv[@]}" -eq 0 ] || ph[${#ph[@]}]="waive $(_card_list 6 "${wv[@]}")"
-      [ "${#rn[@]}" -eq 0 ] || ph[${#ph[@]}]="run $(_card_list 6 "${rn[@]}")"
+      [ "${#cf[@]}" -eq 0 ] || ph[${#ph[@]}]="confirm $(english_list 6 "${cf[@]}")"
+      [ "${#wv[@]}" -eq 0 ] || ph[${#ph[@]}]="waive $(english_list 6 "${wv[@]}")"
+      [ "${#rn[@]}" -eq 0 ] || ph[${#ph[@]}]="run $(english_list 6 "${rn[@]}")"
     fi
   done
   l=""
   for ((i = 0; i < ${#ph[@]}; i++)); do l="${l:+$l, }${ph[$i]}"; done
-  [ "${#ap[@]}" -eq 0 ] || l="${l:+$l, then }$(_card_list 6 "${ap[@]}")"
+  [ "${#ap[@]}" -eq 0 ] || l="${l:+$l, then }$(english_list 6 "${ap[@]}")"
   _card_hang 2 "- Recommended: $l."
 }
 
@@ -2923,11 +2906,11 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
       case "$g" in
         F) lab="Fixed"
            # shellcheck disable=SC2086  # the fixing rows, one word each
-           [ -z "$RL_FROWS" ] || lab="Fixed by $(_card_list 6 $RL_FROWS)" ;;
+           [ -z "$RL_FROWS" ] || lab="Fixed by $(english_list 6 $RL_FROWS)" ;;
         A) lab="Awaiting your decision" ;;
         C) lab="Carried as known limits" ;;
         # THE CARRIED COUNT IS THE LOG'S: the findings no deferral in the log holds are named in one line, apart.
-        R) lab="Carried by their records alone, with no deferral in the run's log: $(_card_list 6 "${RL_FUNL[@]}")" ;;
+        R) lab="Carried by their records alone, with no deferral in the run's log: $(english_list 6 "${RL_FUNL[@]}")" ;;
       esac
       _card_hang 0 "$lab"
       while IFS= read -r sent; do [ -z "$sent" ] || _card_hang 7 "$sent"; done <<< "$lines"
@@ -3259,17 +3242,16 @@ _card_sitrep_states() {
 # open tasks follow, one row each in the sheet's order. A run of one is the task's own row; a longer run lists its
 # descriptions as far as the width allows and counts the rest.
 _card_sitrep_tasklist() {
-  printf '%s\n' "$SR_RECS" | awk -F'\t' -v dash="–" -v width="$BIONIC_LINE_WIDTH" '
+  printf '%s\n' "$SR_RECS" | awk -F'\t' -v dash="–" -v width="$BIONIC_LINE_WIDTH" "$_ENGLISH_AWK"'
     function lab(id) { return (substr(id, 1, 1) == "T") ? substr(id, 2) : id }
     function cap(s) { return toupper(substr(s, 1, 1)) substr(s, 2) }
     function low(s) { return (substr(s, 2, 1) ~ /[a-z]/) ? tolower(substr(s, 1, 1)) substr(s, 2) : s }
     function own(j) { return cap(td[j]) ((tn[j] == "-" || tn[j] == "") ? "" : ", " tn[j]) }
     # the descriptions of run r, first to last, as many as fit in room, the rest counted
-    function listed(r, room,   k, x, s, c) {
+    function listed(r, room,   k, x, s, c, wd) {
+      for (x = 1; x <= rn[r]; x++) wd[x] = (x == 1) ? cap(td[ri[r, x]]) : low(td[ri[r, x]])
       for (k = rn[r]; k >= 1; k--) {
-        s = ""
-        for (x = 1; x <= k; x++) s = s ((x == 1) ? cap(td[ri[r, x]]) : ((x == k && k == rn[r]) ? " and " : ", ") low(td[ri[r, x]]))
-        if (k < rn[r]) s = s " and " (rn[r] - k) " more"
+        s = english_join(wd, rn[r], k)
         if (length(s) <= room || k == 1) return s
       }
     }
@@ -3647,7 +3629,7 @@ case "$1" in
   rigor)
     [ "$#" -eq 2 ] || _card_usage "rigor takes exactly one word (got $(( $# - 1 )))"
     rigor_print "$2" && exit 0
-    printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2
+    printf "card.sh: '%s' is no review rigor — use %s\n" "$2" "$(write_gate_or "$WRITE_GATE_RIGORS")" >&2
     exit 1 ;;
   opening)
     # The version line is the version command's own print and has no second source here: a line composed in
@@ -3663,10 +3645,7 @@ case "$1" in
     fi
     [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || _card_usage "opening takes a rigor word and, with it, an intent and a scale (got $(( $# - 1 )) arguments)"
     _card_open_level="$(rigor_level "$2" 2>/dev/null)"
-    case "$_card_open_level" in
-      single|double) ;;
-      *) printf "card.sh: '%s' is no review rigor — use single or double\n" "$2" >&2; exit 1 ;;
-    esac
+    write_gate_has "$_card_open_level" "$WRITE_GATE_RIGORS" || { printf "card.sh: '%s' is no review rigor — use %s\n" "$2" "$(write_gate_or "$WRITE_GATE_RIGORS")" >&2; exit 1; }
     if [ "$#" -eq 4 ]; then
       printf 'Canonical SDLC engaged — %s · %s rigor · %s\n' "$3" "$_card_open_level" "$4"
     else
@@ -3682,7 +3661,7 @@ case "$1" in
       _card_owe 0 "${3:-}"
       exit 0
     fi
-    printf "card.sh: '%s' is no scale — use task, wave or epic\n" "$2" >&2
+    printf "card.sh: '%s' is no scale — use %s\n" "$2" "$(write_gate_or "$WRITE_GATE_SCALES")" >&2
     exit 1 ;;
   inherited)
     # THE READING CLOSE-OUT CARRIES FROM (T43): `card.sh inherited <requirements file>`. A path that
@@ -3745,12 +3724,14 @@ case "$1" in
     # Whether the release approval card may render: the three facts, and what a red check owes that the page settles.
     [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one plan path (got $(( $# - 1 )))"
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable plan at '$2'"
-    _card_early_load || { printf 'card.sh: %s: lib/owed.sh and lib/roster.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }
+    bionic_need owed.sh owed_list && bionic_need roster.sh roster_open_names && bionic_need refuse.sh refuse_ordinary_exit \
+      || { printf 'card.sh: %s: lib/owed.sh, lib/roster.sh and lib/refuse.sh cannot be loaded beside this file\n' "$1" >&2; exit 1; }
     _card_early_ctx "$2" || { printf 'card.sh: %s: %s\n' "$1" "$CF_ERR" >&2; exit 1; }
     # THE RUN'S FACTS ARE READ ONCE, IN THIS SHELL, before any subshell asks: inside the command's hold the held fold
     # is read here and inherited, so no subshell below reads it again; outside one this shell folds once for them all.
     if declare -F _proof_facts >/dev/null 2>&1; then _proof_facts "$CF_PLAN" >/dev/null 2>&1 || :; fi
-    if ! _card_early; then printf 'CARD-EARLY — %s\n' "$CARD_EARLY_WHY" >&2; exit 1; fi
+    # Early is the card's answer, not a failure (lib/refuse.sh, the list): exit 0, the CARD-EARLY line its words.
+    if ! _card_early; then printf 'CARD-EARLY — %s\n' "$CARD_EARLY_WHY" >&2; exit "$(refuse_ordinary_exit card-early 1)"; fi
     printf '%s' "$CF_SETTLE" | awk 'NF && !seen[$0]++ { print "settles: " $0 }'
     exit 0 ;;
   step0|step1|step2|step3)

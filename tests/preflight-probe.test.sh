@@ -114,7 +114,7 @@ live_b() {
 
 run_probe() {  # <sandbox> [KEY=VAL ...] -> echoes exit code; stdout/stderr in $OUT/$ERR
   local sbx="$1"; shift
-  ( cd "$sbx/repo" && env -u ANTHROPIC_API_KEY \
+  ( cd "$sbx/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN \
       HOME="$sbx/home" \
       CLAUDE_CONFIG_DIR="$sbx/config" \
       CLAUDE_CODE_SESSION_ID="$SESSION_A" \
@@ -142,9 +142,7 @@ EOF
   printf '%s' "$d:$PATH"
 }
 
-# ============================================================
 section "S1 — positive pair: passing environment writes the attestation (AC-1)"
-# ============================================================
 
 
 SBX="$(mk_sandbox)"
@@ -173,6 +171,21 @@ SBX2="$(mk_sandbox)"; rm -f "$SBX2/config/.credentials.json"
 rc="$(run_probe "$SBX2" PATH="$(stub_dir "$SBX2" 1)" ANTHROPIC_API_KEY=sk-fixture-marker-0001)"
 expect_eq "credential satisfied by ANTHROPIC_API_KEY alone" "0" "$rc"
 
+# credential source 2: a login by token — the token variable alone, by presence only
+SBX2T="$(mk_sandbox)"; rm -f "$SBX2T/config/.credentials.json"
+rc="$(run_probe "$SBX2T" PATH="$(stub_dir "$SBX2T" 1)" CLAUDE_CODE_OAUTH_TOKEN=fixture-token-not-real-0002)"
+expect_eq "credential satisfied by CLAUDE_CODE_OAUTH_TOKEN alone" "0" "$rc"
+expect_file_regex "the token login is named as the source" 'credential present \(environment token\)' "$OUT"
+expect_file_no_regex "the token's value is absent from stdout" 'fixture-token-not-real-0002' "$OUT"
+expect_file_no_regex "the token's value is absent from stderr" 'fixture-token-not-real-0002' "$ERR"
+expect_file_no_regex "the token's value is absent from the attestation" 'fixture-token-not-real-0002' "$SBX2T/repo/$STATE_REL"
+
+# an empty token is no login: no source left, so the probe still refuses
+SBX2E="$(mk_sandbox)"; rm -f "$SBX2E/config/.credentials.json"
+rc="$(run_probe "$SBX2E" PATH="$(stub_dir "$SBX2E" 1)" CLAUDE_CODE_OAUTH_TOKEN=)"
+expect_eq "an empty CLAUDE_CODE_OAUTH_TOKEN is not a credential" "1" "$rc"
+expect_file_regex "the refusal names the token variable" 'credential absent.*CLAUDE_CODE_OAUTH_TOKEN' "$OUT"
+
 # credential source 3: the macOS keychain, via a substituted `security`
 SBX3="$(mk_sandbox)"; rm -f "$SBX3/config/.credentials.json"
 rc="$(run_probe "$SBX3" PATH="$(stub_dir "$SBX3" 0)")"
@@ -192,9 +205,7 @@ expect_eq "re-run over a reordered/extended prior record exits 0" "0" "$rc"
 expect_file_regex "re-run refreshes this session's record" "^session_id=$SESSION_A\$" "$SBX4/repo/$STATE_REL"
 expect_file_no_regex "re-run discards the stale placeholder repo field" "^repo=/somewhere\$" "$SBX4/repo/$STATE_REL"
 
-# ============================================================
 section "S2 — blocking failure writes nothing and destroys the prior stamp (AC-1)"
-# ============================================================
 
 # credential missing: no env var, no credentials file, keychain lookup fails
 SBX="$(mk_sandbox)"; rm -f "$SBX/config/.credentials.json"
@@ -249,9 +260,7 @@ else
   ok "an unwritable state dir leaves NO usable prior attestation (C2)"
 fi
 
-# ============================================================
 section "S3 — no session key REFUSES (AC-10 / design §7)"
-# ============================================================
 
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX" CLAUDE_CODE_SESSION_ID=)"
@@ -266,9 +275,7 @@ rc="$(run_probe "$SBX" CLAUDE_CODE_SESSION_ID=)"
 expect_eq "unkeyed re-run exits 3" "3" "$rc"
 expect_eq "unkeyed run leaves existing state byte-identical" "$_before" "$(cat "$SBX/repo/$STATE_REL" 2>/dev/null)"
 
-# ============================================================
 section "S4 — hostile repo: symlinks and unpredictable temp names (AC-8 / design §8)"
-# ============================================================
 
 # file-level symlink plant
 SBX="$(mk_sandbox)"
@@ -327,9 +334,7 @@ expect_file_no_regex "credential value absent from stderr" 'SECRET-9f2b' "$ERR"
 expect_file_no_regex 'no \$\$-derived temp filename (A2)' '\.tmp\.\$\$|\$\$\.tmp|\$\{?\$\}?"?\.' "$PROBE"
 expect_file_regex "mktemp template uses XXXXXX" 'mktemp[^|&;]*XXXXXX' "$PROBE"
 
-# ============================================================
 section "S5 — locking against racing writers (A4)"
-# ============================================================
 
 SBX="$(mk_sandbox)"
 mkdir -p "$SBX/repo/.bionic/tmp/.preflight.lock"
@@ -345,10 +350,10 @@ rmdir "$SBX/repo/.bionic/tmp/.preflight.lock"
 # twice at once) still serializes through the shared lock and is covered by the
 # single-writer interleaving pin below.
 SBX="$(mk_sandbox)"
-( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
+( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
     CLAUDE_CODE_SESSION_ID="$SESSION_A" bash "$PROBE" ) >/dev/null 2>&1 &
 p1=$!
-( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
+( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
     CLAUDE_CODE_SESSION_ID="$SESSION_B" bash "$PROBE" ) >/dev/null 2>&1 &
 p2=$!
 wait $p1; wait $p2
@@ -361,9 +366,7 @@ expect_eq "session B's record is keyed to session B, not clobbered by A" "$SESSI
 _debris="$(find "$SBX/repo/.bionic/tmp" -name 'preflight-*.state.*' 2>/dev/null | head -3)"
 expect_eq "parallel writers leave no temp debris" "" "$_debris"
 
-# ============================================================
 section "S6 — context probes never block (design §4)"
-# ============================================================
 
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
@@ -397,9 +400,7 @@ SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
 expect_file_no_regex "own session never warned about" "WARN.*$SESSION_A" "$OUT"
 
-# ============================================================
 section "S6b — D-5: legacy single-slot pruning, dead-session pruning (task 4/2)"
-# ============================================================
 
 # (iii) the legacy single-slot file is pruned on every run and never honored — this
 # script no longer reads OR writes it, so its mere presence must not survive a run,
@@ -439,9 +440,7 @@ expect_eq "the live foreign session's record is unchanged, still keyed to sessio
   "$(grep -m1 '^session_id=' "$SBX/repo/$STATE_REL_B" | cut -d= -f2-)"
 expect_true "this session's own record was ALSO written (both valid concurrently)" [ -f "$SBX/repo/$STATE_REL" ]
 
-# ============================================================
 section "S6c — rostered-vs-unrostered scan (task 4/7, display/warn only)"
-# ============================================================
 #
 # spec Design "Component boundaries and interfaces": "hooks/preflight-probe.sh
 # ... its other-live-session scan reports rostered-vs-unrostered." Two additions
@@ -508,9 +507,7 @@ else
   ok "a rostered subagent is NOT flagged UNROSTERED"
 fi
 
-# ============================================================
 section "S7 — mutation-and-restore proofs (design §9, checklist A5/A2)"
-# ============================================================
 
 ORIG_SUM="$(shasum "$PROBE" | awk '{print $1}')"
 
@@ -543,7 +540,7 @@ else
   SBX="$(mk_sandbox)"
   rc="$(run_probe "$SBX")"
   expect_eq "prior attestation established for the write-failure proof" "0" "$rc"
-  rc="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" \
+  rc="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" \
             CLAUDE_CONFIG_DIR="$SBX/config" CLAUDE_CODE_SESSION_ID="$SESSION_A" \
             bash "$MUT" ) >"$OUT" 2>"$ERR"; echo $?)"
   expect_eq "write failure exits 2, never 1 (A5 doc/behavior split)" "2" "$rc"
@@ -560,10 +557,10 @@ if [ -z "$MUT" ]; then
   no "mutation 'showtmp' changed the script" "awk matched nothing — the mktemp step moved"
 else
   SBX="$(mk_sandbox)"
-  n1="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" \
+  n1="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" \
             CLAUDE_CONFIG_DIR="$SBX/config" CLAUDE_CODE_SESSION_ID="$SESSION_A" \
             bash "$MUT" ) 2>&1 >/dev/null | grep '^TMPNAME=' | head -1)"
-  n2="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" \
+  n2="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN HOME="$SBX/home" \
             CLAUDE_CONFIG_DIR="$SBX/config" CLAUDE_CODE_SESSION_ID="$SESSION_A" \
             bash "$MUT" ) 2>&1 >/dev/null | grep '^TMPNAME=' | head -1)"
   expect_true "temp name captured on run 1" [ -n "$n1" ]
@@ -575,9 +572,7 @@ else
 fi
 
 
-# ============================================================
 section "S8 — documented exit codes match the code (A5) and hot-path hygiene (A7)"
-# ============================================================
 
 _doc_codes="$(grep -oE '^#[[:space:]]+exit [0-9]+' "$PROBE" | grep -oE '[0-9]+' | sort -u | tr '\n' ' ')"
 _code_codes="$(grep -vE '^[[:space:]]*#' "$PROBE" | grep -oE '(^|[^[:alnum:]_])exit [0-9]+' \
@@ -591,9 +586,7 @@ expect_file_no_regex "the producer performs no plan-directory walk (A7)" 'docs/p
 
 expect_true "script is bash and runs under set -u" grep -q '^set -u' "$PROBE"
 
-# ============================================================
 section "S9 — payload-shape canary: CLI version pin for the D-3 agent_id discriminator (w3 task 4/4)"
-# ============================================================
 #
 # The D-3 same-actor wall reads observer identity from the undocumented top-level agent_id
 # field on subagent-invoked PostToolUse|Bash payloads (validated
@@ -645,9 +638,7 @@ rc="$(run_probe "$SBX" PATH="$SBX/combostub:$PATH")"
 expect_eq "mismatched pin does not mask a real blocking failure" "1" "$rc"
 expect_false "mismatched pin does not cause a spurious attestation on blocking failure" [ -e "$SBX/repo/$STATE_REL" ]
 
-# ============================================================
 section "S11 — the project root is PINNED, never taken from the shell (epic-16 w2 S5, AC-4/R5)"
-# ============================================================
 #
 # THE FIELD CASE, from a field report §3: an attestation was taken, and then had to
 # be taken AGAIN, because the root it described came from wherever the shell happened to
@@ -677,7 +668,7 @@ mk_committed_sandbox() {  # a sandbox whose repo has a commit, so worktrees can 
 
 run_probe_in() {  # <sandbox> <cwd> [KEY=VAL ...] -> echoes exit code
   local sbx="$1" where="$2"; shift 2
-  ( cd "$where" && env -u ANTHROPIC_API_KEY \
+  ( cd "$where" && env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN \
       HOME="$sbx/home" \
       CLAUDE_CONFIG_DIR="$sbx/config" \
       CLAUDE_CODE_SESSION_ID="$SESSION_A" \
@@ -741,9 +732,7 @@ expect_true "…attesting against the working directory, as it always has" \
 # The auto-probe path in the dispatch wall now REPRINTS this script's output verbatim
 # inside a refusal, so any advice left here reaches an operator through a second surface.
 
-# ============================================================
 section "S10 — attestation version 2 and its reader (AC-25, wave-bionic-1.4.0-update)"
-# ============================================================
 #
 # THE SCHEMA LIVES IN THIS SCRIPT (spec Design §3, ownership table), so the writer's version
 # and the set the reader accepts are pinned HERE. The behaviour of the five probe fields and

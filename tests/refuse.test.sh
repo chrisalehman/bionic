@@ -122,6 +122,7 @@ FX_FIX_7="add it to the Suites budget line"
 MUT_DIR="$SANDBOX/lib"
 mkdir -p "$MUT_DIR"
 cp "$LIB_DIR/width.sh" "$MUT_DIR/width.sh"
+cp "$LIB_DIR/loader.sh" "$MUT_DIR/loader.sh"
 
 # mutant <name> <sed-expr> — sets MUT_PATH to a scratch copy of the shipped library with
 # one guard removed. EACH CALL IS PRECEDED BY ITS OWN `anchor file payload/scripts/lib/refuse.sh
@@ -1007,8 +1008,8 @@ expect_contains "(rv23) …after its LINT line" "LINT T1 payload/q.sh:2 wave" "$
 RS="$(ll_world)"; RSP="$(ll_plan "$RS")"; ll_launch "$RS" T1 a.test.sh
 printf '# §RUN: one case\n' >> "$RS/tests/a.test.sh"; git -C "$RS" add -A && git -C "$RS" commit -qm "a section"
 git -C "$RS/.worktrees/T1" merge -q --no-edit wave/x && sed -i '' '/§RUN/d' "$RS/.worktrees/T1/tests/a.test.sh" && git -C "$RS/.worktrees/T1" commit -qam "T1: section gone"
-printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|---|\n| REQ-1 | r | AC-9.1 | hermetic | `tests/run.sh --only a.test.sh` §RUN → one case | x | T1 |\n' >> "$RSP"
-( eval "$(sed -n '/^line_field() {/,/^}/p; /^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
+printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when | Task |\n|---|---|---|---|---|---|---|\n| REQ-1 | r | AC-9.1 | hermetic | `tests/run.sh --only a.test.sh` §RUN → one case | x | T1 |\n' >> "$RSP"
+( . "$REPO/payload/scripts/lib/fields.sh"; eval "$(sed -n '/^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
   BIONIC_LIB="$REPO/payload/scripts/lib" BIONIC_ROOT="$RS" BIONIC_SID="$WORLD_SID"
   dispatch_event "status=confirmed|row=T1|name=wx-T1|brief=.bionic/docs/record/wave-x/briefs/T1.md|brief_sum=s|plan=$RSP" )
 rv_ready rv24 '^run: bash .*spawn-worktree\.sh ready$' "$RS"

@@ -13,7 +13,8 @@
 # the file, the plan as it was, and the last line is `/bionic:canonical-sdlc <path>`; with no run, it says to read the
 # file and do Next 1.
 #
-# Sections: §NO-RUN §ONE-LINE §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §POINTER-AGREE.
+# Sections: §NO-RUN §ONE-LINE §SECTIONS §STATE §PORTABLE §POINTER §CLOSED §READERS §RESUME §POINTER-AGREE (which
+# also holds the one test of a handoff, lib/handoff.sh handoff_is_one, and the four doors that ask it).
 #
 # FIXTURE FIDELITY (HERMETIC). The session-poker prelude's sandbox, pins and gate-admitted plan (`s42_plan`), one
 # repository per world; a no-run world is a bare `git init` with no bionic folder at all. A running process is a
@@ -195,9 +196,7 @@ hf_world() {
   s42_snap "$HF_R" "$HF_P"
 }
 
-# ============================================================
 section "§NO-RUN: with no run bound, handoff writes the document under the handoffs folder, creating the bionic folder and its ignore file; it never refuses for want of a plan"
-# ============================================================
 HF_NR="$TMPROOT/hf-norun"; mkdir -p "$HF_NR"
 ( cd "$HF_NR" && git init -q . && git config user.name "Dana Fixture" && git config user.email d@example.com \
   && printf 'one\n' > a.txt && git add a.txt && git commit -qm "the first file" && printf 'two\n' >> a.txt && : > notes.txt )
@@ -233,9 +232,7 @@ expect_true "N6 a bionic folder git does not ignore: the handoffs folder gets it
   git -C "$HF_EU" check-ignore -q "$HF_EU_F"
 expect_eq "N6b …the literal *" "*" "$(cat "$HF_EU/$HF_HOME/.gitignore" 2>/dev/null)"
 
-# ============================================================
 section "§ONE-LINE: on success the verb prints the resume line alone and nothing on stderr; the handoff skill ends on that line in a fence and quotes nothing"
-# ============================================================
 # A reader sees one line. The verb's stdout and stderr are captured apart here, so a second line on either stream is
 # caught where hf_poke's merged capture would only count it.
 hf_split() {  # <repo> <stdin file> <args...> -> OL_OUT, OL_ERR, OL_RC: the poker's stdout and stderr, apart
@@ -278,9 +275,7 @@ expect_eq "OL-3d the last step ends on a fenced block holding the resume line" "
 expect_eq "OL-3e …and the step's last non-blank line closes that fence" '```' "$(printf '%s' "$OL_LASTSTEP" | /usr/bin/grep . | tail -1 | tr -d ' ')"
 
 
-# ============================================================
 section "§SECTIONS: the kind line, the title, then the ten sections in order; an empty section is one line; a long finding is printed whole"
-# ============================================================
 expect_eq "S1 line 1 is the kind line" "bionic-handoff/v1" "$(sed -n 1p "$HF_NR_F")"
 expect_eq "S3 the sections, in order" "$HF_HEADS" "$(hf_heads "$HF_NR_F")"
 expect_eq "S4 no heading stands over nothing (S3 read every heading)" "0" "$(hf_bare "$HF_NR_F")"
@@ -306,9 +301,7 @@ expect_eq "S12 a handoff with nothing composed exits 0" "0" "$RC"
 expect_eq "S12b …every section still stands, in order" "$HF_HEADS" "$(hf_heads "$HF_NR_F")"
 expect_eq "S12c …none of them bare" "0" "$(hf_bare "$HF_NR_F")"
 
-# ============================================================
 section "§STATE: bound, every State fact is computed: the tree, what runs, the agents with their briefs and progress files, the plan, step, open tasks and Patrol; a Finding with no source says unverified"
-# ============================================================
 hf_world state
 ( cd "$HF_R" && printf 'one\n' > tracked.txt && git add tracked.txt && git commit -qm "the tracked file" \
   && printf 'two\n' >> tracked.txt && : > dirty.txt )
@@ -357,9 +350,7 @@ expect_eq "T10c …and the run that ended is no longer running (T4's extractor)"
 expect_absent "T10d …no wait line (T10b read the same file)" "wait " "$(grep -E '^wait [0-9]+ minutes' "$HF_F")"
 kill "$HF_PID" 2>/dev/null; wait "$HF_PID" 2>/dev/null
 
-# ============================================================
 section "§HEAD: the head is the title, bound the run's status line, then Blocked on you: yes only while an ask that waits on you holds something, and one line per open ask with what it holds"
-# ============================================================
 # The asks are the run's register, opened through lib/owed.sh's own opener and answered through its own answer; the
 # status line is `sitrep --line`'s. An ask that waits on an event blocks nobody, so a head over only such asks says no.
 # fails-when: an ask open on the run is missing from the head, the head says nothing is blocked while an ask that waits
@@ -387,9 +378,7 @@ hf_poke "$HF_NR" "$HF_C" handoff
 expect_eq "HD3b with no run and a session's own ask open, the line is there and holds nothing, so the head still says Blocked on you: no" \
   "Blocked on you: no|- Approve release — holds nothing" "$(sed -n 3p "$HF_NR_F")|$(sed -n 4p "$HF_NR_F")"
 
-# ============================================================
 section "§PORTABLE: an argument tailors the document; secrets and addresses are redacted; a copied block is left out for its path; no safe-to-clear line exists"
-# ============================================================
 HF_NOKEY=1 hf_poke "$HF_NR" "$HF_C" handoff 'measure the judge cold and warm'
 HF_PF="$HF_NR/$HF_HOME/2026-10-06-measure-the-judge-cold-and-warm.md"
 expect_eq "P1 handoff <purpose> exits 0" "0" "$RC"
@@ -427,9 +416,7 @@ expect_eq "P5 a retired human-line flag is the usage error, exit 2" "2" "$RC"
 expect_contains "P5b …the usage error names stdin for the sections" "stdin" "$OUT"
 expect_eq "P5c …and nothing is written" "$HF_NFILES" "$(ls "$HF_NR/$HF_HOME" | wc -l | tr -d ' ')"
 
-# ============================================================
 section "§POINTER: bound, the run's log holds the handoff, naming the file, and the plan is as it was"
-# ============================================================
 s42_snap "$HF_R" "$HF_P"
 BIONIC_NOW_EPOCH=$((HF_NOW + 60)) hf_poke "$HF_R" "$HF_C" handoff 'the next session reviews T2'
 expect_eq "PT1 a bound handoff with a purpose, a minute on, exits 0; the reader's handoff names the file; the plan's sum is unchanged" \
@@ -439,9 +426,7 @@ hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "PT2 a plan at 15, which holds no state section, hands off: exit 0, the reader's handoff names the file, the plan's sum is unchanged" \
   "15|0|0|$HF_DOOR|$(cksum < "$TMPROOT/s42-before")" "$(sed -n 's/^canonical_sdlc_version: //p' "$HF_P")|$(grep -c '^## SDLC State' "$HF_P")|$RC|$(hf_ho "$HF_P")|$(cksum < "$HF_P")"
 
-# ============================================================
 section "§CLOSED: handoff on a delivered or parked plan writes the same document, its State saying where the run closed; the reader names it"
-# ============================================================
 hf_close() {  # <delivered text> -> the run's log closing it at Step 9 with that text, the plan snapped
   printf 'run/v1|ev=step|n=9|delivered=%s|at=2026-10-08T13:00:00Z\n' "$1" >> "$HF_REC"
   s42_snap "$HF_R" "$HF_P"
@@ -507,9 +492,7 @@ expect_contains "RC2 …and prints its resume point verbatim" "$(hf_label "$HF_F
 expect_contains "RC2b …saying nothing is resumed" "nothing to resume" "$OUT"
 expect_absent "RC3b …and no task list is offered" "task-list: " "$OUT"
 
-# ============================================================
 section "§READERS: adopt's STALE note reads the document's written instant through the reader's handoff"
-# ============================================================
 hf_world readers no
 poke "$HF_R" handoff
 expect_eq "R0 precondition: the handoff is written" "0" "$RC"
@@ -530,9 +513,7 @@ poke "$HF_R" adopt --report-only
 expect_contains "R4 an old-shape handoff (an ISO written: line, no instant:) still reads STALE after a later dispatch" \
   "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es)" "$OUT"
 
-# ============================================================
 section "§RESUME: /bionic:canonical-sdlc <file> runs session-poker.sh resume <file>: bind, adopt, the task list, the recap, the step file, the tick (at a scale with a Patrol); a no-run document binds nothing; no resume command ships"
-# ============================================================
 # The door is a verb the governing skill runs first when it is invoked with a handoff file's path; a /clear leaves a
 # new session that is engaged but unbound and unarmed. FIXTURE FIDELITY: §STATE's world; the document written by the
 # real verb while bound; then the session made new beside a predecessor session's roster holding a planted open row
@@ -658,9 +639,7 @@ expect_eq "RX5 precondition: the listing reads the shipped commands and skills (
 expect_eq "RX5b ls payload/commands payload/skills has no resume" "0" \
   "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c resume)"
 
-# ============================================================
 section "§POINTER-AGREE: one reader of the pointer, lib/handoff.sh handoff_file_of over the reader; with no pointer the default is today's handoffs file"
-# ============================================================
 # Each door is asked on one plan: close-out `check` names the file its closed form would be written to; the verb
 # appends its event. FIXTURE FIDELITY: the plan's header naming its integration branch, so check reads the plan through.
 # fails-when: close-out names another file than the one the verb writes.
@@ -673,6 +652,64 @@ hf_world pointer-agree no
 expect_eq "PA0 with no pointer, close-out check names today's handoffs file, the one the verb writes" "$HF_DOOR" "$(pa_check_file)"
 poke "$HF_R" handoff
 expect_eq "PA4 the verb exits 0" "0" "$RC"
+
+# ONE TEST OF A HANDOFF. lib/handoff.sh handoff_is_one answers whether a file is a handoff: a regular file whose first
+# line is the kind line. Four doors ask it, and the two that read a path they are handed (the engage hook and the
+# session-start door) refuse a link in the same call, while the resume verb and close-out's writer have refused a link
+# before they ask, in their own words, so they say `link-ok`. Each case is read through the shell the callers run in,
+# and a handoff is asked beside every refusal so a predicate that says no to all of them fails here.
+# fails-when: the predicate takes a link, a directory, an empty file, a file with another first line or a missing path
+# for a handoff, or refuses a handoff; or a door restates the kind-line test instead of asking.
+PI_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/handoff.sh"
+PI_D="$(mktemp -d)"
+printf 'bionic-handoff/v1\nHandoff · fixture\n\nSummary\n' > "$PI_D/doc.md"
+printf 'bionic-handoff/v1' > "$PI_D/bare.md"
+printf 'bionic-handoff/v1\r\nHandoff\n' > "$PI_D/crlf.md"
+printf 'Handoff · fixture\nbionic-handoff/v1\n' > "$PI_D/second.md"
+printf '# a note\n' > "$PI_D/note.md"
+: > "$PI_D/empty.md"
+mkdir "$PI_D/dir.md"
+mkfifo "$PI_D/pipe.md"
+( while :; do printf 'bionic-handoff/v1\n' > "$PI_D/pipe.md"; done ) 2>/dev/null &
+PI_WRITER=$!
+ln -s doc.md "$PI_D/link.md"
+ln -s note.md "$PI_D/linknote.md"
+pi_ask() {  # <file> [<mode>] -> yes when handoff_is_one says so, no when not
+  ( . "$PI_LIB" >/dev/null 2>&1; if handoff_is_one "$@"; then echo yes; else echo no; fi )
+}
+expect_eq "PI0 precondition: the predicate is defined by the library" "yes" \
+  "$( . "$PI_LIB" >/dev/null 2>&1; if declare -F handoff_is_one >/dev/null; then echo yes; else echo no; fi )"
+for pi_mode in no-link link-ok; do
+  expect_eq "PI1 $pi_mode: a handoff is one" "yes" "$(pi_ask "$PI_D/doc.md" $pi_mode)"
+  expect_eq "PI2 $pi_mode: a handoff with no line end is one" "yes" "$(pi_ask "$PI_D/bare.md" $pi_mode)"
+  expect_eq "PI3 $pi_mode: a first line with a carriage return is not the kind line" "no" "$(pi_ask "$PI_D/crlf.md" $pi_mode)"
+  expect_eq "PI4 $pi_mode: the kind line on the second line is not one" "no" "$(pi_ask "$PI_D/second.md" $pi_mode)"
+  expect_eq "PI5 $pi_mode: a file with another first line is not one" "no" "$(pi_ask "$PI_D/note.md" $pi_mode)"
+  expect_eq "PI6 $pi_mode: an empty file is not one" "no" "$(pi_ask "$PI_D/empty.md" $pi_mode)"
+  expect_eq "PI7 $pi_mode: a directory is not one" "no" "$(pi_ask "$PI_D/dir.md" $pi_mode)"
+  expect_eq "PI7b $pi_mode: a named pipe that is fed a kind line is not one, and is not read" "no" "$(pi_ask "$PI_D/pipe.md" $pi_mode)"
+  expect_eq "PI8 $pi_mode: a path to nothing is not one" "no" "$(pi_ask "$PI_D/none.md" $pi_mode)"
+  expect_eq "PI9 $pi_mode: no path is not one" "no" "$(pi_ask "" $pi_mode)"
+  expect_eq "PI10 $pi_mode: a link to a file that is no handoff is not one" "no" "$(pi_ask "$PI_D/linknote.md" $pi_mode)"
+done
+expect_eq "PI11 no-link: a link to a handoff is refused" "no" "$(pi_ask "$PI_D/link.md" no-link)"
+expect_eq "PI12 link-ok: a link to a handoff is one" "yes" "$(pi_ask "$PI_D/link.md" link-ok)"
+expect_eq "PI13 no mode says no-link: a link to a handoff is refused" "no" "$(pi_ask "$PI_D/link.md")"
+kill "$PI_WRITER" 2>/dev/null || true
+rm -rf "$PI_D"
+
+# The four doors ask the predicate and restate nothing: no door compares a first line with the kind line, each calls
+# handoff_is_one once, two with `no-link` (the hooks) and two with `link-ok` (the resume verb and close-out).
+PI_DOORS="$BIONIC_HOOKS_DIR/engage.sh $BIONIC_HOOKS_DIR/session-start.sh $BIONIC_HOOKS_DIR/poker/sitrep.sh $BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh"
+# shellcheck disable=SC2086
+PI_TEXT="$(cat $PI_DOORS)"
+expect_contains "PI14 the doors are read: the engage hook's file is in the text" "ENGAGE_FILE" "$PI_TEXT"
+expect_contains "PI14b the doors are read: close-out's handoff file is in the text" "CO_HO_FILE" "$PI_TEXT"
+expect_eq "PI15 no door compares a first line with the kind line" "0" \
+  "$(printf '%s\n' "$PI_TEXT" | grep -c -E '=[ ]*"bionic-handoff/v1"' || true)"
+expect_eq "PI16 four calls of the predicate, one at each door" "4" "$(printf '%s\n' "$PI_TEXT" | grep -c 'handoff_is_one "')"
+expect_eq "PI17 two doors refuse a link" "2" "$(printf '%s\n' "$PI_TEXT" | grep -c 'handoff_is_one "[^"]*" no-link')"
+expect_eq "PI18 two doors leave a link to their own refusal" "2" "$(printf '%s\n' "$PI_TEXT" | grep -c 'handoff_is_one "[^"]*" link-ok')"
 
 
 finish

@@ -30,6 +30,8 @@
 #   §TOOLS    the same roads by Write and Edit through the write hook, then the commit.
 #   §CHANGED  a caught change: the refusal names the log and both replies, the ask it opens is in the log
 #             the seal names, and the sitrep lists it, the plan gone too; a plan put back still reads changed.
+#   §CHANGED-WORDS  the changed-run refusal asks for the person's words as a plain message, names the verb as the
+#             orchestrator's act, and offers no command behind a shell escape; the staged ask says the same.
 #   §KEPT     the kept place, the kept facts, then both, rewritten by hand to read delivered with plan,
 #             log and binding untouched: the commit's refusal is the one before, word for word.
 #   §JUDGED   a fact written by hand into the kept facts moves no door; written over it by its own verb, it admits.
@@ -43,6 +45,9 @@
 #   §ACCEPT   accept is taken only on words a session the log bound as sealed typed, then the run is clean
 #             and one line names the word and the change.
 #   §ABANDON  abandon is taken only on words a session typed, and on them it ends the run.
+#   §JUDGE    the one judgment of a changed seal: refused with the ask staged and the catch kept, so a plan put
+#             back still reads changed where the wall's words alone keep nothing; a held seal is refused and keeps
+#             nothing; both callers ask it and neither keeps the catch itself.
 #   §HELD     a living command's held fold, a planted step in it too, is what its processes are served; once the
 #             command ends its directory is gone, and a copy under a dead pid serves a decider nothing.
 #
@@ -177,9 +182,14 @@ section "LOCK"
 base
 mkdir "$HOME_DIR/.reap"; printf '%s\n' "$$" > "$HOME_DIR/.reap/pid"
 expect_true "a live holder's lock stands" test -d "$HOME_DIR/.reap"
+# The wait is counted in the lock's own tries (one `sleep` between tries, at most 100 of them), not timed against a
+# clock: a slow machine stretches each try, never their number. The wrapper only counts, then sleeps as before.
+tries=0; sleep() { tries=$((tries + 1)); command sleep "$@"; }
 t0=$SECONDS; seal_write "$P" "$L" sh -c ': > "$1"' _ "$SB/held"; rc=$?; waited=$((SECONDS - t0))
+unset -f sleep
 expect_status "a write meets a held lock and exits 75" 75 "$rc"
-expect_true "it waited, then gave up well under ten seconds ($waited s)" test "$waited" -ge 1 -a "$waited" -le 4
+expect_true "it waited at least a second, then gave up by itself within the lock's 100 tries ($tries tries, $waited s)" \
+  test "$waited" -ge 1 -a "$tries" -ge 1 -a "$tries" -le 100
 expect_false "and ran nothing" test -f "$SB/held"
 out="$(seal_verify "$P")"; rc=$?
 expect_eq "verify meets it too and says busy" busy "$out"
@@ -458,6 +468,16 @@ the plan removed|PG|rm "$GP"
 the plan edited|PC|printf "| T9 | x |\n" >> "$GP"
 a line of the log rewritten|LC|sed -i.bak "1s/n=1/n=7/" "$GL"
 ROWS
+section "CHANGED-WORDS"
+# The refusal asks the person for a plain message and names the verb as the orchestrator's act; it
+# never offers a command behind a shell escape, which the verb refuses when typed (lib/said.sh `user_said`).
+world; eval 'rm "$GL"'; gate "git commit -m x"; E="$(cat "$SB/gate.err")"
+expect_status "the changed-run refusal: refused" 2 "$GRC"
+expect_contains "the refusal asks for the person's words as a plain message" "as a plain message" "$E"
+expect_contains "and names the verb as the orchestrator's act, never the person's" "you run the verb, never the person" "$E"
+expect_contains "and the verb carries their words" "session-poker.sh accept '<their words>'" "$E"
+expect_no_regex "the refusal holds no command behind a shell escape" '(^|[ `])! *(bash|session-poker)' "$E"
+expect_contains "the staged ask says the person rules by a plain message" "the person rules by a plain message" "$(cat "$GL")"
 rm "$GP"
 expect_regex "the ask of the changed log is listed still, with the plan then removed" "$SA" "$(sitrep_asks)"
 gated "the plan removed, its commit refused, then put back" "$PC" 'cp "$GP" "$SB/keep"; rm "$GP"; gate "git commit -m x"; cp "$SB/keep" "$GP"'
@@ -620,7 +640,7 @@ export BIONIC_GATE_DIR="$SB/gatedir" BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=
 rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"; CK="$(bash -c '. "$(dirname "$0")/lib/resolve-roots.sh"; require_helpers() { :; }; for l in lib/regression-fixture.sh lib/roster-row.sh close-out.prelude.sh lib/bound-marker.sh; do . "$(dirname "$0")/$l"; done
   PS="$(mk_fixture kept)"; P="$PS/$PLAN_REL"; RL="$(/usr/bin/grep "|ev=proof|kind=regression|" "$PS/$LOG_REL")"; /usr/bin/grep -v "|ev=proof|kind=regression|" "$PS/$LOG_REL" > "$PS/l"; mv "$PS/l" "$PS/$LOG_REL"; seal_fixture "$P" "$PS/$LOG_REL"; bound_marker "$PS" kept-1 "$P"; ck() { (cd "$PS" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR= BIONIC_CLAUDE_HOME="$SB_HOME/.claude" CLAUDE_CODE_SESSION_ID=kept-1 bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 --check 2>&1; echo "rc=$?"); run_close "$PS" check; printf "%s\n" "$CO_OUT" | grep "^facts: "; }
   ck >/dev/null; E0="$(ck)"; k="$(keep "$RL" "$P" | grep -c "kind=regression")"; E1="$(ck)"; f="${RL#run/v1|ev=proof|}"; IFS="|" read -ra kv <<< "${f%|at=*}"; LOG_AT=2026-10-04T12:00:00Z bash -c "$R proof_event \"\${@:2}\"" _ "$LIB" "$P" "${kv[@]}"
-  printf "%s|%s|%s|%s" "$k" "$(printf "%s\n" "$E0" | grep -c "would refuse\|^rc=1\|^facts: WOULD REFUSE")" "$([ "$E0" = "$E1" ] && echo same)" "$(ck | grep -c "would advance\|^rc=0\|^facts: every fact")"' "$BIONIC_SCRIPTS_DIR/tests/judged")"
+  printf "%s|%s|%s|%s" "$k" "$(printf "%s\n" "$E0" | grep -c "would refuse\|^rc=0\|^facts: WOULD REFUSE")" "$([ "$E0" = "$E1" ] && echo same)" "$(ck | grep -c "would advance\|^rc=0\|^facts: every fact")"' "$BIONIC_SCRIPTS_DIR/tests/judged")"
 expect_eq "with the regression proof given the kept facts by hand, current 8 --check and the close's facts refuse word for word; written by its writer, both admit" "1|3|same|3" "$CK"
 
 section "HELD"
@@ -642,5 +662,32 @@ expect_eq "once the command ends its held directory is gone, and a decider namin
 expect_eq "a held directory whose command is dead, the planted fold in it, serves a decider nothing: it reads the log" "9|5" \
   "$(hd_step "$HD_DEAD")|$(hd_ask "$HD_DEAD")"
 rm -rf "$HD_DEAD"
+
+section "JUDGE"
+# The one judgment of a changed seal that the commit gate folds and the publish verb reads its words from.
+judge() {  # <fn> <seal line> -> the function's exit and the ask it staged, asked in a shell of its own
+  ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/fold.sh"; . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
+    BIONIC_SEAL_LINE="$2" BIONIC_SEAL_PLAN="$P" BIONIC_SEAL_LOG="$L" BIONIC_WALL_OWED=""
+    "$1" publish >/dev/null 2>&1; printf '%s|%s\n' "$?" "${BIONIC_WALL_OWED%%$'\t'*}" )
+}
+PB="$SB/plan.sealed"; PCH="changed what=plan how=changed"; JK=()
+for fn in wall_run_seal wall_run_seal_kept; do
+  base; cp "$P" "$PB"; printf '| T9 | x |\n' >> "$P"
+  expect_eq "$fn: the plan changed by the shell reads changed" "$PCH" "$(seal_verify "$P")"
+  expect_eq "$fn: the changed run is refused, the ask staged" "2|seal:changed" "$(judge "$fn" "$PCH")"
+  cp "$PB" "$P"; JK[${#JK[@]}]="$(seal_verify "$P")"
+done
+expect_eq "the wall's words alone keep nothing: the plan put back reads clean" clean "${JK[0]}"
+expect_eq "the judgment keeps the catch: the plan put back still reads changed" "$PCH" "${JK[1]}"
+base; cp "$P" "$PB"; printf '| T9 | x |\n' >> "$P"
+expect_eq "a seal held past the wait is refused, nothing staged" "2|" "$(judge wall_run_seal_kept busy)"
+cp "$PB" "$P"
+expect_eq "and nothing is kept: the plan put back reads clean" clean "$(seal_verify "$P")"
+expect_eq "a clean run is nothing to judge" "0|" "$(judge wall_run_seal_kept clean)"
+CW='seal_write "\$(BIONIC_SEAL_PLAN|PV_PLAN)"'
+expect_ne "the commit gate folds the one judgment" 0 "$(/usr/bin/grep -c 'bionic_fold "$EVENT" wall_run_seal_kept' "$BIONIC_HOOKS_DIR/bash-walls.sh")"
+expect_ne "the publish verb reads its words from it" 0 "$(/usr/bin/grep -c 'wall_run_seal_kept publish' "$BIONIC_HOOKS_DIR/poker/line.sh")"
+expect_ne "the judgment keeps the catch in the library" 0 "$(/usr/bin/grep -cE "$CW" "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh")"
+expect_eq "and neither caller keeps it itself" 0 "$(cat "$BIONIC_HOOKS_DIR/bash-walls.sh" "$BIONIC_HOOKS_DIR/poker/line.sh" | /usr/bin/grep -cE "$CW")"
 
 finish

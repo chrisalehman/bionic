@@ -29,9 +29,7 @@ S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
-# ============================================================
-section "§CHECK: current <N> --check runs what current <N> runs before it writes, writes nothing, and exits as the advance would (wave-38 T1; REQ-1 AC-1.3; D20)"
-# ============================================================
+section "§CHECK: current <N> --check runs what current <N> runs before it writes, writes nothing, and answers as the advance would, exiting 0 on either answer"
 # `current <N> --check` (N in 5..8) runs the advance's own path up to the swap, through the real gate and the same
 # `cur7_judge <N>`, prints `would advance` or `would refuse` above the refusal text, and writes nothing.
 # FIXTURE FIDELITY: §CUR7's world (session-poker-4): a real repository on `wave/01-fixture` with two
@@ -90,7 +88,8 @@ CK_GOOD="$(ck_floor "$CK_C")
 $(ck_reads "$CK_C")"
 
 # ck_case <label> <N> <current> <want rc> <proof lines> -> the check on a fresh fixture,
-# then the advance on a fresh fixture of the same bytes; asserts both exit <want>, the check's first line,
+# then the advance on a fresh fixture of the same bytes; asserts the advance exits <want> and the check exits 0 (either
+# answer is an answer), the check's first line the verdict <want> gives,
 # that the check wrote nothing (the plan by cmp, the whole tree by cksum), and that a refusal's text is the
 # advance's own. Leaves CK_RC/CK_OUT (the check) and AD_RC/AD_OUT (the advance).
 ck_case() {
@@ -101,8 +100,8 @@ ck_case() {
   ck_plan "$cur" "$proofs"
   expect_true "$label precondition: the advance's fixture is the check's, byte for byte (cmp)" cmp -s "$TMPROOT/ck-before" "$PCK"
   poke "$RCK" current "$n"; AD_RC="$RC"; AD_OUT="$OUT"
-  expect_eq "$label — current $n --check and current $n exit alike, $want (check|advance)" "$want|$want" "$CK_RC|$AD_RC"
-  [ "$CK_RC|$AD_RC" = "$want|$want" ] || printf '      the check said: %s\n      the advance said: %s\n' "$CK_OUT" "$AD_OUT"
+  expect_eq "$label — current $n --check exits 0 and current $n exits $want (check|advance)" "0|$want" "$CK_RC|$AD_RC"
+  [ "$CK_RC|$AD_RC" = "0|$want" ] || printf '      the check said: %s\n      the advance said: %s\n' "$CK_OUT" "$AD_OUT"
   [ "$want" = 0 ] && verdict="would advance" || verdict="would refuse"
   expect_eq "$label — …the check's first line is its verdict" "poker: current $n --check: $verdict" "$(printf '%s\n' "$CK_OUT" | head -1)"
   expect_true "$label — …the check left the plan byte-identical (cmp)" cmp -s "$TMPROOT/ck-before" "$TMPROOT/ck-after"
@@ -166,7 +165,8 @@ poke "$RCK" current --check 7
 expect_eq "CK-u4 the flag before the step is a usage error (exit 2)" "2" "$RC"
 expect_true "CK-u5 …and none of them touched the plan (cmp)" cmp -s "$TMPROOT/ck-before" "$PCK"
 poke "$RCK" current 7 --check
-expect_eq "CK-u6 …control: current 7 --check on that plan is admitted (exit 0)" "0" "$RC"
+expect_eq "CK-u6 …control: current 7 --check on that plan is admitted (exit 0)" "0|poker: current 7 --check: would advance" \
+  "$RC|$(printf '%s\n' "$OUT" | head -1)"
 
 # ---------- the mutant: the judge dropped from the path --check takes ----------
 # A doctored copy of the poker (hooks/ beside scripts/lib, the tree's own library linked in, so the copy's
@@ -203,9 +203,7 @@ expect_eq "CK-mut2 the mutant flips CK-7r: its check says would advance (exit 0)
   "0|poker: current 7 --check: would advance|1" "$CK_M7|$CK_A7"
 POKE_BOUND="$CK_BOUND_WAS"
 
-# ============================================================
 section "§ROUNDS: decisions put appends a put round to the run's log and decisions rule closes its ask, so the decision is owed from its put to its ruling; each put prints what an hour's wait moves, from the tasks that read it and the longest chain"
-# ============================================================
 # A put opens a round and the next ruling of the same number closes it; a ruling with no put open is a round of its
 # own, the shape of a ledger written before puts. The wait line reads the tasks whose deps cell names the decision
 # as an approval and whether any is on the longest open chain. FIXTURE FIDELITY: a real repository, s34_plan's
@@ -257,9 +255,7 @@ rw_close() { case "$1" in *'the predicted close moves'*) echo moves ;; *'the pre
 expect_eq "WT-2 AC-14.1 the line reads the chain: D8's task on it moves the close, D7's off it holds the close, and D7 once its task is the longest moves it" \
   "moves|holds|moves" "$(rw_close "$RW_ON")|$(rw_close "$RW_OFF")|$(rw_close "$RW_FLIP")"
 
-# ============================================================
 section "§EARLY-TICK: the tick says CARD-EARLY as advice beside its WAIT lines while an integrate row is open (wave-38 T3; REQ-1 AC-1.2; D20)"
-# ============================================================
 # The final card refuses to render while a reader is open, a reading is unregistered at the head, or the advance to
 # 6, 7 or 8 checks red (payload/scripts/card.sh `early`, the one owner of the three facts). The tick asks the same
 # function whenever the plan carries an open integrate row and prints its line as advice, `poker: CARD-EARLY —
@@ -298,9 +294,7 @@ expect_contains "ET-3 with no open integrate row the tick still answers" "poker:
 expect_absent "ET-3b …and says no CARD-EARLY, the red check notwithstanding" "CARD-EARLY" "$OUT"
 POKE_BOUND="$ET_BOUND_WAS"
 
-# ============================================================
 section "§ORDER: the tick orders dispatch — FILL offers the longest remaining chain first, the gate line prints the width the gate answers each open landing, and SPLIT is a decision line only while width idles (wave-38 T7; REQ-6 AC-6.5; D22)"
-# ============================================================
 # The tick offers ready rows longest remaining chain first, and offers a split of a row as its SPLIT decision line with
 # its reason when width idles; the gate answers width to the oldest active landing and 0 to the younger ones. A row's
 # remaining chain is its size plus the heaviest path of open rows waiting on it, transitively (the `f` of
@@ -376,9 +370,7 @@ expect_eq "OR-9 a lease left WAITING drops off the line, and the next oldest, LB
   "or:w01:LB=2,or:w01:LA=0" "$(or_gate)"
 rm -rf "$BIONIC_GATE_DIR/leases"
 
-# ============================================================
 section "§QUIET-LANDING: the quiet check reads the row's live landing carrier and the gate's open request for its agent before the mtimes (wave-39 T22; REQ-16 AC-16.1; D21)"
-# ============================================================
 # A writer blocked in a foreground `ready --within 1790` touches neither its progress file nor its transcript for up to
 # 30 minutes, so both NOTIFY arms ask first whether the row's landing carrier lives or the gate holds an open request
 # for the row's agent; either makes the row ACTIVE. Only then the mtimes: a dead silent row still NOTIFYs.
@@ -472,9 +464,7 @@ for QL_P in $QL_PIDS; do kill "$QL_P" 2>/dev/null; wait "$QL_P" 2>/dev/null; don
 ql_clear
 POKE_BOUND="$QL_BOUND_WAS"
 
-# ============================================================
 section "§NOTREADY: a row reading an unruled decision or waiting on an open row is not ready: the tick prints its WAIT and offers FILL only for a row that waits on nothing, an open order offers none, and the wall ends the turn"
-# ============================================================
 # A row that should wait is made not ready by a fact of the run the tick judges: a wait on a decision no approval
 # rules, a wait on a still-open row, or the user's order in the run's log.
 # FIXTURE FIDELITY: s47_plan's run at 15, approved at step 4; T2 is launched, so it is still open; the Stop is the
@@ -524,9 +514,7 @@ printf 'run/v1|ev=order|act=lifted|said=hold the fleet while I read|at=2026-10-2
 forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
 expect_eq "NR-9 the control: the order lifted, T4 is offered again" "poker: FILL T4" "$(nr_fill)"
 
-# ============================================================
 section "§STEP: the approval line alone readies nothing: a plan at current: 2 that carries approved-by: offers no FILL and the wall ends the turn; at current: 4 the same table fills"
-# ============================================================
 # A row's approval:plan read is met only while the plan is at current: 4 or later. A plan approved and still at
 # Step 2 has a ratified table nobody has started, and its rows wait for the step, in the tick, the wall and the
 # table reader alike.
@@ -555,10 +543,7 @@ s31_stop "$RST" "$(s31_transcript "$RST" "carry on")"
 expect_eq "ST-5 …the wall refuses the turn that left it" "duty" "$(s31_decision)"
 expect_eq "ST-6 …and the table reader names T1" "T1" "$(st_ready)"
 
-# ============================================================
-# ============================================================
 section "§TSENTENCE: task-add refuses a Tasks cell with no sentence after its title, or with a backticked one, in the Step-3 card's words"
-# ============================================================
 # A Tasks cell opens on its title, then one plain sentence saying what the row makes true; the Step-3 card prints the
 # sentence under the row and refuses a cell without one. task-add, the verb that writes the cell, refuses it where it is typed,
 # through the card's own check (`card.sh task-cell`), so the words are the card's and the plan is left as it was.
@@ -599,9 +584,7 @@ expect_eq "TSENT-3c …and the plan is unchanged" "$(cat "$TMPROOT/s42-before")"
 
 POKE_BOUND="$TS_BOUND_WAS"
 
-# ============================================================
 section "§CAP: task-add refuses a title over the card's cap where it is typed, in the card's words, the born suffix counted"
-# ============================================================
 # The Step-3 card refuses a title of more than 30 columns. A row added or reset with one landed in the plan and
 # reddened the card at the next draw, a step away from the hand that typed it, so the verb that writes the cell
 # measure it first, through the card's own check (`card.sh task-cell`): the words are the card's, every refused cell
@@ -646,9 +629,7 @@ CP_BORN_LAST="$(printf '%s\n' "$OUT" | tail -1)"
 expect_contains "CAP-3e …with the tag written after the sentence" "| T8 | 7 | doc | ${CP_T30}. The fixture ships as one release. · born: review" "$(cp_row T8)"
 
 
-# ============================================================
 section "§OWED: task-add ends on one line naming the task-list entry the turn now owes, by the row's title"
-# ============================================================
 # A row added to the plan is a row the harness's task list lacks, and the entries after it are recreated to keep the
 # order. The rule is stated where the act happens: the verb's last line names the entry, as the task list names it
 # (`<step>/<id>: <title>`), so no step text carries it.
@@ -663,9 +644,7 @@ expect_eq "OWED-2 a born row (CAP-3d's T8) ends on the same line, its title with
 ta_add "$RCP" T11 7 doc "${CP_T31}. Over the cap." bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "OWED-3 a refused task-add says nothing is owed" "1|0" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed:')"
 POKE_BOUND="$CP_BOUND_WAS"
-# ============================================================
 section "§EXEMPT: a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts, and task-add says which count it applied"
-# ============================================================
 # A defect the wave made, the wave fixes, so the cap counts only the rows a review adds beyond them: a row rated inside
 # fix-policy: (default S1,S2-on) lands however many there are; a finding the person moved to fix from outside it, and a
 # finding carried in from another plan's record directory, count against fix-cap:.
@@ -732,9 +711,7 @@ expect_eq "EX-7 control: with the cap full, a row born review S1 off still lands
 expect_contains "EX-7b …exempt" " · exempt under fix-policy: S1,S2-on" "$(ex_born_line)"
 POKE_BOUND="$EX_BOUND_WAS"
 
-# ============================================================
 section "§REGISTRY: the per-file cap does not count a file every test row must touch, and still counts any other"
-# ============================================================
 # fails-when: a fourth review-born row touching tests/CENSUS.md is refused as a fourth fix on it, or a fourth row on an
 # ordinary shared path is admitted, or its refusal names another path.
 RG_WAS="$POKE_BOUND"; POKE_BOUND=180
@@ -746,9 +723,7 @@ expect_eq "RG-2 control: a fourth on lib/shared.sh, three rows already fixing it
 expect_contains "RG-2b …naming lib/shared.sh and the three rows" "a fourth fix on lib/shared.sh: T21, T22, T23 already fix it" "$OUT"
 POKE_BOUND="$RG_WAS"
 
-# ============================================================
 section "§APPROVED-BY: approve plan '<reply>' appends the plan's approval the walls read, with the user's words, once (REQ-9 AC-9.2)"
-# ============================================================
 # The plan's approval is one approval event in the run's log, key step3, which the commit gate reads from Step 4; step0,
 # step1 and step2 are the ones the gate at 15 asks at Steps 1 to 3, each closing its own ask at its instant. Each holds the
 # git user and the reply as given, a placeholder refused, the plan unwritten, and a second call refused as recorded once.
@@ -786,9 +761,7 @@ said_as typed "$RAB" approved; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RAB" approve
 expect_eq "AS-4 the plan's approval answers the steps before it: at 15 with none of theirs it is taken, the only one, and a commit at Step 4 admitted" "0|1|0" "$AS|$GATE_RC"
 POKE_BOUND="$AB_BOUND_WAS"
 
-# ============================================================
 section "§PARTS: the release-entry parts render in the checkout they run from: a row's tree commits on its own branch and the working branch stays put, the working branch's checkout moves it, and the part line names the tree (REQ-12 AC-12.1, AC-12.2)"
-# ============================================================
 # `known-limits-part <row>` and `reviews-part <row>` render the part into the checkout they run from and commit it on that
 # checkout's branch; only the checkout holding the working branch moves it, a checkout on main commits on the working
 # branch as before, and the part line names the tree that took the commit.
@@ -869,9 +842,7 @@ expect_eq "PA-9 run from a checkout on main, reviews-part commits on the working
 expect_contains "PA-9b …and its part line names the working branch and the checkout holding it" \
   "|ev=published|part=reviews|commit=$PA_T4|branch=wave/01-fixture|tree=$RPA|by=T4|at=" "$(pa_ev reviews)"
 
-# ============================================================
 section "§START: start <id> records the birth, renders the brief and makes the tree of a row the plan holds, then owes one task-list entry, at the end (REQ-14 AC-14.1, REQ-18 AC-18.1)"
-# ============================================================
 # The row's words are a person's and are in the plan first; start does every act after them: task-add's birth, the
 # brief's render and spawn-worktree.sh create --for the row's name, at the working head on wt/<wave n>-<id>. A second
 # start, under a re-dispatch's name, finds the birth and the tree standing and marks the kept tree for the new name.
@@ -906,9 +877,7 @@ expect_eq "START-3c …and it owes no new entry: the one it has goes in progress
   "poker: start — owed: mark the task-list entry 4/T7: Start the row in progress." "$(printf '%s\n' "$OUT" | tail -1)"
 POKE_BOUND="$SR_BOUND_WAS"
 
-# ============================================================
 section "§GREW: the tick's line for a grown plan names the entry the new row owes, at the end of the list, and no other (REQ-18 AC-18.1)"
-# ============================================================
 # The task list only appends, so the one thing a row born after the last tick leaves owed is its own entry. The tick
 # reads the plan and its digest, never the platform's list: the rows past the count its digest holds are the new ones.
 # FIXTURE FIDELITY: §START's plan and run, a roster for its session; the first tick fixes the digest, the new row is
@@ -923,6 +892,15 @@ GR_LINE="$(printf '%s\n' "$OUT" | /usr/bin/grep 'poker: RECONCILE' || :)"
 expect_eq "GREW-1 the tick over the grown plan says one RECONCILE line, naming the new row's entry and no other" \
   "poker: RECONCILE — the ## Tasks table grew since the last tick: add the task-list entry 4/T8: Add the row at the end of the list" "$GR_LINE"
 expect_eq "GREW-1b …and it asks for no delete and no recreate" "0" "$(printf '%s\n' "$GR_LINE" | /usr/bin/grep -c 'delete\|recreate\|rebuild')"
+# A row born ABOVE the table's last row owes its own entry too, and the tick names it, not the row at the table's end.
+# fails-when: the line names the table's last row (T8, held since the last tick) for a row put ahead of it.
+GR2_PLAN="$(sed -n 's/^plan=//p' "$(marker_of "$RSR")")"
+expect_true "GREW-2 precondition: the plan holds the row T8, which the last tick read" /usr/bin/grep -q '^| T8 |' "$GR2_PLAN"
+awk '/^\| *T1 *\|/ && !d { print "| T9 | 4 | build | Put the row above. It sits mid-table. | — | 30 | REQ-1 | lib/h.sh | — |"; d = 1 } { print }' "$GR2_PLAN" > "$GR2_PLAN.mid" && mv "$GR2_PLAN.mid" "$GR2_PLAN"
+poke "$RSR" tick
+GR2_LINE="$(printf '%s\n' "$OUT" | /usr/bin/grep 'poker: RECONCILE' || :)"
+expect_eq "GREW-2b the tick names the row put above the table's end, and not the last row" \
+  "poker: RECONCILE — the ## Tasks table grew since the last tick: add the task-list entry 4/T9: Put the row above at the end of the list" "$GR2_LINE"
 POKE_BOUND="$GR_BOUND_WAS"
 
 finish

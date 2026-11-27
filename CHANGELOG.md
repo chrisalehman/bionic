@@ -8,6 +8,1021 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 2.3.0 — 2026-11-27
+
+This release gives each rule, key and read of the tool one home, and makes a command's exit say whether the command did
+its work, not what it found. The copies went, and the tree grew. The 32 rows that carried the prune rule removed 27,074
+non-whitespace characters of code against a target of 25,000, by the release check's own count. 24,921 of that is one
+sweep, the loader (six rows); the other 26 rows together removed 2,153. Four of the seven families of the prune added code,
+because a new home, its header and the reasons beside it cost more than the copies they replaced. Over the whole release
+the tree is larger than 2.2.0's. `bash tests/lib/release-check.sh --count <rev>` prints tests, then code: `5369032 4433936`
+at `v2.2.0` and `5558931 4473465` at `24ce9a53`, the head this entry was last trued at. That is 39,529 more characters of
+code and 189,899 more of tests. The code growth sits in rows that were not prune rows, and no sum of them by row was taken. The
+release makes no command faster. It is a minor release: the plan format stays at `canonical_sdlc_version: 15`, and a run
+begun under 2.2.0 continues under 2.3.0.
+
+The prune by family, in characters of code (a minus is code removed, a plus is code added), with the change in tests beside it:
+
+| family | rows | code | tests |
+|---|---|---|---|
+| the loader sweep | 6 | −24,921 | +1,800 |
+| records, the roster, the patrol | 8 | −10,143 | +3,262 |
+| walls, the plan header, kinds | 5 | −1,094 | +12,256 |
+| proofs and the kept answer | 3 | +405 | +2,054 |
+| time | 4 | +2,932 | +4,900 |
+| kinds, keys and lists | 3 | +3,365 | +9,399 |
+| small copies and names | 3 | +2,382 | +15,362 |
+| all 32 prune rows | 32 | −27,074 | +49,033 |
+
+Tests grew in every family: the rows added agreement checks, plants and mutants, and lost none.
+
+**What you do when you upgrade.**
+- **Update the plugin and restart Claude Code with no agent out.** A session reads its hooks and pages when it starts, so
+  one that was running at the upgrade keeps the 2.2.0 hooks and pages. The working principles are unchanged, so setup has
+  no span of your instructions file to replace.
+- **A script that tests one of these exits breaks at the upgrade.** Each command below answered a question the caller had
+  asked, and exited non-zero to say "not yet" or "no". It now exits 0 and says the answer in its output. The codes the
+  tool keeps inside its own records (a stamped 75, the closing line's `exit 1`) are unchanged: only the command's exit
+  moved. Read the printed answer, as the last column says.
+
+  | command | when | exit in 2.2.0 | exit now | what a caller reads instead |
+  |---|---|---|---|---|
+  | `spawn-worktree.sh ready` | the landing waits (`WAITING`), or another landing holds the lock (`BUSY`) | 75 | 0 | the first word of the line: `LANDED <row> <commit>`, `WAITING` or `BUSY`; run the same command again on the last two |
+  | `tests/run.sh`, the suite door | the gate admitted nothing, so no suite ran | 75 | 0 | its printed refusal, and the line it appends to the file named by `BIONIC_NOT_ADMITTED` when that variable is set |
+  | `booked.sh` | the gate did not admit the wrapped command, so it ran nothing | 75 | 0 | the same note; the shim's own record still stamps `rc=75` |
+  | `session-poker.sh regression-run` | the gate did not admit the whole run | 75 | 0 | the same note |
+  | `session-poker.sh current <N> --check` | the step would refuse | 1 | 0 | its first line, the verdict words; the lines under it say why |
+  | `session-poker.sh judge <N>…` | a step would refuse | 1 | 0 | the closing line `judged <N> exit 1`, whose code is unchanged |
+  | `session-poker.sh tick` | the decision is NOTIFY | 1 | 0 | the `decision=NOTIFY` line and the lines above it |
+  | `card.sh early <plan>` | the release approval card may not render yet | 1 | 0 | the stderr line that starts `CARD-EARLY — `; a card that cannot load or read its context still exits 1 |
+  | `session-poker.sh release-approval` | asked too early | 1 | 0 | the same `CARD-EARLY — ` line |
+  | `close-out.sh <plan> run` | held because the working branch is not merged yet | 2 | 0 | its last line; a request closed unmerged, a merge that cannot be read and every other hold still exit 2 |
+
+  An advance that is not checked (`current <N>` with no `--check`) and a refusal of a wrong call keep their codes: a
+  refusal stays red because something was wrong. The watcher's wake keeps its code, the one the platform wakes a session
+  on. The entries below this one still carry the old wording where they gave a code; they are left as they were written.
+- **A run meant to fail is written `BIONIC_EXPECT=red tests/run.sh --only <suite>.test.sh`.** A run led by that word
+  exits 0 when its suite fails and 1 when its suite passes, and says which on one stderr line.
+- **A call may carry one `ruling-ack`.** A call that holds one is taken, whether it follows a `cd` guard, is joined or
+  piped, or sits inside a `bash -c` string. A call that holds two is refused, naming how many.
+- **Plans and specs are written with the new words, and the old ones still read.** The table is `## Test design`, with the
+  columns `Test type` and `Test`. A page written as `## Eval design` with `Eval type` and `Eval` reads as before, and its
+  criterion sums do not move. The Step 2 card is headed `Test design`; its view word is `tests` (`card.sh step2 <spec> tests
+  <REQ>`, where it was `evals`) and its batch kind is `test-design`. The Step 3 card no longer offers `show evals`, which
+  had no view behind it. A script that reads the card's old words, or the refusals that named the Eval design, sees the new ones.
+- **The situation report's fact sheet has one more key,** `waste.failed-commands`, before `waste.waiting-on-you`, and the
+  scorecard's `waste:` line ends with the same count.
+- **A script that parses a row's brief sees one more label,** `Lands-by:`, and each `Reviewed range` line ends with
+  `(scope: piece)` or `(scope: whole)`.
+
+### What shipped
+
+**The build is checked on the way.**
+- A plan marks a row with the tag ` · point` in its task cell, and the rows its deps name are the rows it waits on.
+  `regression-run --point <row>` runs every suite at the head the point stands at; `proof-add point <log>` records it; the
+  tick starts a ready point and lands it on its proof. A plan with no point reads as it did. This run had two points: the
+  first ran 136 suites green and 2 red, the second 129 green and 11 red, and each red suite became a fix row before the
+  build went on. The whole run after the last build row, at `5074682017bb`, ran 142 suites, all green.
+- The landing bar is judged as if the machine were quiet (`LINE_BAR_LOAD=0`), so a suite gets the same verdict at any load,
+  and the row's brief and its landing read that one answer.
+- A row's birth line, brief and landing name the same suites: one reader, `poker_row_suites`. The birth of a row born of
+  findings no longer says it lands on none while its brief names suites.
+
+**One home for each thing.**
+- The loader has one function, `bionic_need <lib> <marker>`. The libraries, scripts and hooks that copied a load-once guard
+  or a lookup of the library's folder call it, and it finds its own folder with builtins, so it works with only `bash` on
+  the path. The eight-line stub each hook opens with stays, since it runs before any library, and a test holds the copies
+  equal. This is the 24,921 characters above.
+- Time has one home: four functions in the time library (`time_now`, `file_mtime`, `iso_now`, `epoch_iso`). `time_now`
+  follows the clock a test pins, and the code that should follow that clock calls it. Three `now_epoch` copies and a few
+  inline `date +%s` reads stay on purpose, because they must read the real clock even when a test pins it.
+- One reader each for: a field by key, the roster's path, a proof line, a plan's header, the git common directory, whether a
+  session is judged (`bionic_judged`), a session's seal, the triple's intents, rigors and scales, the kinds and the roles
+  of a task row (`UNITS_KINDS`), a pull request's two ask keys, the gate's small copies, a handoff file, and small helpers.
+  Two lists that were copied, the situation report's measured keys and the debt kinds, are derived from their source.
+- A name the tool makes comes from `bionic_new` or `bionic_id`: the eleven `$RANDOM` sites and 44 lines that joined a
+  process number to a name. Two sibling subshells under bash 3.2 draw different names.
+- A kept answer is served only to a process whose libraries in that answer's key sum the same as those of the process
+  that kept it. A derived answer is keyed by the eighteen libraries its derivations reach, and a test measures that reach
+  from the code and is red while the key's list differs from it. The held facts and a step's kept place are keyed by the
+  reader's five libraries, `fields.sh` among them, and the place by the proof library as well; a test is red while a
+  library that the reader functions they run reach is missing from that list.
+- Test suites borrow no function out of another suite's file: the builders live in libraries under `tests/lib` that both
+  load. Six pairs that cannot be merged (a page against code) are held equal by a test, and so are the kept copies: the
+  loader stub each hook opens with, and the remover's copies.
+- The one-reader check has twelve counts, and each refuses: parsers, plan writers, shared types, hook refusals, loader
+  copies, unheard folds, names, load guards, git homes, field readers, writers of the log with no kind, and homes. Each reads
+  zero in this tree, with the kept copies named. The release check runs it at every landing, and the landing's lint names
+  the home when a changed file holds a copy. The register's 54 earlier lines are burned; the review of the whole added
+  three, named under Known limits.
+
+**A failed command means something is wrong.**
+- The ordinary answers above exit 0. The dispatch page, the survival text and the six role files name no code for an
+  answer that exits 0. They teach `BIONIC_EXPECT=red` for a run meant to fail, and that a check which expects no match ends
+  with `|| true`. The eight reason clauses a row of this release cut from the dispatch page, the survival text and the
+  role files are back word for word, and the set of pages every session loads is 739 bytes larger than 2.2.0's.
+- The scorecard counts the failed commands of the run's sessions by kind: refusal, killed, meant-to-fail, red-suite,
+  ordinary, check, not-run, other. One table, `SITREP_RED_TABLE` in the situation report's code, classes them, and the first
+  matching row wins; it reads the exit, the command's text and the output. On this run's own sessions it counted 304
+  failed commands: refusal 75, killed 6, meant-to-fail 0, red-suite 96, ordinary 23, check 27, not-run 11, other 66. It
+  makes one pass over the sessions' transcripts and the agents' transcripts: about 3.0 s over 138 transcripts, 213 MB, so
+  the situation report and the scorecard are that much slower (the scorecard took 5.7 s before and 8.7 s with it), and the
+  cost grows with the transcripts. The pass is not cached.
+- An acknowledgement of a ruling, made as the ruling's own text tells the writer, is taken the first time.
+
+**The run needs fewer hands.**
+- The tick names a writer that has met its record and committed past the working head with no landing, once for each tree
+  head, with the command to land. Its reconcile line names the row added, wherever it sits in the table.
+- A writer's brief gives the landing command with its script, `bash <plugin-root>/scripts/spawn-worktree.sh ready --within
+  <seconds>`.
+- A reply typed after a card was drawn is taken even inside a longer message, a quote's line breaks are folded, and an
+  approval is asked again at the instant of its open round.
+- A session logged in only by `CLAUDE_CODE_OAUTH_TOKEN` passes the dispatch wall's login check. The token is counted by
+  presence and never read, printed or recorded.
+- A sealed run asks the person for a plain message, and says the verb is run by the agent with the person's words.
+- Registering a review that defers a finding with no sentence says so then, with the `finding-move … stated` command to
+  type. The registration still passes and no ask is opened. A landing that leaves the entry as it was is told of a missing
+  sentence or missing landing numbers as a note and passes; the landing that writes the entry is judged in full.
+- The close lands a close row only once its record stands, and leaves the continuation to a writer whose launch was taken
+  back. The close's check now reads the run's log six times where it read five.
+- A landing that stalls on a suite with no summary line names the line it reads. The hand-holds line of a run with no
+  delivery says the run's log holds none.
+- The pages teach today's verbs: the dispatch page and the Step 4 page name `start`, the dispatch page teaches the rule
+  verb's `--files+` and `--suites+` and `check-from`, and the Step 7 page says a carried finding's sentence is stated before
+  the release card.
+- A deterministic check is a test, and an eval is a test of a model: the tool's cards, refusals and
+  reports say test, the pages define both words once, and the fixtures write the new words. The Step 2 card's counts each
+  start under the label of the type they count.
+
+**Repairs that landed with it.** A proof log that holds a byte that is not a character no longer hides its failed suites from
+the readers in a UTF-8 locale. Several suite checks that bounded a wait by a stopwatch now wait for the event they read, on
+a slow machine or a busy one. Two records of the tests are trued: the census cites only rows its suites hold, and the release
+check's suite no longer prints an error and passes.
+
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: flag at 50746820 by T68, 2026-11-27T18:42:45Z (`critic-adversarial.md`)
+- structure review, whole: flag at 50746820 by T68, 2026-11-27T18:42:48Z (`critic-structure.md`)
+- evidence review, whole: fail at 50746820 by T67, 2026-11-27T18:50:06Z (`auditor-evidence.md`)
+- adversarial review, piece: flag at c0ecca8c by T68-r2, 2026-11-27T20:52:07Z (`critic-adversarial-r2.md`)
+- structure review, piece: flag at c0ecca8c by T68-r2, 2026-11-27T20:52:20Z (`critic-structure-r2.md`)
+- adversarial review, piece: flag at c9cf4301 by T68-r3, 2026-11-27T22:08:56Z (`critic-adversarial-r3.md`)
+- structure review, piece: flag at c9cf4301 by T68-r3, 2026-11-27T22:09:09Z (`critic-structure-r3.md`)
+- evidence review, piece: fail at c9cf4301 by T67-r2, 2026-11-27T22:13:12Z (`auditor-evidence-r2.md`)
+- evidence review, piece: pass at b9c4f1c3 by T67-r3, 2026-11-27T23:13:28Z (`auditor-evidence-r3.md`)
+
+### Known limits
+
+Stated first because they are what this release leaves on purpose.
+- **The prune's 25,000 is met by one sweep.** Outside the loader sweep the prune rows removed 2,153 characters. Counted over
+  38 rows (the 32 and six more that moved code on purpose), the prune removed 17,460, which is 7,540 short of 25,000. The tree as a whole is
+  39,529 characters of code larger than 2.2.0's. The requirement that the code be 25,000 characters smaller is not met in
+  its plain sense. The person waived it for this release (D31, 2026-11-27), and the next wave opens with a target on the
+  size of the whole codebase.
+- **Seven commands are still over the 10-second bound, as 2.2.0 recorded them.** No record of this run times them again. The
+  failed-command count adds about 3.0 s to the situation report, which was already one of the seven (11.63 s in 2.2.0), and
+  to the scorecard.
+- The landing line can report a pass's width one core too high. One cause found: a runner that has called the gate's end and
+  not yet written its result is counted by the gate as ended and by the drain as running, so an ask made then counts it
+  twice. It moves only the line's `width=` field; every runner is still admitted.
+- A row's landing suites run three times and no run is reused (issue 70).
+- The library's field cleaner drops what follows a byte that is not valid UTF-8.
+- The failed-command classifier reads text. A compound command is read by its last segment; a run of a workspace file by
+  `bash` lands in other; a failing-first run typed without the meant-to-fail word counts as a red suite. A session with no
+  loaded-state file is not counted.
+- The shell has two readers of a field by key in the fields library, `line_value` and `line_field`, which read a line
+  differently; the copy check names `line_value` as the home while the library names `line_field`, and no test holds the
+  two equal.
+- The English list has its home in `english.sh`, and one inline copy stands beside it in the poker's plan part, which
+  prints "a, b, c and N more" where the home prints "a, b and c".
+- A project that stands anywhere under a `.bionic` folder cannot be written by a dispatched writer.
+- The key that a kept fold of the run's log is served under leaves out the proof library, so a copy of the tool whose proof library differs can be served another copy's kept findings until the log is next appended; no gate reads that kept file.
+- In a fresh project, the first session cannot record an approval until Claude Code is restarted, because the session
+  writes its load record only when `.bionic/tmp/` exists at its start, and the refusal names a missing transcript where
+  the load record is what is missing.
+- `ready` runs each suite by its path (`bash tests/<suite>`), not through the project's door (`tests/run.sh --only`), so
+  a suite whose end line comes only from the door stalls the landing (`STALLED`, exit 70) although it is green through
+  the door.
+- The copy check searches by shape for 8 of the 54 concepts that have one home; a copy of any of the other 46 is
+  found only by a review. The close's hand-spelt instant, which the audit found that way, now calls the time library's
+  `iso_now`, and the instant is one of the eight shapes the check searches.
+- For nine of the release's criteria the first failing run was proved by reading the tests and not from a saved log,
+  because the logs were lost with two scratch folders when the machine was restarted.
+- Not in this release, and tentative for 2.4.0: the watcher's two issues (58 and 59, with an outside check that a run is
+  alive), the cache's two edges (the tick's own whole run and a project's regression command), and Code Mode (issue 60).
+
+What this release changed in the limits of 2.2.0, which stand as 2.2.0's entry wrote them except where this says.
+- Gone: a writer that has written its record and committed but not landed is named by a line of the tick; a brief names the
+  landing script; a session logged in only by `CLAUDE_CODE_OAUTH_TOKEN` can dispatch; a sealed run no longer tells the person
+  to type a command behind `!` that is refused when typed; a landing that stalls on a missing summary line names the line;
+  the dispatch page teaches `start`; a derived answer is keyed by the code that derives it.
+- Every other 2.2.0 limit was not read again against this release's code and stands as 2.2.0 wrote it.
+
+### The landing numbers
+
+`landing-report --rows` at c9cf4301fc3c0b4259a9c6b31bdec3b1a8e310b4 on 2026-11-27T22:15:05Z:
+
+```
+landings: queue=92 hand=0 git=0 · ready-to-landed median=35.1m p75=152.9m max=4545.1m · runs: green=579 red=29 none=2 discarded=95 red-then-green=0 run=1368 reused=0 absent=0 · waited median=1217s · killed=34
+T1 queue ready=2026-11-22T20:09:40Z landed=2026-11-22T20:34:36Z minutes=24.9 runs=6 waited=992s wait=16.5 prove=8.4 rework=0.0 width=1
+  units.test.sh green promised=78s actual=81s ratio=1.04
+  reader.test.sh green promised=43s actual=47s ratio=1.09
+  session-poker-5.test.sh green promised=244s actual=239s ratio=0.98
+  bash-walls.test.sh green promised=73s actual=68s ratio=0.93
+  render.test.sh green promised=17s actual=18s ratio=1.06
+  shell-lint.test.sh green promised=49s actual=47s ratio=0.96
+T11 queue ready=2026-11-22T20:35:32Z landed=2026-11-22T21:16:05Z minutes=40.5 runs=4 waited=1605s wait=26.8 prove=13.8 rework=0.0 width=1
+  landing-line-1.test.sh green promised=444s actual=458s ratio=1.03
+  landing-line-2.test.sh green promised=259s actual=288s ratio=1.11
+  brief-file.test.sh green promised=31s actual=30s ratio=0.97
+  shell-lint.test.sh green promised=39s actual=48s ratio=1.23
+T52 queue ready=2026-11-22T21:03:22Z landed=2026-11-24T15:08:21Z minutes=2525.0 runs=7 waited=150040s wait=2500.7 prove=24.3 rework=0.0 width=7
+  landing-line-1.test.sh green promised=444s actual=426s ratio=0.96
+  landing-line-2.test.sh green promised=262s actual=259s ratio=0.99
+  landing-line-1.test.sh green promised=0s actual=770s ratio=-
+  landing-line-2.test.sh green promised=0s actual=430s ratio=-
+  session-poker-4.test.sh green promised=0s actual=455s ratio=-
+  close-out-3.test.sh green promised=0s actual=288s ratio=-
+  shell-lint.test.sh green promised=0s actual=44s ratio=-
+T53 queue ready=2026-11-22T21:13:54Z landed=2026-11-24T15:10:53Z minutes=2517.0 runs=6 waited=150883s wait=2514.7 prove=2.3 rework=0.0 width=3
+  words.test.sh discarded promised=16s actual=- ratio=-
+  words.test.sh green promised=0s actual=38s ratio=-
+  render.test.sh green promised=0s actual=53s ratio=-
+  dispatch-preflight-3.test.sh green promised=0s actual=36s ratio=-
+  context-spend.test.sh green promised=0s actual=17s ratio=-
+  shell-lint.test.sh green promised=44s actual=72s ratio=1.64
+T3 queue ready=2026-11-22T20:48:15Z landed=2026-11-24T15:14:34Z minutes=2546.3 runs=15 waited=152530s wait=2542.2 prove=3.8 rework=0.4 width=3
+  loader.test.sh green promised=2s actual=3s ratio=1.50
+  hook-adoption.test.sh green promised=9s actual=10s ratio=1.11
+  hooks-closed.test.sh red promised=3s actual=3s ratio=1.00
+  loader.test.sh green promised=0s actual=4s ratio=-
+  hook-adoption.test.sh green promised=0s actual=10s ratio=-
+  hooks-closed.test.sh green promised=0s actual=4s ratio=-
+  doctor-walls.test.sh discarded promised=0s actual=- ratio=-
+  one-reader.test.sh discarded promised=0s actual=- ratio=-
+  shell-lint.test.sh discarded promised=0s actual=- ratio=-
+  loader.test.sh green promised=4s actual=9s ratio=2.25
+  hook-adoption.test.sh green promised=10s actual=26s ratio=2.60
+  hooks-closed.test.sh green promised=4s actual=8s ratio=2.00
+  doctor-walls.test.sh green promised=0s actual=91s ratio=-
+  one-reader.test.sh green promised=0s actual=113s ratio=-
+  shell-lint.test.sh green promised=72s actual=85s ratio=1.18
+T10 queue ready=2026-11-22T21:20:35Z landed=2026-11-24T15:38:21Z minutes=2537.8 runs=2 waited=151066s wait=2517.8 prove=20.0 rework=0.0 width=2
+  release-check.test.sh green promised=0s actual=205s ratio=-
+  door-landing.test.sh green promised=0s actual=1196s ratio=-
+T54 queue ready=2026-11-24T16:20:42Z landed=2026-11-24T16:49:06Z minutes=28.4 runs=5 waited=196s wait=3.3 prove=25.1 rework=0.0 width=4
+  shell-lint.test.sh discarded promised=255s actual=- ratio=-
+  release-check.test.sh discarded promised=581s actual=- ratio=-
+  shell-lint.test.sh green promised=336s actual=332s ratio=0.99
+  release-check.test.sh discarded promised=857s actual=- ratio=-
+  release-check.test.sh green promised=636s actual=967s ratio=1.52
+T44 queue ready=2026-11-24T15:22:44Z landed=2026-11-25T02:21:59Z minutes=659.2 runs=13 waited=37474s wait=624.6 prove=34.7 rework=0.0 width=7
+  inbox.test.sh discarded promised=60s actual=- ratio=-
+  bash-walls.test.sh discarded promised=137s actual=- ratio=-
+  bash-walls-egd.test.sh discarded promised=220s actual=- ratio=-
+  inbox.test.sh green promised=73s actual=267s ratio=3.66
+  bash-walls.test.sh green promised=137s actual=437s ratio=3.19
+  bash-walls-egd.test.sh green promised=220s actual=709s ratio=3.22
+  hooks-closed.test.sh green promised=7s actual=22s ratio=3.14
+  shell-lint.test.sh green promised=147s actual=180s ratio=1.22
+  inbox.test.sh green promised=138s actual=239s ratio=1.73
+  bash-walls.test.sh green promised=137s actual=509s ratio=3.72
+  bash-walls-egd.test.sh green promised=220s actual=923s ratio=4.20
+  hooks-closed.test.sh green promised=8s actual=11s ratio=1.38
+  shell-lint.test.sh green promised=0s actual=198s ratio=-
+T49 queue ready=2026-11-24T15:31:24Z landed=2026-11-25T03:22:39Z minutes=711.2 runs=10 waited=40509s wait=675.1 prove=36.1 rework=0.0 width=7
+  preflight-probe.test.sh green promised=58s actual=142s ratio=2.45
+  resources.test.sh green promised=17s actual=43s ratio=2.53
+  cross-gate-agreement-1.test.sh green promised=138s actual=429s ratio=3.11
+  preflight-probe.test.sh green promised=58s actual=210s ratio=3.62
+  resources.test.sh green promised=17s actual=48s ratio=2.82
+  cross-gate-agreement-1.test.sh none promised=138s actual=- ratio=-
+  dispatch-preflight.test.sh none promised=0s actual=- ratio=-
+  shell-lint.test.sh green promised=198s actual=413s ratio=2.09
+  cross-gate-agreement-1.test.sh green promised=138s actual=609s ratio=4.41
+  dispatch-preflight.test.sh green promised=0s actual=1237s ratio=-
+T55 queue ready=2026-11-25T02:02:54Z landed=2026-11-25T19:59:03Z minutes=1076.2 runs=16 waited=63678s wait=1061.3 prove=14.2 rework=0.6 width=5
+  notify.test.sh discarded promised=0s actual=- ratio=-
+  plan-page.test.sh discarded promised=0s actual=- ratio=-
+  sitrep-card.test.sh discarded promised=0s actual=- ratio=-
+  card.test.sh discarded promised=10s actual=- ratio=-
+  notify.test.sh discarded promised=0s actual=- ratio=-
+  plan-page.test.sh green promised=0s actual=120s ratio=-
+  sitrep-card.test.sh green promised=0s actual=96s ratio=-
+  shell-lint.test.sh green promised=413s actual=47s ratio=0.11
+  notify.test.sh discarded promised=384s actual=- ratio=-
+  plan-page.test.sh discarded promised=299s actual=- ratio=-
+  shell-lint.test.sh discarded promised=56s actual=- ratio=-
+  card.test.sh green promised=472s actual=662s ratio=1.40
+  notify.test.sh green promised=384s actual=429s ratio=1.12
+  plan-page.test.sh green promised=299s actual=290s ratio=0.97
+  sitrep-card.test.sh green promised=96s actual=209s ratio=2.18
+  shell-lint.test.sh green promised=88s actual=82s ratio=0.93
+T76 queue ready=2026-11-25T21:07:36Z landed=2026-11-25T21:12:16Z minutes=4.7 runs=1 waited=90s wait=1.5 prove=3.2 rework=0.0 width=8
+  shell-lint.test.sh green promised=48s actual=188s ratio=3.92
+T12 queue ready=2026-11-25T02:02:48Z landed=2026-11-25T23:42:14Z minutes=1299.4 runs=13 waited=71866s wait=1197.8 prove=100.9 rework=0.8 width=7
+  brief-file.test.sh green promised=55s actual=482s ratio=8.76
+  session-poker-4.test.sh discarded promised=0s actual=- ratio=-
+  session-poker-5.test.sh discarded promised=467s actual=- ratio=-
+  dispatch-preflight-5.test.sh red promised=0s actual=1114s ratio=-
+  shell-lint.test.sh green promised=413s actual=305s ratio=0.74
+  session-poker-4.test.sh discarded promised=0s actual=- ratio=-
+  session-poker-4.test.sh discarded promised=305s actual=- ratio=-
+  brief-file.test.sh green promised=94s actual=147s ratio=1.56
+  session-poker-4.test.sh green promised=279s actual=1079s ratio=3.87
+  brief-file.test.sh green promised=482s actual=202s ratio=0.42
+  session-poker-4.test.sh red promised=491s actual=1779s ratio=3.62
+  session-poker-5.test.sh green promised=467s actual=1270s ratio=2.72
+  shell-lint.test.sh green promised=0s actual=134s ratio=-
+T46 queue ready=2026-11-25T19:36:08Z landed=2026-11-25T23:50:08Z minutes=254.0 runs=14 waited=12499s wait=208.3 prove=45.7 rework=0.0 width=6
+  watch.test.sh discarded promised=0s actual=- ratio=-
+  shell-lint.test.sh discarded promised=0s actual=- ratio=-
+  watch.test.sh discarded promised=0s actual=- ratio=-
+  shell-lint.test.sh discarded promised=0s actual=- ratio=-
+  watch.test.sh discarded promised=0s actual=- ratio=-
+  shell-lint.test.sh discarded promised=0s actual=- ratio=-
+  session-poker-5.test.sh green promised=467s actual=1598s ratio=3.42
+  stop.test.sh green promised=323s actual=668s ratio=2.07
+  watch.test.sh red promised=0s actual=2248s ratio=-
+  shell-lint.test.sh green promised=1s actual=157s ratio=157.00
+  session-poker-5.test.sh green promised=467s actual=277s ratio=0.59
+  stop.test.sh green promised=323s actual=136s ratio=0.42
+  watch.test.sh green promised=0s actual=458s ratio=-
+  shell-lint.test.sh green promised=0s actual=48s ratio=-
+T77 queue ready=2026-11-25T21:11:41Z landed=2026-11-25T23:55:55Z minutes=164.2 runs=6 waited=9364s wait=156.1 prove=8.2 rework=0.0 width=5
+  run-seal.test.sh discarded promised=874s actual=- ratio=-
+  shell-lint.test.sh discarded promised=80s actual=- ratio=-
+  run-seal.test.sh discarded promised=0s actual=- ratio=-
+  shell-lint.test.sh green promised=1s actual=46s ratio=46.00
+  run-seal.test.sh green promised=0s actual=319s ratio=-
+  shell-lint.test.sh green promised=0s actual=44s ratio=-
+T45 queue ready=2026-11-22T21:22:15Z landed=2026-11-26T01:07:18Z minutes=4545.1 runs=10 waited=261091s wait=4351.5 prove=88.2 rework=105.3 width=4
+  session-poker-4.test.sh green promised=409s actual=491s ratio=1.20
+  session-poker-5.test.sh green promised=467s actual=495s ratio=1.06
+  watch.test.sh red promised=538s actual=938s ratio=1.74
+  stop.test.sh green promised=323s actual=226s ratio=0.70
+  shell-lint.test.sh green promised=413s actual=73s ratio=0.18
+  session-poker-4.test.sh green promised=491s actual=1072s ratio=2.18
+  session-poker-5.test.sh green promised=467s actual=1977s ratio=4.23
+  watch.test.sh green promised=0s actual=2395s ratio=-
+  stop.test.sh green promised=323s actual=288s ratio=0.89
+  shell-lint.test.sh green promised=0s actual=90s ratio=-
+T48 queue ready=2026-11-25T19:21:42Z landed=2026-11-26T01:48:46Z minutes=387.1 runs=8 waited=17880s wait=298.0 prove=47.7 rework=41.4 width=5
+  session-poker-4.test.sh red promised=491s actual=2105s ratio=4.29
+  session-poker-3.test.sh green promised=278s actual=1065s ratio=3.83
+  session-poker.test.sh green promised=74s actual=180s ratio=2.43
+  shell-lint.test.sh green promised=0s actual=139s ratio=-
+  session-poker-4.test.sh green promised=491s actual=739s ratio=1.51
+  session-poker-3.test.sh green promised=278s actual=371s ratio=1.33
+  session-poker.test.sh green promised=74s actual=84s ratio=1.14
+  shell-lint.test.sh green promised=99s actual=75s ratio=0.76
+T78 queue ready=2026-11-25T23:49:23Z landed=2026-11-26T02:04:21Z minutes=135.0 runs=3 waited=7220s wait=120.3 prove=14.6 rework=0.0 width=5
+  shell-lint.test.sh discarded promised=90s actual=- ratio=-
+  session-poker-4.test.sh green promised=491s actual=873s ratio=1.78
+  shell-lint.test.sh green promised=119s actual=76s ratio=0.64
+T72 queue ready=2026-11-25T21:13:58Z landed=2026-11-26T02:39:22Z minutes=325.4 runs=14 waited=17103s wait=285.1 prove=40.4 rework=0.0 width=4
+  reader.test.sh discarded promised=0s actual=- ratio=-
+  card.test.sh discarded promised=10s actual=- ratio=-
+  reader.test.sh green promised=0s actual=172s ratio=-
+  card.test.sh green promised=10s actual=755s ratio=75.50
+  plan-page.test.sh green promised=120s actual=373s ratio=3.11
+  one-reader.test.sh green promised=113s actual=171s ratio=1.51
+  replay-bed.test.sh green promised=0s actual=1311s ratio=-
+  shell-lint.test.sh green promised=90s actual=152s ratio=1.69
+  reader.test.sh green promised=172s actual=73s ratio=0.42
+  card.test.sh green promised=10s actual=288s ratio=28.80
+  plan-page.test.sh green promised=373s actual=163s ratio=0.44
+  one-reader.test.sh green promised=171s actual=77s ratio=0.45
+  replay-bed.test.sh green promised=0s actual=441s ratio=-
+  shell-lint.test.sh green promised=97s actual=73s ratio=0.75
+T50 queue ready=2026-11-25T18:38:47Z landed=2026-11-26T03:00:02Z minutes=501.2 runs=18 waited=13268s wait=221.1 prove=87.7 rework=192.4 width=5
+  run-seal.test.sh discarded promised=201s actual=- ratio=-
+  pr-route.test.sh discarded promised=0s actual=- ratio=-
+  canonical-sdlc-governing-skill.test.sh green promised=0s actual=247s ratio=-
+  run-seal.test.sh red promised=232s actual=988s ratio=4.26
+  pr-route.test.sh discarded promised=0s actual=- ratio=-
+  bash-walls.test.sh green promised=509s actual=256s ratio=0.50
+  shell-lint.test.sh green promised=75s actual=102s ratio=1.36
+  run-seal.test.sh green promised=0s actual=591s ratio=-
+  pr-route.test.sh discarded promised=0s actual=- ratio=-
+  canonical-sdlc-governing-skill.test.sh green promised=0s actual=180s ratio=-
+  bash-walls.test.sh green promised=509s actual=200s ratio=0.39
+  shell-lint.test.sh green promised=97s actual=97s ratio=1.00
+  pr-route.test.sh discarded promised=0s actual=- ratio=-
+  run-seal.test.sh green promised=591s actual=395s ratio=0.67
+  pr-route.test.sh green promised=0s actual=1171s ratio=-
+  canonical-sdlc-governing-skill.test.sh green promised=180s actual=143s ratio=0.79
+  bash-walls.test.sh green promised=174s actual=158s ratio=0.91
+  shell-lint.test.sh green promised=71s actual=81s ratio=1.14
+T79 queue ready=2026-11-26T00:13:53Z landed=2026-11-26T03:02:34Z minutes=168.7 runs=5 waited=10021s wait=167.0 prove=1.7 rework=0.0 width=5
+  detect-probes.test.sh discarded promised=0s actual=- ratio=-
+  shell-lint.test.sh discarded promised=95s actual=- ratio=-
+  loader.test.sh green promised=8s actual=8s ratio=1.00
+  detect-probes.test.sh green promised=0s actual=25s ratio=-
+  shell-lint.test.sh green promised=74s actual=88s ratio=1.19
+T7 queue ready=2026-11-26T01:08:44Z landed=2026-11-26T03:07:04Z minutes=118.3 runs=7 waited=6914s wait=115.2 prove=3.1 rework=0.0 width=5
+  bash-walls.test.sh green promised=196s actual=178s ratio=0.91
+  hooks-closed.test.sh green promised=11s actual=20s ratio=1.82
+  hook-adoption.test.sh green promised=26s actual=29s ratio=1.12
+  execution-recorder.test.sh green promised=0s actual=18s ratio=-
+  session-start.test.sh green promised=0s actual=69s ratio=-
+  stop-orders.test.sh green promised=0s actual=62s ratio=-
+  booked.test.sh green promised=0s actual=74s ratio=-
+T4 queue ready=2026-11-26T01:17:48Z landed=2026-11-26T03:21:42Z minutes=123.9 runs=10 waited=6590s wait=109.8 prove=14.1 rework=0.0 width=3
+  proof-at-head.test.sh discarded promised=0s actual=- ratio=-
+  speed-counts.test.sh discarded promised=0s actual=- ratio=-
+  units.test.sh discarded promised=309s actual=- ratio=-
+  regression-rename.test.sh discarded promised=0s actual=- ratio=-
+  proof-at-head.test.sh red promised=0s actual=433s ratio=-
+  reader.test.sh green promised=67s actual=135s ratio=2.01
+  speed-counts.test.sh green promised=0s actual=690s ratio=-
+  units.test.sh green promised=309s actual=83s ratio=0.27
+  regression-rename.test.sh green promised=0s actual=20s ratio=-
+  loader.test.sh green promised=13s actual=6s ratio=0.46
+T8 queue ready=2026-11-26T01:37:06Z landed=2026-11-26T03:24:48Z minutes=107.7 runs=15 waited=6278s wait=104.6 prove=3.1 rework=0.0 width=7
+  stop.test.sh discarded promised=144s actual=- ratio=-
+  roster.test.sh green promised=6s actual=3s ratio=0.50
+  run.test.sh discarded promised=0s actual=- ratio=-
+  reader.test.sh discarded promised=48s actual=- ratio=-
+  binding.test.sh discarded promised=0s actual=- ratio=-
+  notify.test.sh discarded promised=0s actual=- ratio=-
+  handoff-file.test.sh discarded promised=0s actual=- ratio=-
+  stop.test.sh green promised=162s actual=136s ratio=0.84
+  roster.test.sh green promised=6s actual=6s ratio=1.00
+  run.test.sh green promised=0s actual=12s ratio=-
+  reader.test.sh green promised=54s actual=65s ratio=1.20
+  binding.test.sh green promised=0s actual=49s ratio=-
+  notify.test.sh green promised=0s actual=148s ratio=-
+  handoff-file.test.sh green promised=0s actual=107s ratio=-
+  log.test.sh green promised=0s actual=20s ratio=-
+T47 queue ready=2026-11-26T01:42:16Z landed=2026-11-26T03:31:00Z minutes=108.7 runs=6 waited=6172s wait=102.9 prove=5.9 rework=0.0 width=7
+  brief-file.test.sh green promised=482s actual=50s ratio=0.10
+  session-poker-4.test.sh green promised=295s actual=349s ratio=1.18
+  dispatch-preflight-3.test.sh green promised=42s actual=31s ratio=0.74
+  render.test.sh green promised=114s actual=34s ratio=0.30
+  words.test.sh green promised=62s actual=22s ratio=0.35
+  shell-lint.test.sh green promised=89s actual=45s ratio=0.51
+T5 queue ready=2026-11-26T02:55:15Z landed=2026-11-26T03:40:37Z minutes=45.4 runs=8 waited=2416s wait=40.3 prove=5.1 rework=0.0 width=4
+  session-poker-5.test.sh discarded promised=467s actual=- ratio=-
+  session-poker.test.sh green promised=87s actual=42s ratio=0.48
+  session-poker-2.test.sh green promised=386s actual=194s ratio=0.50
+  session-poker-5.test.sh green promised=467s actual=302s ratio=0.65
+  units.test.sh green promised=309s actual=116s ratio=0.38
+  roots.test.sh green promised=61s actual=16s ratio=0.26
+  engage.test.sh green promised=142s actual=58s ratio=0.41
+  loader.test.sh green promised=8s actual=6s ratio=0.75
+T58 queue ready=2026-11-26T03:13:01Z landed=2026-11-26T03:43:46Z minutes=30.8 runs=8 waited=1708s wait=28.5 prove=2.3 rework=0.0 width=6
+  context.test.sh green promised=20s actual=5s ratio=0.25
+  detect.test.sh green promised=8s actual=3s ratio=0.38
+  refuse.test.sh green promised=147s actual=41s ratio=0.28
+  grant.test.sh green promised=50s actual=24s ratio=0.48
+  placement.test.sh green promised=9s actual=5s ratio=0.56
+  roots.test.sh green promised=41s actual=21s ratio=0.51
+  doctor-walls.test.sh green promised=113s actual=50s ratio=0.44
+  principles-item.test.sh green promised=283s actual=117s ratio=0.41
+T80 queue ready=2026-11-26T04:43:37Z landed=2026-11-26T04:45:43Z minutes=2.1 runs=2 waited=16s wait=0.3 prove=1.8 rework=0.0 width=6
+  proof-at-head.test.sh green promised=80s actual=109s ratio=1.36
+  shell-lint.test.sh green promised=38s actual=40s ratio=1.05
+T9 queue ready=2026-11-26T01:50:47Z landed=2026-11-26T04:50:42Z minutes=179.9 runs=10 waited=6158s wait=102.6 prove=8.6 rework=68.7 width=5
+  one-reader.test.sh red promised=63s actual=79s ratio=1.25
+  release-check.test.sh red promised=0s actual=132s ratio=-
+  shell-lint.test.sh green promised=60s actual=60s ratio=1.00
+  landing-line-2.test.sh discarded promised=486s actual=- ratio=-
+  spawn-worktree.test.sh green promised=125s actual=96s ratio=0.77
+  one-reader.test.sh green promised=65s actual=71s ratio=1.09
+  release-check.test.sh green promised=114s actual=113s ratio=0.99
+  shell-lint.test.sh green promised=43s actual=51s ratio=1.19
+  landing-line-2.test.sh green promised=469s actual=280s ratio=0.60
+  spawn-worktree.test.sh green promised=142s actual=84s ratio=0.59
+T73 queue ready=2026-11-26T04:43:46Z landed=2026-11-26T05:03:16Z minutes=19.5 runs=6 waited=436s wait=7.3 prove=12.2 rework=0.0 width=6
+  words.test.sh green promised=14s actual=28s ratio=2.00
+  card.test.sh green promised=119s actual=181s ratio=1.52
+  reader.test.sh green promised=37s actual=58s ratio=1.57
+  release-approval.test.sh green promised=0s actual=732s ratio=-
+  close-out-4.test.sh green promised=0s actual=613s ratio=-
+  shell-lint.test.sh green promised=35s actual=52s ratio=1.49
+T6 queue ready=2026-11-26T03:12:55Z landed=2026-11-26T05:05:11Z minutes=112.3 runs=4 waited=2857s wait=47.6 prove=1.5 rework=63.1 width=4
+  units.test.sh green promised=163s actual=91s ratio=0.56
+  worktree.test.sh green promised=250s actual=90s ratio=0.36
+  gate.test.sh green promised=144s actual=52s ratio=0.36
+  loader.test.sh green promised=8s actual=5s ratio=0.62
+T37 queue ready=2026-11-26T05:05:42Z landed=2026-11-26T05:07:31Z minutes=1.8 runs=4 waited=20s wait=0.3 prove=1.5 rework=0.0 width=5
+  hooks-closed.test.sh green promised=2s actual=4s ratio=2.00
+  principles-item.test.sh green promised=85s actual=88s ratio=1.04
+  hook-adoption.test.sh green promised=23s actual=11s ratio=0.48
+  shell-lint.test.sh green promised=52s actual=43s ratio=0.83
+T81 queue ready=2026-11-26T05:10:13Z landed=2026-11-26T05:11:17Z minutes=1.1 runs=2 waited=19s wait=0.3 prove=0.8 rework=0.0 width=4
+  shell-rc.test.sh green promised=1s actual=2s ratio=2.00
+  shell-lint.test.sh green promised=52s actual=43s ratio=0.83
+T74 queue ready=2026-11-26T05:13:58Z landed=2026-11-26T05:15:07Z minutes=1.1 runs=4 waited=21s wait=0.3 prove=0.8 rework=0.0 width=5
+  words.test.sh green promised=26s actual=24s ratio=0.92
+  render.test.sh green promised=21s actual=27s ratio=1.29
+  context-spend.test.sh green promised=17s actual=11s ratio=0.65
+  shell-lint.test.sh green promised=40s actual=45s ratio=1.12
+T51 queue ready=2026-11-26T05:45:32Z landed=2026-11-26T05:52:26Z minutes=6.9 runs=5 waited=30s wait=0.5 prove=6.4 rework=0.0 width=6
+  release-check.test.sh green promised=73s actual=136s ratio=1.86
+  session-poker-4.test.sh green promised=345s actual=382s ratio=1.11
+  worktree.test.sh green promised=98s actual=93s ratio=0.95
+  door-cover.test.sh green promised=10s actual=13s ratio=1.30
+  shell-lint.test.sh green promised=40s actual=48s ratio=1.20
+T2 queue ready=2026-11-26T04:46:35Z landed=2026-11-26T06:05:14Z minutes=78.7 runs=16 waited=1382s wait=23.0 prove=25.8 rework=29.8 width=9
+  session-poker-4.test.sh red promised=194s actual=421s ratio=2.17
+  units.test.sh green promised=61s actual=117s ratio=1.92
+  canonical-sdlc-evidence-gate-2.test.sh green promised=77s actual=146s ratio=1.90
+  proof-at-head.test.sh green promised=106s actual=169s ratio=1.59
+  regression-rename.test.sh green promised=20s actual=23s ratio=1.15
+  sitrep.test.sh green promised=483s actual=598s ratio=1.24
+  render.test.sh green promised=16s actual=33s ratio=2.06
+  shell-lint.test.sh green promised=45s actual=61s ratio=1.36
+  session-poker-4.test.sh green promised=270s actual=533s ratio=1.97
+  units.test.sh green promised=71s actual=133s ratio=1.87
+  canonical-sdlc-evidence-gate-2.test.sh green promised=89s actual=165s ratio=1.85
+  proof-at-head.test.sh green promised=111s actual=200s ratio=1.80
+  regression-rename.test.sh green promised=14s actual=25s ratio=1.79
+  sitrep.test.sh green promised=598s actual=715s ratio=1.20
+  render.test.sh green promised=18s actual=43s ratio=2.39
+  shell-lint.test.sh green promised=58s actual=60s ratio=1.03
+T83 queue ready=2026-11-26T07:19:47Z landed=2026-11-26T07:22:37Z minutes=2.8 runs=2 waited=67s wait=1.1 prove=1.7 rework=0.0 width=7
+  one-reader.test.sh green promised=97s actual=101s ratio=1.04
+  shell-lint.test.sh green promised=33s actual=71s ratio=2.15
+T84 queue ready=2026-11-26T07:26:07Z landed=2026-11-26T07:28:13Z minutes=2.1 runs=2 waited=61s wait=1.0 prove=1.1 rework=0.0 width=8
+  booked.test.sh green promised=33s actual=50s ratio=1.52
+  shell-lint.test.sh green promised=36s actual=63s ratio=1.75
+T39 queue ready=2026-11-26T08:11:01Z landed=2026-11-26T08:55:53Z minutes=44.9 runs=14 waited=213s wait=3.5 prove=39.6 rework=1.7 width=5
+  booked.test.sh green promised=105s actual=172s ratio=1.64
+  background-suite-guard.test.sh green promised=41s actual=298s ratio=7.27
+  cmd-class.test.sh green promised=16s actual=84s ratio=5.25
+  bash-walls.test.sh green promised=129s actual=443s ratio=3.43
+  proof-at-head.test.sh green promised=303s actual=879s ratio=2.90
+  slots.test.sh red promised=228s actual=610s ratio=2.68
+  shell-lint.test.sh green promised=83s actual=197s ratio=2.37
+  booked.test.sh green promised=119s actual=127s ratio=1.07
+  background-suite-guard.test.sh green promised=48s actual=185s ratio=3.85
+  cmd-class.test.sh green promised=15s actual=69s ratio=4.60
+  bash-walls.test.sh green promised=332s actual=392s ratio=1.18
+  proof-at-head.test.sh green promised=303s actual=832s ratio=2.75
+  slots.test.sh green promised=186s actual=525s ratio=2.82
+  shell-lint.test.sh green promised=115s actual=165s ratio=1.43
+T27 queue ready=2026-11-26T09:15:10Z landed=2026-11-26T09:25:35Z minutes=10.4 runs=8 waited=96s wait=1.6 prove=8.8 rework=0.0 width=9
+  git-argv.test.sh green promised=115s actual=235s ratio=2.04
+  grant.test.sh green promised=91s actual=113s ratio=1.24
+  protect-main.test.sh green promised=34s actual=109s ratio=3.21
+  bash-walls.test.sh green promised=483s actual=328s ratio=0.68
+  canonical-sdlc-governing-skill.test.sh green promised=178s actual=314s ratio=1.76
+  dispatch-preflight-5.test.sh green promised=414s actual=370s ratio=0.89
+  root.test.sh green promised=14s actual=53s ratio=3.79
+  shell-lint.test.sh green promised=146s actual=114s ratio=0.78
+T28 queue ready=2026-11-26T09:17:42Z landed=2026-11-26T09:39:45Z minutes=22.1 runs=5 waited=580s wait=9.7 prove=12.4 rework=0.0 width=4
+  canonical-sdlc-governing-skill.test.sh green promised=305s actual=195s ratio=0.64
+  scale-profile.test.sh green promised=138s actual=73s ratio=0.53
+  commands.test.sh green promised=32s actual=17s ratio=0.53
+  card.test.sh green promised=237s actual=499s ratio=2.11
+  units.test.sh green promised=268s actual=327s ratio=1.22
+T18 queue ready=2026-11-26T10:10:17Z landed=2026-11-26T10:30:28Z minutes=20.2 runs=11 waited=840s wait=14.0 prove=4.4 rework=1.8 width=2
+  patrol-stale.test.sh green promised=11s actual=19s ratio=1.73
+  doctor-patrol.test.sh discarded promised=62s actual=- ratio=-
+  worktree.test.sh discarded promised=127s actual=- ratio=-
+  stop-check.test.sh green promised=41s actual=44s ratio=1.07
+  one-reader.test.sh discarded promised=67s actual=- ratio=-
+  roster.test.sh green promised=41s actual=7s ratio=0.17
+  patrol-stale.test.sh green promised=17s actual=11s ratio=0.65
+  doctor-patrol.test.sh green promised=127s actual=90s ratio=0.71
+  worktree.test.sh green promised=239s actual=165s ratio=0.69
+  stop-check.test.sh green promised=53s actual=33s ratio=0.62
+  one-reader.test.sh green promised=120s actual=87s ratio=0.72
+T24 queue ready=2026-11-26T09:40:58Z landed=2026-11-26T10:42:39Z minutes=61.7 runs=8 waited=2744s wait=45.7 prove=7.9 rework=8.1 width=3
+  one-reader.test.sh green promised=87s actual=144s ratio=1.66
+  root.test.sh green promised=48s actual=12s ratio=0.25
+  canonical-sdlc-governing-skill.test.sh green promised=314s actual=203s ratio=0.65
+  dispatch-preflight.test.sh green promised=354s actual=239s ratio=0.68
+  canonical-sdlc-evidence-gate.test.sh green promised=296s actual=91s ratio=0.31
+  stop.test.sh green promised=557s actual=334s ratio=0.60
+  session-poker.test.sh green promised=167s actual=133s ratio=0.80
+  shell-lint.test.sh red promised=220s actual=115s ratio=0.52
+T23 queue ready=2026-11-26T10:29:47Z landed=2026-11-26T11:47:06Z minutes=77.3 runs=8 waited=2065s wait=34.4 prove=42.9 rework=0.0 width=5
+  close-out-1.test.sh discarded promised=0s actual=- ratio=-
+  close-out-1.test.sh green promised=0s actual=1308s ratio=-
+  close-out-2.test.sh green promised=0s actual=893s ratio=-
+  close-out-3.test.sh green promised=288s actual=968s ratio=3.36
+  close-out-5.test.sh green promised=0s actual=486s ratio=-
+  close-out-6.test.sh green promised=0s actual=281s ratio=-
+  card.test.sh green promised=360s actual=334s ratio=0.93
+  notify.test.sh green promised=148s actual=342s ratio=2.31
+T16 queue ready=2026-11-26T09:31:43Z landed=2026-11-26T12:45:36Z minutes=193.9 runs=16 waited=8512s wait=141.9 prove=52.0 rework=0.0 width=2
+  names.test.sh green promised=3s actual=14s ratio=4.67
+  slots.test.sh green promised=187s actual=453s ratio=2.42
+  run-seal.test.sh green promised=430s actual=870s ratio=2.02
+  units.test.sh green promised=330s actual=510s ratio=1.55
+  speed-counts.test.sh green promised=0s actual=1142s ratio=-
+  sitrep.test.sh green promised=598s actual=1961s ratio=3.28
+  inbox.test.sh green promised=155s actual=251s ratio=1.62
+  shell-lint.test.sh green promised=114s actual=230s ratio=2.02
+  names.test.sh green promised=3s actual=12s ratio=4.00
+  slots.test.sh green promised=180s actual=277s ratio=1.54
+  run-seal.test.sh green promised=430s actual=500s ratio=1.16
+  units.test.sh green promised=309s actual=326s ratio=1.06
+  speed-counts.test.sh red promised=0s actual=580s ratio=-
+  sitrep.test.sh green promised=598s actual=884s ratio=1.48
+  inbox.test.sh green promised=184s actual=100s ratio=0.54
+  shell-lint.test.sh red promised=91s actual=125s ratio=1.37
+T25 queue ready=2026-11-26T09:52:38Z landed=2026-11-26T12:53:39Z minutes=181.0 runs=13 waited=9860s wait=164.3 prove=16.7 rework=0.0 width=4
+  canonical-sdlc-evidence-gate.test.sh green promised=109s actual=180s ratio=1.65
+  canonical-sdlc-evidence-gate-2.test.sh green promised=171s actual=587s ratio=3.43
+  plan-page.test.sh green promised=204s actual=516s ratio=2.53
+  canonical-sdlc-governing-skill.test.sh green promised=115s actual=293s ratio=2.55
+  reader.test.sh green promised=96s actual=285s ratio=2.97
+  run.test.sh green promised=35s actual=100s ratio=2.86
+  canonical-sdlc-evidence-gate.test.sh green promised=170s actual=58s ratio=0.34
+  canonical-sdlc-evidence-gate-2.test.sh green promised=212s actual=149s ratio=0.70
+  plan-page.test.sh green promised=483s actual=171s ratio=0.35
+  canonical-sdlc-governing-skill.test.sh green promised=174s actual=102s ratio=0.59
+  reader.test.sh green promised=153s actual=107s ratio=0.70
+  run.test.sh green promised=43s actual=43s ratio=1.00
+  bash-walls.test.sh green promised=290s actual=104s ratio=0.36
+T22 queue ready=2026-11-26T10:27:10Z landed=2026-11-26T13:08:13Z minutes=161.1 runs=19 waited=7769s wait=129.5 prove=31.6 rework=0.0 width=9
+  watch.test.sh green promised=0s actual=1076s ratio=-
+  patrol-stale.test.sh green promised=11s actual=26s ratio=2.36
+  session-sweep.test.sh green promised=82s actual=93s ratio=1.13
+  stop.test.sh green promised=230s actual=553s ratio=2.40
+  stop-check.test.sh green promised=52s actual=63s ratio=1.21
+  doctor-patrol.test.sh green promised=127s actual=202s ratio=1.59
+  booked.test.sh green promised=62s actual=115s ratio=1.85
+  alive.test.sh green promised=102s actual=44s ratio=0.43
+  patrol-stale.test.sh discarded promised=22s actual=- ratio=-
+  session-sweep.test.sh discarded promised=93s actual=- ratio=-
+  stop.test.sh discarded promised=203s actual=- ratio=-
+  watch.test.sh green promised=12s actual=745s ratio=62.08
+  patrol-stale.test.sh green promised=22s actual=33s ratio=1.50
+  session-sweep.test.sh green promised=93s actual=61s ratio=0.66
+  stop.test.sh green promised=200s actual=213s ratio=1.06
+  stop-check.test.sh green promised=52s actual=69s ratio=1.33
+  doctor-patrol.test.sh green promised=152s actual=87s ratio=0.57
+  booked.test.sh green promised=103s actual=91s ratio=0.88
+  alive.test.sh green promised=33s actual=31s ratio=0.94
+T20 queue ready=2026-11-26T11:05:19Z landed=2026-11-26T13:34:43Z minutes=149.4 runs=18 waited=5084s wait=84.7 prove=61.1 rework=3.5 width=8
+  session-poker.test.sh green promised=96s actual=248s ratio=2.58
+  session-poker-3.test.sh green promised=450s actual=855s ratio=1.90
+  session-poker-5.test.sh discarded promised=421s actual=- ratio=-
+  sitrep.test.sh discarded promised=598s actual=- ratio=-
+  roster.test.sh green promised=39s actual=78s ratio=2.00
+  preflight-probe.test.sh green promised=155s actual=146s ratio=0.94
+  session-sweeper.test.sh green promised=132s actual=90s ratio=0.68
+  stop-orders.test.sh green promised=78s actual=181s ratio=2.32
+  session-poker-5.test.sh green promised=411s actual=633s ratio=1.54
+  sitrep.test.sh discarded promised=598s actual=- ratio=-
+  session-poker.test.sh green promised=76s actual=97s ratio=1.28
+  session-poker-3.test.sh green promised=598s actual=477s ratio=0.80
+  session-poker-5.test.sh green promised=540s actual=663s ratio=1.23
+  sitrep.test.sh green promised=598s actual=1490s ratio=2.49
+  roster.test.sh green promised=24s actual=10s ratio=0.42
+  preflight-probe.test.sh green promised=91s actual=79s ratio=0.87
+  session-sweeper.test.sh green promised=72s actual=52s ratio=0.72
+  stop-orders.test.sh green promised=62s actual=88s ratio=1.42
+T13 queue ready=2026-11-26T11:31:15Z landed=2026-11-26T13:49:53Z minutes=138.6 runs=13 waited=7445s wait=124.1 prove=14.6 rework=0.0 width=4
+  bash-walls-egd.test.sh discarded promised=378s actual=- ratio=-
+  plan-page.test.sh discarded promised=482s actual=- ratio=-
+  canonical-sdlc-evidence-gate.test.sh discarded promised=180s actual=- ratio=-
+  bash-walls-egd.test.sh discarded promised=432s actual=- ratio=-
+  plan-page.test.sh discarded promised=515s actual=- ratio=-
+  proof-at-head.test.sh discarded promised=301s actual=- ratio=-
+  bash-walls-egd.test.sh green promised=323s actual=160s ratio=0.50
+  plan-page.test.sh green promised=152s actual=141s ratio=0.93
+  canonical-sdlc-evidence-gate.test.sh green promised=53s actual=51s ratio=0.96
+  proof-at-head.test.sh green promised=302s actual=194s ratio=0.64
+  session-poker-4.test.sh green promised=548s actual=511s ratio=0.93
+  pr-route.test.sh green promised=0s actual=667s ratio=-
+  units.test.sh green promised=326s actual=133s ratio=0.41
+T15 queue ready=2026-11-26T11:34:47Z landed=2026-11-26T14:16:27Z minutes=161.7 runs=6 waited=8283s wait=138.1 prove=23.6 rework=0.0 width=6
+  speed-counts.test.sh red promised=580s actual=614s ratio=1.06
+  reader.test.sh green promised=102s actual=108s ratio=1.06
+  sitrep.test.sh green promised=598s actual=1246s ratio=2.08
+  proof-at-head.test.sh green promised=211s actual=273s ratio=1.29
+  session-poker-4.test.sh green promised=548s actual=856s ratio=1.56
+  shell-lint.test.sh red promised=88s actual=98s ratio=1.11
+T85 queue ready=2026-11-26T12:06:36Z landed=2026-11-26T14:22:11Z minutes=135.6 runs=4 waited=7794s wait=129.9 prove=5.7 rework=0.0 width=6
+  session-poker-4.test.sh discarded promised=297s actual=- ratio=-
+  shell-lint.test.sh discarded promised=46s actual=- ratio=-
+  session-poker-4.test.sh green promised=548s actual=311s ratio=0.57
+  shell-lint.test.sh red promised=49s actual=46s ratio=0.94
+T14 queue ready=2026-11-26T12:12:14Z landed=2026-11-26T14:34:27Z minutes=142.2 runs=7 waited=7841s wait=130.7 prove=11.5 rework=0.0 width=6
+  proof-at-head.test.sh green promised=234s actual=191s ratio=0.82
+  session-poker-4.test.sh green promised=400s actual=455s ratio=1.14
+  release-approval-2.test.sh green promised=510s actual=308s ratio=0.60
+  units.test.sh green promised=76s actual=110s ratio=1.45
+  bash-walls-egd.test.sh green promised=212s actual=174s ratio=0.82
+  canonical-sdlc-evidence-gate-2.test.sh green promised=243s actual=179s ratio=0.74
+  sitrep.test.sh green promised=598s actual=564s ratio=0.94
+T61 queue ready=2026-11-26T12:53:31Z landed=2026-11-26T14:42:35Z minutes=109.1 runs=8 waited=6124s wait=102.1 prove=7.0 rework=0.0 width=10
+  execution-recorder.test.sh green promised=20s actual=22s ratio=1.10
+  permission-answer.test.sh green promised=108s actual=103s ratio=0.95
+  stop-orders.test.sh green promised=44s actual=38s ratio=0.86
+  dispatch-preflight.test.sh green promised=109s actual=108s ratio=0.99
+  dispatch-preflight-4b.test.sh green promised=334s actual=164s ratio=0.49
+  session-poker-5.test.sh green promised=540s actual=314s ratio=0.58
+  landing-line-2.test.sh green promised=216s actual=404s ratio=1.87
+  refuse.test.sh green promised=40s actual=54s ratio=1.35
+T26 queue ready=2026-11-26T14:06:21Z landed=2026-11-26T15:03:32Z minutes=57.2 runs=8 waited=2312s wait=38.5 prove=18.6 rework=0.0 width=8
+  run-seal.test.sh green promised=292s actual=389s ratio=1.33
+  pr-route.test.sh green promised=0s actual=1102s ratio=-
+  bash-walls.test.sh green promised=193s actual=177s ratio=0.92
+  canonical-sdlc-evidence-gate.test.sh green promised=71s actual=75s ratio=1.06
+  canonical-sdlc-evidence-gate-2.test.sh green promised=152s actual=239s ratio=1.57
+  context.test.sh green promised=10s actual=33s ratio=3.30
+  permission-answer.test.sh green promised=180s actual=149s ratio=0.83
+  session-start.test.sh green promised=104s actual=65s ratio=0.62
+T40 queue ready=2026-11-26T12:46:36Z landed=2026-11-26T15:18:23Z minutes=151.8 runs=7 waited=7333s wait=122.2 prove=14.0 rework=15.6 width=9
+  exits.test.sh green promised=13s actual=37s ratio=2.85
+  landing-line-2.test.sh green promised=333s actual=774s ratio=2.32
+  booked.test.sh green promised=56s actual=100s ratio=1.79
+  slots.test.sh green promised=139s actual=190s ratio=1.37
+  session-poker-4.test.sh green promised=455s actual=837s ratio=1.84
+  run.test.sh green promised=22s actual=48s ratio=2.18
+  rehearsal.test.sh green promised=224s actual=151s ratio=0.67
+T62 queue ready=2026-11-26T15:33:10Z landed=2026-11-26T15:42:40Z minutes=9.5 runs=7 waited=131s wait=2.2 prove=7.3 rework=0.0 width=6
+  bash-walls.test.sh green promised=152s actual=94s ratio=0.62
+  permission-answer.test.sh green promised=109s actual=92s ratio=0.84
+  inbox.test.sh green promised=60s actual=63s ratio=1.05
+  watch.test.sh green promised=12s actual=436s ratio=36.33
+  stop.test.sh green promised=297s actual=151s ratio=0.51
+  booked.test.sh green promised=59s actual=51s ratio=0.86
+  dispatch-preflight.test.sh green promised=108s actual=89s ratio=0.82
+T21 queue ready=2026-11-26T15:44:41Z landed=2026-11-26T15:47:32Z minutes=2.9 runs=7 waited=37s wait=0.6 prove=2.2 rework=0.0 width=8
+  execution-recorder.test.sh green promised=8s actual=12s ratio=1.50
+  stop-orders.test.sh green promised=19s actual=30s ratio=1.58
+  permission-answer.test.sh green promised=48s actual=75s ratio=1.56
+  brief-file.test.sh green promised=40s actual=52s ratio=1.30
+  stop.test.sh green promised=129s actual=120s ratio=0.93
+  inbox.test.sh green promised=31s actual=50s ratio=1.61
+  log.test.sh green promised=10s actual=16s ratio=1.60
+T89 queue ready=2026-11-26T17:02:31Z landed=2026-11-26T17:14:45Z minutes=12.2 runs=2 waited=683s wait=11.4 prove=0.8 rework=0.0 width=1
+  hook-adoption.test.sh green promised=12s actual=12s ratio=1.00
+  shell-lint.test.sh red promised=50s actual=48s ratio=0.96
+T90 queue ready=2026-11-26T17:08:54Z landed=2026-11-26T17:17:13Z minutes=8.3 runs=3 waited=430s wait=7.2 prove=1.1 rework=0.0 width=3
+  words.test.sh green promised=43s actual=43s ratio=1.00
+  regression-rename.test.sh green promised=25s actual=36s ratio=1.44
+  shell-lint.test.sh green promised=58s actual=63s ratio=1.09
+T87 queue ready=2026-11-26T17:10:16Z landed=2026-11-26T17:19:48Z minutes=9.5 runs=3 waited=509s wait=8.5 prove=1.1 rework=0.0 width=4
+  time.test.sh green promised=7s actual=22s ratio=3.14
+  loader.test.sh green promised=4s actual=14s ratio=3.50
+  shell-lint.test.sh green promised=45s actual=59s ratio=1.31
+T92 queue ready=2026-11-26T17:18:02Z landed=2026-11-26T17:44:59Z minutes=26.9 runs=2 waited=203s wait=3.4 prove=23.6 rework=0.0 width=4
+  canonical-sdlc-evidence-gate-2.test.sh green promised=107s actual=1412s ratio=13.20
+  shell-lint.test.sh green promised=41s actual=64s ratio=1.56
+T91 queue ready=2026-11-26T17:24:23Z landed=2026-11-26T18:15:51Z minutes=51.5 runs=2 waited=2566s wait=42.8 prove=8.7 rework=0.0 width=3
+  speed-counts.test.sh green promised=485s actual=520s ratio=1.07
+  shell-lint.test.sh green promised=64s actual=63s ratio=0.98
+T93 queue ready=2026-11-26T18:32:47Z landed=2026-11-26T18:48:33Z minutes=15.8 runs=2 waited=59s wait=1.0 prove=14.8 rework=0.0 width=5
+  landing-line-2.test.sh green promised=465s actual=883s ratio=1.90
+  shell-lint.test.sh green promised=80s actual=71s ratio=0.89
+T59 queue ready=2026-11-26T18:48:24Z landed=2026-11-26T18:53:31Z minutes=5.1 runs=7 waited=68s wait=1.1 prove=4.0 rework=0.0 width=7
+  time.test.sh green promised=13s actual=11s ratio=0.85
+  binding.test.sh green promised=39s actual=54s ratio=1.38
+  notify.test.sh green promised=184s actual=225s ratio=1.22
+  run.test.sh green promised=16s actual=50s ratio=3.12
+  slots.test.sh green promised=107s actual=176s ratio=1.64
+  stop.test.sh green promised=176s actual=209s ratio=1.19
+  handoff-file.test.sh green promised=175s actual=170s ratio=0.97
+T88 queue ready=2026-11-26T19:12:59Z landed=2026-11-26T19:33:45Z minutes=20.8 runs=6 waited=115s wait=1.9 prove=18.9 rework=0.0 width=6
+  one-reader.test.sh green promised=70s actual=116s ratio=1.66
+  release-check.test.sh green promised=199s actual=213s ratio=1.07
+  door-landing.test.sh green promised=592s actual=773s ratio=1.31
+  door-card.test.sh green promised=580s actual=548s ratio=0.94
+  close-replay.test.sh green promised=0s actual=996s ratio=-
+  reader.test.sh green promised=87s actual=108s ratio=1.24
+T17 queue ready=2026-11-26T19:23:26Z landed=2026-11-26T19:38:21Z minutes=14.9 runs=4 waited=744s wait=12.4 prove=2.5 rework=0.0 width=6
+  time.test.sh green promised=7s actual=26s ratio=3.71
+  reader.test.sh green promised=68s actual=90s ratio=1.32
+  handoff-file.test.sh green promised=101s actual=141s ratio=1.40
+  shell-lint.test.sh green promised=44s actual=73s ratio=1.66
+T60 queue ready=2026-11-26T19:26:20Z landed=2026-11-26T19:57:26Z minutes=31.1 runs=7 waited=857s wait=14.3 prove=16.8 rework=0.0 width=8
+  time.test.sh green promised=8s actual=23s ratio=2.88
+  execution-recorder.test.sh green promised=17s actual=38s ratio=2.24
+  permission-answer.test.sh green promised=125s actual=143s ratio=1.14
+  preflight-probe.test.sh green promised=44s actual=71s ratio=1.61
+  session-start.test.sh green promised=41s actual=60s ratio=1.46
+  booked.test.sh green promised=58s actual=73s ratio=1.26
+  close-out-1.test.sh green promised=468s actual=965s ratio=2.06
+T41 queue ready=2026-11-26T19:56:23Z landed=2026-11-26T20:43:55Z minutes=47.5 runs=8 waited=385s wait=6.4 prove=41.1 rework=0.0 width=5
+  exits.test.sh green promised=39s actual=42s ratio=1.08
+  bash-walls.test.sh green promised=186s actual=262s ratio=1.41
+  canonical-sdlc-evidence-gate-2.test.sh green promised=140s actual=506s ratio=3.61
+  card.test.sh green promised=467s actual=1056s ratio=2.26
+  release-approval-2.test.sh green promised=320s actual=1224s ratio=3.83
+  run-seal.test.sh green promised=389s actual=1094s ratio=2.81
+  session-poker-4.test.sh green promised=575s actual=1721s ratio=2.99
+  session-poker-5.test.sh green promised=428s actual=1181s ratio=2.76
+T29 queue ready=2026-11-26T22:14:09Z landed=2026-11-26T22:30:22Z minutes=16.2 runs=5 waited=92s wait=1.5 prove=14.7 rework=0.0 width=5
+  card.test.sh green promised=488s actual=878s ratio=1.80
+  dispatch-preflight-5.test.sh green promised=378s actual=505s ratio=1.34
+  units.test.sh green promised=384s actual=566s ratio=1.47
+  refuse.test.sh green promised=154s actual=159s ratio=1.03
+  render.test.sh green promised=128s actual=140s ratio=1.09
+T34 queue ready=2026-11-26T22:50:32Z landed=2026-11-26T23:26:21Z minutes=35.8 runs=8 waited=426s wait=7.1 prove=28.7 rework=0.0 width=2
+  english.test.sh green promised=2s actual=49s ratio=24.50
+  card.test.sh green promised=488s actual=944s ratio=1.93
+  sitrep.test.sh green promised=598s actual=1705s ratio=2.85
+  release-approval-2.test.sh green promised=275s actual=1016s ratio=3.69
+  doctor.test.sh green promised=31s actual=113s ratio=3.65
+  setup.test.sh green promised=8s actual=36s ratio=4.50
+  root.test.sh green promised=13s actual=38s ratio=2.92
+  shell-lint.test.sh red promised=82s actual=187s ratio=2.28
+T19 queue ready=2026-11-26T23:08:18Z landed=2026-11-26T23:35:24Z minutes=27.1 runs=10 waited=1167s wait=19.4 prove=7.7 rework=0.0 width=7
+  session-sweep.test.sh discarded promised=116s actual=- ratio=-
+  session-poker.test.sh discarded promised=188s actual=- ratio=-
+  session-sweeper.test.sh green promised=28s actual=77s ratio=2.75
+  session-sweep.test.sh green promised=116s actual=141s ratio=1.22
+  session-poker.test.sh green promised=162s actual=162s ratio=1.00
+  session-poker-2.test.sh green promised=391s actual=353s ratio=0.90
+  stop-orders.test.sh green promised=52s actual=157s ratio=3.02
+  time.test.sh green promised=16s actual=44s ratio=2.75
+  landing-gate.test.sh green promised=104s actual=65s ratio=0.62
+  shell-lint.test.sh red promised=106s actual=83s ratio=0.78
+T65 queue ready=2026-11-26T23:28:58Z landed=2026-11-26T23:43:15Z minutes=14.3 runs=8 waited=571s wait=9.5 prove=4.8 rework=0.0 width=7
+  names.test.sh green promised=6s actual=29s ratio=4.83
+  gate.test.sh green promised=154s actual=118s ratio=0.77
+  worktree.test.sh green promised=313s actual=245s ratio=0.78
+  roster.test.sh green promised=27s actual=30s ratio=1.11
+  session-start.test.sh green promised=102s actual=106s ratio=1.04
+  setup.test.sh green promised=11s actual=78s ratio=7.09
+  alive.test.sh green promised=13s actual=31s ratio=2.38
+  shell-lint.test.sh red promised=65s actual=102s ratio=1.57
+T32 queue ready=2026-11-26T23:31:07Z landed=2026-11-26T23:57:26Z minutes=26.3 runs=6 waited=933s wait=15.6 prove=10.8 rework=0.0 width=5
+  gate.test.sh green promised=79s actual=128s ratio=1.62
+  booked.test.sh green promised=60s actual=136s ratio=2.27
+  runner-roster.test.sh green promised=51s actual=103s ratio=2.02
+  runner-width.test.sh green promised=35s actual=80s ratio=2.29
+  session-poker-2.test.sh green promised=560s actual=517s ratio=0.92
+  run.test.sh green promised=115s actual=51s ratio=0.44
+T33 queue ready=2026-11-26T23:43:50Z landed=2026-11-27T00:11:41Z minutes=27.9 runs=6 waited=902s wait=15.0 prove=12.8 rework=0.0 width=6
+  engage.test.sh green promised=150s actual=126s ratio=0.84
+  session-start.test.sh green promised=57s actual=81s ratio=1.42
+  handoff-file.test.sh green promised=176s actual=177s ratio=1.01
+  sitrep.test.sh green promised=598s actual=765s ratio=1.28
+  close-out-1.test.sh green promised=468s actual=601s ratio=1.28
+  hook-adoption.test.sh green promised=55s actual=53s ratio=0.96
+T64 queue ready=2026-11-26T23:53:02Z landed=2026-11-27T00:22:52Z minutes=29.8 runs=8 waited=1267s wait=21.1 prove=8.7 rework=0.0 width=7
+  one-reader.test.sh green promised=182s actual=76s ratio=0.42
+  units.test.sh green promised=510s actual=196s ratio=0.38
+  roster.test.sh green promised=5s actual=9s ratio=1.80
+  inbox.test.sh green promised=70s actual=83s ratio=1.19
+  binding.test.sh green promised=57s actual=61s ratio=1.07
+  session-poker-5.test.sh green promised=382s actual=425s ratio=1.11
+  bash-walls.test.sh green promised=394s actual=145s ratio=0.37
+  stop.test.sh green promised=225s actual=230s ratio=1.02
+T35 queue ready=2026-11-27T00:14:45Z landed=2026-11-27T00:38:25Z minutes=23.7 runs=8 waited=796s wait=13.3 prove=10.4 rework=0.0 width=5
+  card.test.sh green promised=297s actual=451s ratio=1.52
+  close-out-6.test.sh green promised=180s actual=360s ratio=2.00
+  notify.test.sh green promised=196s actual=314s ratio=1.60
+  worktree.test.sh green promised=123s actual=226s ratio=1.84
+  stop.test.sh green promised=141s actual=294s ratio=2.09
+  proof-at-head.test.sh green promised=232s actual=341s ratio=1.47
+  bash-walls.test.sh green promised=137s actual=172s ratio=1.26
+  shell-lint.test.sh red promised=117s actual=139s ratio=1.19
+T31 queue ready=2026-11-26T23:53:09Z landed=2026-11-27T02:29:31Z minutes=156.4 runs=12 waited=4629s wait=77.2 prove=75.4 rework=3.9 width=7
+  rehearsal.test.sh green promised=121s actual=181s ratio=1.50
+  rehearsal-stop-rule.test.sh green promised=94s actual=121s ratio=1.29
+  card.test.sh green promised=251s actual=488s ratio=1.94
+  units.test.sh green promised=166s actual=275s ratio=1.66
+  session-poker-4.test.sh green promised=575s actual=1173s ratio=2.04
+  close-out-3.test.sh green promised=381s actual=720s ratio=1.89
+  rehearsal.test.sh green promised=100s actual=475s ratio=4.75
+  rehearsal-stop-rule.test.sh green promised=72s actual=358s ratio=4.97
+  card.test.sh green promised=242s actual=1340s ratio=5.54
+  units.test.sh green promised=361s actual=722s ratio=2.00
+  session-poker-4.test.sh green promised=575s actual=2746s ratio=4.78
+  close-out-3.test.sh green promised=532s actual=1615s ratio=3.04
+T75 queue ready=2026-11-27T01:48:43Z landed=2026-11-27T14:37:07Z minutes=768.4 runs=17 waited=15377s wait=256.3 prove=512.1 rework=0.0 width=6
+  canonical-sdlc-evidence-gate.test.sh discarded promised=26s actual=- ratio=-
+  dispatch-preflight-5.test.sh discarded promised=175s actual=- ratio=-
+  landing-line-2.test.sh discarded promised=465s actual=- ratio=-
+  notify.test.sh discarded promised=170s actual=- ratio=-
+  reader.test.sh green promised=134s actual=1600s ratio=11.94
+  card.test.sh green promised=488s actual=3054s ratio=6.26
+  canonical-sdlc-evidence-gate.test.sh green promised=26s actual=725s ratio=27.88
+  dispatch-preflight-5.test.sh green promised=175s actual=1383s ratio=7.90
+  landing-line-2.test.sh red promised=465s actual=5578s ratio=12.00
+  notify.test.sh green promised=374s actual=2315s ratio=6.19
+  plan-page.test.sh green promised=67s actual=1508s ratio=22.51
+  refuse.test.sh green promised=101s actual=614s ratio=6.08
+  sitrep-card.test.sh green promised=137s actual=1616s ratio=11.80
+  sitrep.test.sh green promised=598s actual=12440s ratio=20.80
+  close-out-4.test.sh green promised=0s actual=16884s ratio=-
+  shell-lint.test.sh red promised=393s actual=891s ratio=2.27
+  sitrep.test.sh green promised=598s actual=16109s ratio=26.94
+T94 queue ready=2026-11-27T14:35:44Z landed=2026-11-27T14:38:18Z minutes=2.6 runs=6 waited=94s wait=1.6 prove=1.0 rework=0.0 width=5
+  shell-lint.test.sh discarded promised=393s actual=- ratio=-
+  root.test.sh green promised=6s actual=4s ratio=0.67
+  roots.test.sh green promised=11s actual=13s ratio=1.18
+  shell-lint.test.sh red promised=393s actual=44s ratio=0.11
+  root.test.sh green promised=7s actual=4s ratio=0.57
+  roots.test.sh green promised=19s actual=10s ratio=0.53
+T30 queue ready=2026-11-27T00:12:18Z landed=2026-11-27T14:58:06Z minutes=885.8 runs=24 waited=10631s wait=177.2 prove=136.7 rework=571.9 width=5
+  sitrep.test.sh discarded promised=598s actual=- ratio=-
+  pr-route.test.sh discarded promised=0s actual=- ratio=-
+  units.test.sh green promised=121s actual=372s ratio=3.07
+  sitrep.test.sh discarded promised=598s actual=- ratio=-
+  pr-route.test.sh discarded promised=0s actual=- ratio=-
+  dispatch-preflight-4b.test.sh green promised=172s actual=603s ratio=3.51
+  session-poker-5.test.sh discarded promised=293s actual=- ratio=-
+  regression-rename.test.sh green promised=22s actual=62s ratio=2.82
+  reader.test.sh green promised=99s actual=267s ratio=2.70
+  units.test.sh green promised=581s actual=997s ratio=1.72
+  sitrep.test.sh green promised=598s actual=5954s ratio=9.96
+  pr-route.test.sh green promised=0s actual=5864s ratio=-
+  dispatch-preflight-4b.test.sh green promised=455s actual=1194s ratio=2.62
+  session-poker-5.test.sh red promised=411s actual=2528s ratio=6.15
+  regression-rename.test.sh green promised=37s actual=303s ratio=8.19
+  reader.test.sh green promised=135s actual=478s ratio=3.54
+  units.test.sh green promised=581s actual=189s ratio=0.33
+  sitrep.test.sh green promised=598s actual=1005s ratio=1.68
+  pr-route.test.sh green promised=0s actual=1005s ratio=-
+  landing-line-1.test.sh green promised=510s actual=956s ratio=1.87
+  dispatch-preflight-4b.test.sh green promised=455s actual=216s ratio=0.47
+  session-poker-5.test.sh green promised=296s actual=478s ratio=1.61
+  regression-rename.test.sh green promised=145s actual=51s ratio=0.35
+  reader.test.sh green promised=478s actual=117s ratio=0.24
+T38 queue ready=2026-11-27T14:50:22Z landed=2026-11-27T15:24:40Z minutes=34.3 runs=7 waited=491s wait=8.2 prove=16.8 rework=9.3 width=9
+  one-reader.test.sh green promised=216s actual=145s ratio=0.67
+  spawn-worktree.test.sh green promised=103s actual=314s ratio=3.05
+  shell-lint.test.sh red promised=54s actual=114s ratio=2.11
+  release-check.test.sh green promised=213s actual=326s ratio=1.53
+  landing-line-1.test.sh green promised=510s actual=1003s ratio=1.97
+  landing-line-2.test.sh green promised=428s actual=777s ratio=1.82
+  units.test.sh green promised=545s actual=266s ratio=0.49
+T36 queue ready=2026-11-27T15:10:34Z landed=2026-11-27T15:27:04Z minutes=16.5 runs=4 waited=873s wait=14.6 prove=1.9 rework=0.0 width=6
+  one-home.test.sh green promised=22s actual=12s ratio=0.55
+  shell-lint.test.sh red promised=66s actual=50s ratio=0.76
+  render.test.sh green promised=90s actual=23s ratio=0.26
+  proof-at-head.test.sh green promised=175s actual=114s ratio=0.65
+T63 queue ready=2026-11-27T15:52:42Z landed=2026-11-27T16:06:22Z minutes=13.7 runs=8 waited=30s wait=0.5 prove=13.2 rework=0.0 width=8
+  exits.test.sh green promised=20s actual=21s ratio=1.05
+  session-poker.test.sh green promised=81s actual=40s ratio=0.49
+  notify.test.sh green promised=164s actual=155s ratio=0.95
+  pr-route.test.sh green promised=0s actual=566s ratio=-
+  watch.test.sh green promised=243s actual=463s ratio=1.91
+  release-approval.test.sh green promised=0s actual=789s ratio=-
+  close-out-4.test.sh green promised=0s actual=698s ratio=-
+  shell-lint.test.sh green promised=81s actual=61s ratio=0.75
+T42 queue ready=2026-11-27T16:21:24Z landed=2026-11-27T16:22:37Z minutes=1.2 runs=4 waited=23s wait=0.4 prove=0.8 rework=0.0 width=7
+  words.test.sh green promised=20s actual=20s ratio=1.00
+  render.test.sh green promised=18s actual=20s ratio=1.11
+  execution-recorder.test.sh green promised=5s actual=9s ratio=1.80
+  shell-lint.test.sh green promised=46s actual=48s ratio=1.04
+T43 queue ready=2026-11-27T17:09:46Z landed=2026-11-27T17:17:00Z minutes=7.2 runs=4 waited=20s wait=0.3 prove=6.9 rework=0.0 width=8
+  sitrep.test.sh green promised=430s actual=413s ratio=0.96
+  session-poker.test.sh green promised=44s actual=29s ratio=0.66
+  proof-at-head.test.sh green promised=109s actual=103s ratio=0.94
+  shell-lint.test.sh green promised=37s actual=46s ratio=1.24
+T56 queue ready=2026-11-27T17:28:23Z landed=2026-11-27T17:30:18Z minutes=1.9 runs=5 waited=24s wait=0.4 prove=1.5 rework=0.0 width=8
+  release-check.test.sh green promised=107s actual=90s ratio=0.84
+  name-scan.test.sh green promised=0s actual=71s ratio=-
+  render.test.sh green promised=10s actual=20s ratio=2.00
+  doctor-version.test.sh green promised=176s actual=70s ratio=0.40
+  commands.test.sh green promised=9s actual=4s ratio=0.44
+T69 queue ready=2026-11-27T19:24:24Z landed=2026-11-27T19:26:38Z minutes=2.2 runs=2 waited=28s wait=0.5 prove=1.8 rework=0.0 width=6
+  release-check.test.sh green promised=133s actual=104s ratio=0.78
+  name-scan.test.sh green promised=71s actual=83s ratio=1.17
+T96 queue ready=2026-11-27T18:57:51Z landed=2026-11-27T19:29:02Z minutes=31.2 runs=2 waited=1754s wait=29.2 prove=1.9 rework=0.0 width=4
+  shell-lint.test.sh green promised=58s actual=57s ratio=0.98
+  shell-lint.test.sh green promised=59s actual=59s ratio=1.00
+T95 queue ready=2026-11-27T19:20:22Z landed=2026-11-27T19:31:47Z minutes=11.4 runs=18 waited=377s wait=6.3 prove=5.1 rework=0.0 width=5
+  one-reader.test.sh discarded promised=62s actual=- ratio=-
+  handoff-file.test.sh discarded promised=171s actual=- ratio=-
+  shell-lint.test.sh discarded promised=59s actual=- ratio=-
+  release-check.test.sh discarded promised=265s actual=- ratio=-
+  shell-lint.test.sh discarded promised=59s actual=- ratio=-
+  release-check.test.sh discarded promised=326s actual=- ratio=-
+  one-reader.test.sh green promised=62s actual=74s ratio=1.19
+  handoff-file.test.sh green promised=239s actual=97s ratio=0.41
+  shell-lint.test.sh green promised=59s actual=59s ratio=1.00
+  release-check.test.sh green promised=326s actual=133s ratio=0.41
+  one-reader.test.sh discarded promised=59s actual=- ratio=-
+  handoff-file.test.sh discarded promised=60s actual=- ratio=-
+  shell-lint.test.sh discarded promised=38s actual=- ratio=-
+  release-check.test.sh discarded promised=90s actual=- ratio=-
+  one-reader.test.sh green promised=69s actual=76s ratio=1.10
+  handoff-file.test.sh green promised=72s actual=99s ratio=1.38
+  shell-lint.test.sh green promised=41s actual=71s ratio=1.73
+  release-check.test.sh green promised=105s actual=132s ratio=1.26
+T99 queue ready=2026-11-27T19:27:14Z landed=2026-11-27T19:33:28Z minutes=6.2 runs=3 waited=307s wait=5.1 prove=1.1 rework=0.0 width=4
+  words.test.sh green promised=22s actual=28s ratio=1.27
+  render.test.sh green promised=29s actual=31s ratio=1.07
+  shell-lint.test.sh green promised=69s actual=65s ratio=0.94
+T98 queue ready=2026-11-27T20:15:46Z landed=2026-11-27T20:20:42Z minutes=4.9 runs=3 waited=25s wait=0.4 prove=4.5 rework=0.0 width=8
+  speed-counts.test.sh green promised=236s actual=269s ratio=1.14
+  proof-at-head.test.sh green promised=77s actual=118s ratio=1.53
+  shell-lint.test.sh green promised=33s actual=55s ratio=1.67
+T101 queue ready=2026-11-27T20:47:56Z landed=2026-11-27T20:53:01Z minutes=5.1 runs=3 waited=26s wait=0.4 prove=4.7 rework=0.0 width=8
+  speed-counts.test.sh green promised=215s actual=278s ratio=1.29
+  proof-at-head.test.sh green promised=111s actual=121s ratio=1.09
+  shell-lint.test.sh green promised=54s actual=55s ratio=1.02
+T100 queue ready=2026-11-27T20:59:09Z landed=2026-11-27T22:00:06Z minutes=61.0 runs=2 waited=3558s wait=59.3 prove=1.6 rework=0.0 width=7
+  release-check.test.sh green promised=67s actual=98s ratio=1.46
+  name-scan.test.sh green promised=83s actual=78s ratio=0.94
+```
+
 ## 2.2.0 — 2026-11-21
 
 This release drives a wave with a fraction of the waiting and the typing, in five themes. The cap on tests counts what

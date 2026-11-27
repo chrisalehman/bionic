@@ -29,6 +29,7 @@
 # The goal readers also ask lib/units.sh `units_rows` and lib/proof.sh `proof_last_line` when loaded; without them a
 # one-file landing or a whole run reads as not measured.
 # Sourced, never executed; bash 3.2.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 # The read is the reader-owned parser's (lib/plan-read.sh): the header key, never a key under a heading of the body.
 plan_integration_branch() {  # <plan>
@@ -142,7 +143,7 @@ _plan_matrix_acs() {
 }
 
 # THE ONE MAPPER OF A MATRIX ROW TO ITS REQUIREMENT. `_plan_ac_req(id, serves)` returns the requirement a row serves,
-# the word after `REQ-`: the first REQ id of its `serves` value, the Eval design's Requirement cell as the reader hands
+# the word after `REQ-`: the first REQ id of its `serves` value, the Test design's Requirement cell as the reader hands
 # it in; else the <req> of a dotted id `AC-<req>.<n>`; else "". A bare `AC-<n>` maps to nothing:
 # its number counts criteria, it names no requirement, and read as one it lands a criterion under another theme.
 # PAR_BY says how the row was mapped, `serves`, `id` or ""; PAR_MANY is 1 when serves: names several requirements.
@@ -230,7 +231,7 @@ plan_themes() {
 # Requirement cell, read by their dotted id` when a dotted id mapped any, `read as the first: <n> rows serve several
 # requirements` when a Requirement cell named more than one, and
 # `not mapped: <n> criteria name no requirement and no dotted id: …`, naming the Requirement cell of the criterion's
-# Eval design row as the place that maps it, its ids space-separated after it, when any row maps to
+# Test design row as the place that maps it, its ids space-separated after it, when any row maps to
 # nothing: such a row is in no theme's count, so a theme it serves reads short and the reading says why. A task plan
 # reads its matrix even when no theme is found, since its one theme is the matrix's own.
 _plan_theme_reads() {
@@ -267,7 +268,7 @@ _plan_theme_reads() {
         print ((step != "" && step + 0 >= 6) ? "overdue" : (d[t] ? "oncourse" : "pending")) "\t" nm[t] "\t" m "\t" goal_open(o, c - 2) f }
       if (byid) print "mapping\tmapped by id: " byid " criteria name no requirement in the Requirement cell, read by their dotted id"
       if (many) print "mapping\tread as the first: " many " rows serve several requirements"
-      if (unm) print "mapping\tnot mapped: " unm " criteria name no requirement and no dotted id: write the requirement in the Requirement cell of each row under ## Eval design\t" un
+      if (unm) print "mapping\tnot mapped: " unm " criteria name no requirement and no dotted id: write the requirement in the Requirement cell of each row under ## Test design\t" un
     }'
 }
 
@@ -301,7 +302,8 @@ plan_goal_slug() {
 # median is the middle value, the mean of the middle two for an even count. A task of more files moves nothing here.
 plan_one_file_median() {
   local plan="${1:-}" rep="${2:-}"
-  { printf '%s\n' "$rep" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") print "L\t" $1 "\t" substr($i, 9) }'
+  bionic_need fields.sh line_field_v
+  { printf '%s\n' "$rep" | awk "$_LINE_FIELDS_AWK"'NR > 1 && $2 == "queue" && (m = line_kv("minutes")) != "" && m != "-" { print "L\t" $1 "\t" m }'
     declare -F units_rows >/dev/null 2>&1 && units_rows "$plan" 2>/dev/null | awk -F'\t' '{ print "R\t" $1 "\t" $9 }'
   } | awk -F'\t' '
     $1 == "R" { n = split($3, a, ","); c = 0
@@ -422,6 +424,7 @@ plan_task_title() {
 # Always rc 0.
 plan_goals_read() {
   local plan="${1:-}" rec="${2:-}" rep="${3:-}" recdir docs t m r st rd tgt v n line ev f h s hs hrow hu hst
+  bionic_need fields.sh line_field_v
   recdir="${rec%/*}"; docs="${recdir%/*}"; docs="${docs%/*}"
   _plan_theme_reads "$plan"
   while IFS='	' read -r t m r; do
@@ -446,7 +449,7 @@ plan_goals_read() {
           IFS='	' read -r hs hrow hu hst <<< "$v"
           [ "$hs" != - ] || hs=""
           [ "$hst" = delivered ] || hu=""
-          v="$(hand_holds_report "$rec" "$h" "$plan" ${hs:+--since "$hs"} ${hu:+--until "$hu"} | awk '{ for (i = 1; i <= NF; i++) if (index($i, "total=") == 1) { print substr($i, 7) + 0; exit } }')"
+          v="$(hand_holds_report "$rec" "$h" "$plan" ${hs:+--since "$hs"} ${hu:+--until "$hu"} | awk "$_LINE_FIELDS_AWK"'(t = line_kv("total")) != "" { print t + 0; exit }')"
           if [ -z "$v" ]; then rd="the hand-holds report printed no total"
           else
             st="$(awk -v a="$v" -v b="$tgt" 'BEGIN { print (a + 0 <= b + 0) ? "reached" : "missed" }')"
@@ -459,7 +462,7 @@ plan_goals_read() {
         else
           case "$m" in
             *one-file*) v="$(plan_one_file_median "$plan" "$rep")"; s="one-file " ;;
-            *) v="$(printf '%s\n' "$rep" | awk 'NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1 && $i != "minutes=-") { n++; x[n] = substr($i, 9) + 0 } }
+            *) v="$(printf '%s\n' "$rep" | awk "$_LINE_FIELDS_AWK"'NR > 1 && $2 == "queue" && (m = line_kv("minutes")) != "" && m != "-" { n++; x[n] = m + 0 }
                  END { if (!n) exit; for (i = 2; i <= n; i++) { t = x[i]; for (j = i - 1; j >= 1 && x[j] > t; j--) x[j + 1] = x[j]; x[j + 1] = t }
                        printf "%.1f\t%d\n", (n % 2) ? x[(n + 1) / 2] : (x[n / 2] + x[n / 2 + 1]) / 2, n }')"; s="" ;;
           esac
@@ -499,7 +502,7 @@ plan_goals_read() {
         fi ;;
       *' §'*)
         s="${r%% §*}"; s="${s##* }"; case "$s" in *.test.sh) ;; *) s="$s.test.sh" ;; esac
-        [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "${BASH_SOURCE[0]%/*}/line.sh" ] && . "${BASH_SOURCE[0]%/*}/line.sh"; } >/dev/null 2>&1
+        bionic_need line.sh line_lines
         v="$(line_lines "$rec" 2>/dev/null | awk -F'|' -v s="$s" "${_LINE_FIELDS_AWK:-}"'line_ev() == "verdict" && line_kv("suite") == s {
                r = line_kv("result"); if (r == "green" || r == "red") l = r "\t" substr(line_kv("commit"), 1, 8) } END { if (l != "") print l }' 2>/dev/null)"
         case "${v%%	*}" in

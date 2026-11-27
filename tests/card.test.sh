@@ -21,7 +21,7 @@
 # the free cell inside its own column, and measures in columns through width.sh.
 # This suite is that file's wall.
 #
-# A FORMAT IS PINNED WHERE A CELL'S MEANING RESTS ON ITS COLUMN. A count under the Eval
+# A FORMAT IS PINNED WHERE A CELL'S MEANING RESTS ON ITS COLUMN. A count under the Test
 # design header is a bare number, so Section 2 renders that kind's header and rows from
 # its format by hand and the renderer must agree BYTE FOR BYTE: a label off its column
 # misstates which count is which. Section 5's header-only row holds the decision header
@@ -42,9 +42,9 @@ WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
 # ── the two formats card.sh owns that this suite renders by hand ──
 # The decision row gives its title cell 30 columns, a title being at most 30 characters
-# on every card; the eval-design format is the one the cards first stated.
+# on every card; the test-design format starts each count at its label's column.
 OLD_FMT_DEC='    %-4s %-30s %-14s %s'
-OLD_FMT_EVAL='    %-8s %-36s %6s %5s %9s %5s %6s'
+OLD_FMT_EVAL='    %-8s %-36s %-6s %-5s %-9s %-5s %-6s'
 
 section "Section 1: the renderer is there, and it refuses what it cannot render"
 
@@ -79,7 +79,7 @@ expect_true "4: card.sh parses under /bin/bash" /bin/bash -n "$CARD_SH"
 expect_eq "4a: …and /bin/bash is the 3.x this gate is about" "3" \
   "$(/bin/bash -c 'echo ${BASH_VERSINFO[0]}')"
 
-section "Section 2: the eval-design kind renders what its former printf format rendered"
+section "Section 2: the test-design kind renders what its former printf format rendered"
 
 # fmt_render — the row, built one field at a time from a format, the way the card
 # was hand-padded before this task. NOT `printf "$fmt"` itself: printf pads by
@@ -150,19 +150,30 @@ card() {  # <kind> — TSV rows on stdin
   bash "$CARD_SH" "$@" 2>/dev/null
 }
 
-# --- eval-design (five RIGHT-aligned count columns, and a total row) ---
+# --- test-design (five RIGHT-aligned count columns, and a total row) ---
 EVAL_VALS1=("REQ-<id>" "<how it is proven, one line>" "2" "1" "3" "0" "1")
 EVAL_VALS2=("REQ-<id>" "<how it is proven, one line>" "1" "0" "2" "1" "0")
 EVAL_VALS_T=("total" "" "3" "1" "5" "1" "1")
+# A row's last field pads on the left-aligned format and the card trims the line's end, so the hand-built rows trim theirs.
 EVAL_WANT="$(printf '%s\n' \
-  "$(hdr_build "Eval design" "$OLD_FMT_EVAL" "2:static" "3:unit" "4:hermetic" "5:live" "6:human")" \
+  "$(hdr_build "Test design" "$OLD_FMT_EVAL" "2:static" "3:unit" "4:hermetic" "5:live" "6:human")" \
   "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS1[@]}")" \
   "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS2[@]}")" \
-  "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS_T[@]}")")"
+  "$(fmt_render "$OLD_FMT_EVAL" "${EVAL_VALS_T[@]}")" | sed -e 's/ *$//')"
 EVAL_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS1[@]}"
                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS2[@]}"
-               printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS_T[@]}"; } | card eval-design)"
-expect_eq "9: the eval-design kind renders the card's own header and three rows" "$EVAL_WANT" "$EVAL_GOT"
+               printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${EVAL_VALS_T[@]}"; } | card test-design)"
+expect_eq "9: the test-design kind renders the card's own header and three rows" "$EVAL_WANT" "$EVAL_GOT"
+# THE COUNT STARTS UNDER ITS LABEL. Row 9 holds the format against itself; this row reads the
+# printed card, so a count right-aligned in its column, which ends under the label's end, goes red.
+EVAL_START_GOT="$(printf '%s\n' "$EVAL_GOT" | awk '
+  NR == 1 { n = split("static unit hermetic live human", L, " "); for (i = 1; i <= n; i++) start[i] = index($0, L[i]); next }
+  NF > 0 && $1 != "total" {
+    out = ""; line = $0
+    for (i = 1; i <= n; i++) { out = out (out == "" ? "" : ",") (substr(line, start[i], 1) ~ /[0-9]/ && substr(line, start[i] - 1, 1) == " " ? "ok" : "off") }
+    print out }')"
+expect_eq "9b: each count of the test-design rows starts at the first column of its type's label" \
+  "$(printf 'ok,ok,ok,ok,ok\nok,ok,ok,ok,ok')" "$EVAL_START_GOT"
 
 section "Section 5: the edges"
 
@@ -253,9 +264,9 @@ OWN9_P="$(printf 'concept\towner\t%s\ttests/x.test.sh\n' "$PLAIN_FOLD" | card ow
 expect_eq "35: ownership — § — “ ” … in the surfaces cell do not move test" \
   "$(cols "${OWN9_P%%tests/x.test.sh*}")" "$(cols "${OWN9_G%%tests/x.test.sh*}")"
 
-EVAL9_G="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$GLYPH_FOLD" | card eval-design | tail -n +2)"
-EVAL9_P="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$PLAIN_FOLD" | card eval-design | tail -n +2)"
-expect_eq "36: eval-design — § — “ ” … in the description cell keep every count column aligned" \
+EVAL9_G="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$GLYPH_FOLD" | card test-design | tail -n +2)"
+EVAL9_P="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$PLAIN_FOLD" | card test-design | tail -n +2)"
+expect_eq "36: test-design — § — “ ” … in the description cell keep every count column aligned" \
   "$(cols "$EVAL9_P")" "$(cols "$EVAL9_G")"
 
 TASK9_G="$(printf 'T9\t%s\tREQ-9\tbuild\t—\timplementor\n' "$GLYPH_FOLD" | card task | grep -v '^  Tasks')"
@@ -434,9 +445,9 @@ Answer the fixture's two requirements with a design small enough to read whole.
 
 - ADR-099 — the fixture ruling: `adrs/epic-99/adr-099-fixture.md` (D1).
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | a source pin and a fixture run | AC-1.1 the first criterion | static | `grep` | the pin is gone |
 | REQ-1 | a source pin and a fixture run | AC-1.2 the second criterion | hermetic | `bash tests/first.test.sh` | it reds |
@@ -470,9 +481,9 @@ fixture branch, with one floor at the integration head.
 | T1 | 4 | build | REQ-1: the first task. The fixture's first task has its own sentence. It also has a detail the card does not show. complexity: standard | — | 30 | REQ-1 | lib/first.sh | — |
 | T2 | 4 | test | REQ-2: the second task. The fixture's second task has one too. complexity: complex | T1 | 45 | REQ-2 | lib/second.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | static | `tests/a.test.sh` | it is wrong |
 | REQ-1 | fixture | AC-1.2 | hermetic | `tests/a.test.sh` | it is wrong |
@@ -560,7 +571,7 @@ whole_card step2 "$SPEC_FIX" ownership; S2_OWN="$WC_OUT"
 expect_contains "55: the Ownership sub-view carries the spec's own table rows" \
   "owner lib/first.sh" "$S2_OWN"
 expect_contains "55a: …and the second concept's test suite" "tests/second.test.sh" "$S2_OWN"
-expect_contains "56: the Eval design section counts REQ-1's criteria by type" "REQ-1" "$S2"
+expect_contains "56: the Test design section counts REQ-1's criteria by type" "REQ-1" "$S2"
 expect_contains "56a: …and carries a total row" "total" "$S2"
 
 whole_card step3 "$PLAN_FIX"; S3="$WC_OUT"
@@ -943,9 +954,9 @@ Who owns what:
 
 - `adrs/epic-23-bionic-tech-debt/adr-071-code-draws-the-facts-the-model-judges.md` (D6; D7; D8; REQ-1, REQ-3, REQ-4): the card's three owners and the check's rule; written at Step 7.
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | a register with one ask of each kind, one answered | AC-1.1 | hermetic | `asks.test.sh` §WAITS: `ask_waits_on` says user for a decision, an approval and an unanswered waiver, event for a waiver answered no and a finding answered carry; the sheet's `ask:` lines carry `waits=` | the refused waiver reads user, or a line lacks the field |
 | REQ-1 | a register with one ask of each kind, one answered | AC-1.2 | hermetic | `asks.test.sh` §ANSWER: the item stays open with `answer=no`; the finding stays open with `answer=carry event=T9 lands` and closes when T9's landing is recorded | the item closes at the answer, or reads no answer |
@@ -1291,9 +1302,9 @@ card_intree_cleanup
 section "§CONTENT: the Step-2 card's shape follows what the spec holds, never the scale (wave-43 D11; REQ-13 AC-13.2)"
 # ============================================================
 # Wave 42 and wave 43 both wrote a wave-shaped spec at task scale, and the renderer drew the
-# paragraph card for it, since one line keyed the shape on `scale:`. The decisions and the eval
+# paragraph card for it, since one line keyed the shape on `scale:`. The decisions and the test
 # counts the user was approving never reached the card, and wave 42 drew them by hand (A-orch.8).
-# The rule now: a spec that holds decision rows or an eval table gets the full card and its
+# The rule now: a spec that holds decision rows or a test table gets the full card and its
 # sub-views, whatever the scale; a spec that holds neither keeps the paragraph card, the
 # task-scale form. An ADR line naming several decisions, `(D1; D2; REQ-1)`, credits each.
 # fails-when: the dispatch keys on CARD_SCALE alone (CONTENT-2 to CONTENT-4, CONTENT-6), or
@@ -1305,13 +1316,13 @@ sed -e 's/^sdlc-step: 2$/sdlc-step: 2\nscale: task/' \
 expect_contains "CONTENT-0 precondition: the task spec declares scale: task" "scale: task" "$(cat "$TASK_SPEC")"
 expect_contains "CONTENT-0b precondition: its ADR line names D1 and D2" "(D1; D2; REQ-1)" "$(cat "$TASK_SPEC")"
 whole_card step2 "$TASK_SPEC"; S2_TASK="$WC_OUT"
-expect_eq "CONTENT-1 step2 exits 0 on a task-scale spec that holds decisions and evals" "0" "$WC_RC"
-expect_contains "CONTENT-2 …and the card carries the Decisions section with D1" "D1" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p')"
-expect_contains "CONTENT-2b …and D2" "D2" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p')"
-expect_contains "CONTENT-3 …and the Eval design section with its total row" "total" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Eval design/,/^  Artifacts/p')"
-expect_contains "CONTENT-4 …and the sub-view line, since the content is there to show" "show evals <req>" "$S2_TASK"
+expect_eq "CONTENT-1 step2 exits 0 on a task-scale spec that holds decisions and tests" "0" "$WC_RC"
+expect_contains "CONTENT-2 …and the card carries the Decisions section with D1" "D1" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Test design/p')"
+expect_contains "CONTENT-2b …and D2" "D2" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Test design/p')"
+expect_contains "CONTENT-3 …and the Test design section with its total row" "total" "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Test design/,/^  Artifacts/p')"
+expect_contains "CONTENT-4 …and the sub-view line, since the content is there to show" "show tests <req>" "$S2_TASK"
 expect_eq "CONTENT-5 an ADR line naming D1 and D2 credits both decisions with the ADR" "2" \
-  "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Eval design/p' | /usr/bin/grep -c 'adr-099-fixture.md')"
+  "$(printf '%s\n' "$S2_TASK" | sed -n '/^  Decisions/,/^  Test design/p' | /usr/bin/grep -c 'adr-099-fixture.md')"
 whole_card step2 "$TASK_SPEC" ownership
 expect_eq "CONTENT-6 the ownership sub-view is offered on that spec too" "0" "$WC_RC"
 expect_contains "CONTENT-6b …and carries the table's rows" "lib/first.sh" "$WC_OUT"
@@ -1336,10 +1347,10 @@ One small thing, designed in a paragraph.
 The one thing lives in one file and is read by one caller; nothing else changes.
 FIXEOF
 whole_card step2 "$PARA_SPEC"; S2_PARA="$WC_OUT"
-expect_eq "CONTENT-7 a task-scale spec holding neither decisions nor evals still exits 0" "0" "$WC_RC"
+expect_eq "CONTENT-7 a task-scale spec holding neither decisions nor tests still exits 0" "0" "$WC_RC"
 expect_contains "CONTENT-7b …and draws the paragraph card" "The one thing lives in one file" "$S2_PARA"
 expect_eq "CONTENT-7c …with no Decisions section and no sub-view line" "" \
-  "$(printf '%s\n' "$S2_PARA" | /usr/bin/grep -e '^  Decisions' -e 'show evals')"
+  "$(printf '%s\n' "$S2_PARA" | /usr/bin/grep -e '^  Decisions' -e 'show tests')"
 whole_card step2 "$PARA_SPEC" ownership
 expect_eq "CONTENT-7d …and refuses the sub-view, as before" "2" "$WC_RC"
 
@@ -1386,9 +1397,9 @@ Land the flock app's six tasks so the Step-3 card has a ledger to read.
 | T5 | 5 | test | Prove the join. The join is proved after the four. DETAIL-EPSILON runs after the four. complexity: standard | T1, T2, T3, T4 | 45 | REQ-2 | tests/d.test.sh | — |
 | T6 | 4 | build | Prove the pair. The pair is proved after two. DETAIL-ZETA runs after two. complexity: standard | T1, T2 | 45 | REQ-1 | tests/e.test.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | hermetic | \`tests/a.test.sh\` | the fixture is wrong |
 FIXEOF
@@ -1718,9 +1729,9 @@ The sync first, then the view.
 - ${RISK_LONG}
 - A short one.
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture run | AC-1.1 the sync | unit | \`bash tests/sync.test.sh\` | it reds |
 FIXEOF
@@ -1805,9 +1816,9 @@ The flock syncs two phones and draws one list.
 
 - ADR-001 — the sync ruling: \`adrs/epic-99/adr-001-sync.md\` (D1).
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | two phones meet and compare lists | AC-1.1 the sync | unit | \`bash tests/sync.test.sh\` | it reds |
 | REQ-1 | two phones meet and compare lists | AC-1.2 the merge | hermetic | \`bash tests/merge.test.sh\` | it reds |
@@ -1874,10 +1885,10 @@ expect_eq "DSENTENCE-7c …and a backtick in the detail after the sentence refus
   "$(/usr/bin/grep -c '`lib/sync.sh`' "$DS_TICK" | tr -d ' ')|$(printf '%s\n' "$WC_ERR" | /usr/bin/grep -c 'decision D1')"
 
 # ============================================================
-section "§APPROACH: the Eval design's Approach cell is one plain line of at most 60 columns per requirement"
+section "§APPROACH: the Test design's Approach cell is one plain line of at most 60 columns per requirement"
 # ============================================================
 # fails-when: an Approach cell over 60 columns, one carrying a backtick, or a second approach on one requirement
-# renders, the refusal does not name the row, a 60-column cell is refused, or the Eval design line stops printing it.
+# renders, the refusal does not name the row, a 60-column cell is refused, or the Test design line stops printing it.
 AP60="two phones meet — each keeps the other's edits, none is lost"
 expect_eq "APPROACH-0 precondition: the boundary approach is 60 columns and more than 60 bytes" "60|yes" \
   "$(cols "$AP60")|$([ "$(printf '%s' "$AP60" | wc -c | tr -d ' ')" -gt 60 ] && echo yes)"
@@ -1887,18 +1898,18 @@ expect_eq "APPROACH-0b precondition: both REQ-1 rows carry the 60-column approac
   "$(/usr/bin/grep -c "| REQ-1 | ${AP60} |" "$AP_SPEC" | tr -d ' ')"
 whole_card step2 "$AP_SPEC"; AP="$WC_OUT"
 expect_eq "APPROACH-1 a 60-column approach, the same on every row of its requirement, draws, silently" "0|" "$WC_RC|$WC_ERR"
-AP_EVAL="$(printf '%s\n' "$AP" | sed -n '/^  Eval design/,/^$/p')"
+AP_EVAL="$(printf '%s\n' "$AP" | sed -n '/^  Test design/,/^$/p')"
 printf 'REQ-1\t%s\t0\t1\t1\t0\t0\nREQ-2\tthe view draws one list\t0\t1\t0\t0\t0\ntotal\t\t0\t2\t1\t0\t0\n' "$AP60" \
-  | card eval-design > "${CARD_SANDBOX}/ap-tsv.txt"
+  | card test-design > "${CARD_SANDBOX}/ap-tsv.txt"
 printf '%s\n' "$AP_EVAL" | sed -e '/^$/d' > "${CARD_SANDBOX}/ap-whole.txt"
-expect_eq "APPROACH-1b …and the Eval design block prints the approach as the row kind always has (precondition: REQ-1 row)" "yes|same" \
+expect_eq "APPROACH-1b …and the Test design block prints the approach as the row kind always has (precondition: REQ-1 row)" "yes|same" \
   "$(printf '%s\n' "$AP_EVAL" | /usr/bin/grep -q '^    REQ-1 ' && echo yes)|$(cmp -s "${CARD_SANDBOX}/ap-tsv.txt" "${CARD_SANDBOX}/ap-whole.txt" && echo same)"
 AP_LONG="${CARD_SANDBOX}/wave-24-flock.spec.md"
 sed -e "s/| REQ-1 | ${AP60} |/| REQ-1 | ${AP60}. |/" "$AP_SPEC" > "$AP_LONG"
 whole_card step2 "$AP_LONG"
 expect_eq "APPROACH-2 an approach of 61 columns is refused: exit 64, no card on stdout" "64|" "$WC_RC|$WC_OUT"
 expect_contains "APPROACH-2b …naming the row, the width and the cap" \
-  "Eval design row REQ-1 AC-1.1: the Approach cell is 61 columns, the cap is 60" "$WC_ERR"
+  "Test design row REQ-1 AC-1.1: the Approach cell is 61 columns, the cap is 60" "$WC_ERR"
 AP_TICK="${CARD_SANDBOX}/wave-25-flock.spec.md"
 sed -e 's/| REQ-2 | the view draws one list |/| REQ-2 | the `view` draws one list |/' "$AP_SPEC" > "$AP_TICK"
 expect_eq "APPROACH-3 precondition: the planted REQ-2 approach carries a backtick" "1" \
@@ -1906,7 +1917,7 @@ expect_eq "APPROACH-3 precondition: the planted REQ-2 approach carries a backtic
 whole_card step2 "$AP_TICK"
 expect_eq "APPROACH-3a an approach carrying a backtick is refused: exit 64, no card on stdout" "64|" "$WC_RC|$WC_OUT"
 expect_contains "APPROACH-3b …naming the row and the cell whole" \
-  'Eval design row REQ-2 AC-2.1: the Approach cell carries a backtick: the `view` draws one list' "$WC_ERR"
+  'Test design row REQ-2 AC-2.1: the Approach cell carries a backtick: the `view` draws one list' "$WC_ERR"
 AP_TWO="${CARD_SANDBOX}/wave-26-flock.spec.md"
 sed -e "s/| REQ-1 | ${AP60} | AC-1.2/| REQ-1 | a merge fixture | AC-1.2/" "$AP_SPEC" > "$AP_TWO"
 expect_eq "APPROACH-4 precondition: REQ-1's second row carries a second approach" "1|1" \
@@ -1914,8 +1925,8 @@ expect_eq "APPROACH-4 precondition: REQ-1's second row carries a second approach
 whole_card step2 "$AP_TWO"
 expect_eq "APPROACH-4a two approaches on one requirement are refused: exit 64, no card on stdout" "64|" "$WC_RC|$WC_OUT"
 expect_contains "APPROACH-4b …naming the row and both approaches" \
-  "Eval design row REQ-1 AC-1.2: a second approach for REQ-1: a merge fixture (the first: ${AP60})" "$WC_ERR"
-whole_card step2 "$AP_TWO" evals REQ-1
+  "Test design row REQ-1 AC-1.2: a second approach for REQ-1: a merge fixture (the first: ${AP60})" "$WC_ERR"
+whole_card step2 "$AP_TWO" tests REQ-1
 expect_eq "APPROACH-4c …and the sub-views are refused with it" "64|" "$WC_RC|$WC_OUT"
 
 # ============================================================
@@ -1954,9 +1965,9 @@ Land the flock app's three tasks so the Step-3 card has sentences to read.
 | T2 | 4 | build | Join the rows. ${TS_LONG} TS-DETAIL-TWO the join keeps table order. complexity: complex | T1 | 45 | REQ-1, REQ-2 | lib/b.sh | — |
 | T3 | 5 | test | Prove the join. The join is proved on two rows · complexity: standard | T2 | 30 | REQ-2 | tests/b.test.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | hermetic | \`tests/a.test.sh\` | the fixture is wrong |
 FIXEOF
@@ -2144,29 +2155,25 @@ section "§UNPROVED: the release card prints the full pass's state at this head,
 # ============================================================
 # fails-when: the card prints green, or covered, over a whole run behind the head whose reds later landings greened;
 # the landings since the run go uncounted; or a whole run green at the head reads anything but green at it.
-# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name with the
-# close-out fixture's builders it stands on, out of tests/close-out.prelude.sh), so the card is drawn over the plan
-# and record the other surfaces print from; the card is the real `release-approval --preview`.
+# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, from tests/lib/proof-at-head-world.sh, with
+# the close-out fixture it stands on, tests/lib/close-out-fixture.sh), so the card is drawn over the plan and record
+# the other surfaces print from; the card is the real `release-approval --preview`.
 # fails-when, too: the card puts no merge-unproved decision over the red world, or puts one over the green; current 8
 # --check passes over the red world before the person's word is written, or refuses after it.
 # ANTI-VACUITY: UP-1 reads the red world and UP-2 the green one through the same extractor; UP-3 reads the decision
 # through up_ask before UP-3g and UP-4 read its absence through it; UP-3b refuses before UP-3f passes on one world.
-up_import() {  # <name> <file> -> the function, defined here, read out of <file>
-  local body
-  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$2")"
-  [ -n "$body" ] || { echo "up_import: no $1 in $2" >&2; return 1; }
-  eval "$body"
-}
-UP_MISSING=""
-for _f in in_fixture fixture_own fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to; do
-  up_import "$_f" "$(dirname "$0")/close-out.prelude.sh" || UP_MISSING="$UP_MISSING $_f"
-done
-for _f in pah_world pah_poke pah_card_state; do up_import "$_f" "$(dirname "$0")/proof-at-head.test.sh" || UP_MISSING="$UP_MISSING $_f"; done
-expect_eq "UP-0 the builders were all read out of their suites" "" "$UP_MISSING"
+. "$(dirname "$0")/lib/close-out-fixture.sh" || { echo "card.test.sh: cannot load lib/close-out-fixture.sh"; exit 1; }
+. "$(dirname "$0")/lib/proof-at-head-world.sh" || { echo "card.test.sh: cannot load lib/proof-at-head-world.sh"; exit 1; }
 SANDBOX="$CARD_SANDBOX/up"; mkdir -p "$SANDBOX"; SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 REPO_ROOT="$REPO"; UNITS_LIB="$REPO/payload/scripts/lib/units.sh"; PAH_LIB="$REPO/payload/scripts/lib"
 PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"; LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+# ck_said <rc> <output> -> <rc>:<advance|refuse>: the checked advance's exit and the answer its verdict line gives. The
+# check exits 0 on either answer, so the answer is read from its words, never from the exit alone.
+ck_said() {
+  printf '%s:%s' "$1" "$(printf '%s\n' "$2" | awk 'index($0, "--check: would advance") { print "advance"; exit }
+    index($0, "--check: would refuse") { print "refuse"; exit }')"
+}
 up_line() { printf '%s\n' "$1" | /usr/bin/grep -F "whole suite: " | head -1; }  # <card> -> its whole-suite line
 # up_ask <card> -> the card's merge-unproved decision, its folded lines joined: `<n>. Merge without … · default: none`
 up_ask() {
@@ -2188,7 +2195,7 @@ expect_eq "UP-1 a whole run red at F, two landings past it greening its reds: th
 expect_absent "UP-1b …and never covered or green" "green" "$(pah_card_state "$PAH_OUT")"
 expect_regex "UP-3 …and the card asks the merge without a pass at this head as its own decision, the state on it, waiting recommended and no default" "^[0-9]+\. Merge without a whole run at this head — red at ${PAH_F:0:8}, 2 landings before this head · recommended: wait for the pass · default: none\$" "$(up_ask "$PAH_OUT")"
 pah_poke "$PAH_P" card-up-session current 8 --check
-expect_eq "UP-3b unanswered, current 8 --check refuses (exit 1) on the regression, unproved at this head" "1|1" "$PAH_RC|$(printf '%s\n' "$PAH_OUT" | /usr/bin/grep -cE "^regression	unproved	red at ${PAH_F:0:8}, 2 landings before this head	")"
+expect_eq "UP-3b unanswered, current 8 --check refuses (exit 0: would refuse) on the regression, unproved at this head" "0:refuse|1" "$(ck_said "$PAH_RC" "$PAH_OUT")|$(printf '%s\n' "$PAH_OUT" | /usr/bin/grep -cE "^regression	unproved	red at ${PAH_F:0:8}, 2 landings before this head	")"
 expect_contains "UP-3c …naming the person's exit" "needs: the user — reply" "$PAH_OUT"
 expect_contains "UP-3d …and the other: the pass at this head" "on the release card (merge without a whole run at this head), or wait for the pass" "$PAH_OUT"
 # The approve verb refuses the name on this fixture, so the person's word is the event its writer appends to the run's
@@ -2196,7 +2203,7 @@ expect_contains "UP-3d …and the other: the pass at this head" "on the release 
 up_word
 expect_eq "UP-3e the person's word, given at the working head, is the run's newest merge-unproved approval" "$PAH_H" "$(bash -c '. "$1/proof.sh" && proof_approved_head "$2" merge-unproved' _ "$PAH_LIB" "$PAH_PLAN" 2>/dev/null)"
 pah_poke "$PAH_P" card-up-session current 8 --check
-expect_eq "UP-3f …after which current 8 --check passes (exit 0)" "0" "$PAH_RC"
+expect_eq "UP-3f …after which current 8 --check passes (exit 0)" "0:advance" "$(ck_said "$PAH_RC" "$PAH_OUT")"
 [ "$PAH_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$PAH_OUT" | tail -4)"
 pah_poke "$PAH_P" card-up-session release-approval --preview "$PAH_PLAN"
 expect_eq "UP-3g …and the card still prints red at F, and asks nothing more of it" "✖️ whole suite: red at ${PAH_F:0:8}, 2 landings before this head|" "$(up_line "$PAH_OUT")|$(up_ask "$PAH_OUT")"
@@ -2208,7 +2215,7 @@ expect_eq "UP-2 a whole run green at the working head: the card prints green at 
   "0|✅ whole suite: green at ${PAH_H:0:8}" "$PAH_RC|$(up_line "$PAH_OUT")"
 expect_eq "UP-4 …and asks no merge without a pass" "" "$(up_ask "$PAH_OUT")"
 pah_poke "$PAH_P" card-up-session current 8 --check
-expect_eq "UP-4b …and current 8 --check passes with no word from the person (exit 0)" "0" "$PAH_RC"
+expect_eq "UP-4b …and current 8 --check passes with no word from the person (exit 0)" "0:advance" "$(ck_said "$PAH_RC" "$PAH_OUT")"
 
 # ============================================================
 section "§UNRUN: at 15 a criterion owed now and never run is the release card's decision, and the gate still refuses it"
@@ -2217,7 +2224,7 @@ section "§UNRUN: at 15 a criterion owed now and never run is the release card's
 # early, so no page is written and the person is never asked; or the card settles it by a loosened gate, so the advance
 # to 6 passes over the unrun criterion; or the waiver a reply gives is not the waiver event in the person's words; or
 # the other reply moves the run.
-# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), carried
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, tests/lib/close-out-fixture.sh's, loaded above), carried
 # from step 5 to 8 by the advance itself. The criterion is born late: a row the person adds to the Eval design once the
 # run stands at 8, naming no task, so it is owed now. The advance to 6 refuses a pending criterion owed now, and a proof
 # that discharged a criterion stands at every head, so a criterion born after the advance is how one reaches the card
@@ -2257,7 +2264,7 @@ ur_world() {  # <label> [<edit> [<last step>]] -> UR_P: the fixture at 15, its S
   for n in $(seq 6 "${3:-8}"); do ur_poke "$p" current "$n"; [ "$UR_RC" = 0 ] || { printf '      current %s said: %s\n' "$n" "$UR_OUT"; return 1; }; done
   UR_P="$p"
 }
-ur_born() {  # <root> -> the person's edit: a second criterion joins the Eval design, under the first, naming no task
+ur_born() {  # <root> -> the person's edit: a second criterion joins the Test design, under the first, naming no task
   awk '{ print } /^\| — \| fixture \| AC-1 \|/ { print "| — | fixture | AC-2 | unit | `bash tests/x.test.sh` | a second planted defect |" }' \
     "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
   seal_fixture "$1/$PLAN_REL" "$1/$LOG_REL"
@@ -2284,7 +2291,7 @@ expect_contains "UNRUN-0a …for no decision waits on the person" "None wait on 
 ur_born "$UR_W"
 expect_eq "UNRUN-0b the person's edit gives the run a criterion born late, pending at 15" "state=pending" "$(ur_cell "$UR_W" AC-2)"
 ur_poke "$UR_W" current 6 --check
-expect_eq "UNRUN-1 the gate is not loosened: current 6 --check refuses (exit 1) the criterion owed now" "1" "$UR_RC"
+expect_eq "UNRUN-1 the gate is not loosened: current 6 --check refuses (exit 0: would refuse) the criterion owed now" "0:refuse" "$(ck_said "$UR_RC" "$UR_OUT")"
 expect_contains "UNRUN-1b …in the wall's live-row words, naming the person's waiver" "session-poker.sh waive AC-2 '<their words>' '<why>'" "$UR_OUT"
 ur_early "$UR_W"
 expect_eq "UNRUN-2 card.sh early settles the refusal as the page's own decision (exit 0, settles: row:AC-2)" "0|settles: row:AC-2" \
@@ -2306,7 +2313,7 @@ expect_regex "UNRUN-4b …and writes the waiver's event for AC-2 in the person's
   "^run/v1\|ev=waiver\|ac=AC-2\|.*\|said=1 waive, rest default\|" "$(ur_waiver "$UR_W")"
 expect_eq "UNRUN-4c …so the criterion is discharged by the waiver" "state=discharged by=waiver" "$(ur_cell "$UR_W" AC-2)"
 ur_poke "$UR_W" current 6 --check
-expect_eq "UNRUN-8 …and only then does current 6 --check pass (exit 0)" "0" "$UR_RC"
+expect_eq "UNRUN-8 …and only then does current 6 --check pass (exit 0)" "0:advance" "$(ck_said "$UR_RC" "$UR_OUT")"
 
 ur_world ur-run; UR_R="${UR_P:-}"
 ur_born "$UR_R"
@@ -2320,7 +2327,7 @@ expect_eq "UNRUN-6 the reply that runs it exits 0 and holds the decision back" "
   "$UR_RC|$(/usr/bin/grep -x 'withheld: row:AC-2' "$(ur_page "$UR_R")" 2>/dev/null)"
 expect_eq "UNRUN-6b …writing no waiver, and leaving the criterion pending" "|state=pending" "$(ur_waiver "$UR_R")|$(ur_cell "$UR_R" AC-2)"
 ur_poke "$UR_R" current 6 --check
-expect_eq "UNRUN-6c …so the run stays where it is: current 6 --check still refuses (exit 1)" "1" "$UR_RC"
+expect_eq "UNRUN-6c …so the run stays where it is: current 6 --check still refuses (exit 0: would refuse)" "0:refuse" "$(ck_said "$UR_RC" "$UR_OUT")"
 expect_eq "UNRUN-6d …and the run's step is still 8" "n=8" "$(bash "$REPO/payload/scripts/reader.sh" "$UR_R/$PLAN_REL" step 2>/dev/null | head -1)"
 
 
@@ -2331,7 +2338,7 @@ section "§OWNCHECK: at 15 a proved criterion the person confirms, not yet confi
 # confirmation, so it puts a standing auditor's finding to waive or run and counts it the auditor's; the reply that
 # confirms writes no approval naming the criterion in the person's words, or one the advance to 8 does not take; the
 # reply that waives writes no waiver.
-# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), its one
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, tests/lib/close-out-fixture.sh's, loaded above), its one
 # criterion's eval type human, discharged by the fixture's own proof and confirmed by nobody. At double rigor the run
 # is carried from 5 to 7 by the advance itself, the advance to 8 refuses the criterion, and the card is asked there; at
 # single the advance takes it to 8, where the card is asked at the merge. The page is the real acting
@@ -2351,8 +2358,8 @@ OC_OFFER="key=row:AC-1|default=approve AC-1|other=waive AC-1|pick=default|choice
 
 ur_world oc-confirm oc_double 7; OC_C="${UR_P:-}"
 ur_poke "$OC_C" current 8 --check
-expect_eq "OWN-0 precondition: at 7, proved and confirmed by nobody, the advance to 8 refuses (exit 1)" \
-  "1|state=discharged by=proof" "$UR_RC|$(ur_cell "$OC_C" AC-1)"
+expect_eq "OWN-0 precondition: at 7, proved and confirmed by nobody, the advance to 8 refuses (exit 0: would refuse)" \
+  "0:refuse|state=discharged by=proof" "$(ck_said "$UR_RC" "$UR_OUT")|$(ur_cell "$OC_C" AC-1)"
 expect_contains "OWN-0b …naming the criterion" "AC-1 awaits its person's confirmation" "$UR_OUT"
 ur_poke "$OC_C" release-approval "$OC_C/$PLAN_REL"
 expect_eq "OWN-1 the acting card writes its page (exit 0), the criterion its one decision" "0|row:AC-1" "$UR_RC|$(ur_keys "$OC_C")"
@@ -2370,7 +2377,7 @@ expect_regex "OWN-2b …and writes the approval naming the criterion, in the per
   "^run/v1\|ev=approval\|key=AC-1\|by=Dana Fixture\|said=1 confirm, rest default(\|why=[^|]+)?\|at=[0-9T:Z-]+\$" "$(oc_appr "$OC_C")"
 expect_contains "OWN-2c …through the page's applied: path" "applied: row:AC-1 approve rc=0" "$(cat "$(ur_page "$OC_C")" 2>/dev/null)"
 ur_poke "$OC_C" current 8 --check
-expect_eq "OWN-2d …after which the advance to 8 takes it (current 8 --check, exit 0)" "0" "$UR_RC"
+expect_eq "OWN-2d …after which the advance to 8 takes it (current 8 --check, exit 0)" "0:advance" "$(ck_said "$UR_RC" "$UR_OUT")"
 [ "$UR_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
 ur_poke "$OC_C" release-approval --preview "$OC_C/$PLAN_REL"
 expect_contains "OWN-2e …and the card then counts it proved, confirmed by the person" "1 of 1 criterion proved; 1 confirmed by you" "$(oc_acc)"
@@ -2388,7 +2395,7 @@ expect_eq "OWN-3b the reply that waives it exits 0" "0" "$UR_RC"
 expect_regex "OWN-3c …and writes the waiver's event for the criterion in the person's words" \
   "^run/v1\|ev=waiver\|ac=AC-1\|.*\|said=1 waive, rest default\|" "$(ur_waiver "$OC_W")"
 ur_poke "$OC_W" current 8 --check
-expect_eq "OWN-3d …after which the advance to 8 takes it (current 8 --check, exit 0)" "0" "$UR_RC"
+expect_eq "OWN-3d …after which the advance to 8 takes it (current 8 --check, exit 0)" "0:advance" "$(ck_said "$UR_RC" "$UR_OUT")"
 [ "$UR_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
 
 ur_world oc-eight oc_human; OC_E="${UR_P:-}"

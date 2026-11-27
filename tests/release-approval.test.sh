@@ -10,6 +10,13 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/release-approval.prelude.sh"
 . "$(dirname "$0")/lib/plan-fixture.sh"
+
+# ck_said <rc> <output> -> <rc>:<advance|refuse>: the checked advance's exit and the answer its verdict line gives. The
+# check exits 0 on either answer, so the answer is read from its words, never from the exit alone.
+ck_said() {
+  printf '%s:%s' "$1" "$(printf '%s\n' "$2" | awk 'index($0, "--check: would advance") { print "advance"; exit }
+    index($0, "--check: would refuse") { print "refuse"; exit }')"
+}
 # A row's state is the reader's cell answer, a waiver event read as waived: the waiver leaves the table's text as it was.
 fc_row() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" cell "$1" | awk -F= '$1 == "state" { s = $2 } $1 == "by" { b = $2 }
   END { print (b == "waiver") ? "waived" : s }'; }
@@ -65,7 +72,7 @@ for fc_n in 6 7; do
 done
 poke "$RFC" current 8 --check
 expect_eq "SHAPE-0.8 precondition: current 8 --check refuses on the fixture on the release approval alone, the card's to ask" \
-  "1|1|yes" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')|$(fc_has "$OUT" 'carries no approved: release line')"
+  "0:refuse|1|yes" "$(ck_said "$RC" "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')|$(fc_has "$OUT" 'carries no approved: release line')"
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_card early
 expect_eq "SHAPE-0.9 precondition: AC-1.2 owed now, card.sh early settles it as the page's own decision (exit 0)" \
@@ -228,13 +235,13 @@ expect_absent "NW-2c …and no table line" "regression" "$(fc_table)"
 fc_plan "$(fc_reads "$FC_C")" "" fc_owed_now
 poke "$RFC" current 7 --check
 fc_page
-expect_eq "NW-3b …and the page is early, not a waiver (exit 1, nothing rendered or written)" "1||" "$FC_RC|$FC_OUT|$(fc_pages)"
+expect_eq "NW-3b …and the page is early, not a waiver (exit 0, nothing rendered or written)" "0||" "$FC_RC|$FC_OUT|$(fc_pages)"
 expect_eq "NW-3c …saying CARD-EARLY on the advance to 7, which judges the whole run" "CARD-EARLY — current 7 --check: would refuse" "$FC_ERR"
 fc_plan "$(fc_floor "$FC_C" a.test.sh)
 $(fc_reads "$FC_C")" "" fc_owed_now
 fc_page
-expect_eq "NW-4 a whole run that left a suite red: early too, on the advance to 8 (exit 1, nothing written)" \
-  "1||CARD-EARLY — current 8 --check: would refuse" "$FC_RC|$(fc_pages)|$FC_ERR"
+expect_eq "NW-4 a whole run that left a suite red: early too, on the advance to 8 (exit 0, nothing written)" \
+  "0||CARD-EARLY — current 8 --check: would refuse" "$FC_RC|$(fc_pages)|$FC_ERR"
 expect_absent "NW-4b …offering no waiver" "waive regression" "$FC_OUT$FC_ERR"
 
 # ============================================================
@@ -246,11 +253,11 @@ fc_plan "$FC_GOOD"
 new_roster "$RFC"
 add_row "$RFC" name=w38-T13 agent_id=a013 subagent_type=bionic:critic
 fc_page
-expect_eq "EARLY-1 an open critic row on the roster: release-approval exits 1" "1" "$FC_RC"
+expect_eq "EARLY-1 an open critic row on the roster: release-approval exits 0" "0" "$FC_RC"
 expect_eq "EARLY-1b …saying CARD-EARLY and the reviewer, on stderr" "CARD-EARLY — reviewer w38-T13 open" "$FC_ERR"
 expect_eq "EARLY-1c …rendering nothing and writing no page" "|" "$FC_OUT|$(fc_pages)"
 fc_card early
-expect_eq "EARLY-1e card.sh early answers the same fact, the same words (exit 1)" "1|CARD-EARLY — reviewer w38-T13 open" "$FC_RC|$FC_ERR"
+expect_eq "EARLY-1e card.sh early answers the same fact, the same words (exit 0)" "0|CARD-EARLY — reviewer w38-T13 open" "$FC_RC|$FC_ERR"
 ack_rows "$RFC" w38-T13
 fc_page
 expect_eq "EARLY-2 the same critic acked: the page renders (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
@@ -261,7 +268,7 @@ fc_page
 expect_eq "EARLY-2b an open writer row is no reader: the page renders (exit 0)" "0|" "$FC_RC|$FC_ERR"
 fc_plan "$FC_GOOD" '/structure-whole/d'
 fc_page
-expect_eq "EARLY-3 the whole structure reading unregistered at the head: exit 1" "1" "$FC_RC"
+expect_eq "EARLY-3 the whole structure reading unregistered at the head: exit 0" "0" "$FC_RC"
 expect_eq "EARLY-3b …CARD-EARLY naming the question and the head" "CARD-EARLY — structure unregistered at $FC_H8" "$FC_ERR"
 expect_eq "EARLY-3c …nothing rendered, no page written" "|" "$FC_OUT|$(fc_pages)"
 # No Step-7 document: the header names none.
@@ -269,11 +276,11 @@ FC_NODOC='/^adrs: /d'
 fc_plan "$FC_GOOD" "$FC_NODOC"
 poke "$RFC" current 7 --check
 expect_eq "EARLY-4 precondition: the header names no Step-7 document, so current 7 --check refuses on it" \
-  "1|poker: current 7 --check: would refuse" "$RC|$(printf '%s\n' "$OUT" | head -1)"
+  "0:refuse|poker: current 7 --check: would refuse" "$(ck_said "$RC" "$OUT")|$(printf '%s\n' "$OUT" | head -1)"
 expect_contains "EARLY-4a …in the Step-7 document's own words" "Step 7's document" "$OUT"
 fc_page
-expect_eq "EARLY-4b release-approval exits 1, CARD-EARLY with the check's own verdict line, nothing written" \
-  "1|CARD-EARLY — current 7 --check: would refuse|" "$FC_RC|$FC_ERR|$(fc_pages)"
+expect_eq "EARLY-4b release-approval exits 0, CARD-EARLY with the check's own verdict line, nothing written" \
+  "0|CARD-EARLY — current 7 --check: would refuse|" "$FC_RC|$FC_ERR|$(fc_pages)"
 new_roster "$RFC"; forget_digest "$RFC"
 poke "$RFC" tick
 expect_contains "EARLY-5 the tick, an integrate row open, says the same line as advice" \
@@ -294,7 +301,7 @@ $(fc_reads "$FC_C" | sed '/adversarial-whole\.md/{s/adversarial-whole\.md/advers
 fc_plan "$FC_FAILR"
 poke "$RFC" current 8 --check
 expect_eq "EARLY-6 precondition: the failing adversarial reading makes current 8 --check refuse" \
-  "1|yes" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q '^review	adversarial	.*failing' && echo yes || echo no)"
+  "0:refuse|yes" "$(ck_said "$RC" "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep -q '^review	adversarial	.*failing' && echo yes || echo no)"
 fc_page
 expect_eq "EARLY-6b …and yet the page renders: the waiver settles it (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
 expect_contains "EARLY-6e …the person's waiver item opened on the ledger" "waive:adversarial" "$(fc_owed)"
@@ -302,12 +309,12 @@ poke "$RFC" reply "$FC_WD"
 expect_regex "EARLY-6f reply all default writes the waiver with the reply's words" \
   "^run/v1\|ev=waiver\|question=adversarial\|head=$FC_R\|by=Dana Fixture\|said=$FC_WD\|at=[0-9T:Z-]+\$" "$(/usr/bin/grep -F '|question=adversarial|' "$FC_REC/run.log" 2>/dev/null)"
 poke "$RFC" current 8 --check
-expect_eq "EARLY-6g …after which current 8 --check is green" "0" "$RC"
+expect_eq "EARLY-6g …after which current 8 --check is green" "0:advance" "$(ck_said "$RC" "$OUT")"
 fc_plan "$FC_FAILR"
 printf 'release-check: bash tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
 fc_page
-expect_eq "EARLY-7 the failing reading beside an unheld release check no default settles: CARD-EARLY (exit 1)" \
-  "1|CARD-EARLY — current 8 --check: would refuse|" "$FC_RC|$FC_ERR|$FC_OUT"
+expect_eq "EARLY-7 the failing reading beside an unheld release check no default settles: CARD-EARLY (exit 0)" \
+  "0|CARD-EARLY — current 8 --check: would refuse|" "$FC_RC|$FC_ERR|$FC_OUT"
 rm -f "$RFC/.bionic/config.yaml"
 # THREE ROWS THE AUDITOR DID NOT CONFIRM: each proof carries the auditor's UNVERIFIABLE, so the advance to 6 takes it as a
 # verdict and the advance to 8 refuses the first as unruled; the page offers all three as decisions. A proof that names
@@ -319,9 +326,9 @@ fc_unconfirmed() {  # <page> -> three criteria discharged under the auditor's UN
   printf 'run/v1|ev=proof|ac=AC-1.%s|evidence=record/generic-evidence.md|auditor=%s|at=\n' 3 UNVERIFIABLE 4 UNVERIFIABLE 2 CONFIRMED >> "$FC_EV"
 }
 fc_plan "$FC_GOOD" "" fc_unconfirmed
-FC_CK=""; for fc_n in 6 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
+FC_CK=""; for fc_n in 6 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$(ck_said "$RC" "$OUT") "; done
 expect_eq "EARLY-8 precondition: current 6 --check is green, and current 8 --check refuses on a row the auditor has not confirmed" \
-  "01|yes" "$FC_CK|$(fc_has "$OUT" 'the auditor has not confirmed AC-1.1')"
+  "0:advance 0:refuse |yes" "$FC_CK|$(fc_has "$OUT" 'the auditor has not confirmed AC-1.1')"
 fc_page
 expect_eq "EARLY-8a …the judge's line for it, byte for byte" "bionic: commit refused — the auditor has not confirmed AC-1.1 (rule it: the auditor confirms it, the row is waived, or a T4 row carries its user's confirmation)" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'AC-1.1')"
@@ -331,8 +338,8 @@ expect_eq "EARLY-8c …putting the three rows as its first decisions, AC-1.1 und
 expect_absent "EARLY-8d …and not the confirmed, discharged AC-1.2" "AC-1.2" "$(fc_under Decisions)"
 poke "$RFC" reply "$FC_WD"
 expect_eq "EARLY-8f reply all default waives the three rows" "waived waived waived" "$(fc_row AC-1.1) $(fc_row AC-1.3) $(fc_row AC-1.4)"
-FC_CK=""; for fc_n in 6 7 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
-expect_eq "EARLY-8g …and current 6, 7 and 8 --check are then green" "000" "$FC_CK"
+FC_CK=""; for fc_n in 6 7 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$(ck_said "$RC" "$OUT") "; done
+expect_eq "EARLY-8g …and current 6, 7 and 8 --check are then green" "0:advance 0:advance 0:advance " "$FC_CK"
 # THE STEP-8 APPROVAL REFUSAL IS THE PAGE'S OWN: in the release order the advance to 8 refuses first on the missing
 # `approved: release` line, which is decision 7 of the page, so a run whose every other fact holds renders and puts both
 # approvals. (The order is a test row at Step 5 and the release's doc row; the fixture's matrix is fully confirmed.)
@@ -343,10 +350,10 @@ fc_ord() {  # <page> -> a test row T4 at Step 5, landed by hand after T1, and th
 }
 fc_plan "$FC_GOOD" "" fc_ord
 poke "$RFC" current 8 --check
-FC_CK=""; for fc_n in 6 7; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
+FC_CK=""; for fc_n in 6 7; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$(ck_said "$RC" "$OUT") "; done
 poke "$RFC" current 8 --check
-expect_eq "EARLY-9 precondition: current 6 and 7 --check are green, and current 8 --check refuses (exit 1) on the missing approval alone" \
-  "001|1" "$FC_CK$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')"
+expect_eq "EARLY-9 precondition: current 6 and 7 --check are green, and current 8 --check refuses (exit 0: would refuse) on the missing approval alone" \
+  "0:advance 0:advance 0:refuse|1" "$FC_CK$(ck_said "$RC" "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')"
 expect_contains "EARLY-9a …naming the missing approved: release line" "carries no approved: release line" "$OUT"
 fc_page
 expect_eq "EARLY-9b …and the page renders (exit 0, no refusal, a page written)" "0||release-approval-$FC_H8.md" "$FC_RC|$FC_ERR|$(fc_pages)"
@@ -365,7 +372,7 @@ expect_eq "PREV-1 the early run previews (exit 0, nothing on stderr)" "0|" "$FC_
 expect_eq "PREV-3 …every section printed" "Bottom line|Goals|Tests|Reviews|Findings|Decisions" "$(fc_heads)"
 expect_eq "PREV-5 …no page written, no approval opened" "|" "$(fc_pages)|$(fc_owed | /usr/bin/grep '^approve:')"
 fc_page
-expect_eq "PREV-6 the same run without --preview is early (exit 1)" "1" "$FC_RC"
+expect_eq "PREV-6 the same run without --preview is early (exit 0, no page)" "0|" "$FC_RC|$(fc_pages)"
 fc_plan "$FC_FAILR"
 fc_page --preview
 expect_eq "PREV-7b …and opens no item on the person's ledger, the finding's nor the waiver's" "" "$(fc_owed)"
@@ -421,27 +428,30 @@ fc_block() {  # <a judge's output> <step> -> the lines it printed for <step>, it
     { b = b $0 "\n" }'
 }
 fc_judged_rc() { printf '%s\n' "$1" | awk -v n="$2" 'index($0, "poker: judged ") == 1 && $3 == n { print $5; exit }'; }
+# fc_judged_said <the code a judge's closing line gives> -> the checked advance's exit and answer for that code, as ck_said
+# prints them: 0 would advance and 1 would refuse, both exiting 0; any other code is no answer, and is its own exit.
+fc_judged_said() { case "$1" in 0) printf '0:advance' ;; 1) printf '0:refuse' ;; *) printf '%s:refuse' "$1" ;; esac; }
 # Each world: the advance's check alone, the judge asked for that step alone, and the whole wall's dry commit at it.
-fc_judge_world() {  # -> JW_ROWS: one line per step, <step> <check rc> <exits equal> <first lines equal> <blocks equal>; JW_CK_<n>, JW_J_<n>, JW_RC_<n>
+fc_judge_world() {  # -> JW_ROWS: one line per step, <step> <check exit:answer> <answers equal> <first lines equal> <blocks equal>; JW_CK_<n>, JW_J_<n>, JW_RC_<n> (the judge's closing code)
   local n ck ckrc j jrc
   JW_ROWS=""
   for n in 6 7 8; do
-    poke "$RFC" current "$n" --check; ck="$OUT"; ckrc="$RC"
+    poke "$RFC" current "$n" --check; ck="$OUT"; ckrc="$(ck_said "$RC" "$OUT")"
     poke "$RFC" judge "$n"; j="$OUT"; jrc="$(fc_judged_rc "$OUT" "$n")"
-    eval "JW_CK_$n=\"\$ck\"; JW_J_$n=\"\$j\"; JW_RC_$n=\"\$ckrc\""
-    JW_ROWS="$JW_ROWS$n $ckrc $([ "$ckrc" = "$jrc" ] && echo same || echo differ) $([ "$(printf '%s\n' "$ck" | head -1)" = "$(printf '%s\n' "$j" | head -1)" ] && echo same || echo differ)"
+    eval "JW_CK_$n=\"\$ck\"; JW_J_$n=\"\$j\"; JW_RC_$n=\"\$jrc\""
+    JW_ROWS="$JW_ROWS$n $ckrc $([ "$ckrc" = "$(fc_judged_said "$jrc")" ] && echo same || echo differ) $([ "$(printf '%s\n' "$ck" | head -1)" = "$(printf '%s\n' "$j" | head -1)" ] && echo same || echo differ)"
     JW_ROWS="$JW_ROWS $([ "$ck" = "$(fc_block "$j" "$n")" ] && echo same || echo differ)"$'\n'
   done
 }
 fc_plan "$FC_GOOD" "$FC_NODOC"
 fc_judge_world
 expect_eq "JUDGE-1 precondition: with no Step-7 document the advance to 7 checks red through its gate, the gate's own line under the verdict" \
-  "1|poker: current 7 --check: would refuse|yes" \
+  "0:refuse|poker: current 7 --check: would refuse|yes" \
   "$(printf '%s\n' "$JW_ROWS" | awk '$1 == 7 { print $2 }')|$(printf '%s\n' "$JW_CK_7" | head -1)|$(fc_has "$(fc_gate_lines "$JW_CK_7")" "Step 7's document")"
-expect_eq "JUDGE-1b asked directly for each step, the judge prints the first line the checked advance prints, every line of it, and exits as it does" \
+expect_eq "JUDGE-1b asked directly for each step, the judge prints the first line the checked advance prints, every line of it, and its closing code is the check's answer" \
   "6 same same same|7 same same same|8 same same same" "$(printf '%s\n' "$JW_ROWS" | sed '/^$/d' | awk '{ print $1, $3, $4, $5 }' | paste -sd'|' -)"
 poke "$RFC" judge 6 7 8; FC_J3="$OUT"
-expect_eq "JUDGE-1c one ask of the three steps answers each as it is answered alone, block for block, exit for exit" \
+expect_eq "JUDGE-1c one ask of the three steps answers each as it is answered alone, block for block, closing code for closing code" \
   "same same|same same|same same" \
   "$(for n in 6 7 8; do eval "j=\"\$JW_J_$n\"; r=\"\$JW_RC_$n\""; printf '%s %s|' "$([ "$(fc_block "$FC_J3" "$n")" = "$(fc_block "$j" "$n")" ] && echo same || echo differ)" "$([ "$(fc_judged_rc "$FC_J3" "$n")" = "$r" ] && echo same || echo differ)"; done | sed 's/|$//')"
 fc_wall_dry 7
@@ -452,7 +462,7 @@ expect_eq "JUDGE-2 the judge's gate prints at 7 what the whole wall prints for t
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_judge_world
 expect_eq "JUDGE-3 precondition: a criterion owed now and never run makes the advance to 6 check red through its gate" \
-  "1|yes" "$(printf '%s\n' "$JW_ROWS" | awk '$1 == 6 { print $2 }')|$(fc_has "$(fc_gate_lines "$JW_CK_6")" 'AC-1.2')"
+  "0:refuse|yes" "$(printf '%s\n' "$JW_ROWS" | awk '$1 == 6 { print $2 }')|$(fc_has "$(fc_gate_lines "$JW_CK_6")" 'AC-1.2')"
 expect_eq "JUDGE-3b …and the judge, asked directly, answers each step as the checked advance does" \
   "same same same|same same same|same same same" "$(printf '%s\n' "$JW_ROWS" | sed '/^$/d' | awk '{ print $3, $4, $5 }' | paste -sd'|' -)"
 fc_wall_dry 6
@@ -462,7 +472,7 @@ expect_eq "JUDGE-3c …and its gate at 6 prints what the whole wall prints for t
 fc_plan "$FC_FAILR"
 fc_judge_world
 expect_eq "JUDGE-4 precondition: the failing adversarial reading makes the advance to 8 check red on the judge's line" \
-  "1|yes" "$(printf '%s\n' "$JW_ROWS" | awk '$1 == 8 { print $2 }')|$(printf '%s\n' "$JW_CK_8" | /usr/bin/grep -q '^review	adversarial	.*failing' && echo yes)"
+  "0:refuse|yes" "$(printf '%s\n' "$JW_ROWS" | awk '$1 == 8 { print $2 }')|$(printf '%s\n' "$JW_CK_8" | /usr/bin/grep -q '^review	adversarial	.*failing' && echo yes)"
 expect_eq "JUDGE-4b …and the judge, asked directly, answers each step as the checked advance does" \
   "same same same|same same same|same same same" "$(printf '%s\n' "$JW_ROWS" | sed '/^$/d' | awk '{ print $3, $4, $5 }' | paste -sd'|' -)"
 for fc_n in 6 7; do
@@ -720,7 +730,7 @@ expect_eq "T4-1h …the confirmation is the approval naming the criterion, as th
 fc_t4 '—' "$FC_UC" fc_t4_rows
 poke "$RFC" current 8 --check
 expect_eq "T4-1i …and with the unrun row the close's, current 8 --check refuses on nothing but the release approval" \
-  "1|1|yes" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')|$(fc_has "$OUT" 'carries no approved: release line')"
+  "0:refuse|1|yes" "$(ck_said "$RC" "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')|$(fc_has "$OUT" 'carries no approved: release line')"
 fc_t4 '-' "$FC_UC"; fc_page --preview
 expect_eq "T4-1f the cell - reads as — does" "$FC_ACC_DASH" "$(fc_acc)"
 fc_t4 '' "$FC_UC"; fc_page --preview
@@ -774,8 +784,8 @@ poke "$RFC" current 7 --check
 expect_eq "CONFIRM-5 a pending T4 row: current 6 and 7 --check would advance" \
   "0|poker: current 6 --check: would advance|0|poker: current 7 --check: would advance" "$FC_C6|$RC|$(printf '%s\n' "$OUT" | head -1)"
 poke "$RFC" current 8 --check
-expect_eq "CONFIRM-5b …current 8 --check refuses it, naming the row" "1|1" \
-  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^bionic: commit refused — .*AC-1\.3')"
+expect_eq "CONFIRM-5b …current 8 --check refuses it, naming the row" "0:refuse|1" \
+  "$(ck_said "$RC" "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^bionic: commit refused — .*AC-1\.3')"
 expect_eq "CONFIRM-5d …in the words of the party awaited, its person, and not the auditor" "bionic: commit refused — AC-1.3 awaits its person's confirmation (it is proved; its person confirms it at release: reply <n> confirm, <n> being the decision the release approval card gives it)" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'AC-1.3')"
 fc_card early
@@ -868,7 +878,7 @@ fc_born_plan
 fc_page
 expect_regex "BORN-3 the control: one code commit past the fixes that no row was born for is CARD-EARLY" \
   "^CARD-EARLY — (evidence|adversarial|structure) unregistered at ${FC_F3:0:8}\$" "$FC_ERR"
-expect_eq "BORN-3b …exit 1, nothing rendered, no page written" "1||" "$FC_RC|$FC_OUT|$(fc_pages)"
+expect_eq "BORN-3b …exit 0, nothing rendered, no page written" "0||" "$FC_RC|$FC_OUT|$(fc_pages)"
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md
 fc_record structure structure piece
@@ -913,17 +923,17 @@ expect_eq "POST-0 precondition: the working head is the fix's landing, and the r
   "$(git -C "$RFC" rev-parse wave/01-fixture)|$(for r in $(/usr/bin/grep -oE '^\| T[2456] ' "$PFC" | tr -d '| '); do
     printf '%s:%s\n' "$r" "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" status "$r" | sed -n 's/^state=//p')"; done | paste -sd' ' -)"
 fc_card early
-expect_eq "POST-1 the readers open and unread: card.sh early is CARD-EARLY naming the first reader row (exit 1)" \
-  "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
+expect_eq "POST-1 the readers open and unread: card.sh early is CARD-EARLY naming the first reader row (exit 0)" \
+  "0|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
 fc_page
 expect_eq "POST-1b …release-approval says the same, renders nothing and writes no page" \
-  "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered||" \
+  "0|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered||" \
   "$FC_RC|$FC_ERR|$FC_OUT|$(fc_pages)"
 fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)"
 fc_card early
-expect_eq "POST-1c the critic's two readings registered, the auditor's not: early, naming the auditor's row T6 (exit 1)" \
-  "1|CARD-EARLY — review row T6 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
+expect_eq "POST-1c the critic's two readings registered, the auditor's not: early, naming the auditor's row T6 (exit 0)" \
+  "0|CARD-EARLY — review row T6 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
 fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)
 $(fc_post_read evidence)"
@@ -982,7 +992,7 @@ expect_contains "WINDOW-2a-2 …a window that ends before it does not" "waivers=
 expect_eq "HANDHOLDS-3 the report read after the reply counts the page's decline and the reply's waiver after the card: the card ends nothing" \
   "$(printf '%s\n' "$HH_PAGE" | sed 's/total=1 /total=2 /; s/waivers=0 /waivers=1 /')" "$(hh_lr)"
 expect_eq "HANDHOLDS-3b …and the report's ends line runs to now, printing the start alone and no page time" \
-  "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the plan names no delivered: time") > 0) "|" (index($0, at) > 0) }')"
+  "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the run\047s log holds no delivery yet") > 0) "|" (index($0, at) > 0) }')"
 expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
 rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md
 
@@ -1173,7 +1183,7 @@ FC_APP="$(printf 'run/v1|ev=approval|key=%s|by=Dana Fixture|head=%s|said=%s|at=2
 fc_plan "$FC_GOOD
 $FC_APP" "" fc_ord
 poke "$RFC" current 8 --check
-expect_eq "STALE-0 control: approved at the working head, current 8 --check is green" "0" "$RC"
+expect_eq "STALE-0 control: approved at the working head, current 8 --check is green" "0:advance" "$(ck_said "$RC" "$OUT")"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 fc_page
 expect_eq "STALE-0b …and the page renders with nothing for the user to decide, no renewal among it" \
@@ -1188,10 +1198,10 @@ printf 'run/v1|ev=published|row=T5|branch=wt/fix|head=%s|commit=%s|at=2026-10-12
 fc_plan "$(fc_floor "$FC_X")
 $(fc_reads "$FC_X")
 $FC_APP" "" fc_ord_t5
-FC_CK=""; for fc_n in 6 7; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
+FC_CK=""; for fc_n in 6 7; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$(ck_said "$RC" "$OUT") "; done
 poke "$RFC" current 8 --check
 expect_eq "STALE-1 precondition: a fix landed past the approval; current 6 and 7 --check are green, current 8 --check refuses" \
-  "001" "$FC_CK$RC"
+  "0:advance 0:advance 0:refuse" "$FC_CK$(ck_said "$RC" "$OUT")"
 expect_contains "STALE-1b …on the approval alone, naming the head the user approved" \
   "is not the head the user approved for release, ${FC_R:0:12}" "$OUT"
 fc_page
@@ -1215,7 +1225,7 @@ expect_regex "STALE-3c …the new line with the reply's words" \
 expect_eq "STALE-3d …and a second approved: merge line at the new head, beside the first" "2|$FC_R|$FC_X" \
   "$(fc_appr merge | grep -c .)|$(fc_appr merge | sed -n 's/.*head=\([0-9a-f]*\).*/\1/p' | paste -sd'|' -)"
 poke "$RFC" current 8 --check
-expect_eq "STALE-4 …after which current 8 --check is green at the new head" "0" "$RC"
+expect_eq "STALE-4 …after which current 8 --check is green at the new head" "0:advance" "$(ck_said "$RC" "$OUT")"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 cp "$PFC" "$TMPROOT/fc-before-again"
 poke "$RFC" approve release 'ship it again'
@@ -1318,8 +1328,8 @@ fc_page --preview
 expect_eq "GR-1 over three criteria with no Requirement cell and no dotted id the card is refused (exit 1), no page printed, none written; the plan reads two themes" \
   "1|||2" "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_pages)|$(/usr/bin/grep -c '^## The ' "$FC_GR_REQ")"
 expect_contains "GR-1b …saying how many criteria map to no requirement" "release-approval refused — 3 criteria map to no requirement" "$FC_ERR"
-expect_contains "GR-1c …naming them and the act that maps one, the Requirement cell of its Eval design row" \
-  "Requirement cell of its row under ## Eval design (AC-168, AC-169, AC-170)" "$FC_ERR"
+expect_contains "GR-1c …naming them and the act that maps one, the Requirement cell of its Test design row" \
+  "Requirement cell of its row under ## Test design (AC-168, AC-169, AC-170)" "$FC_ERR"
 expect_absent "GR-1d …and no serves: line, which no page at 15 holds" "serves:" "$FC_ERR"
 fc_gr_cells REQ-1 REQ-1 REQ-2
 RC=0; FC_GR_N="$(/usr/bin/grep -c '^| REQ-[12] | x | AC-1' "$PFC")"

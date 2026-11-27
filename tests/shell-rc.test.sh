@@ -79,8 +79,11 @@ _extract_fn() {  # <file> <fn-name> -> the function's body, verbatim
 DETECT_FN_BODY="$(_extract_fn "$DETECT_SH" "_detect_shell_rc")"
 REMOVE_FN_BODY="$(_extract_fn "$REMOVE_SH" "_rm_shell_rc")"
 
+# detect.sh loads shell.sh through the loader (`bionic_need shell.sh shell_rc_file`);
+# the old literal source of the file is accepted too. The loader form is anchored
+# to the start of a line so a comment that merely mentions the call is not a load.
 expect_true "6: detect.sh sources lib/shell.sh" \
-  grep -qE '/lib/shell\.sh"?$|shell\.sh"' "$DETECT_SH"
+  grep -qE '/lib/shell\.sh"?$|shell\.sh"|^[[:space:]]*bionic_need[[:space:]]+shell\.sh[[:space:]]' "$DETECT_SH"
 expect_true "7: remove.sh sources lib/shell.sh" \
   grep -qE '/lib/shell\.sh"?$|shell\.sh"' "$REMOVE_SH"
 

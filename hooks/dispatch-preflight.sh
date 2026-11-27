@@ -164,16 +164,14 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "dispatch-preflight"; f
 # THE PERSON'S LEDGER (wave-33 T35; D2): the approval arm opens what the user owes. NOT in
 # `BIONIC_LIB_WANT`, and sourced only when readable, as session-poker.sh sources it: a library
 # without it leaves every verdict of this hook exactly as it was.
-if ! declare -F owed_open >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$BIONIC_LIB/owed.sh"
-fi
+bionic_need owed.sh owed_open
 # THE SCALE PROFILE: the watch wall asks whether the plan's scale has a Patrol. Sourced
 # the same way: a library without it leaves the wall as it was. (The budget wall's cap comes from `fill_cap`.)
-if ! declare -F scale_patrol >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$BIONIC_LIB/scale.sh"
-fi
+bionic_need scale.sh scale_patrol
+# THE RECORD'S FIELD READER: a roster row's field is read by key, `line_kv_of` in awk (lib/fields.sh).
+bionic_need fields.sh line_field_v
+# The clock's one home, asked by name: no hook lists it among the libraries it wants.
+bionic_need time.sh _time_epoch
 
 if [ -n "$DP_ADMITTED_ONLY" ]; then
   for _dp_a in $ROLE_READONLY_SET; do printf '%s\n' "$_dp_a"; done
@@ -584,10 +582,7 @@ if ! role_is_readonly "$DP_SUBAGENT" && [ -z "$DP_PROTOTYPE" ] && [ -n "$PLAN" ]
   # disagree about whether the plan is approved, and an approval the run's log alone holds admits. A library directory
   # without the reader, or a place that cannot be read, REFUSES the writer by name: an approval this hook cannot read is
   # no approval. Read-only roles never reach here. The step is read only to name it in the refusal.
-  if ! declare -F fill_plan_approved >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/fill.sh" ]; then
-    # shellcheck source=/dev/null
-    . "$BIONIC_LIB/fill.sh"
-  fi
+  bionic_need fill.sh fill_plan_approved
   DP_APPROVED=""; DP_CURRENT=""
   if ! declare -F fill_plan_approved >/dev/null 2>&1; then
     DP_APPROVED=unreadable
@@ -692,10 +687,7 @@ if [ -n "$PLAN" ] && [ -n "$DP_BOUND_REC" ]; then
     # holds admits, and one recorded as the plan's line is read through the translation of that line. The
     # answer is taken with its exit; a fold that fails, or a library without the question, refuses by name
     # and never falls back to the text.
-    if ! declare -F proof_approved >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
-      # shellcheck source=/dev/null
-      . "$BIONIC_LIB/proof.sh"
-    fi
+    bionic_need proof.sh proof_approved
     while IFS=$'\t' read -r DP_AW_ID DP_AW_NAME; do
       [ -n "$DP_AW_NAME" ] || continue
       DP_AW_RC=2
@@ -843,34 +835,15 @@ ACK_LEDGER_FILE="$STATE_DIR/sweeper-${BIONIC_SID}.state"
 # from inside a tree is ledgered in one place by an author working in another, and the
 # tree's own lease has no row that accounts for the orchestrator sitting in it.
 #
-# THE TEST FOR "LINKED WORKTREE" IS THE ONE scripts/lib/worktree.sh's land verb USES: a
-# linked worktree's `.git` is a FILE pointing into the shared repository, the main
-# checkout's is a directory. One spelling of that distinction, not two.
+# THE TEST FOR "LINKED WORKTREE" IS lib/root.sh's `git_tree_lease`, which the plan write's
+# lease wall asks too: a linked worktree's `.git` is a FILE pointing into the shared
+# repository, the main checkout's is a directory. One spelling of that distinction, not two.
 #
 # AMBIGUITY PASSES, per §7. If the tree's main repository cannot be resolved, or the
 # project root is the tree itself (a tree carrying its own `.bionic` is its own project,
 # not a lease of this one), this wall has no main checkout to name and says nothing.
-if ! is_agent_context; then
-  LEASE_TOP=$(git -C "$BIONIC_CWD" rev-parse --show-toplevel 2>/dev/null) || LEASE_TOP=""
-  if [ -n "$LEASE_TOP" ] && [ -f "$LEASE_TOP/.git" ]; then
-    LEASE_TOP=$( cd "$LEASE_TOP" 2>/dev/null && pwd -P ) || LEASE_TOP=""
-  else
-    LEASE_TOP=""
-  fi
-  if [ -n "$LEASE_TOP" ] && [ "$LEASE_TOP" != "$BIONIC_ROOT" ]; then
-    # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
-    # answer against the tree, exactly as lib/root.sh's own walk does.
-    LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || LEASE_COMMON=""
-    if [ -z "$LEASE_COMMON" ]; then
-      LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --git-common-dir 2>/dev/null) || LEASE_COMMON=""
-      case "$LEASE_COMMON" in ""|/*) ;; *) LEASE_COMMON="$LEASE_TOP/$LEASE_COMMON" ;; esac
-    fi
-    LEASE_MAIN=""
-    [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
-    if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
-      dispatch_finding worktree "$BIONIC_CWD" "$LEASE_TOP" "$LEASE_MAIN"
-    fi
-  fi
+if ! is_agent_context && git_tree_lease "$BIONIC_CWD" "$BIONIC_ROOT"; then
+  dispatch_finding worktree "$BIONIC_CWD" "$BIONIC_LEASE_TOP" "$BIONIC_LEASE_MAIN"
 fi
 
 # ---------- the budget wall: a person's cap on writers ----------
@@ -900,7 +873,7 @@ PARALLEL_BUDGET=""
 # THE CAP IS `fill_cap`'S (lib/fill.sh), the one reader the tick's FILL and the stop wall ask too: a person's
 # line when one was written, else the plan's scale row writers cell (the task row's is 3; wave and epic are
 # `uncapped` and cap nothing). A library without fill.sh keeps the person's line alone.
-{ declare -F fill_cap >/dev/null 2>&1 || { [ -r "${BIONIC_LIB:-}/fill.sh" ] && . "$BIONIC_LIB/fill.sh"; }; } >/dev/null 2>&1
+bionic_need fill.sh fill_cap
 DP_BUDGET_WRITERS=""
 if [ -n "$PLAN" ]; then
   if declare -F fill_cap >/dev/null 2>&1; then DP_BUDGET_WRITERS="$(fill_cap "$PLAN")"
@@ -1287,14 +1260,9 @@ if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; the
   # close without a live panel, which this wall does not have.
   DP_INFLIGHT=""
   if /usr/bin/grep -qxF -- "$AGENT_NAME" <<< "$(roster_open_names "$ROSTER_FILE" "$ACK_LEDGER_FILE")"; then
-    DP_INFLIGHT=$(/usr/bin/awk -v want="$AGENT_NAME" -v rpfx="roster-state/${ROSTER_VERSION}|" '
-      function kv(line, key,   i, n, parts) {
-        n = split(line, parts, "|")
-        for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-        return ""
-      }
-      index($0, rpfx) == 1 && kv($0, "name") == want {
-        st = kv($0, "status")
+    DP_INFLIGHT=$(/usr/bin/awk -v want="$AGENT_NAME" -v rpfx="roster-state/${ROSTER_VERSION}|" "$_LINE_FIELDS_AWK"'
+      index($0, rpfx) == 1 && line_kv_of($0, "name") == want {
+        st = line_kv_of($0, "status")
         if (st == "intended" || st == "confirmed" || st == "identified") last = st
       }
       END { print (last != "" ? last : "open") }
@@ -1497,25 +1465,13 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # an ambiguity, and takes §7 direction — fall back to the lexical answer rather
 # than refuse on a question this gate cannot answer.
 resolve_in_repo() {  # <path> -> absolute, `.`/`..` folded, existing prefix physical
-  local p="$1" abs out part had_f head rest phys
+  local p="$1" out head rest phys
+  # lib/root.sh's lexical fold, the one the governing hook's fold_dots calls too.
   case "$p" in
-    /*) abs="$p" ;;
-    *)  abs="$BIONIC_ROOT/$p" ;;
+    /*) path_normal "$p" ;;
+    *)  path_normal "$BIONIC_ROOT/$p" ;;
   esac
-  case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
-  set -f   # a `*` inside a brief-supplied path is a character, never a glob
-  out=""
-  local IFS=/
-  for part in $abs; do
-    case "$part" in
-      ''|.) ;;
-      ..)   out="${out%/*}" ;;
-      *)    out="$out/$part" ;;
-    esac
-  done
-  unset IFS
-  [ "$had_f" -eq 1 ] || set +f
-  out="${out:-/}"
+  out="$PATH_NORMAL"
 
   head="$out"; rest=""
   while [ -n "$head" ] && [ ! -d "$head" ]; do
@@ -1564,7 +1520,7 @@ dp_prototype_confine() {
   tree_line="$(brief_field "$DP_CONTRACT" tree)"
   if [ -n "$tree_line" ]; then
     tree="$(resolve_in_repo "$tree_line")"
-    { declare -F worktree_marker >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/worktree.sh" ] && . "$BIONIC_LIB/worktree.sh"; }; } >/dev/null 2>&1
+    bionic_need worktree.sh worktree_marker
     [ -f "$tree/.git" ] && declare -F worktree_marker >/dev/null 2>&1 && mark="$(worktree_marker "$tree")" || mark=""
     if [ -z "$AGENT_NAME" ] || [ "$mark" != "$AGENT_NAME" ]; then
       if [ ! -f "$tree/.git" ]; then seen=none; elif [ -n "$mark" ]; then seen=marked; else seen=unmarked; fi
@@ -1748,7 +1704,7 @@ dp_live_writer() {  # sets DP_BOUND_TREE (the row's tree, or empty), DP_LIVE_WRI
   DP_BOUND_TREE="$(dp_tree_of "$(units_field "$DP_BOUND_REC" worktree)")"; DP_LIVE_WRITER=""; DP_LIVE_SID=""
   open="$(roster_open_names "$ROSTER_FILE" "$ACK_LEDGER_FILE" | /usr/bin/grep -vxF -- "$AGENT_NAME")"
   if [ -n "$open" ]; then
-    { declare -F line_row_writer >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; }; } >/dev/null 2>&1
+    bionic_need line.sh line_row_writer
     if declare -F line_row_writer >/dev/null 2>&1 \
        && line_row_writer "$ROSTER_FILE" "$PLAN" "$DP_BOUND_ROW" "$(units_field "$DP_BOUND_REC" agent)" \
        && /usr/bin/grep -qxF -- "$LINE_WRITER" <<< "$open"; then
@@ -1765,8 +1721,7 @@ dp_live_writer() {  # sets DP_BOUND_TREE (the row's tree, or empty), DP_LIVE_WRI
   fi
   # EVERY ROSTER'S HOLD (T28). fill.sh is loaded here as the approval arm loads it; a library that cannot
   # be loaded leaves the reads above standing alone, as a copied hook predating it would.
-  { declare -F fill_roster_holds >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/fill.sh" ] && . "$BIONIC_LIB/fill.sh"; }; } >/dev/null 2>&1
-  declare -F fill_roster_holds >/dev/null 2>&1 || return 0
+  bionic_need fill.sh fill_roster_holds || return 0
   # Every holder of the row is asked, not only the first: this dispatch's own name in this session is
   # skipped (the in-flight arm's case), and another name may still hold the row behind it. The walk's
   # note on an unreadable roster reaches stderr.
@@ -1864,10 +1819,7 @@ dispatch_refuse_findings
 # refused after this read, by the deadline or by the roster, touches nothing and is told nothing but its refusal.
 _dp_debt_hits=""; _dp_dcs=""
 if [ -n "$PLAN" ] && [ -n "$C_FILES" ]; then
-  if ! declare -F proof_debt_hits >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
-    # shellcheck source=/dev/null
-    . "$BIONIC_LIB/proof.sh"
-  fi
+  bionic_need proof.sh proof_debt_hits
   if declare -F proof_debt_hits >/dev/null 2>&1; then
     _dp_debt_hits="$(proof_debt_hits "$PLAN" "$C_FILES" 2>/dev/null | awk -F'\t' '$6 == "-"')"
     _dp_dcs="$(printf '%s\n' "$_dp_debt_hits" | awk -F'\t' '$1 != "" && !($1 in s) { s[$1] = 1; printf "%s%s", (n++ ? " " : ""), $1 }')"
@@ -2035,7 +1987,7 @@ ROW=$(roster_row \
   "session=${BIONIC_SID}" \
   "name=${AGENT_NAME}" \
   agent_id= \
-  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "launched_at=$(iso_now)" \
   "subagent_type=${SUBAGENT_TYPE}" \
   "model=${AGENT_MODEL}" \
   "deliverable=${C_DELIVERABLE}" \

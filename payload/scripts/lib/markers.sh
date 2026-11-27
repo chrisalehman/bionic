@@ -45,24 +45,15 @@
 #
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/markers.sh"
 
-_markers_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 # `bionic_link_target` is deps.sh's — the one symlink resolver the writers share.
 # The same soft source env.sh uses: a caller that already has it does not load it
 # twice.
-if ! declare -F bionic_link_target >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_markers_self_dir)" && pwd -P)/deps.sh"
-fi
+bionic_need deps.sh bionic_link_target
 # `bionic_rc_shell` is shell.sh's — which shell reads an rc — for the parse checks
 # below (wave-27 T66). The same soft source.
-if ! declare -F bionic_rc_shell >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_markers_self_dir)" && pwd -P)/shell.sh"
-fi
+bionic_need shell.sh bionic_rc_shell
 
 _markers_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
   local mode

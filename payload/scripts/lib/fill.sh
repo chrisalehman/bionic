@@ -94,36 +94,29 @@
 # [WALL: tests/session-poker.test.sh]
 # [WALL: tests/patrol-duties-gate.test.sh]
 
-_fill_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-_FILL_LIB_DIR="$(cd "$(_fill_self_dir)" && pwd -P)"
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 
 # THE TABLE READER, SOURCED THE WAY payload/scripts/lib/stop.sh SOURCES IT and guarded on
 # the verb this file actually calls: a caller that already has it (the poker, whose
 # `BIONIC_LIB_WANT` names units.sh) pays nothing, and a caller that does not (hooks/stop.sh,
 # which wants this file alone) gets it here. units.sh defines functions and runs nothing at
 # source time, so the guard costs one parse and no forks.
-if ! declare -F units_ready >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_FILL_LIB_DIR/units.sh"
-fi
+bionic_need units.sh units_ready
 # THE GATE, SOURCED THE SAME WAY (wave-28 T13): `fill_gate_width` asks `gate_room`. A copy of
 # this file whose directory holds no gate.sh leaves it undefined, and the width is then the
 # open count alone: no room is offered on a gate nobody can read.
-if ! declare -F gate_room >/dev/null 2>&1 && [ -r "$_FILL_LIB_DIR/gate.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_FILL_LIB_DIR/gate.sh"
-fi
+bionic_need gate.sh gate_room || :
 
 # THE RUN'S REGISTER, SOURCED THE SAME WAY: `fill_merge_hold` reads it through `owed_list_plan`. A copy of this
 # file whose directory holds no owed.sh leaves the function undefined, and no merge is then held: a register nobody can
 # read holds nothing, the same posture `gate_room` takes above.
-if ! declare -F owed_list_plan >/dev/null 2>&1 && [ -r "$_FILL_LIB_DIR/owed.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_FILL_LIB_DIR/owed.sh"
-fi
+bionic_need owed.sh owed_list_plan || :
+
+# THE FIELD READER, SOURCED THE SAME WAY, for `adopt_cross_acks`.
+bionic_need fields.sh line_field_v
 
 # ── THE LEDGER'S OWN FIELD ────────────────────────────────────────────────────
 #
@@ -178,8 +171,7 @@ fill_current_forget() {  # -> drops the memo; the next reader parses whatever pa
 fill_facts_load() {
   local plan="${1:-}" got
   if [ -z "$plan" ] || [ ! -f "$plan" ]; then fill_current_forget; return 0; fi
-  declare -F _proof_ask >/dev/null 2>&1 || . "$_FILL_LIB_DIR/proof.sh" >/dev/null 2>&1
-  declare -F _proof_ask >/dev/null 2>&1 || return 1
+  bionic_need proof.sh _proof_ask || return 1
   got="$(_proof_ask "$plan" _fill_facts "$plan")" || return 1
   _FILL_CURRENT_VALUE="$(printf '%s\n' "$got" | sed -n 's/^n=//p')"
   _FILL_APPROVED="$(printf '%s\n' "$got" | sed -n 's/^approved=//p')"
@@ -210,8 +202,7 @@ _fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE and _FILL_APPR
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   # The step and the approval are the reader's (lib/proof.sh `proof_step_held`), never the plan's lines read here. A place
   # that cannot be read is no step and no approval, named by `fill_place_unread` so a caller refuses by name.
-  declare -F proof_step_held >/dev/null 2>&1 || . "$_FILL_LIB_DIR/proof.sh" >/dev/null 2>&1
-  if ! declare -F proof_step_held >/dev/null 2>&1 || ! got="$(proof_step_held "$plan")"; then _FILL_UNREAD="$plan"; return 1; fi
+  if ! bionic_need proof.sh proof_step_held || ! got="$(proof_step_held "$plan")"; then _FILL_UNREAD="$plan"; return 1; fi
   _FILL_CURRENT_VALUE="$(printf '%s\n' "$got" | sed -n 's/^n=//p')"
   case "$got" in *approved=1*) _FILL_APPROVED=1 ;; esac
   _FILL_CURRENT_PLAN="$plan"
@@ -458,7 +449,7 @@ fill_cap() {  # <plan>
   fi
   case "$c" in ''|*[!0-9]*) c="" ;; esac
   if [ -z "$c" ] && declare -F plan_frontmatter_get >/dev/null 2>&1; then
-    declare -F scale_cell >/dev/null 2>&1 || . "$_FILL_LIB_DIR/scale.sh" 2>/dev/null || :
+    bionic_need scale.sh scale_cell || :
     if declare -F scale_cell >/dev/null 2>&1; then
       scale="$(plan_frontmatter_get "${1:-}" scale 2>/dev/null)"
       c="$(scale_cell "$scale" writers 2>/dev/null)" || c=""
@@ -503,8 +494,8 @@ fill_ready_tagged() {  # <plan>
 
 # ── THE ROWS THAT TAKE NO WRITER SLOT (wave-26 T13; D9) ───────────────────────
 #
-# fill_readonly_ids <plan> -> the ids, space-joined, of the rows whose kind is `verify` or
-# `review` and whose `Files` cell names no tracked path, in table order.
+# fill_readonly_ids <plan> -> the ids, space-joined, of the rows whose kind takes a read-only slot in
+# units.sh `UNITS_KINDS` (verify and review) and whose `Files` cell names no tracked path, in table order.
 #
 # THE RULE IS THE KIND, BECAUSE THE KIND IS WHAT THE TABLE CARRIES (A-T13.2). A writer slot is a
 # writer's: an agent that edits a worktree. The dispatch wall knows the role it is launching
@@ -522,8 +513,9 @@ fill_ready_tagged() {  # <plan>
 # row takes a writer place like any writer and, at a full budget, waits with the budget reason;
 # the test is units.sh `writes_head`, the predicate that decides which rows owe a tree.
 fill_readonly_ids() {  # <plan> -> ids, space-joined
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$(_units_files_awk)"'
-    ($3 == "verify" || $3 == "review") && !writes_head($9) { printf "%s%s", (n++ ? " " : ""), $1 }'
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' -v ro="$(units_kinds slot readonly)" "$(_units_files_awk)"'
+    BEGIN { m = split(ro, r, " "); for (i = 1; i <= m; i++) rk[r[i]] = 1 }
+    ($3 in rk) && !writes_head($9) { printf "%s%s", (n++ ? " " : ""), $1 }'
 }
 
 # ── THE NAME A ROW IS DISPATCHED UNDER ────────────────────────────────────────
@@ -667,27 +659,22 @@ adopt_cross_acks() {  # <state dir> -> one line per ack in any ledger of the roo
     [ -f "$l" ] && [ ! -L "$l" ] || continue
     /usr/bin/grep -q '|event=ack|' "$l" 2>/dev/null || continue
     printf '%s\n' "$l"
-  done | awk '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
+  done | awk "$_LINE_FIELDS_AWK"'
     {
       led = $0; sid = led; sub(/^.*\/sweeper-/, "", sid); sub(/\.state$/, "", sid)
       ros = led; sub(/sweeper-[^\/]*$/, "roster-" sid ".state", ros)
       split("", ids); split("", nids); split("", noid)
       while ((getline line < ros) > 0) {
         if (index(line, "roster-state/") != 1) continue
-        nm = kv(line, "name"); if (nm == "") continue
-        id = kv(line, "agent_id")
+        nm = line_kv_of(line, "name"); if (nm == "") continue
+        id = line_kv_of(line, "agent_id")
         if (id == "") { noid[nm] = 1; continue }
         if (!((nm SUBSEP id) in ids)) { ids[nm SUBSEP id] = 1; nids[nm]++; one[nm] = id }
       }
       close(ros)
       while ((getline line < led) > 0) {
-        if (index(line, "sweeper-ledger/v1|") != 1 || kv(line, "event") != "ack") continue
-        nm = kv(line, "name"); at = kv(line, "at"); if (nm == "" || at == "") continue
+        if (index(line, "sweeper-ledger/v1|") != 1 || line_kv_of(line, "event") != "ack") continue
+        nm = line_kv_of(line, "name"); at = line_kv_of(line, "at"); if (nm == "" || at == "") continue
         sig = ""
         if ((nm in noid) || (nm in nids)) sig = ((nm in noid) || nids[nm] != 1) ? "*" : "=" one[nm]
         printf "%s\t%s\t%s\t%s\n", nm, at, sig, sid
@@ -783,7 +770,7 @@ $s
   esac
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    mt="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"  # GNU first: its `stat -f` prints filesystem text
+    mt="$(file_mtime "$f")"
     case "$mt" in ''|*[!0-9]*) continue ;; esac
     [ "$mt" -gt "$newest" ] && newest="$mt"
   done <<RRO_FILES

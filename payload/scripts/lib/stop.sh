@@ -70,25 +70,17 @@
 # [WALL: tests/patrol-duties-gate.test.sh]
 # [WALL: tests/patrol-revive.test.sh]
 
-_stop_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-_STOP_LIB_DIR="$(cd "$(_stop_self_dir)" && pwd -P)"
-
-if ! declare -F bionic_fold >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/fold.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
+bionic_need fold.sh bionic_fold
 
 # RESOURCES.SH IS SOURCED THE SAME WAY (wave-18 T2b, R1): `hooks/stop.sh`'s own
 # `BIONIC_LIB_WANT` does not name it, and this row's Files: declaration is this file
 # alone, so the dependency is met here rather than by widening the hook's want-list. The gate
 # (lib/gate.sh, which the fill duty asks through fill.sh) reads its readers.
-if ! declare -F _res_used_pct >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/resources.sh"
-fi
+bionic_need resources.sh _res_used_pct
 
 # ─── FILE SCOPE: hooks/context-spend.sh's audit path ─────────────────────────
 #
@@ -101,10 +93,7 @@ fi
 # SOURCED THE WAY fold.sh IS, ten lines above, and for the same reason: hooks/stop.sh already
 # sources root.sh at :153, above this library at :165, so in the shipped process this guard
 # never fires. It is here for the suites that drive this file directly.
-if ! declare -F audit_path >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/root.sh"
-fi
+bionic_need root.sh audit_path
 
 # ─── FILE SCOPE: the unbound advisory, said once per process ─────────────────
 #
@@ -122,10 +111,7 @@ fi
 #
 # run.sh IS SOURCED HERE for the suites that drive this file directly, the way root.sh is
 # above; hooks/stop.sh sources it first, so in the shipped process the guard never fires.
-if ! declare -F run_unbound_advisory >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/run.sh"
-fi
+bionic_need run.sh run_unbound_advisory
 stop_unbound_advise() {  # <plan> -> 0 staged · 1 already said in this process
   [ -z "${_STOP_UNBOUND_SAID:-}" ] || return 1
   _STOP_UNBOUND_SAID=1
@@ -145,10 +131,7 @@ stop_unbound_advise() {  # <plan> -> 0 staged · 1 already said in this process
 # already (the evidence gate's own process, a suite driving this library directly) pays
 # nothing. units.sh defines functions and runs nothing at source time, which is why sourcing
 # it here costs one parse and no forks.
-if ! declare -F units_rows >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/units.sh"
-fi
+bionic_need units.sh units_rows
 
 # ─── FILE SCOPE: the ready set, which this file must not compute twice ───────
 #
@@ -165,10 +148,7 @@ fi
 # which no verdict in that process reads directly — so in the shipped process the loader has
 # already checked it is readable and this guard is what a suite driving the library alone
 # pays. fill.sh sources units.sh under the same kind of guard, so the pair arrives together.
-if ! declare -F fill_ready_set >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/fill.sh"
-fi
+bionic_need fill.sh fill_ready_set
 
 # THE RUN'S FACTS, LOADED AS THE TICK LOADS THEM. The step, the Step-3 approval, the standing order and the newest
 # review proof are the reader's answers (`fill_facts_load`), so a fact the run's log alone holds is this wall's fact
@@ -183,20 +163,14 @@ stop_facts_load() {  # -> always 0
 }
 
 # THE TICK'S DIGEST AND THE WATCH RECORD: patrol.sh owns both readers.
-if ! declare -F tick_digest_path >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/patrol.sh"
-fi
+bionic_need patrol.sh tick_digest_path
 
 # THE PERSON'S LEDGER AND ITS ONE SENDER (epic-23 wave-33-workhorse, T11; REQ-2, D2): owed.sh
 # keeps what the person owes, and sources notify.sh beside it. NOT in hooks/stop.sh's
 # `BIONIC_LIB_WANT`, and sourced only when readable: the send is never a reason for this process
 # to step aside, and a library without it (a copy older than this wave) sends nothing and changes
 # nothing else.
-if ! declare -F owed_send >/dev/null 2>&1 && [ -r "$_STOP_LIB_DIR/owed.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/owed.sh"
-fi
+bionic_need owed.sh owed_send || :
 
 # ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
 #
@@ -546,7 +520,7 @@ fi
 case "$s_occ" in ''|*[!0-9]*) s_occ="$OCCUPIED" ;; esac
 DELTA=$((OCCUPIED - s_occ))
 if [ "$DELTA" -ge 0 ]; then DELTA="+$DELTA"; fi
-LINE="- $(date -u +%Y-%m-%dT%H:%M:%SZ) context-spend step-$s_step: occupied=$OCCUPIED delta=$DELTA model=$MODEL ($PLAN)"
+LINE="- $(iso_now) context-spend step-$s_step: occupied=$OCCUPIED delta=$DELTA model=$MODEL ($PLAN)"
 if AUDIT_FILE=$(audit_path "$BIONIC_ROOT"); then
   mkdir -p "$(dirname "$AUDIT_FILE")" 2>/dev/null && printf '%s\n' "$LINE" >> "$AUDIT_FILE" 2>/dev/null
 fi
@@ -812,7 +786,7 @@ fi
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
 [ "$BIONIC_ENGAGED" = 1 ] || return "$_adv"
 
-ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+ROSTER_FILE="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
 # Existence first, so a session that has dispatched nothing costs one stat. The symlink
 # guard is the write half of TDD §8: a repo controls its own .bionic/, and a link at any
 # level redirects this script's marker append outside the repo.
@@ -1029,7 +1003,7 @@ REFUSALS=""
 # would be user-facing text the ruled table does not carry.
 REFUSE_KIND=""
 
-NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+NOW=$(iso_now)
 
 while IFS=$'\t' read -r AID NAME KIND CFILES; do
   [ -n "$AID" ] && [ -n "$NAME" ] || continue
@@ -1295,7 +1269,7 @@ return 2
 # for the open row it waits on. A version-15 page holds a task's waits in its deps cell, a row by its id and a ruling as
 # `approval:DN`; an older page in its reads cell, a row by its record, the ruling the same.
 stop_wait_cell() {
-  declare -F plan_read_header >/dev/null 2>&1 || . "$_STOP_LIB_DIR/plan-read.sh" >/dev/null 2>&1
+  bionic_need plan-read.sh plan_read_header
   case "$(plan_read_header "${1:-}" canonical_sdlc_version 2>/dev/null)" in
     canonical_sdlc_version=15) printf 'deps RID\n' ;;
     *) printf 'reads RECORD\n' ;;
@@ -2018,7 +1992,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   # THE OCCUPANCY IS THE ONE CLOSE PREDICATE'S OPEN SET (wave-20 T2, D10): this session's
   # roster rows not closed by a later ack. A roster or ledger that is a symlink is not read,
   # and the numbers are left unknown rather than judged on zero — zero refuses more.
-  FILL_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  FILL_ROSTER="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   FILL_ACKS="$BIONIC_ROOT/.bionic/tmp/sweeper-${BIONIC_SID}.state"
   if [ -L "$FILL_ROSTER" ] || [ -L "$FILL_ACKS" ]; then
     return 0
@@ -2165,10 +2139,7 @@ stop_fill_ledger() {  # <event> -> always 0
   stop_turn_facts || return 0
   [ "$_ST_LIVE" = 1 ] || return 0
   local ready launched idle turn current
-  if ! declare -F line_event >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$_STOP_LIB_DIR/line.sh" 2>/dev/null && declare -F line_event >/dev/null 2>&1 || return 0
-  fi
+  bionic_need line.sh line_event || return 0
   ready="${_ST_READY// /,}"
   launched="$_ST_LAUNCHED"
   # THE ROWS THAT SAT IDLE: ready, not launched this turn, while a writer slot
@@ -2214,17 +2185,14 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
   [ -n "$lb" ] || return 0
   orders="$BIONIC_ROOT/.bionic/tmp/stop-orders-${BIONIC_SID}.state"
   [ -f "$orders" ] && [ ! -L "$orders" ] && [ -r "$orders" ] || return 0
-  targets="$(awk -v lb="${lb:0:19}" -v sid="$BIONIC_SID" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
+  # Each line's fields are read by name, through the record's field reader (lib/fields.sh).
+  bionic_need fields.sh line_field_v || return 0
+  targets="$(awk -v lb="${lb:0:19}" -v sid="$BIONIC_SID" "$_LINE_FIELDS_AWK"'
     index($0, "stop-order/v1|") == 1 {
-      if (kv($0, "by") != "patrol") next
-      s = kv($0, "session"); if (s != "" && s != sid) next
-      at = substr(kv($0, "at"), 1, 19); if (at == "" || at < lb) next
-      t = kv($0, "target"); if (t !~ /^[A-Za-z0-9_.-]+$/) next
+      if (line_kv_of($0, "by") != "patrol") next
+      s = line_kv_of($0, "session"); if (s != "" && s != sid) next
+      at = substr(line_kv_of($0, "at"), 1, 19); if (at == "" || at < lb) next
+      t = line_kv_of($0, "target"); if (t !~ /^[A-Za-z0-9_.-]+$/) next
       if (!(t in last) || at > last[t]) last[t] = at
     }
     END { for (t in last) printf "%s %s\n", t, last[t] }' "$orders" 2>/dev/null)"
@@ -2233,16 +2201,11 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
   # the name's row with `held=<iso> <reason> fp=…`, and the latest row of a name is its row. The
   # tick orders no held name while the hold's fingerprint stands, so an order newer than the hold
   # says something about the agent has changed since, and that order stands.
-  roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   held=""
   if [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; then
-    held="$(awk '
-      function kv(line, key,   i, n, parts) {
-        n = split(line, parts, "|")
-        for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-        return ""
-      }
-      index($0, "roster-state/") == 1 { nm = kv($0, "name"); if (nm != "") h[nm] = kv($0, "held") }
+    held="$(awk "$_LINE_FIELDS_AWK"'
+      index($0, "roster-state/") == 1 { nm = line_kv_of($0, "name"); if (nm != "") h[nm] = line_kv_of($0, "held") }
       END { for (nm in h) { at = substr(h[nm], 1, 19); if (at != "") printf "%s %s\n", nm, at } }' "$roster" 2>/dev/null)"
   fi
   targets="$(printf '%s\n' "$targets" | awk -v held="$held" '
@@ -2255,15 +2218,10 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
   vout=$( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
           CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "${_STOP_HOOK_DIR_ABS}/session-sweeper.sh" verdict 2>/dev/null )
   case "$?" in 0|1) : ;; *) return 0 ;; esac
-  printf '%s\n' "$vout" | awk -v want=" $targets" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
+  printf '%s\n' "$vout" | awk -v want=" $targets" "$_LINE_FIELDS_AWK"'
     index($0, "landing-verdict/v1|") == 1 {
-      nm = kv($0, "name")
-      if (kv($0, "state") != "MET" || kv($0, "acked") != "no") next
+      nm = line_kv_of($0, "name")
+      if (line_kv_of($0, "state") != "MET" || line_kv_of($0, "acked") != "no") next
       if (index(want, " " nm " ") == 0 || (nm in seen)) next
       seen[nm] = 1; out = out (out == "" ? "" : " ") nm
     }
@@ -2352,10 +2310,7 @@ esac
 # holds the path of. A plan whose scale cannot be read, or a library without scale.sh, judges as before: a Patrol
 # is assumed, so a wave-scale run loses nothing. Sourced here and not at file scope, behind the guard patrol.sh
 # carries below, for the same reason: a bystander turn does not parse a table it will not ask.
-if ! declare -F scale_patrol >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/scale.sh" 2>/dev/null || :
-fi
+bionic_need scale.sh scale_patrol || :
 if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$_RUN_PLAN")" = no ]; then
   return "$_adv"
 fi
@@ -2367,10 +2322,7 @@ fi
 # fixed order, so the dead watcher is read from the record whichever came first: a record still saying watching over
 # the dead process, or the new watcher's claim, which keeps the dead pid as `lost=`. `said=` on the record is what
 # keeps a later turn end from saying it again.
-if ! declare -F watch_lost >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_STOP_LIB_DIR/patrol.sh" 2>/dev/null || :
-fi
+bionic_need patrol.sh watch_lost || :
 if declare -F watch_lost >/dev/null 2>&1 && _lost="$(watch_lost "$BIONIC_ROOT" "$BIONIC_SID")"; then
   fold_advise "bionic watch: stopped — the watcher (pid ${_lost}) died without a word; this turn's end starts another"
   _adv=1
@@ -2408,19 +2360,6 @@ STOP_WATCH_WAIT_DEFAULT=6
 STOP_WATCH_CLAIM_GRACE=3
 STOP_WATCH_SLACK=5
 
-_stop_watch_read() {  # <record> — sets _SW_STATE _SW_WHY _SW_AT _SW_PID; rc 1 when it is no record
-  local l
-  _SW_STATE=''; _SW_WHY=''; _SW_AT=''; _SW_PID=''
-  [ -f "$1" ] && [ ! -L "$1" ] || return 1
-  while IFS= read -r l; do
-    case "$l" in
-      state=*) _SW_STATE="${l#state=}" ;; why=*) _SW_WHY="${l#why=}" ;;
-      at=*) _SW_AT="${l#at=}" ;; pid=*) _SW_PID="${l#pid=}" ;;
-    esac
-  done < "$1"
-  [ -n "$_SW_STATE" ]
-}
-
 stop_said_path() {  # <root> <sid> -> the session's record of the last stop line said, or nothing
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   case "$2" in *[!A-Za-z0-9_-]*) return 1 ;; esac
@@ -2434,7 +2373,7 @@ stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
   declare -F watch_record_path >/dev/null 2>&1 || return 0
   local rec prompt bound grace fresh live said key tmp
   rec="$(watch_record_path "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
-  _stop_watch_read "$rec" || return 0
+  _watch_read "$rec" || return 0
   stop_turn_facts >/dev/null 2>&1
   prompt="${_ST_MARK_TS%%.*}"; prompt="${prompt%Z}"
   [ -n "$prompt" ] || return 0
@@ -2444,14 +2383,14 @@ stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
   grace="$STOP_WATCH_CLAIM_GRACE"; [ "$grace" -le "$bound" ] || grace="$bound"
   fresh="$(date -u -v-"$((SECONDS + STOP_WATCH_SLACK))"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null     || date -u -d "-$((SECONDS + STOP_WATCH_SLACK)) seconds" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   while :; do
-    case "$_SW_STATE" in
+    case "$_WR_STATE" in
       resting)
-        [[ "$_SW_AT" < "$prompt" ]] || break
+        [[ "$_WR_AT" < "$prompt" ]] || break
         [ "$SECONDS" -lt "$grace" ] || break ;;
       watching)
         live=no
-        case "$_SW_PID" in ''|*[!0-9]*) : ;; *) kill -0 "$_SW_PID" 2>/dev/null && live=yes ;; esac
-        if [ "$live" = yes ] && [ -n "$fresh" ] && ! [[ "$_SW_AT" < "$fresh" ]]; then
+        case "$_WR_PID" in ''|*[!0-9]*) : ;; *) kill -0 "$_WR_PID" 2>/dev/null && live=yes ;; esac
+        if [ "$live" = yes ] && [ -n "$fresh" ] && ! [[ "$_WR_AT" < "$fresh" ]]; then
           [ "$SECONDS" -lt "$bound" ] || break
         else
           [ "$live" = no ] && [ "$SECONDS" -lt "$grace" ] || break
@@ -2459,14 +2398,14 @@ stop_watch_line() {  # <event> -> 0 nothing · 1 the line staged
       *) [ "$SECONDS" -lt "$grace" ] || break ;;
     esac
     sleep 0.2
-    _stop_watch_read "$rec" || return 0
+    _watch_read "$rec" || return 0
   done
-  [ "$_SW_STATE" = resting ] && [ "$_SW_WHY" = person ] || return 0
-  [[ "$_SW_AT" < "$prompt" ]] && return 0
-  [ -z "$(roster_open_names "$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state" \
+  [ "$_WR_STATE" = resting ] && [ "$_WR_WHY" = person ] || return 0
+  [[ "$_WR_AT" < "$prompt" ]] && return 0
+  [ -z "$(roster_open_names "$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")" \
     "$BIONIC_ROOT/.bionic/tmp/sweeper-$BIONIC_SID.state" "$BIONIC_SID" 2>/dev/null)" ] || return 0
   key="$(tick_digest_field "$(tick_digest_path "$BIONIC_ROOT" "$BIONIC_SID")" digest)"
-  key="digest=${key:-at $_SW_AT}"
+  key="digest=${key:-at $_WR_AT}"
   said="$(stop_said_path "$BIONIC_ROOT" "$BIONIC_SID")" || return 0
   [ -f "$said" ] && [ ! -L "$said" ] && [ "$(cat "$said" 2>/dev/null)" = "$key" ] && return 0
   # Written whole beside it and renamed in, never through a link; a line that cannot be marked said is not said,
@@ -2603,7 +2542,7 @@ stop_guard_refuse() {  # <key> [facts...] -> never returns; an unknown key refus
 stop_guard_unrostered_write() {  # <roster> <sid> <name> <why> -> 0 written; 1 not
   local roster="$1" row
   row=$(roster_row status=closed "session=$2" "name=$3" agent_id= \
-    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "reason=$4" plan=none) || return 1
+    "launched_at=$(iso_now)" "reason=$4" plan=none) || return 1
   [ -n "$row" ] || return 1
   if [ ! -e "$roster" ]; then
     { roster_header >> "$roster"; } 2>/dev/null && chmod 600 "$roster" 2>/dev/null
@@ -2651,7 +2590,7 @@ stop_agent_armed() {  # -> 0 armed; 1 not
   [ -d "${BIONIC_ROOT:-}" ] || return 1
   [ "${BIONIC_ENGAGED:-}" = 1 ] || return 1
   [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || return 1
-  local roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  local roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   [ ! -L "$roster" ] && [ -f "$roster" ]
 }
 
@@ -2700,7 +2639,7 @@ sg_deadline_stop() {
 }
 
 # The session's own subagent directory, `<transcript-dir>/<session-id>/subagents`: a session can only
-# stop its own tasks, and the recorder scopes its writes the same way.
+# stop its own tasks. This guard is its one reader.
 _sg_subagents_dir() {  # <transcript-path>
   local tr="$1"
   [ -n "$tr" ] || return 1
@@ -2714,7 +2653,7 @@ _sg_subagents_dir() {  # <transcript-path>
 _sg_symlink_in_repo() {  # <repo> -> 0 iff $repo/.bionic resolves under this repo's own root
   local repo="$1" target common root
   target="$(cd "$repo/.bionic" 2>/dev/null && pwd -P)" || return 1
-  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  common="$(git_common_dir "$repo")" || return 1
   root="$(cd "${common%/.git}" 2>/dev/null && pwd -P)" || return 1
   case "$target/" in "$root"/*) return 0 ;; *) return 1 ;; esac
 }
@@ -2892,7 +2831,7 @@ stop_guard() {  # <hook-dir> -> 0 admits; a refusal exits 2
   ALIAS_SUFFIX=""
   case "$RAW" in *@*) ALIAS_SUFFIX="${RAW##*@}" ;; esac
 
-  ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
+  ROSTER_FILE="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
   ROSTER_UNREADABLE=""
   [ -L "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1

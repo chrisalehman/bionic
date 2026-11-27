@@ -142,7 +142,6 @@ W="$(in_world)"
 [ -n "$W" ] && [ -d "$W/.worktrees/T1" ] || { echo "inbox: the world could not be built — suite refuses to run"; exit 1; }
 ROSTER="$(in_roster "$W")"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "§PUSH: a ruling rides the writer's next tool result, exactly once (AC-1.1)"
 
 expect_contains "(p0) hooks.json registers ruling-push.sh on PostToolUse for every tool (matcher *)" \
@@ -182,7 +181,6 @@ wait
 P_PAR="$(cat "$WORLD_ROOT"/par.* 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
 expect_contains "(p5) six concurrent calls: the ruling rides one of them" "bionic ruling $P_ID2 " "$P_PAR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "§STATE: the roster records delivery; the orchestrator reads it without asking (AC-1.2)"
 
 in_poker "$W" rule wx-T2 'rebase onto the wave head first'
@@ -209,7 +207,6 @@ expect_false "(s4) …and no roster carries it" /usr/bin/grep -q "id=${S_ID}|" "
 in_poker "$W" ruling-ack r-no-such-ruling
 expect_eq "(s5) ruling-ack of an id no ruling carries is refused (exit 2)" "2" "$IN_RC"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "§SCOPE: only the named writer sees it; a closed row is refused at once (AC-1.3)"
 
 in_poker "$W" rule wx-T1 'only wx-T1 reads this'
@@ -237,7 +234,6 @@ expect_contains "(c3) …naming it" "wx-T9" "$IN_OUT"
 in_poker "$W" rule wx-T1 '   '
 expect_eq "(c4) a ruling with no text is a usage error (exit 2)" "2" "$IN_RC"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "§ACK: a ruling acknowledged before its push is never pushed; the flag follows (T31)"
 
 # The walk's sequence (record/wave-33-workhorse/walk.md §2, §8): record, ruling-ack, the writer's
@@ -268,7 +264,6 @@ expect_contains "(k5) control: a fresh ruling, the same call shape, is carried" 
 expect_false "(k5) …and once it is pushed the flag is down" test -e "$FLAG"
 ( cd "$W/.worktrees/T1" && bash "$POKER" ruling-ack "$K_ID3" ) >/dev/null 2>&1
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "§GUARD: no commit and no ready against an unread ruling (AC-1.4)"
 
 # The control: a writer with nothing unread commits in this world.
@@ -306,7 +301,6 @@ expect_eq "(g8) the same ready once shown lands (exit 0)" "0" "$IN_RC"
 expect_contains "(g8) …LANDED" "LANDED T1 " "$IN_OUT"
 expect_contains "(g8) …and its ready entered the line, read by the extractor (g6) reads" "1" "$(/usr/bin/grep -c '^run/v1|ev=ready|row=T1|' "$REC")"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "§WORDS: the ruling walls' refusals, said by the library the wall calls"
 
 # Each refusal's words and the decision that reaches them, called with the facts the wall gathers and folded as the
@@ -322,10 +316,11 @@ expect_contains "(w1) …and the ruling itself" "wx-T1, shown now:"$'\n'"bionic 
 in_say ruling_unread_refusal wx-T1 ""
 expect_eq "(w2) with nothing unread it is admitted, silent" "0 " "$IN_RC $IN_OUT"
 in_say ruling_ack_refusal r-w3 wx-T1 wx-T1 b00T1 1
-expect_eq "(w3) an acknowledgement alone from its writer is admitted, silent" "0 " "$IN_RC $IN_OUT"
-in_say ruling_ack_refusal r-w3 wx-T1 wx-T1 b00T1 0
-expect_eq "(w4) one from its writer not alone in its call is refused (exit 2)" "2" "$IN_RC"
-expect_contains "(w4) …saying it goes alone" "an acknowledgement goes alone in its call" "$IN_OUT"
+expect_eq "(w3) a call holding one acknowledgement, from its writer, is admitted, silent" "0 " "$IN_RC $IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 wx-T1 b00T1 2
+expect_eq "(w4) a call holding two acknowledgements, from the writer, is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(w4) …saying it is one a call, and how many it ran" "one acknowledgement a call" "$IN_OUT"
+expect_contains "(w4) …counting them" "this call runs 2 acknowledgements" "$IN_OUT"
 in_say ruling_ack_refusal r-w3 wx-T1 "" "" 1
 expect_eq "(w5) one from the main thread is refused (exit 2)" "2" "$IN_RC"
 expect_contains "(w5) …naming the writer it needs" "ruling r-w3 is addressed to wx-T1, not to the main thread." "$IN_OUT"
@@ -337,7 +332,6 @@ expect_contains "(w7) one from an agent no row names is refused as that" "not to
 in_say ruling_ack_refusal r-no-such-ruling "" "" "" 1
 expect_eq "(w8) an id no ruling carries has no writer, and the verb refuses it, not the wall" "0 " "$IN_RC $IN_OUT"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "§ROOT: one plugin root in every ruling's acknowledgement call (wave-34 T4; debt ruling-plugin-root)"
 
 # The push, the commit wall and `ready` each print the ruling in the one wording, whose last words are
@@ -351,7 +345,35 @@ expect_eq "(rt1) the push names the plugin that holds lib/roster.sh" "$RT_WANT" 
 expect_eq "(rt2) the commit wall's refusal names the same root" "$RT_WANT" "$(in_root "$G_OUT1")"
 expect_eq "(rt3) ready's refusal names the same root" "$RT_WANT" "$(in_root "$G_OUT6")"
 
-# ─────────────────────────────────────────────────────────────────────────────
+section "§ONE: a call holding exactly one acknowledgement is admitted, whatever else it runs; one holding two is refused (AC-15.1)"
+
+# The wall as the writer meets it: the real hook, over a call typed the way the role files teach (`cd <tree> || exit 1`
+# first) and the shapes writers joined to an ack. The same call is the positive beside each refusal.
+in_poker "$W" rule wx-T2 'first ruling for the call tests'
+O_ID1="$(in_rid "$IN_OUT")"
+in_poker "$W" rule wx-T2 'second ruling for the call tests'
+O_ID2="$(in_rid "$IN_OUT")"
+expect_nonempty "(o0) two rulings for wx-T2 are recorded" "$O_ID1$O_ID2"
+in_walls "$W" b00T2 "cd $W || exit 1; bash $POKER ruling-ack $O_ID1"
+expect_eq "(o1) AC-15.1 the writer's ack behind a cd guard is admitted (exit 0)" "0" "$IN_RC"
+in_walls "$W" b00T2 "bash $POKER ruling-ack $O_ID1 && git status --porcelain"
+expect_eq "(o2) AC-15.1 …joined to another command (exit 0)" "0" "$IN_RC"
+in_walls "$W" b00T2 "bash $POKER ruling-ack $O_ID1 2>&1 | tail -5"
+expect_eq "(o3) AC-15.1 …piped into tail (exit 0)" "0" "$IN_RC"
+in_walls "$W" b00T2 "bash -c 'cd $W; bash $POKER ruling-ack $O_ID1'"
+expect_eq "(o4) AC-15.1 …inside a bash -c string, counted once (exit 0)" "0" "$IN_RC"
+in_walls "$W" b00T2 "bash $POKER ruling-ack $O_ID1; bash $POKER ruling-ack $O_ID2"
+expect_eq "(o5) AC-15.1 two acknowledgements in one call are refused (exit 2)" "2" "$IN_RC"
+expect_contains "(o5) …saying it is one a call" "one acknowledgement a call" "$IN_OUT"
+in_walls "$W" b00T2 "bash -c 'bash $POKER ruling-ack $O_ID1; bash $POKER ruling-ack $O_ID2'"
+expect_eq "(o6) AC-15.1 …two inside a bash -c string too (exit 2)" "2" "$IN_RC"
+in_walls "$W" b00T1 "cd $W || exit 1; bash $POKER ruling-ack $O_ID1"
+expect_eq "(o7) one acknowledgement is still checked as before: another writer's is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(o7) …naming the writer it needs" "addressed to wx-T2, not to wx-T1." "$IN_OUT"
+# The wall only judges the call; the two rulings are read for the sections below, which count what is unread.
+in_poker "$W" ruling-ack "$O_ID1"; in_poker "$W" ruling-ack "$O_ID2"
+expect_regex "(o8) …and both are read, so the sections below start from none unread of these" "shown=[0-9]+" "$(in_state "$W" wx-T2 "$O_ID2")"
+
 section "§CLEAR: a ruling crosses a /clear in both orders, and one a roster held still reaches its writer (AC-12.1, AC-12.2)"
 
 # The clear is the fleet's: a new session bound to the same plan runs the real `adopt`, which carries the writer's row to
@@ -402,7 +424,6 @@ expect_eq "(y6) of the four rulings, the rosters carry only the one planted ther
   "$(cat "$W"/.bionic/tmp/roster-*.state | /usr/bin/grep -o -F -e "ruling/v1|id=r-legacy-1|" -e "id=$X_ID|" -e "id=$Y_ID|" -e "id=$Z_ID|")"
 expect_eq "(y6) …the run's log holds each" "3" "$(/usr/bin/grep -c -E "^run/v1\|ev=ruling\|id=($X_ID|$Y_ID|$Z_ID)\|row=T2\|writer=wx-T2\|recorded=" "$REC")"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "§GRANT: one rule call grants a file and a suite; a successor of the row is born holding both (AC-24.1, AC-24.2)"
 
 # fails-when: a second command is needed for the grant, or the successor's brief, the contract its row is born from, lacks either.

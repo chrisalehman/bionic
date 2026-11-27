@@ -89,6 +89,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "permission-answer"; fi
 . "$BIONIC_LIB/git-argv.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/grant.sh"
+# The clock's one home, asked by name: no hook lists it among the libraries it wants.
+bionic_need time.sh _time_epoch
 
 # The run verdict is wanted: whether the lead is bound to an open run decides its class.
 BIONIC_CONTEXT_WANT_RUN=1
@@ -167,7 +169,7 @@ _pa_emit() {
 # _pa_log <decision> <reason> — the answer line (D9), through lib/root.sh's appender:
 # `<ISO-UTC>|<sid>|<asker>|<tool>|<decision>|<reason>|<first 120 chars of the command or path>`.
 _pa_log() {
-  log_answer "$BIONIC_ROOT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)|$(_pa_clean "$BIONIC_SID")|$(_pa_clean "$PA_ASKER")|$(_pa_clean "${PA_TOOL:-unknown}")|$1|$(_pa_clean "$2")|$(_pa_clean "$PA_HEAD" 120)"
+  log_answer "$BIONIC_ROOT" "$(iso_now)|$(_pa_clean "$BIONIC_SID")|$(_pa_clean "$PA_ASKER")|$(_pa_clean "${PA_TOOL:-unknown}")|$1|$(_pa_clean "$2")|$(_pa_clean "$PA_HEAD" 120)"
 }
 
 # _pa_finish <allow|deny-fix|deny-reserved> <reason> [<message>] — log, answer, exit 0. An
@@ -235,19 +237,14 @@ esac
 #
 # The payload's agent_id, read through THIS session's roster (the session id in the payload
 # is the lead's for every asker, measured); no agent_id is the lead. A first occurrence of a
-# key wins, as every by-key reader of the roster takes it.
-_pa_row_field() {  # <row> <key> -> the value of the first <key>= field
-  local rest="|${1#*|}|" k="|$2="
-  case "$rest" in *"$k"*) ;; *) return 0 ;; esac
-  rest="${rest#*"$k"}"
-  printf '%s' "${rest%%|*}"
-}
+# key wins, as every by-key reader of the roster takes it: lib/fields.sh's `line_field`.
+bionic_need fields.sh line_field_v
 
 PA_STAGE="finding who asked"
 PA_NAME=""
 PA_ROW=""
 if [ -n "$PA_AGENT" ]; then
-  PA_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state"
+  PA_ROSTER="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
   if [ -L "$PA_ROSTER" ]; then
     _pa_fail roster-symlink
   elif [ ! -e "$PA_ROSTER" ]; then
@@ -257,7 +254,7 @@ if [ -n "$PA_AGENT" ]; then
   fi
   PA_ROW="$(roster_row_for_id "$PA_ROSTER" "$PA_AGENT")" \
     || _pa_fail roster-no-row "$PA_AGENT"
-  PA_NAME="$(_pa_row_field "$PA_ROW" name)"
+  PA_NAME="$(line_field "$PA_ROW" name)"
   # An agent dispatched without a name has a real row whose name= is empty: that is a reader
   # (a tree is recorded for a name, and it has none), not a fault. It stays labelled by its id.
   [ -z "$PA_NAME" ] || PA_ASKER="$PA_NAME"
@@ -341,7 +338,7 @@ case "$PA_CLASS" in
     # whether the report lies inside it or the scratch); a report that names a directory is
     # not a file and is handed nothing (wave-25 T17, review S1).
     [ "$PA_BOUND" = 1 ] && _pa_root record "$(_pa_record_dir "$BIONIC_RUN_PLAN")"
-    PA_REPORT="$(_pa_row_field "$PA_ROW" deliverable)"
+    PA_REPORT="$(line_field "$PA_ROW" deliverable)"
     case "$PA_REPORT" in
       ''|/*) ;;
       *) PA_REPORT="$BIONIC_ROOT/$PA_REPORT" ;;
@@ -490,7 +487,7 @@ _pa_gate() {
       END { exit !found }' "$f" 2>/dev/null; then
     return 0
   fi
-  printf 'gate/v1|at=%s%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$key" >> "$f" 2>/dev/null
+  printf 'gate/v1|at=%s%s\n' "$(iso_now)" "$key" >> "$f" 2>/dev/null
 }
 
 PA_STAGE="answering"

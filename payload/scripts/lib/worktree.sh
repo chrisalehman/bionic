@@ -29,17 +29,19 @@
 # NO `--force`, ANYWHERE. git's refusal to discard uncommitted work is the
 # feature; a land that forced would be a lease that ate a writer's work.
 
-_wt_self_dir() { dirname "${BASH_SOURCE[0]}"; }
+# shellcheck source=/dev/null
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 # roots.sh, THE SOFT SOURCE — the idiom this file already uses for git-argv.sh, taken at
 # source time because two of this file's roots are wanted on every path through it. Every
 # root resolver in the tree has one definition there (epic-22 wave-01, N1); this file is a
 # caller of `worktree_root` (three copies before N1: here as `_wt_main_root`, lib/patrol.sh,
 # spawn-worktree.sh). `claude_home` is only the probe for "already loaded": D1 read session
 # files through it until wave-20 T8c, and reads processes now.
-if ! declare -F claude_home >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/roots.sh"
-fi
+bionic_need roots.sh claude_home
+bionic_need fields.sh line_field_v
 
 # Physical absolute path of a directory. No `realpath`: BSD's is flagless and it
 # is absent on some targets, and every path this file canonicalises is a
@@ -64,14 +66,7 @@ _wt_abs() {  # <dir>
 # protected": a wall that cannot read its own list must refuse rather than wave
 # the merge through.
 _wt_branch_protected() {  # <branch> -> 0 protected, 1 not, 2 unknowable
-  local lib
-  if ! declare -f git_branch_protected >/dev/null 2>&1; then
-    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/git-argv.sh"
-    [ -r "$lib" ] || return 2
-    # shellcheck source=/dev/null
-    . "$lib" 2>/dev/null || return 2
-    declare -f git_branch_protected >/dev/null 2>&1 || return 2
-  fi
+  bionic_need git-argv.sh git_branch_protected || return 2
   git_branch_protected "${1:-}"
 }
 
@@ -230,16 +225,6 @@ _wt_runner_script() {  # <argv word>...
   return 1
 }
 
-_wt_liveness() {  # rc 0 once lib/slots.sh's liveness rule is loaded
-  declare -F _slots_live >/dev/null 2>&1 && return 0
-  local lib
-  lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/slots.sh"
-  [ -r "$lib" ] || return 1
-  # shellcheck source=/dev/null
-  . "$lib" 2>/dev/null || return 1
-  declare -F _slots_live >/dev/null 2>&1
-}
-
 # _wt_busy_request <main-root> [target-checkout] — the gate's half of D1. Prints
 # `request=<id> key=<key> tree=<tree> holder=<pid>` for the first admitted, unended request with a
 # live holder whose tree is the main checkout or the target checkout, in the store's listing
@@ -247,7 +232,7 @@ _wt_liveness() {  # rc 0 once lib/slots.sh's liveness rule is loaded
 _wt_busy_request() {
   local root="${1:-}" co="${2:-}" store f id l key tree holder adm ended
   [ -n "$root" ] || return 1
-  _wt_liveness || return 1
+  bionic_need slots.sh _slots_live || return 1
   store="${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
   for f in "$store"/requests/*; do
     id="${f##*/}"
@@ -737,23 +722,12 @@ _wt_check_judge() {  # <repo dir> <base> <head> -> <path>[,<path>]
 # RB_FROM then names it, the words and who typed them, RB_WORD the last two alone. The judge is still never a commit
 # the landing it judges wrote: the word was given at a head that landing's candidate only descends from. RB_RELEASE is
 # the release base the tags and base-sha give, whatever the judge is, for a reader that counts from the release.
-_wt_judge_load() {  # -> 0 once the plan's integration branch and base readers are defined
-  local d
-  declare -F plan_integration_branch >/dev/null 2>&1 && declare -F proof_plan_base >/dev/null 2>&1 && return 0
-  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
-  # shellcheck source=/dev/null
-  declare -F _run_lines >/dev/null 2>&1 || . "$d/run.sh" 2>/dev/null
-  # shellcheck source=/dev/null
-  declare -F plan_integration_branch >/dev/null 2>&1 || . "$d/plan.sh" 2>/dev/null
-  # shellcheck source=/dev/null
-  declare -F proof_plan_base >/dev/null 2>&1 || . "$d/proof.sh" 2>/dev/null
-  declare -F plan_integration_branch >/dev/null 2>&1 && declare -F proof_plan_base >/dev/null 2>&1
-}
 release_base() {  # <plan> <checkout> <head>
   local plan="$1" co="$2" head="$3" t tc tn best="" jw
   RB_BASE=""; RB_FROM=""; RB_BS=""; RB_IB=""; RB_RELEASE=""; RB_WORD=""
-  _wt_judge_load || return 1
-  jw="$(_wt_reader_load && reader_main "$plan" judge 2>/dev/null)" || jw=""
+  bionic_need run.sh _run_lines
+  bionic_need plan.sh plan_integration_branch && bionic_need proof.sh proof_plan_base || return 1
+  jw="$(bionic_need reader.sh reader_log_in && reader_main "$plan" judge 2>/dev/null)" || jw=""
   RB_IB="$(plan_integration_branch "$plan")"
   if [ -n "$RB_IB" ]; then
     while IFS= read -r t; do
@@ -877,35 +851,15 @@ _wt_release_check() {  # <root> <plan> <base> <head> <writer tree> <branch> <ont
 # `published` event; lib/line.sh `line_lines` reads it. The path is derived from the project's docs root
 # (lib/roots.sh `docs_root`), in the project's docs tree, never in the tree being removed. The slug is lib/proof.sh `proof_plan_slug`'s, the
 # one reader (wave-37 T2; AC-9.2), loaded on first use as units.sh and slots.sh are here.
-_wt_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
-  declare -F proof_plan_slug >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/proof.sh" 2>/dev/null
-  declare -F proof_plan_slug >/dev/null 2>&1
-}
-_wt_reader_load() {  # -> 0 once lib/reader.sh, the log path's one home, is loaded
-  declare -F reader_log_in >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/reader.sh" 2>/dev/null
-  declare -F reader_log_in >/dev/null 2>&1
-}
 _wt_proofs_path() {  # <root> <plan> -> the record's path, the run's log
   local slug
-  _wt_proof_load && _wt_reader_load && slug="$(proof_plan_slug "${2:-}")" || return 1
+  bionic_need proof.sh proof_plan_slug && bionic_need reader.sh reader_log_in && slug="$(proof_plan_slug "${2:-}")" || return 1
   printf '%s' "$(reader_log_in "$(docs_root "$1")/record/$slug")"
 }
 
 # The id of the first `## Tasks` row, in table order, whose `worktree` cell names <tree>; a
 # relative cell is read from <root>. Nothing when none does, or when lib/units.sh, the table's
 # one reader, cannot be loaded (it is loaded lazily, as run.sh is below).
-_wt_units_load() {  # -> 0 once lib/units.sh's table readers are loaded
-  local lib
-  declare -F units_rows >/dev/null 2>&1 && return 0
-  lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/units.sh"
-  # shellcheck source=/dev/null
-  [ -r "$lib" ] && . "$lib" 2>/dev/null
-  declare -F units_rows >/dev/null 2>&1
-}
 # A Tasks `worktree` cell as the tree it names: a leading `./` and any trailing slashes are not part of the name,
 # and a relative cell is joined to <root>. rc 1 for an empty cell (`-`, `—`).
 _wt_cell_tree() {  # <root> <cell>
@@ -917,7 +871,7 @@ _wt_cell_tree() {  # <root> <cell>
 }
 _wt_proofs_row() {  # <root> <plan> <tree abs> -> <row id> | nothing
   local rec cell id
-  _wt_units_load || return 1
+  bionic_need units.sh units_rows || return 1
   while IFS= read -r rec; do
     cell="$(_wt_cell_tree "$1" "$(units_field "$rec" worktree)")" || continue
     if [ "$cell" = "$3" ]; then
@@ -947,16 +901,14 @@ _wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
   [ ! -L "$1" ] || return 1
   if [ -e "$1" ]; then [ -f "$1" ] && [ -w "$1" ] || return 1; fi
   mkdir -p "${1%/*}" 2>/dev/null || return 1
-  mine="$(_wt_proofs_private "$1")" || return 1
-  rm -f "$mine"
+  _wt_proofs_private "$1" || return 1
+  rm -f "$BIONIC_NEW"
 }
 
-# A private file beside the record, made by `mktemp` (exclusive, so never another's):
-# `.<record's name>.<this process's pid>.<random>`. One a killed append left is never read again.
-_wt_proofs_private() {  # <record path> -> the new file's path
-  local me
-  me="$(exec sh -c 'echo "$PPID"')"   # this process's own pid, which `$$` is not inside a subshell
-  mktemp "${1%/*}/.${1##*/}.${me}.XXXXXX" 2>/dev/null
+# A private file beside the record, made by the exclusive create (lib/root.sh `bionic_new`, so never another's):
+# `.<record's name>.<pid>.<draw>.<try>`. One a killed append left is never read again.
+_wt_proofs_private() {  # <record path> -> 0 with BIONIC_NEW naming the new empty file; 1 when none was made
+  bionic_need root.sh bionic_new && bionic_new "${1%/*}/.${1##*/}"
 }
 
 # THE APPEND IS ONE WRITE (wave-27 T69; review pass 48; A-orch-124, A-orch-132). The record had a
@@ -1003,13 +955,9 @@ _wt_proofs_cut() {  # <record path> -> 0 cut, 1 not
 _wt_log_put() {  # <record or log path> <event type> <key=value>... -> 0 appended, 1 not (proofs=unwritten)
   local log
   _WT_PROOFS_SAW=""
-  _wt_reader_load && log="$(reader_log_in "${1%/*}")" || { _WT_PROOFS_SAW="lib/reader.sh could not be loaded"; return 1; }
+  bionic_need reader.sh reader_log_in && log="$(reader_log_in "${1%/*}")" || { _WT_PROOFS_SAW="lib/reader.sh could not be loaded"; return 1; }
   shift
-  if ! declare -F log_append >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/log.sh" 2>/dev/null && declare -F log_append >/dev/null 2>&1 \
-      || { _WT_PROOFS_SAW="lib/log.sh could not be loaded"; return 1; }
-  fi
+  bionic_need log.sh log_append || { _WT_PROOFS_SAW="lib/log.sh could not be loaded"; return 1; }
   RUN_LOG="$log" log_append "$@" && return 0
   _WT_PROOFS_SAW="${_WT_PROOFS_SAW:-the appender of the log refused the line}"
   return 1
@@ -1023,8 +971,9 @@ _wt_proofs_write() {  # <file> <text> -> 0 appended, 1 not (the proofs=unwritten
   _WT_PROOFS_SAW=""
   if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then _WT_PROOFS_SAW="the record's path is not a regular file"; return 1; fi
   ! _wt_proofs_cut "$1" || lead="$nl"
-  priv="$(_wt_proofs_private "$1")" || { _WT_PROOFS_SAW="no private file could be made beside the record"; return 1; }
-  { printf '%s%s\n' "$lead" "$block" > "$priv"; } 2>/dev/null || { rm -f "$priv"; _WT_PROOFS_SAW="the private file could not be written"; return 1; }
+  _wt_proofs_private "$1" || { _WT_PROOFS_SAW="no private file could be made beside the record"; return 1; }
+  priv="$BIONIC_NEW"
+  { printf '%s%s\n' "$lead" "$block" >| "$priv"; } 2>/dev/null || { rm -f "$priv"; _WT_PROOFS_SAW="the private file could not be written"; return 1; }
   size="$(wc -c < "$priv" 2>/dev/null)"; size="${size//[!0-9]/}"
   before=0; [ ! -e "$1" ] || { before="$(wc -c < "$1" 2>/dev/null)"; before="${before//[!0-9]/}"; }
   if [ -z "$size" ] || [ -z "$before" ]; then rm -f "$priv"; _WT_PROOFS_SAW="the block or the record could not be measured"; return 1; fi
@@ -1106,18 +1055,12 @@ _wt_dirty_paths() {  # <porcelain lines>
 # takers never both clear it. Taking a free tree is one exclusive create of its hold. Trees are
 # reused between landings and re-pointed, never removed per landing; no agent writes in one.
 _wt_landing_dir() { printf '%s/.bionic/tmp/landing' "${1%/}"; }   # <root>
-_wt_slots_load() {  # -> 0 once lib/slots.sh's liveness rule (`_slots_alive`, `_slots_since`) is loaded
-  declare -F _slots_since >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/slots.sh" 2>/dev/null
-  declare -F _slots_since >/dev/null 2>&1
-}
 _wt_hold_alive() {  # <hold file> -> 0 while its `<pid>:<start>` lives
   local h="" p now
   { read -r h < "$1"; } 2>/dev/null
   p="${h%%:*}"
   case "$p" in ''|*[!0-9]*) return 1 ;; esac
-  _wt_slots_load || return 0
+  bionic_need slots.sh _slots_since || return 0
   _slots_alive "$p" || return 1
   now="$(_slots_since "$p")"
   [ -z "$now" ] || [ "${h#*:}" = "$now" ]
@@ -1127,7 +1070,7 @@ landing_tree_take() {  # <root> -> a free landing tree's path, now held by this 
   [ -d "$root" ] || return 1
   dir="$(_wt_landing_dir "$root")"
   mkdir -p "$dir" 2>/dev/null || return 1
-  _wt_slots_load || return 1
+  bionic_need slots.sh _slots_since || return 1
   me="$$:$(_slots_since "$$")"
   while :; do
     t="${dir}/${n}"
@@ -1214,13 +1157,7 @@ EOF
 # _wt_plan_current <plan> -> the run's step as the reader answers it, through lib/fill.sh (loaded lazily, as units.sh
 # is for the landing record), its memo dropped first; 1 when the step cannot be read.
 _wt_plan_current() {
-  local lib
-  if ! declare -F _fill_current_load >/dev/null 2>&1; then
-    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/fill.sh"
-    # shellcheck source=/dev/null
-    [ -r "$lib" ] && . "$lib" 2>/dev/null
-    declare -F _fill_current_load >/dev/null 2>&1 || return 1
-  fi
+  bionic_need fill.sh _fill_current_load || return 1
   fill_current_forget
   _fill_current_load "$1" || return 1
   printf '%s' "$_FILL_CURRENT_VALUE"
@@ -1259,28 +1196,8 @@ _wt_launch_row() {  # <roster> <key> <value> -> the line; 1 when none
 # under; the bare `<dir>` is accepted too, for a caller that names its rows
 # without the prefix.
 
-# One `|`-delimited field, BY KEY. Position would read the wrong value on a line
-# whose schema gained a field, which is the same reason every other reader in
-# this repo does it this way.
-#
-# FORK-FREE (wave-34 T11, D19): the walk is parameter expansion, not `tr` behind a `$( )`, and
-# `_wt_field_v` writes the answer into the caller's variable, so a caller that reads a field
-# per roster line (`_wt_row_discharged`, every tick) starts no process at all. A newline
-# separates fields as `|` does, which is what the `tr` this replaced made of one.
-_wt_field_v() {  # <var> <line> <key>
-  local _wtf_rest="${2:-}" _wtf_f _wtf_nl=$'\n'
-  _wtf_rest="${_wtf_rest//$_wtf_nl/|}|"
-  while [ -n "$_wtf_rest" ]; do
-    _wtf_f="${_wtf_rest%%|*}"; _wtf_rest="${_wtf_rest#*|}"
-    case "$_wtf_f" in "${3}="*) printf -v "$1" '%s' "${_wtf_f#"${3}="}"; return 0 ;; esac
-  done
-  printf -v "$1" '%s' ''
-}
-_wt_field() {  # <line> <key>
-  local _wtf_v
-  _wt_field_v _wtf_v "$@"
-  printf '%s' "$_wtf_v"
-}
+# A field is read by key through lib/fields.sh; lib/line.sh still calls `_wt_field`.
+_wt_field() { line_field "$@"; }  # <line> <key>
 
 # The discharge set: an ack, or a WAIVED, CLOSED or MET contract. hooks/stop-orders.sh and
 # `stop_guard` (lib/stop.sh) discharge on an ack, a WAIVED contract or a MET one that declared
@@ -1289,11 +1206,11 @@ _wt_field() {  # <line> <key>
 # same predicate as a sweeper verdict line.
 _wt_discharged() {  # <line>
   local v
-  _wt_field_v v "$1" acked
+  line_field_v v "$1" acked
   [ "$v" = "yes" ] && return 0
-  _wt_field_v v "$1" state
+  line_field_v v "$1" state
   case "$v" in MET|CLOSED|WAIVED) return 0 ;; esac
-  _wt_field_v v "$1" status
+  line_field_v v "$1" status
   case "$v" in MET|CLOSED|WAIVED) return 0 ;; esac
   return 1
 }
@@ -1303,7 +1220,7 @@ _wt_row_discharged() {  # <file> <row name>
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
     case "$line" in '#'*) continue ;; esac
-    _wt_field_v name "$line" name
+    line_field_v name "$line" name
     [ "$name" = "$2" ] || continue
     _wt_discharged "$line" && return 0
   done < "$1"
@@ -1397,13 +1314,8 @@ _wt_workspace_value_bad() {  # <value>
 # The session's bound plan as the engaged marker names it, or `none`. Never the root's
 # newest open run: that fallback is somebody else's run (lib/run.sh `session_run`).
 _wt_workspace_plan() {  # <root> <sid>
-  local lib p
-  if ! declare -f session_plan >/dev/null 2>&1; then
-    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/run.sh"
-    # shellcheck source=/dev/null
-    [ -r "$lib" ] && . "$lib" 2>/dev/null
-    declare -f session_plan >/dev/null 2>&1 || return 1
-  fi
+  local p
+  bionic_need run.sh session_plan || return 1
   p="$(session_plan "$1" "$2" 2>/dev/null)" || p=""
   case "$p" in /*) printf '%s' "$p" ;; *) printf 'none' ;; esac
 }
@@ -1434,7 +1346,7 @@ worktree_record_workspace() {  # <root> <sid> <name> <abs tree> <branch> <base s
   _wt_workspaces_unlinked "$root" "$f" || { printf 'workspace-file-symlinked'; return 1; }
   printf '%s|session=%s|name=%s|path=%s|branch=%s|base=%s|plan=%s|at=%s\n' \
     "$WORKSPACE_SCHEMA" "$sid" "$name" "$path" "$branch" "$base" "$plan" \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" 2>/dev/null \
+    "$(iso_now)" >> "$f" 2>/dev/null \
     || { printf 'workspace-file-unwritable'; return 1; }
 }
 
@@ -1449,9 +1361,10 @@ worktree_mark() {  # <tree> <name>
   _wt_workspace_value_bad "$name" && { printf 'invalid-name'; return 1; }
   gd="$(git_linked_dir "$tree")"
   case $? in 0) ;; 2) printf 'not-a-linked-worktree'; return 1 ;; *) printf 'not-a-tree'; return 1 ;; esac
-  printf '%s\n' "$name" > "$gd/bionic-agent.$$" 2>/dev/null \
-    && mv -f "$gd/bionic-agent.$$" "$gd/bionic-agent" 2>/dev/null \
-    || { rm -f "$gd/bionic-agent.$$"; printf 'marker-unwritable'; return 1; }
+  BIONIC_NEW=""
+  { bionic_need root.sh bionic_new && bionic_new "$gd/bionic-agent" && printf '%s\n' "$name" >| "$BIONIC_NEW" \
+    && mv -f "$BIONIC_NEW" "$gd/bionic-agent"; } 2>/dev/null \
+    || { [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW"; printf 'marker-unwritable'; return 1; }
 }
 
 # worktree_marker <tree> -> the name the tree's marker holds; rc 1 and nothing when it carries none (wave-35
@@ -1483,7 +1396,7 @@ _wt_tree_record_file() {  # <tree> -> <its own git-dir>/bionic-tree; rc 1 when <
 # The plan's `## Tasks` row whose <column> cell is <value>, as units_rows prints it; rc 1 when none is.
 _wt_row_where() {  # <plan> <column> <value>
   local rec
-  [ -n "${3:-}" ] && [ -f "${1:-}" ] && _wt_units_load || return 1
+  [ -n "${3:-}" ] && [ -f "${1:-}" ] && bionic_need units.sh units_rows || return 1
   while IFS= read -r rec; do
     [ -n "$rec" ] && [ "$(units_field "$rec" "$2")" = "$3" ] || continue
     printf '%s\n' "$rec"; return 0
@@ -1498,15 +1411,17 @@ worktree_record_tree() {  # <root> <sid> <name> <abs tree>
   local root="${1:-}" sid="${2:-}" name="${3:-}" tree="${4:-}" f plan row="" rec v
   f="$(_wt_tree_record_file "$tree")" || { printf 'not-a-linked-worktree'; return 1; }
   plan="$(_wt_workspace_plan "$root" "$sid")" || { printf 'run-library-unloadable'; return 1; }
-  [ "$plan" = none ] || ! _wt_units_load || { rec="$(_wt_row_where "$plan" agent "$name")" && row="$(units_field "$rec" id)"; }
+  [ "$plan" = none ] || ! bionic_need units.sh units_rows || { rec="$(_wt_row_where "$plan" agent "$name")" && row="$(units_field "$rec" id)"; }
   case "$row" in ''|*[[:space:]]*) row=- ;; esac
   for v in "$tree" "$plan" "$row" "$name" "$sid"; do
     _wt_workspace_value_bad "$v" && { printf 'tree-field-unrecordable'; return 1; }
   done
-  printf '%s|path=%s|plan=%s|row=%s|worker=%s|spawned-by=%s|at=%s\n' "$TREE_RECORD_SCHEMA" \
-    "$tree" "$plan" "$row" "$name" "$sid" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f.$$" 2>/dev/null \
-    && mv -f "$f.$$" "$f" 2>/dev/null \
-    || { rm -f "$f.$$"; printf 'tree-record-unwritable'; return 1; }
+  BIONIC_NEW=""
+  { bionic_need root.sh bionic_new && bionic_new "$f" \
+    && printf '%s|path=%s|plan=%s|row=%s|worker=%s|spawned-by=%s|at=%s\n' "$TREE_RECORD_SCHEMA" \
+       "$tree" "$plan" "$row" "$name" "$sid" "$(iso_now)" >| "$BIONIC_NEW" \
+    && mv -f "$BIONIC_NEW" "$f"; } 2>/dev/null \
+    || { [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW"; printf 'tree-record-unwritable'; return 1; }
 }
 
 # A TREE MADE FOR A ROW IS ONE EVENT OF ITS RUN. The row is the one the name's brief was rendered from
@@ -1520,21 +1435,17 @@ worktree_record_tree() {  # <root> <sid> <name> <abs tree>
 # worktree_tree_row <root> <sid> <name> -> the brief's row, rc 0; nothing and rc 1 for no row's;
 #   the rows the name claims and rc 2 when it claims one and has no brief
 worktree_tree_row() {
-  local root="${1:-}" name="${3:-}" plan rec d id hits=""
+  local root="${1:-}" name="${3:-}" plan rec id hits=""
   plan="$(_wt_workspace_plan "$root" "${2:-}")" && [ "$plan" != none ] || return 1
   rec="$(_wt_proofs_path "$root" "$plan")" || return 1
   rec="${rec%/*}"
-  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
   if [ -f "$rec/briefs/$name.md" ]; then
-    # shellcheck source=/dev/null
-    declare -F brief_file_read >/dev/null 2>&1 || . "$d/brief.sh" >/dev/null 2>&1
-    if declare -F brief_file_read >/dev/null 2>&1; then
+    if bionic_need brief.sh brief_file_read; then
       brief_file_read "$root" "$rec/briefs/$name.md"
       if [ -n "$BRIEF_FILE_ROW" ] && [ "$BRIEF_FILE_NAME" = "$name" ]; then printf '%s' "$BRIEF_FILE_ROW"; return 0; fi
     fi
   fi
-  # shellcheck source=/dev/null
-  { declare -F fill_row_launched >/dev/null 2>&1 || . "$d/fill.sh" >/dev/null 2>&1; } && _wt_units_load || return 1
+  bionic_need fill.sh fill_row_launched && bionic_need units.sh units_rows || return 1
   for id in $(units_rows "$plan" 2>/dev/null | cut -f1); do
     fill_row_launched "$id" "$name" && hits="${hits:+$hits,}$id"
   done
@@ -1543,21 +1454,19 @@ worktree_tree_row() {
 }
 worktree_row_kind() {  # <plan> <row> -> the row's kind cell; nothing, rc 1, for a row the plan lacks
   local rec
-  _wt_units_load && rec="$(_wt_row_where "${1:-}" id "${2:-}")" || return 1
+  bionic_need units.sh units_rows && rec="$(_wt_row_where "${1:-}" id "${2:-}")" || return 1
   units_field "$rec" kind
 }
 # worktree_tree_event <root> <sid> <name> <abs tree | empty> <branch> <base sha> <row> [<plan>] -> the row's tree event
 # appended to the log of <plan>, else of the session's bound run; rc 1 with nothing appended. An empty tree is the
 # tree removed: the path and base empty, `why=removed`.
 worktree_tree_event() {
-  local root="${1:-}" tree="${4:-}" plan="${8:-}" rec d
+  local root="${1:-}" tree="${4:-}" plan="${8:-}" rec
   [ -n "${7:-}" ] || return 1
   [ -n "$plan" ] || plan="$(_wt_workspace_plan "$root" "${2:-}")" || return 1
   [ "$plan" != none ] || return 1
   rec="$(_wt_proofs_path "$root" "$plan")" || return 1
-  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
-  # shellcheck source=/dev/null
-  declare -F log_append >/dev/null 2>&1 || . "$d/log.sh" >/dev/null 2>&1 || return 1
+  bionic_need log.sh log_append || return 1
   [ -n "$tree" ] || { RUN_LOG="$rec" log_append tree "row=$7" path= "branch=${5:-}" base= "by=${3:-}" why=removed; return; }
   RUN_LOG="$rec" log_append tree "row=$7" "path=$(_wt_tree_rel "$root" "$tree")" "branch=${5:-}" "base=${6:-}" "by=${3:-}"
 }
@@ -1570,18 +1479,16 @@ _wt_tree_rel() {  # <root> <abs tree> -> the tree from the root, as a tree event
 _wt_tree_record_plan() {  # <abs tree> -> the plan its own record names, read before the tree goes; nothing for none
   local l
   l="$(worktree_tree_record "${1:-}" 2>/dev/null)" || return 0
-  l="$(_wt_field "$l" plan)"; [ "$l" = none ] || printf '%s' "$l"
+  l="$(line_field "$l" plan)"; [ "$l" = none ] || printf '%s' "$l"
 }
 # A TREE REMOVED IS NO ROW'S TREE: each row whose latest tree event names it gets the event again with an empty path,
 # through the one writer above, in <plan> (the tree's own record's, read before the removal) or the session's bound
 # run. rc 0 with nothing to write, 1 when a removal could not be written.
 worktree_tree_gone() {  # <root> <sid> <abs tree> [<plan>]
-  local root="${1:-}" plan="${4:-}" d t rel row branch by rc=0
+  local root="${1:-}" plan="${4:-}" t rel row branch by rc=0
   [ -n "$plan" ] || plan="$(_wt_workspace_plan "$root" "${2:-}")" || return 1
   [ "$plan" != none ] || return 0
-  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
-  # shellcheck source=/dev/null
-  declare -F reader_trees >/dev/null 2>&1 || . "$d/reader.sh" >/dev/null 2>&1 || return 1
+  bionic_need reader.sh reader_trees || return 1
   t="$(reader_trees "$plan")" || return 1
   rel="$(_wt_tree_rel "$root" "${3:-}")"
   while IFS=$'\t' read -r row branch by; do
@@ -1602,7 +1509,7 @@ worktree_tree_record() {  # <tree>
   IFS= read -r line < "$f" || [ -n "$line" ] || return 1
   line="${line%$'\r'}"
   case "$line" in "${TREE_RECORD_SCHEMA}|"*) : ;; *) return 1 ;; esac
-  [ "$(_wt_field "$line" path)" = "$tree" ] || return 1
+  [ "$(line_field "$line" path)" = "$tree" ] || return 1
   printf '%s\n' "$line"
 }
 
@@ -1613,7 +1520,7 @@ worktree_tree_record() {  # <tree>
 worktree_for_agent() {  # <root> <name> <sid>...
   local root="${1:-}" name="${2:-}" s plan rec
   shift 2
-  _wt_units_load || return 1
+  bionic_need units.sh units_rows || return 1
   for s in "$@"; do
     [ -n "$s" ] || continue
     plan="$(_wt_workspace_plan "$root" "$s")" && [ "$plan" != none ] || continue
@@ -1668,19 +1575,14 @@ _wt_workspace_paths() {  # <root> <sid> <name> <all: 1 or 0>
   _wt_workspaces_unlinked "$1" "$f" || return 2
   [ -e "$f" ] || return 1
   { [ -f "$f" ] && [ -r "$f" ]; } || return 2
-  out="$(WT_SID="$2" WT_NAME="$3" WT_ALL="$4" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
+  out="$(WT_SID="$2" WT_NAME="$3" WT_ALL="$4" awk -F'|' -v schema="$WORKSPACE_SCHEMA" "$_LINE_FIELDS_AWK"'
     BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; all = ENVIRON["WT_ALL"] }
     { sub(/\r$/, "") }
     $1 != schema { next }
     {
-      s = ""; n = ""; p = ""; hn = 0
-      for (i = 2; i <= NF; i++) {
-        if (index($i, "session=") == 1) s = substr($i, 9)
-        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
-        else if (index($i, "path=") == 1) p = substr($i, 6)
-      }
-      if (s != sid || substr(p, 1, 1) != "/") next
-      if (all == "1" || (hn && n == want)) print p
+      p = line_kv("path")
+      if (line_kv("session") != sid || substr(p, 1, 1) != "/") next
+      if (all == "1" || line_kv("name") == want) print p
     }' "$f" 2>/dev/null)" || return 2
   [ -n "$out" ] || return 1
   _wt_listed_trees "$1" "$out" "$4"

@@ -35,13 +35,13 @@
 #
 # bash 3.2 (ADR-001).
 
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 _READER_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
 # shellcheck source=/dev/null
 . "$_READER_LIB_DIR/fields.sh"
 # The reader calls nothing of the landing library, but its callers find that library loaded through it: their guards
 # read a set field reader as the landing library loaded, and call its record readers on that word.
-# shellcheck source=/dev/null
-declare -F line_lines >/dev/null 2>&1 || . "$_READER_LIB_DIR/line.sh"
+bionic_need line.sh line_lines
 # The record's field reader, read by name; `ev()` is its event, for the `run/v1` shape the fold prints.
 _READER_AWK="${_LINE_FIELDS_AWK}"'
 function ev() { return line_kv("ev") }
@@ -273,10 +273,13 @@ reader_q_landed() {  # <plan> [row] -> each landing, of <row> when named
     ev() == "published" && (r == "" || line_kv("row") == r)'
 }
 
-# An ask's round, by key and round (absent, 1); a decision has one key, approve:D<n> read as decide:D<n>.
-_READER_ASK_AWK='
-function ask_round(   k, r) { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k = "decide:" substr(k, 9); r = line_kv("round")
-  return k SUBSEP (r == "" ? 1 : r) }
+# A decision has one key, approve:D<n> read as decide:D<n>; lib/owed.sh `owed_key` reads it here too.
+_READER_KEY_AWK='
+function ask_key(k) { return k ~ /^approve:D[0-9]+$/ ? "decide:" substr(k, 9) : k }
+'
+# An ask's round, by key and round (absent, 1).
+_READER_ASK_AWK="$_READER_KEY_AWK"'
+function ask_round(   r) { r = line_kv("round"); return ask_key(line_kv("key")) SUBSEP (r == "" ? 1 : r) }
 '
 
 reader_question asks list reader_q_asks
@@ -570,9 +573,8 @@ reader_q_verdicts() {  # <plan> [row] -> each suite's verdict standing, of <row>
 # A row answers its authored cells alone, in either shape of the Tasks table: state is the log's.
 # shellcheck source=/dev/null
 . "$_READER_LIB_DIR/plan-read.sh"
-# A criterion's tier is its eval type through the scale profile's one map.
-# shellcheck source=/dev/null
-declare -F scale_tier_awk >/dev/null 2>&1 || . "$_READER_LIB_DIR/scale.sh"
+# A criterion's tier is its test type through the scale profile's one map.
+bionic_need scale.sh scale_tier_awk
 
 reader_question header value reader_q_header
 reader_q_header() {  # <plan> [key] -> key=value per header key, or the one named; 1 when it is absent
@@ -590,9 +592,9 @@ reader_q_row() {  # <plan> <id> -> the row's nine authored cells as key=value, i
 }
 
 reader_question criterion value reader_q_criterion
-reader_q_criterion() {  # <plan> <id> -> its Eval design row as key=value, one per column; 1 no such criterion
+reader_q_criterion() {  # <plan> <id> -> its criteria table row as key=value, one per column; 1 no such criterion
   _reader_needs criterion '<id>' "${2:-}" || return 2
-  plan_read_row "$1" 'Eval design' Criterion "$2"
+  plan_read_row "$1" "$PLAN_READ_CRITERIA" Criterion "$2"
 }
 
 reader_question cell value reader_q_cell
@@ -606,7 +608,7 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 }
 
 # reader_cells <plan> [head] -> one line per criterion, `<criterion>\037<state>\037<by>\037<tier>\037<evidence>\037
-# <auditor>\037<confirmed>\037<serves>`: the Eval design's criteria in its order. ONE FOLD answers every criterion, so a
+# <auditor>\037<confirmed>\037<serves>`: the Test design's criteria in its order. ONE FOLD answers every criterion, so a
 # caller that judges them all asks once; the cell question answers through it, and no question prints the further
 # fields: the bed pins the cell answer over the closed runs, and the fields are what the gate, the judge and the cards
 # weigh, never a fact a person asks for.
@@ -615,7 +617,7 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #               with no instant does not displace a waiver the log holds with one. An approval discharges only a
 #               criterion nothing else does: a person confirms after the proof, and their word never unseats the
 #               proof or waiver that came first.
-#   tier        the Eval design's eval type through lib/scale.sh.
+#   tier        the Test design's test type through lib/scale.sh.
 #   evidence    the discharging proof's or waiver's `evidence=`.
 #   auditor     the `auditor=` its discharging proof carries when that proof has no instant, else the evidence review
 #               standing at <head>, CONFIRMED when it passed and REFUTED when not. An untimed proof is one the act
@@ -623,19 +625,19 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #               so a verdict named on a proof written since is never read as one.
 #   confirmed   the approval naming the criterion, as `<by> <day> <its words>`, its giver folded to one word and the
 #               criterion standing for words it holds none of.
-#   serves      the Eval design's requirement.
+#   serves      the Test design's requirement.
 # 1 when the plan names no criterion; the fold's failure is its exit.
 reader_cells() {
   # Its names are its own: a caller that hands it the facts names its copy `facts`, which a local of that name would hide.
-  local _rc_plan="$1" _rc_head="${2:-}" _rc_eval _rc_facts
-  _rc_eval="$(plan_read_rows "$_rc_plan" 'Eval design' criterion 2>/dev/null)" || _rc_eval=""
-  [ -n "$_rc_eval" ] || return 1
+  local _rc_plan="$1" _rc_head="${2:-}" _rc_test _rc_facts
+  _rc_test="$(plan_read_rows "$_rc_plan" "$PLAN_READ_CRITERIA" criterion 2>/dev/null)" || _rc_test=""
+  [ -n "$_rc_test" ] || return 1
   _rc_facts="$(reader_facts "$_rc_plan")" || return
-  printf 'E\n%s\nF\n%s\n' "$_rc_eval" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
+  printf 'E\n%s\nF\n%s\n' "$_rc_test" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
     function cell(s, k,   n, i, c) { n = split(s, c, "\t"); for (i = 1; i <= n; i++) if (index(c[i], k "=") == 1) return substr(c[i], length(k) + 2); return "" }
     $0 == "E" || $0 == "F" { part = $0; next }
     $0 == "" { next }
-    part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "eval-type")); req[c] = cell($0, "requirement"); next }
+    part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "test-type")); req[c] = cell($0, "requirement"); next }
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }

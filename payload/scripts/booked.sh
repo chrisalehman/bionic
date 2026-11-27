@@ -6,7 +6,7 @@
 #   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
 #                                        [--max-wait <seconds>] [--shell <path>]
 #                                        [--stamp-dir <dir>] [--suites <names>] [--class browser|compile] [--runner]
-#                                        [--detach [--no-wait]]
+#                                        [--detach [--no-wait]] [--expect red]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -97,10 +97,20 @@
 # command's own code (`gate_end`), so the gate learns what the command cost. While the command
 # runs the shim reads `gate_state` every BIONIC_GATE_POLL seconds (2 unless set), the one call
 # that samples a run nothing else polls (T2's sampling note), so its peak is the request's. Not
-# admitted in time, it prints one line naming the command to run again, stamps 75 and exits 75:
-# NOTHING RAN, and the request keeps its turn, so the same command asked again by the same agent
-# resumes its number and is served before every later one. A wait never ends in a kill, under
-# --kill-after either.
+# admitted in time, it prints one line naming the command to run again, stamps 75 and exits 0:
+# NOTHING RAN, which is an ordinary answer, and the request keeps its turn, so the same command
+# asked again by the same agent resumes its number and is served before every later one. A wait
+# never ends in a kill, under --kill-after either. THE STAMP SAYS IT, NEVER THE EXIT: 75 is the
+# record's code for a run that never ran (the proof reader skips it), and the console's 0 is
+# outside the meant-to-fail inversion below, which never sees it.
+#
+# THE NOTE. The command the shim runs may itself be a run the gate did not admit (the suite door
+# under --runner asks for each suite itself, and regression-run for its whole run): it then exits 0
+# having run nothing. So the shim names a file of its own in BIONIC_NOT_ADMITTED for the command,
+# and such a command appends one line to it; a command that exits 0 with a line in the note is
+# stamped and recorded 75, as a run the shim itself was not admitted to, and ends the same way. A
+# shim that a caller handed a note of its own (BIONIC_NOT_ADMITTED set when the shim starts) adds
+# its line there when it ends so, so the answer reaches every caller that asked.
 #
 # NESTING. A shim inside an admitted command inherits BIONIC_GATE_ADMIT, and the gate believes
 # it only while that request is admitted, unfinished and held by an ancestor of the asker (its
@@ -136,13 +146,26 @@
 # A browser or compile run is still `work`, carried with its class so the gate promises it the free
 # room until its own runs have measured it; it is owed its measured cost, never a quiet machine.
 #
+# --expect red: A RUN MEANT TO FAIL. The wall passes it when every suite segment of the command opens
+# on the assignment `BIONIC_EXPECT=red` (lib/cmd-class.sh `cmd_expect`): a failing-first run, whose red
+# is the point. It changes ONE thing, the code the console gets: 0 when the command failed, 1 when it
+# passed, each with one stderr line saying which. The stamp, the run log's rc line, `<log>.rc`, the
+# roster's run_rc= and the run's line in the landing record all keep the command's own code, so the
+# proof reader, which takes green from a stamp's rc=0 alone, never reads a meant-to-fail run as a
+# green run of its suite. A code that is no verdict on the suite is never "failed as declared" and goes
+# to the console as it is: 2 (usage, the door's unknown suite), 70 and 71 (a detached run lost or not
+# started), 75 (not admitted), 124 (over the short limit), 126 and 127 (the command never ran), and
+# 128 and above (a signal). Only the caller inverts: the detached side is never told, so a run's own
+# records cannot differ by who waits on it. The shim never reads BIONIC_EXPECT itself: the assignment
+# reaches every process the suite starts, and a nested shim reading it would invert twice.
+#
 # --kill-after <s>: once MORE than <s> seconds have passed since the shim started, the command's
 # whole process group is killed, one line says it is over the short limit and belongs in a
 # subagent, and the shim exits 124. The clock is `$SECONDS`, whole seconds, so the kill lands
 # up to a second past <s> and never before it (review 12 F4, A-T50.3). THE LIMIT COVERS THE WAIT
 # AT THE GATE (T44, review 8 F2): the ask's --within is the limit and the kill is timed from the
 # shim's start, so the call ends inside the harness's own timeout whatever the machine is doing.
-# A command the gate did not admit within it ends 75, not 124 (AC-2.6): it ran nothing and keeps
+# A command the gate did not admit within it ends 0, stamped 75, never 124: it ran nothing and keeps
 # its number.
 #
 # --max-wait <s>: THE CALL'S OWN BOUND ON THE WAIT (wave-27 T6, critic 3 S2). The wall passes the
@@ -209,9 +232,9 @@
 # T12; D10): the detached side asks the gate with --within BIONIC_SETTLE_MAX_WAIT (1200 s unless set;
 # the name is older than the ceiling, from the retired --quiet settle, and kept as the knob callers set)
 # when nothing smaller bounds it, so a run the gate has not admitted by then ends through the
-# not-admitted path below: exit 75, one line naming the wait and the command to run again in the log,
-# `rc=75` there, `75` in `<log>.rc`, `run_rc=75` on the roster row; the caller copies the line and
-# exits 75. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
+# not-admitted path below: the side exits 75, one line naming the wait and the command to run again
+# in the log, `rc=75` there, `75` in `<log>.rc`, `run_rc=75` on the roster row; the caller copies the
+# line and exits 0. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
 # macOS ships no `setsid`, and perl is the one tool a stock machine has for it. No perl, or a
 # detached side that is neither alive nor ended once its pid file is read, exits 71 with one line.
 #
@@ -241,14 +264,18 @@
 #   71   --detach: the detached run could not be started (no perl, no log, or a detached side
 #        neither alive nor ended); one line says which
 #   70   --detach: the run was LOST — its pid died and it wrote no `<log>.rc` (never a timeout)
-#   75   the gate did not admit the command within the call's limit (the line says to run it
-#        again; the command never ran)
+#   0    also when the gate did not admit the command, the shim's own ask or the command's (THE
+#        NOTE): the line says to run it again, the command never ran, and the stamp, the log's
+#        rc line, `<log>.rc` and the roster's run_rc= say 75; a detached caller that reads 75 as
+#        the run's end exits 0 the same
 #   124  --kill-after fired during the run
 #   128+n  the shim itself was stopped by signal n (its command is killed with it)
-# 75 is EX_TEMPFAIL, "try again later", which is what a wait that ran out means.
+# 75 is EX_TEMPFAIL, "try again later", which is what a wait that ran out means: the records' code.
+#   --expect red inverts the console's code of a verdict, above; never the stamp's
 # A command can exit 75 or 124 itself; the shim's own always comes after a `booked:` or
 # `gate:` line on stderr, and the stamp of either is never proof of a green run. The stamp's
-# `rc=` is the exit code.
+# `rc=` is the command's own exit code, or 75 for a 0 that ran nothing (THE NOTE), whatever the
+# shim returns.
 #
 # THE WAITS. The gate's wait polls every BIONIC_GATE_POLL seconds (lib/gate.sh) and prints one
 # line when it starts. The store follows BIONIC_GATE_DIR.
@@ -264,20 +291,24 @@ case "${BASH_SOURCE[0]}" in */*) : ;; *) BOOKED_SELF_DIR="$(pwd -P)" ;; esac
 . "$BOOKED_SELF_DIR/lib/roots.sh" 2>/dev/null
 # shellcheck disable=SC1091
 . "$BOOKED_SELF_DIR/lib/resources.sh" || exit 2
-# gate.sh brings the liveness rule (slots.sh) with it.
+# gate.sh brings the liveness rules (slots.sh, alive.sh) with it.
 # shellcheck disable=SC1091
 . "$BOOKED_SELF_DIR/lib/gate.sh" || exit 2
+# shellcheck disable=SC1091
+. "$BOOKED_SELF_DIR/lib/loader.sh" 2>/dev/null
+# The clock's one home, asked by name rather than reached through gate.sh.
+bionic_need time.sh _time_epoch
 
 BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class <heavy class>] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class <heavy class>] [--runner] [--unplaced] [--detach [--no-wait]] [--expect red] -- <command>\n' >&2
   exit 2
 }
 
 kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; cls=""; agent=""; runner=0; unplaced=0
-detach=0; run_log=""; no_wait=0
+detach=0; run_log=""; no_wait=0; expect=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --agent)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; agent="$2"; shift 2 ;;
@@ -298,6 +329,8 @@ while [ "$#" -gt 0 ]; do
     --unplaced)     unplaced=1; shift ;;
     --detach)       detach=1; shift ;;
     --no-wait)      no_wait=1; shift ;;
+    --expect)       [ "$#" -ge 2 ] && [ "$2" = red ] || booked_usage; expect=red; shift 2 ;;
+    --expect=*)     [ "${1#--expect=}" = red ] || booked_usage; expect=red; shift ;;
     # THE DETACHED SIDE (internal): the caller of --detach starts this shim again with the log it
     # claimed; nobody types it.
     --run-log)      [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_log="$2"; shift 2 ;;
@@ -357,16 +390,39 @@ booked_stamp() {  # <rc>
   c="$(booked_one_line "$cmd" 120)"
   [ -z "$suites" ] || s="|suites=${suites//[!A-Za-z0-9._+,?-]/?}"
   printf 'stamp/v1|head=%s|dirty=%s|rc=%s|at=%s%s|cmd=%s\n' \
-    "$stamp_head" "${stamp_dirty:-0}" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$s" "$c" \
+    "$stamp_head" "${stamp_dirty:-0}" "$1" "$(iso_now)" "$s" "$c" \
     >> "$stamp_file" 2>/dev/null
   return 0
+}
+
+# booked_exit <rc> — THE CONSOLE'S CODE, the one place a declared run meant to fail is inverted
+# (--expect red, above). Every record is written before this, with the command's own code.
+booked_exit() {
+  local rc="$1"
+  if [ "$expect" = red ]; then
+    case "$rc" in
+      0)
+        printf 'booked: declared meant to fail, and it passed (rc=0, kept in the record) — exit 1\n' >&2
+        rc=1 ;;
+      2|70|71|75|124|126|127)
+        printf 'booked: declared meant to fail, but rc=%s is no verdict on the suite — exit %s\n' "$rc" "$rc" >&2 ;;
+      *)
+        if [ "$rc" -ge 128 ]; then
+          printf 'booked: declared meant to fail, but rc=%s is a signal, no verdict on the suite — exit %s\n' "$rc" "$rc" >&2
+        else
+          printf 'booked: failed as declared (rc=%s, kept in the record) — exit 0\n' "$rc" >&2
+          rc=0
+        fi ;;
+    esac
+  fi
+  exit "$rc"
 }
 
 # ── running the command ──────────────────────────────────────────────────────
 CHILD=""; RUN_RC=0
 # The request this shim asked for: its id, and whether this shim holds it (1) or runs under an
 # ancestor's admission the gate believed (0). Only a holder samples and ends it.
-BOOKED_ID=""; BOOKED_OWN=0; BOOKED_SAMPLE_TICKS=10; BOOKED_IDF=""
+BOOKED_ID=""; BOOKED_OWN=0; BOOKED_SAMPLE_TICKS=10
 
 booked_tree() {  # <pid> — the pid and its descendants, each stopped so none can fork
   local c
@@ -493,7 +549,7 @@ trap 'booked_on_signal 1' HUP
 trap 'booked_on_signal 2' INT
 trap 'booked_on_signal 3' QUIT
 trap 'booked_on_signal 15' TERM
-trap 'rm -f ${BOOKED_IDF:+"$BOOKED_IDF"}' EXIT
+trap 'rm -f ${GATE_ASK_FILE:+"$GATE_ASK_FILE"} ${BOOKED_NOTE:+"$BOOKED_NOTE"}' EXIT
 
 # booked_req_field <id> <field> — the request's last <field>= line (lib/gate.sh's request file).
 booked_req_field() {
@@ -504,7 +560,17 @@ booked_not_admitted() {  # the gate did not admit the command within the call's 
   printf 'booked: the gate did not admit this command within %ss; request %s keeps its turn — run again: %s\n' \
     "$BOOKED_WITHIN" "${BOOKED_ID:-?}" "$cmd" >&2
   booked_stamp "$BOOKED_WAITED_RC"
-  exit "$BOOKED_WAITED_RC"
+  booked_not_run_end
+}
+
+# booked_not_run_end — THE END OF A RUN THAT NEVER RAN, every record already written with 75. The
+# detached side exits 75, so its exit trap writes 75 to the log's rc line, `<log>.rc` and the roster
+# row, and its caller maps it (booked_follow). Anywhere else it is the console's end: the caller's
+# note gets one line (THE NOTE), and the exit is 0, an ordinary answer, outside booked_exit.
+booked_not_run_end() {
+  [ -z "$run_log" ] || exit "$BOOKED_WAITED_RC"
+  [ -z "$BOOKED_OUTER_NOTE" ] || printf 'booked.sh: not admitted: %s\n' "$(booked_one_line "$cmd" 120)" >> "$BOOKED_OUTER_NOTE" 2>/dev/null
+  exit 0
 }
 
 # booked_cd_dir — where the command's first suite segment runs, or nothing: the one placement reader's
@@ -529,16 +595,11 @@ BOOKED_ASK_DIR="$stamp_dir"
 # cannot write goes on unadmitted.
 booked_ask() {
   local rc here="$PWD" moved=0
-  BOOKED_IDF="$(mktemp "${TMPDIR:-/tmp}/booked-id.XXXXXX" 2>/dev/null)"
-  # Asked from the stamp's tree (THE TREE THE ASK NAMES), in this shell, then straight back.
+  # Asked from the stamp's tree (THE TREE THE ASK NAMES), in this shell, then straight back. The id comes back through a
+  # file (lib/gate.sh `gate_ask_here`), which the exit trap removes if the shim is ended while the ask waits.
   if [ -n "$BOOKED_ASK_DIR" ] && cd "$BOOKED_ASK_DIR" 2>/dev/null; then moved=1; fi
-  if [ -n "$BOOKED_IDF" ]; then
-    gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} ${cls:+--class "$cls"} > "$BOOKED_IDF"; rc=$?
-    { read -r BOOKED_ID < "$BOOKED_IDF"; } 2>/dev/null
-    rm -f "$BOOKED_IDF"; BOOKED_IDF=""
-  else
-    BOOKED_ID="$(gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} ${cls:+--class "$cls"})"; rc=$?
-  fi
+  gate_ask_here booked-id "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} ${cls:+--class "$cls"}; rc=$?
+  BOOKED_ID="$GATE_ASK_ID"
   [ "$moved" -eq 0 ] || cd "$here" 2>/dev/null
   case "$rc" in
     0)
@@ -561,7 +622,7 @@ booked_ask() {
 # tree's project is the main checkout. Nothing outside git.
 booked_project_root() {
   local d="${BOOKED_ASK_DIR:-.}" c
-  c="$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  c="$(_gate_common_dir "$d")" || return 0
   case "$c" in
     */.git) printf '%s' "${c%/.git}" ;;
     *) git -C "$d" rev-parse --show-toplevel 2>/dev/null ;;
@@ -601,17 +662,6 @@ booked_claim_log() {
   return 1
 }
 
-# booked_live <pid> <log> — rc 0 when <pid> is alive AND is still the detached shim of <log>: `ps`
-# names booked.sh with that --run-log. A pid the system gave to another process is not this run.
-booked_live() {
-  local c
-  case "$1" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 "$1" 2>/dev/null || return 1
-  c="$(ps -ww -o command= -p "$1" 2>/dev/null)" || return 1
-  case "$c" in *booked.sh*"--run-log $2"*) return 0 ;; esac
-  return 1
-}
-
 # booked_rc_of <log> — the run's code, from `<log>.rc`, which only the detached side writes, after
 # the log's own rc line; rc 1 while there is none. Never from the log's last line alone: a command
 # whose own last output is `rc=<n>` (a door command's `echo "rc=$rc"`) would read as ended.
@@ -637,7 +687,7 @@ booked_find_live() {
     if [ "$n" -eq 1 ]; then p="$1/$2.log"; else p="$1/$2-$n.log"; fi
     [ -e "$p" ] || break
     pid=""; { read -r pid < "$p.pid"; } 2>/dev/null
-    if [ -n "$pid" ] && ! booked_rc_of "$p" >/dev/null && booked_live "$pid" "$p" \
+    if [ -n "$pid" ] && ! booked_rc_of "$p" >/dev/null && alive_shim "$pid" "$p" \
        && [ "$(cat "$p.key" 2>/dev/null)" = "$key" ]; then
       found="$p"; fpid="$pid"
     fi
@@ -649,9 +699,8 @@ booked_find_live() {
 
 booked_mtime_utc() {  # <file> — its last write, UTC ISO-8601
   local m
-  m="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
-  [ -n "$m" ] || { printf 'unknown'; return 0; }
-  date -u -r "$m" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$m" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown'
+  m="$(file_mtime "$1")" || { printf 'unknown'; return 0; }
+  epoch_iso "$m" || printf 'unknown'
 }
 
 # booked_follow <log> <pid> — THE WAIT: every BIONIC_RUN_POLL seconds, the log's new whole lines to
@@ -666,7 +715,9 @@ booked_follow() {
     rc="$(booked_rc_of "$log")" && {
       total="$(wc -l < "$log" | tr -d ' ')"
       [ "$((total - 1))" -le "$done_n" ] || sed -n "$((done_n + 1)),$((total - 1))p" "$log"
-      exit "$rc"
+      # A run that never ran ended 75 in its records; the caller's answer is 0, its line already copied.
+      [ "$rc" != "$BOOKED_WAITED_RC" ] || booked_not_run_end
+      booked_exit "$rc"
     }
     total="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
     case "$total" in ''|*[!0-9]*) total=$done_n ;; esac
@@ -691,7 +742,7 @@ booked_follow() {
       printf 'booked: LOST run=%s last-written=%s\n' "$id" "$(booked_mtime_utc "$log")" >&2
       exit 70
     fi
-    booked_live "$pid" "$log" || { dead=1; continue; }
+    alive_shim "$pid" "$log" || { dead=1; continue; }
     sleep "$poll"
   done
 }
@@ -746,6 +797,11 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
     # background job) hands the ignored state to the detached side and the command below it, where no bash can trap
     # or be ended by it; a bash cannot un-ignore a signal, this perl can, once, before it execs the shim.
     $SIG{$_} = "DEFAULT" for qw(HUP INT QUIT);
+    # NO HOLD OF THE CALLER: BIONIC_HELD names the held reads of the one command that started this run (lib/proof.sh
+    # `proof_hold_begin`), and that command removes them when it ends. This run outlives it, so a poker inside it would
+    # fold into a directory taken away under the fold and refuse what it was asked to record; without the name, each
+    # opens a hold of its own.
+    delete $ENV{BIONIC_HELD};
     open(STDIN, "<", "/dev/null") or POSIX::_exit(4);
     open(STDOUT, ">>", $log) or POSIX::_exit(4);
     open(STDERR, ">&", \*STDOUT) or POSIX::_exit(4);
@@ -785,12 +841,13 @@ booked_run_open() {  # at the start of the tail, in the detached side
   case "$sid" in ''|*[!A-Za-z0-9_-]*) return 0 ;; esac
   r="$(booked_project_root)"
   [ -n "$r" ] || return 0
-  BOOKED_ROSTER="$r/.bionic/tmp/roster-$sid.state"
-  if [ ! -f "$BOOKED_ROSTER" ] || [ -L "$BOOKED_ROSTER" ]; then BOOKED_ROSTER=""; return 0; fi
+  # The roster library first: it names the roster's file as well as writing to it.
   # shellcheck disable=SC1091
   . "$BOOKED_SELF_DIR/lib/roster.sh" 2>/dev/null || { BOOKED_ROSTER=""; return 0; }
+  BOOKED_ROSTER="$(roster_path "$r" "$sid")"
+  if [ ! -f "$BOOKED_ROSTER" ] || [ -L "$BOOKED_ROSTER" ]; then BOOKED_ROSTER=""; return 0; fi
   roster_mark_run "$BOOKED_ROSTER" "$agent" "$run_log" "run_pid=$$" "run_head=$stamp_head" \
-    "run_cmd=$(booked_one_line "$cmd" 120)" "run_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" || BOOKED_ROSTER=""
+    "run_cmd=$(booked_one_line "$cmd" 120)" "run_started_at=$(iso_now)" || BOOKED_ROSTER=""
 }
 
 # booked_run_line <rc> — THE RUN, RECORDED WHERE A FLOOR PROOF LOOKS (wave-37 T4; D7, REQ-6 AC-6.1; ADR-057): after the
@@ -817,12 +874,7 @@ booked_run_line() {
   case "$sid" in ''|*[!A-Za-z0-9_-]*) return 0 ;; esac
   r="$(booked_project_root)"
   [ -n "$r" ] && [ -f "$run_log" ] || return 0
-  # shellcheck disable=SC1091
-  { declare -F session_plan >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/run.sh"; } >/dev/null 2>&1 || return 0
-  # shellcheck disable=SC1091
-  { declare -F line_event >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/line.sh"; } >/dev/null 2>&1 || return 0
-  # shellcheck disable=SC1091
-  { declare -F _detect_sha256 >/dev/null 2>&1 || . "$BOOKED_SELF_DIR/lib/detect.sh"; } >/dev/null 2>&1 || return 0
+  bionic_need run.sh session_plan && bionic_need line.sh line_event && bionic_need detect.sh _detect_sha256 || return 0
   plan="$(session_plan "$r" "$sid" 2>/dev/null)" || return 0
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   sha="$(_detect_sha256 "$run_log")" || return 0
@@ -832,10 +884,10 @@ booked_run_line() {
 }
 
 booked_run_close() {  # <rc> — the exit trap of the detached side
-  rm -f ${BOOKED_IDF:+"$BOOKED_IDF"}
+  rm -f ${GATE_ASK_FILE:+"$GATE_ASK_FILE"} ${BOOKED_NOTE:+"$BOOKED_NOTE"}
   if [ -n "$BOOKED_ROSTER" ]; then
     roster_mark_run "$BOOKED_ROSTER" "$agent" "$run_log" "run_rc=$1" \
-      "run_ended_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null
+      "run_ended_at=$(iso_now)" 2>/dev/null
   fi
   # THE RC LINE IS A LINE OF ITS OWN: a command whose output ends without a newline would glue it.
   [ -z "$(tail -c 1 "$run_log" 2>/dev/null)" ] || printf '\n' >> "$run_log"
@@ -847,7 +899,12 @@ booked_run_close() {  # <rc> — the exit trap of the detached side
 }
 
 # ── main ─────────────────────────────────────────────────────────────────────
+# THE NOTE (header): the caller's, kept to tell; the detached side tells none, its caller does.
+BOOKED_OUTER_NOTE="${BIONIC_NOT_ADMITTED:-}"; [ -z "$run_log" ] || BOOKED_OUTER_NOTE=""
 [ "$detach" -eq 0 ] || [ -n "$run_log" ] || booked_detach
+BOOKED_NOTE="$(mktemp "${TMPDIR:-/tmp}/booked-note.XXXXXX" 2>/dev/null)" || BOOKED_NOTE=""
+if [ -n "$BOOKED_NOTE" ]; then export BIONIC_NOT_ADMITTED="$BOOKED_NOTE"; else unset BIONIC_NOT_ADMITTED; fi
+BOOKED_NOT_RUN=0
 [ -z "$run_log" ] || booked_run_open
 BOOKED_T0=$SECONDS
 # THE CALL'S LIMIT: the smaller of --kill-after and --max-wait; the ask's --within. With neither,
@@ -875,7 +932,10 @@ if [ "$suites" != run.sh ] && [ "$runner" -eq 0 ]; then
   booked_ask work
 fi
 booked_run
+# A command that exits 0 having run nothing the gate admitted said so in the note: recorded 75.
+if [ "$RUN_RC" -eq 0 ] && [ -n "$BOOKED_NOTE" ] && [ -s "$BOOKED_NOTE" ]; then RUN_RC=$BOOKED_WAITED_RC; BOOKED_NOT_RUN=1; fi
 booked_end
 
 booked_stamp "$RUN_RC"
-exit "$RUN_RC"
+[ "$BOOKED_NOT_RUN" -eq 0 ] || booked_not_run_end
+booked_exit "$RUN_RC"

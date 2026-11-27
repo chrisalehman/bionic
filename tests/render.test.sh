@@ -90,7 +90,6 @@ rt_check() {
   RT_RC=$?
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 1: the tree arm on this repo (AC-R1.1)"
 
 rt_check "$REPO" --check
@@ -103,7 +102,6 @@ expect_match "1b: …and says every final and the manifest match a fresh render"
 # pinning it against the live checkout would make this suite a function of the developer's
 # staging area. Sections 2-6 drive it against fixtures whose commit state the suite owns.
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 3: a gitignored render input — the tree arm cannot see it, the archive arm can (AC-R1.4)"
 
 # THE PLANT. A block file that is on disk and OUT of HEAD, injected by a template that IS
@@ -136,7 +134,6 @@ rt_check "$FIX_IGN" --check --archive
 expect_ne "3e: the ARCHIVE arm is RED on the same tree" "0" "$RT_RC"
 expect_match "3f: …and it names the render input HEAD is missing" "*planted*" "$RT_OUT"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 4: a source edit left out of the commit — the arm DIFFS, it does not only detect missing files"
 
 # A different failure mode of the same class, and the one that proves the arm compares
@@ -169,7 +166,6 @@ expect_match "4d: …and it names a rendered final that HEAD does not reproduce"
 expect_match "4e: …and prints the difference as a diff, not only a verdict" \
   "*UNCOMMITTED SOURCE SENTENCE*" "$RT_OUT"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 5: the manifest half, and that --archive never writes"
 
 FIX_MAN="$TMPROOT/manifest"
@@ -203,7 +199,6 @@ expect_ne "5f: the bare --archive form is a check too (red on the same doctored 
 expect_true "5g: …and it wrote nothing either" \
   grep -qF "$RT_ZEROS" "$FIX_MAN/payload/integrity/rendered.sha256"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 6: the arm refuses rather than passes when it cannot do its job"
 
 FIX_OK="$TMPROOT/control"
@@ -232,7 +227,6 @@ expect_match "6b: …and says what it needed" "*git work tree*" "$RT_OUT"
 expect_true "6c: the renderer documents the arm in its own usage block" \
   grep -qF 'THE ARCHIVE ARM' "$RENDER_SH"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 7: a stray template under the role unit never becomes a phantom role file (A15, S10, AC-R4.3)"
 
 # THE DEFECT THIS GUARDS AGAINST. `agents-src/templates` (the role unit) is a flat
@@ -280,7 +274,6 @@ bash "$FIX_A15R/agents-src/render.sh" >/dev/null 2>&1
 expect_true "7f: …a template naming a real role still renders (7c-7d discriminate on membership)" \
   test -f "$FIX_A15R/agents/auditor.md"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 8: render.sh itself is a render input the archive arm compares (A-18)"
 
 # THE GAP THIS CLOSES (A-18; s01-render-pipeline's A-S01-1). Every OTHER source under
@@ -311,7 +304,6 @@ rt_check "$FIX_OK" --check --archive
 expect_status "8e: …while an honestly-committed renderer keeps the archive arm green" \
   0 "$RT_RC"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 9: browser-verify's frontmatter description is valid YAML (A19, AC-R4.3)"
 
 # THE DEFECT (A19). A `description:` scalar with an unquoted `: ` sequence deep inside its
@@ -369,11 +361,12 @@ done
 # The grep a reader runs: the three files that carry the rule, and no other agent file.
 # THE PAIRED NEGATIVE: a file without the rule is read as lacking it, so 17c cannot pass blind.
 
-section "Section 18: §ORDER-TEXT — the Step-8 text and the brief scaffold name the integrate row's order: reviews-part, push, gh pr create"
+section "Section 18: §ORDER-TEXT — the Step-8 text and the brief scaffold name the integrate row's order: reviews-part, push, gh pr create (the scaffold names reviews-part alone)"
 # The integrate row publishes the release entry's reviews part before it pushes and before it opens the pull request, so the
-# order is doctrine the step text and the scaffold carry, rendered from their sources. A reader of either file that finds
-# the verb after the push, or not at all, would run the part late.
-# fails-when: a rendered file lacks `reviews-part`, names the three acts out of order, or differs from its source.
+# order is doctrine the step text carries, rendered from its source; the scaffold's Row: comment names the part alone,
+# because the push and the pull request belong to `publish` and a second actor named for them would be taught the act twice.
+# fails-when: the Step-8 text lacks `reviews-part` or names the three acts out of order; the scaffold lacks
+# `reviews-part <id>`, or its line naming it also names a push or `gh pr create`; or a rendered file differs from its source.
 ot_order() {  # <file> <verb> <push> <create> -> `ordered` when the file's first line naming the verb names push, then create after it
   awk -v v="$2" -v p="$3" -v c="$4" '
     { i = index($0, v); if (i == 0) next
@@ -387,14 +380,22 @@ expect_nonempty "18-0 precondition: the Step-8 text exists and is read" "$(cat "
 expect_eq "18a the rendered Step-8 text names reviews-part <row>, then the push, then gh pr create" "ordered" \
   "$(ot_order "$OT_STEP" 'reviews-part <row>' 'push' 'gh pr create')"
 expect_eq "18b …and so does its source" "ordered" "$(ot_order "$OT_TMPL" 'reviews-part <row>' 'push' 'gh pr create')"
+ot_alone() {  # <file> <verb> -> `alone` when the file's first line naming the verb names no push and no gh pr create, `late` when it names one
+  awk -v v="$2" '
+    { if (index($0, v) == 0) next
+      print ((index($0, "push") || index($0, "gh pr create")) ? "late" : "alone"); exit }' "$1"
+}
 for _ot_f in skills/canonical-sdlc/dispatch.md skills/canonical-sdlc/SKILL.md; do
-  expect_eq "18c $_ot_f's scaffold names reviews-part <id>, then push, then gh pr create" "ordered" \
-    "$(ot_order "$REPO/$_ot_f" 'reviews-part <id>' 'push' 'gh pr create')"
+  expect_eq "18c $_ot_f's scaffold names reviews-part <id> and no push and no gh pr create" "alone" \
+    "$(ot_alone "$REPO/$_ot_f" 'reviews-part <id>')"
 done
-expect_eq "18d …and the scaffold's source block does" "ordered" "$(ot_order "$REPO/agents-src/blocks/brief-scaffold.md" 'reviews-part <id>' 'push' 'gh pr create')"
+expect_eq "18d …and the scaffold's source block does" "alone" "$(ot_alone "$REPO/agents-src/blocks/brief-scaffold.md" 'reviews-part <id>')"
 # THE PAIRED NEGATIVE: the same reader, shown the three acts in the wrong order, says nothing.
 OT_BAD="$TMPROOT/step8-late.md"
 printf 'the integrate row pushes, then runs `reviews-part <row>`, then `gh pr create`\n' > "$OT_BAD"
+OT_PUSH="$TMPROOT/scaffold-push.md"
+printf 'Row: <id>  # the integrate row runs reviews-part <id>, push, gh pr create\n' > "$OT_PUSH"
+expect_eq "18d2 a scaffold line naming a push after reviews-part <id> is read as late, not alone" "late" "$(ot_alone "$OT_PUSH" 'reviews-part <id>')"
 expect_eq "18e a text naming the push before reviews-part is not read as ordered" "" "$(ot_order "$OT_BAD" 'reviews-part <row>' 'push' 'gh pr create')"
 
 section "19 — this suite's header names suites that exist"

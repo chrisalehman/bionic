@@ -25,6 +25,12 @@
 # name is printed lowercased with each run of spaces as one `-` (`Fails when` is `fails-when`), so
 # every answer is a `key=value` line. An escaped `\|` inside a cell is a `|` in its value.
 #
+# THE CRITERIA TABLE HAS TWO SPELLINGS and one set of keys. A page heads it `## Test design` with the columns `Test type`
+# and `Test`, or, written before that, `## Eval design` with `Eval type` and `Eval`; every page on disk must read as it
+# did. The heading is asked for by PLAN_READ_CRITERIA, both names, and the old columns become the new keys where a
+# header becomes a key, in name(): `Eval type` is `test-type` and `Eval` is `test`, so no reader of a cell knows the
+# old words.
+#
 # WHERE A TABLE IS, five rules, because a table read in the wrong place is a schedule nobody wrote:
 #   - a fenced block is prose: a table or a heading inside ``` is an example about the plan, not of it, and every
 #     reader here, of a table, a heading or a section, asks `fenced()` and keeps no rule of its own;
@@ -38,6 +44,18 @@
 # Both exit 0 with an answer, 1 when there is none, 2 when the plan is not a file.
 #
 # bash 3.2 (ADR-001).
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+
+PLAN_READ_CRITERIA='Test design|Eval design'
+
+# release_row(kind, step, state, counts): a doc row at step 7+ in a state <counts> admits (landed, standing, or any).
+_PLAN_READ_RELEASE_AWK='
+    function release_row(k, s, st, counts) {
+      if (k != "doc" || s !~ /^[0-9]+$/ || s + 0 < 7) return 0
+      if (counts == "landed") return st == "landed"
+      if (counts == "standing") return st != "dropped"
+      return 1
+    }'
 
 # A plan's line ends translated, never deleted: `eol(record, out)` splits one input record into the lines it
 # holds, a trailing CR dropped (CRLF) and each lone CR ending a line, and returns how many. Deleted, a
@@ -66,6 +84,15 @@ plan_read_header() {  # <plan> [key [all]] -> `key=value` lines in the header's 
     END { exit !c }' "$1"
 }
 
+# A header that holds no key answers plan_read_header with nothing, as a page with no header does; a caller that
+# names the two apart asks whether the page opens with the fence, its first line ended as the header reader ends it.
+plan_read_headed() {  # <plan> -> 0 when its first line is `---`; 1 when it is not or the page is empty, 2 no plan
+  [ -f "${1:-}" ] || return 2
+  awk "$_PLAN_READ_EOL"'
+    { eol($0, L); h = (L[1] == "---"); exit }
+    END { exit !h }' "$1"
+}
+
 # _plan_read_lines <file> -> its lines, a carriage return ending a line wherever it stands. A file saved
 # with CR alone is one awk record, which no later pass can split again, so this pass comes first.
 _plan_read_lines() {
@@ -81,7 +108,8 @@ _plan_read_lines() {
 # done, never exiting early: its input is a pipe, and a writer cut short fails the pipeline under pipefail.
 # NO APOSTROPHE inside it: it is single-quoted.
 # A section is named by its heading the one way: `## ` and the name, its first letter in either case, going on
-# only after a blank, so `## Design — v2` is the Design section and `## Designer notes` is not. `sec` is the name.
+# only after a blank, so `## Design — v2` is the Design section and `## Designer notes` is not. `sec` is the name, or
+# several joined by `|`, any of which names it, so a section a page may head in two spellings is asked for once.
 # What a fence is, said once for every reader and writer of a heading, so none ends a section at an example's line:
 # `fenced(s)` is 1 on a ``` line, which opens or closes the block, and on each line inside one. It keeps the block in
 # `fence`, so a reader calls it on every line, in order, from the file's first.
@@ -89,7 +117,8 @@ _PLAN_READ_FENCE='
     function fenced(s) { if (s !~ /^[ \t]*```/) return fence; fence = !fence; return 1 }'
 _PLAN_READ_NAMED="$_PLAN_READ_FENCE"'
     function cap(s) { return tolower(substr(s, 1, 1)) substr(s, 2) }
-    function named(h,   l) { l = length(sec); return (cap(substr(h, 1, l)) == cap(sec) && (length(h) == l || substr(h, l + 1, 1) ~ /[ \t]/)) }'
+    function named1(h, n,   l) { l = length(n); return (cap(substr(h, 1, l)) == cap(n) && (length(h) == l || substr(h, l + 1, 1) ~ /[ \t]/)) }
+    function named(h,   m, i, a) { m = split(sec, a, "|"); for (i = 1; i <= m; i++) if (named1(h, a[i])) return 1; return 0 }'
 _PLAN_READ_TABLE="$_PLAN_READ_NAMED"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
@@ -97,7 +126,7 @@ _PLAN_READ_TABLE="$_PLAN_READ_NAMED"'
       for (i = 1; i <= n; i++) { gsub(/^[ \t]+|[ \t]+$/, "", out[i]); gsub(/\001/, "|", out[i]) }
       return n
     }
-    function name(i,   k) { k = tolower(head[i]); gsub(/[ \t]+/, "-", k); return k }
+    function name(i,   k) { k = tolower(head[i]); gsub(/[ \t]+/, "-", k); return (k == "eval-type") ? "test-type" : (k == "eval") ? "test" : k }
     function line(   i, o, v) { o = ""; for (i = 1; i <= nh; i++) { v = r[i]; gsub(/\t/, " ", v); o = o (i > 1 ? "\t" : "") name(i) "=" v }; return o }
     { sub(/\r$/, "") }
     stop { next }
@@ -140,27 +169,30 @@ plan_read_table() {
     function row() { print line(); if (rn > nh) printf "#\tover\t%s\t%d\n", r[kc], rn }'"$_PLAN_READ_TABLE"
 }
 
-# plan_read_criterion_sums <plan> [eval] -> `<criterion><TAB><sum>` per criterion, file order, and its `Eval` cell as a
-# third field when a second argument is given. The sum is of the first `## Eval design` row naming it, its cells as the
+# plan_read_criterion_sums <plan> [test] -> `<criterion><TAB><sum>` per criterion, file order, and its `test` cell as a
+# third field when a second argument is given. The sum is of the first criteria table row naming it, its cells as the
 # table reader reads them, so a row reads as restated exactly when a cell's words change and never for its spacing: a
-# 32-bit string hash over bytes, the same on every awk. Only a criterion id of letters, digits, `.`, `_` and `-` is
+# 32-bit string hash over bytes, the same on every awk. The hashed row spells its keys in the table's old words
+# (`eval-type=`, `eval=`): a sum is recorded at a dispatch and compared at the landing, maybe by a later reader, so a
+# page reads the same sum under either reader and in either spelling. Only a criterion id of letters, digits, `.`, `_` and `-` is
 # summed, so a sum always fits a log field. 1 none, 2 no plan.
 plan_read_criterion_sums() {
   [ -f "${1:-}" ] || return 2
-  plan_read_rows "$1" 'Eval design' criterion 2>/dev/null | LC_ALL=C awk -F'\t' -v ev="${2:-}" '
+  plan_read_rows "$1" "$PLAN_READ_CRITERIA" criterion 2>/dev/null | LC_ALL=C awk -F'\t' -v ev="${2:-}" '
     BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
     { c = ""; e = ""
       for (i = 1; i <= NF; i++) { k = index($i, "="); f = substr($i, 1, k - 1)
-        if (f == "criterion") c = substr($i, k + 1); else if (f == "eval") e = substr($i, k + 1) }
+        if (f == "criterion") c = substr($i, k + 1); else if (f == "test") e = substr($i, k + 1) }
       if (c !~ /^[A-Za-z0-9._-]+$/ || (c in seen)) next; seen[c] = 1
-      h = 5381; for (i = 1; i <= length($0); i++) h = (h * 33 + ord[substr($0, i, 1)]) % 4294967296
+      s = "\t" $0; gsub(/\ttest-type=/, "\teval-type=", s); gsub(/\ttest=/, "\teval=", s); s = substr(s, 2)
+      h = 5381; for (i = 1; i <= length(s); i++) h = (h * 33 + ord[substr(s, i, 1)]) % 4294967296
       printf "%s\t%.0f%s\n", c, h, (ev != "" ? "\t" e : ""); n++ }
     END { exit !n }'
 }
 
 # plan_read_criterion_task <plan> [<criterion>] -> `<criterion><TAB><value>` per criterion that names the task proving it,
 # file order: one task id, several joined by commas, or `9` alone, the close's step. The value is the criterion's cell
-# in the `Task` column of its `## Eval design` row (the first row naming it), a cell holding no letter or digit naming
+# in the `Task` column of its criteria table row (the first row naming it), a cell holding no letter or digit naming
 # none, on a page at 15; a page at any other version names none. The person writes it; nothing derives it. 1 none, 2
 # no plan.
 plan_read_criterion_task() {
@@ -168,7 +200,7 @@ plan_read_criterion_task() {
   local v
   v="$(plan_read_header "$1" canonical_sdlc_version 2>/dev/null)" || v=""
   [ "${v#*=}" = 15 ] || return 1
-  plan_read_rows "$1" 'Eval design' criterion 2>/dev/null | awk -F'\t' -v want="${2:-}" '
+  plan_read_rows "$1" "$PLAN_READ_CRITERIA" criterion 2>/dev/null | awk -F'\t' -v want="${2:-}" '
     { c = ""; t = ""
       for (i = 1; i <= NF; i++) { e = index($i, "="); k = substr($i, 1, e - 1); if (k == "criterion") c = substr($i, e + 1); else if (k == "task") t = substr($i, e + 1) }
       if (c == "" || (c in seen)) next; seen[c] = 1
@@ -214,20 +246,17 @@ plan_read_criterion_faults() {
 # row id is that row, itself included, so a row that waits on itself waits for ever; a path is each other
 # row whose Files write it, so a row's artifact is that row; `head` is each other row writing the tracked
 # tree that does not read head itself or stands at an earlier step, `record` the same over the record;
-# `merge` each integrate row; `proof:<kind>` each row of the kind that writes one, and the proof itself.
+# `merge` each integrate row; `proof:<kind>` each row of the kind that writes one, and the proof itself. A whole-run point
+# writes a proof of its own kind, never the regression's, so it is no writer of `proof:regression`.
 # `live:` is read as what it prefixes, and a row reading `live:head` does not read the settled head, so it
 # still writes it for the rows that do. An integrate or close row also waits for the run to reach its step
 # (`step:<n>`). A path's writers are found once per path, from each row's Files entries split once.
 plan_read_waits() {
   [ -f "${1:-}" ] || return 2
-  local rows d
+  local rows
   rows="$(plan_read_rows "$1" Tasks)" || return 1
-  if ! declare -F _units_cell_awk >/dev/null 2>&1; then
-    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-    # shellcheck source=/dev/null
-    . "$d/units.sh" || return 2
-  fi
-  printf '%s\n' "$rows" | awk -F'\t' -v want="${2:-}" -v regno="$(_units_regno "$1")" "$(_units_files_awk)$(_units_cell_awk)"'
+  bionic_need units.sh _units_cell_awk || return 2
+  printf '%s\n' "$rows" | awk -F'\t' -v want="${2:-}" -v regno="$(_units_regno "$1")" "$_PLAN_READ_RELEASE_AWK$(_units_files_awk)$(_units_cell_awk)"'
     function put(i, t,   j) { if (!((i, t) in said)) { said[i, t] = 1; printf "%s\t%s\n", id[i], t } }
     # row(j, o): row i waits on row j by its read o; a row named by two reads is one line naming both.
     function row(j, o) {
@@ -250,7 +279,7 @@ plan_read_waits() {
     }
     END {
       if (want != "" && !(want in at)) exit 1
-      for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7) hasrel = 1
+      for (i = 1; i <= n; i++) if (release_row(knd[i], stp[i])) hasrel = 1
       for (i = 1; i <= n; i++) {
         code[i] = writes_head(fil[i]); m = split(fil[i], a, ",")
         for (k = 1; k <= m; k++) {
@@ -258,7 +287,7 @@ plan_read_waits() {
           if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
           sub(/!$/, "", e); nfe[i]++; fe[i, nfe[i]] = e; if (in_docs(e)) docs[i] = 1
         }
-        r = kdef(knd[i], stp[i])
+        r = kdef(knd[i], stp[i], tsk[i])
         # A REVIEW ROW READS THE QUESTIONS ITS TASK CELL DECLARES: its live read is `live:head:<q>[+<q>]`, the token the
         # scheduler judges per question, in place of the bare default; a row with no tag keeps it.
         if (knd[i] == "review" && (q = index(tsk[i], " · questions: "))) {
@@ -293,7 +322,7 @@ plan_read_waits() {
           } else if (t == "merge") {
             for (j = 1; j <= n; j++) if (j != i && knd[j] == "integrate") row(j, o)
           } else if (t ~ /^proof:/) {
-            for (j = 1; j <= n; j++) if (j != i && (p == "regression" && (knd[j] == "verify" || knd[j] == "test") || p == "review" && knd[j] == "review")) row(j, o)
+            for (j = 1; j <= n; j++) if (j != i && (p == "regression" && (knd[j] == "verify" || knd[j] == "test" && !marked(tsk[j])) || p == "review" && knd[j] == "review")) row(j, o)
           } else if (t !~ /[ \t:!]/ && t ~ /[\/.*?]/) {
             m = split(writers(t), w, " "); for (x = 1; x <= m; x++) if (w[x] != i) row(w[x], o)
           }
@@ -339,7 +368,7 @@ plan_read_heading() {
     END { exit !found }'
 }
 
-# WHAT A VERSION-15 PLAN HOLDS is what a person wrote: its header, Goal, Problem, Design, Eval design, Tasks and a
+# WHAT A VERSION-15 PLAN HOLDS is what a person wrote: its header, Goal, Problem, Design, Test design, Tasks and a
 # section per task. The machine's sections are gone to the log (the verification matrix, the state and the handoff), a
 # Tasks row is its nine authored cells, and a header key stays only if the reader answers from it. The keys below were
 # the run's own state written into its header (an abandon, a clean-up, the current step and its approvals), which the

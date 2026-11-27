@@ -186,7 +186,6 @@ if [ -r "$LIBDIR/resources.sh" ]; then
   echo "pressure at suite start: ${_pl:-unread}"
 fi
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A2 a subagent's and a teammate's question are answered for THAT asker's workspace"
 
 A2P="$(make_project a2 bound)"
@@ -247,7 +246,6 @@ drive "$A2P" "$(payload "$A2P" Bash "$(bash_ti "touch $A2P/src/d.txt")" a0000000
 expect_eq "A2.21 an agent id with no roster row: one decision" "1" "$(n_obj "$OUT")"
 expect_eq "A2.22 …a deny" "deny" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A2b a forged workspace line never widens a grant: only a tree git lists counts (wave-25 T18, critic C1)"
 #
 # The record lives in .bionic/tmp, and a script the hook never sees can append to it (N7). A
@@ -316,7 +314,6 @@ expect_eq "A2b.lead.3 forged path=<parent of main>: a write beside the project i
 drive "$A2LP" "$(payload "$A2LP" Write "$(file_ti "$A2LP/.worktrees/25-T1/y.txt")")"
 expect_eq "A2b.lead.4 paired positive: the session's true recorded tree is still the lead's" "allow" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A4 tools that collect human input are never answered"
 
 A4P="$(make_project a4 bound)"
@@ -330,7 +327,6 @@ expect_eq "A4.3 …and no answer line for either" "0" "$(log_lines "$A4P")"
 drive "$A4P" "$(payload "$A4P" WebFetch '{"url":"https://example.invalid"}')"
 expect_eq "A4.4 control: an unreadable tool on the same fixture is answered (deny)" "deny" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A5 after engagement, a failure answers deny naming the fault: never allow, never silence"
 
 A5P="$(make_project a5 bound)"
@@ -427,7 +423,6 @@ expect_eq "A5.h1 no library: rc 2, which the platform ignores on this event" "2"
 expect_empty "A5.h2 …and nothing on stdout (bionic claims no authority it cannot establish)" "$OUT"
 expect_true "A5.h3 …and the copy really is the hook (not an empty file)" test -s "$SANDBOX/broken/hooks/permission-answer.sh"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A6 an unbound session has the scratch only, whatever plan is newest"
 
 A6P="$(make_project a6 none)"
@@ -446,7 +441,6 @@ printf 'plan=%s\n' "$A6P/.bionic/docs/plans/epic-99/$PLAN_BASE.plan.md" > "$A6P/
 drive "$A6P" "$(payload "$A6P" Write "$(file_ti "$(record_of "$A6P")/x.md")")"
 expect_eq "A6.6 control: bound to that plan, the same record target allows" "allow" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A10 a session with no engagement marker gets no answer"
 
 INCIDENT="echo TR; bash -c 'TR=./x.jsonl; touch \$TR; rm -f \$TR'"
@@ -467,7 +461,6 @@ drive "$A10P" "$(payload "$A10P" Bash "$(bash_ti "$INCIDENT")")"
 expect_eq "A10.5 control: the marker restored, the same payload is answered" "deny" "$(behavior "$OUT")"
 expect_eq "A10.6 …and leaves its line" "1" "$(log_lines "$A10P")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A11 a project can turn the boundary off; only the literal false does"
 
 A11P="$(make_project a11 bound)"
@@ -493,7 +486,6 @@ n=$((n + 1))
 expect_eq "A11.6 no config file: answers" "deny" "$(behavior "$OUT")"
 expect_eq "A11.7 every answer above left exactly one line" "$n" "$(log_lines "$A11P")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A12 every answer leaves one line, with the seven fields, outside the project"
 
 A12P="$(make_project a12 bound)"
@@ -532,7 +524,6 @@ esac
 expect_eq "A12.14 nothing named for the log appears inside the project" "" \
   "$(find "$A12P" -name 'permission-answers*' 2>/dev/null)"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A13 main= is passed for every class: the project's shared directories are no one's"
 
 # The lead's checkout IS the main root (the fixture's main checkout holds the working branch).
@@ -569,7 +560,6 @@ expect_eq "A13.unbound.0 control: an unbound session writes its scratch" "allow"
 drive "$A13U" "$(payload "$A13U" Write "$(file_ti "$A13U/.git/x")" | jq --arg s "$A13U" '.scratchpad_dir = $s')"
 expect_eq "A13.unbound.1 …and is denied a write in .git under it" "deny" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A14 allow paths end to end, and the same paths through .. denied"
 
 A14P="$(make_project a14 bound)"
@@ -602,7 +592,6 @@ expect_eq "A14.11 a NotebookEdit inside the tree: allow" "allow" "$(behavior "$O
 drive "$A14P" "$(payload "$A14P" MultiEdit "$(jq -n --arg p "$A14P/src/m.txt" '{file_path:$p, edits:[]}')" aw99-T1-0974313b7a6b74f2 w99-T1)"
 expect_eq "A14.12 a MultiEdit in the main checkout: deny" "deny" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A15 a reserved question writes one gate line, once, and offers no file route"
 
 A15P="$(make_project a15 bound)"
@@ -628,7 +617,6 @@ ln -s "$SANDBOX/a15-gate-real" "$A15G"
 drive "$A15P" "$(payload "$A15P" Bash "$(bash_ti "gh pr create --fill")" aw99-T1-0974313b7a6b74f2 w99-T1)"
 expect_eq "A15.11 symlinked gate file: still deny" "deny" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A16 a command too large to read is denied, quickly"
 
 A16P="$(make_project a16 bound)"
@@ -648,7 +636,6 @@ expect_eq "A16.3 …in under 2 s (took ${A16T}s)" "yes" \
 drive "$A16P" "$(payload "$A16P" Bash "$(bash_ti "touch $A16P/src/$(printf 'y%.0s' $(seq 1 200)).txt")")"
 expect_eq "A16.4 control: a long but readable command is read (allow)" "allow" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A17 a credential store is refused through any path that reaches it"
 
 # The reserved table used to be asked about the path a file tool TYPED, so a Read through a
@@ -691,7 +678,6 @@ for st in .npmrc .pypirc .git-credentials .kube/config .docker/config.json .gnup
   expect_contains "A17.store 'cat ~/$st': credentials" "|deny-reserved|credentials:" "$(tail -1 "$(log_of "$A17P")" 2>/dev/null)"
 done
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A18 a read-only agent's report is a root only inside what the lead holds"
 
 # The roster's deliverable= became the reader's write root with no containment test, so a
@@ -734,7 +720,6 @@ expect_eq "A18.9 unbound: a report in the record is denied (no run, no record he
 drive "$A18U" "$(payload "$A18U" Write "$(file_ti "$(scratch_of "$A18U")/RS.md")" aw99-RS-1 general-purpose)"
 expect_eq "A18.10 unbound control: a report in the scratch: allow" "allow" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A20 a command with more targets than the hook reads is denied at once"
 
 # One fork per target ran a 2000-operand rm past the hook's 10 s registration (review S3),
@@ -767,7 +752,6 @@ echo "§A20: at the number (${A20_MAX:-?} targets) the hook took ${A20_T3}s; one
 expect_eq "A20.5 control: exactly the number of targets, all inside the tree, is read: allow" "allow" "$(behavior "$OUT")"
 expect_eq "A20.6 …inside the registration (took ${A20_T3}s)" "yes" "$(awk -v t="$A20_T3" 'BEGIN { print (t != "" && t + 0 < 10.0) ? "yes" : "no" }')"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A21 on and off are one reading: the hook and the doctor agree on one config"
 
 # The ownership table names this suite for on/off across the hook and the doctor (spec §3),
@@ -817,7 +801,6 @@ for a21c in false False unset; do
   expect_eq "A21.$a21c.1 [$a21c] the hook and the doctor agree, and say $a21want" "$a21want|$a21want" "$a21hook|$a21doc"
 done
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§A22 a read that reaches a credential store is refused, by the path it takes or the tree it walks"
 
 # Through the real hook and the real reader (wave-25 T16's `reads` mode): every file a pure
@@ -861,8 +844,6 @@ expect_eq "A22.c3 control: a copy of an ordinary file within the tree: allow" "a
 a22 "find $A22T/src -name '*.txt'"
 expect_eq "A22.c4 control: a find rooted in the tree: allow" "allow" "$(behavior "$OUT")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════════════════════
 # The words, called directly (lib/grant.sh): a failure names what failed, and a denial's message is the reason beside its fix.
 pw() { bash -c '. "$1"; shift; "$@"; printf "%s|%s|%s" "$GRANT_FAIL_REASON" "$GRANT_FAIL_MESSAGE" "$GRANT_DENY_MESSAGE"' _ "$LIBDIR/grant.sh" "$@"; }
 expect_eq "A23.a a failure key quotes its facts in the reason and the message" \

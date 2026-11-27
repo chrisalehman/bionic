@@ -99,21 +99,8 @@
 #
 # [WALL: tests/fold.test.sh]
 
-_fold_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-
-# RESOLVED AT SOURCE TIME, for lib/context.sh's reason at `_CONTEXT_LIB_DIR`:
-# `${BASH_SOURCE[0]%/*}` is RELATIVE when the file was sourced by a relative path, and
-# a soft source that re-derived it later would read against whatever the caller's cwd
-# had become.
-_FOLD_LIB_DIR="$(cd "$(_fold_self_dir)" && pwd -P)"
-
-if ! declare -F refuse >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_FOLD_LIB_DIR/refuse.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need refuse.sh refuse
 
 # ─── The staging verbs ───────────────────────────────────────────────────────
 

@@ -107,12 +107,11 @@
 # prompt (fixtures `slash-args`, `slash-bare`).
 #
 # THE SESSION ID is `session_id` of lib/session.sh, as every reader of the session key takes it. It is
-# sourced from this file's own directory when the caller has not, the directory RESOLVED AT SOURCE TIME
-# as lib/context.sh resolves its own (a call-time `${BASH_SOURCE[0]%/*}` is relative to a working
-# directory the caller may have left, and a bare name has none).
+# loaded through lib/loader.sh's `bionic_need` when the caller has not, softly: a sibling that will not
+# load leaves its functions undefined and sourcing this file still succeeds.
 #
-# Sourced, never executed. Defines functions and one constant; the only thing it reads at load time
-# is the path of session.sh. Needs jq (rc 2 without it). bash 3.2. lib/root.sh (`project_root`) is
+# Sourced, never executed. Defines functions and one constant; the only things it reads at load time
+# are its siblings' paths. Needs jq (rc 2 without it). bash 3.2. lib/root.sh (`project_root`) is
 # sourced from here as session.sh is; lib/detect.sh (`project_slug`) when user_said first runs, since
 # it is a larger library and only the three verbs need it.
 
@@ -120,41 +119,20 @@
 # refusal text (hooks/session-poker.sh finding-move) both read this one number.
 SAID_MIN_WORDS=3
 
-_said_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-# RESOLVED AT SOURCE TIME, for the reason lib/context.sh states at `_CONTEXT_LIB_DIR`.
-_SAID_LIB_DIR="$(cd "$(_said_self_dir)" 2>/dev/null && pwd -P)"
-if ! declare -F session_id >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/session.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_SAID_LIB_DIR/session.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need session.sh session_id || :
 # The run's sessions are read by binding.sh's one reader, and its admission reads the marker through run.sh's
 # `session_plan`; each is sourced from here when the caller has not (functions only, nothing runs at source time).
-if ! declare -F session_plan >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/run.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_SAID_LIB_DIR/run.sh"
-fi
-if ! declare -F bind_sessions >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/binding.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_SAID_LIB_DIR/binding.sh"
-fi
+bionic_need run.sh session_plan || :
+bionic_need binding.sh bind_sessions || :
 # The root the words are held in is root.sh's one reader's (functions only).
-if ! declare -F project_root >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/root.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_SAID_LIB_DIR/root.sh"
-fi
+bionic_need root.sh project_root || :
 
-# _said_need_slug -> 0 when lib/detect.sh `project_slug` is defined, sourcing it from this file's own
-# directory first when the caller has not. Called in the caller's shell (user_said), so the readers below,
+# _said_need_slug -> 0 when lib/detect.sh `project_slug` is defined, loading it first when the caller has
+# not. Called in the caller's shell (user_said), so the readers below,
 # which run in command substitutions, inherit it rather than load it once per session.
 _said_need_slug() {
-  if ! declare -F project_slug >/dev/null 2>&1 && [ -n "$_SAID_LIB_DIR" ] && [ -f "$_SAID_LIB_DIR/detect.sh" ]; then
-    # shellcheck source=/dev/null
-    . "$_SAID_LIB_DIR/detect.sh" >/dev/null 2>&1
-  fi
-  declare -F project_slug >/dev/null 2>&1
+  bionic_need detect.sh project_slug
 }
 
 # _said_root -> this root, physical, on stdout: project_root of the working directory, as the verbs take it.
@@ -310,4 +288,52 @@ SAID_SIDS
   [ -n "$SAID_SESSIONS" ] || return 2
   [ "$short" -eq 0 ] || return 3
   return 1
+}
+
+# THE RUN'S FAILED COMMANDS, read from the same transcripts (hooks/poker/sitrep.sh `sitrep_red_count` classes them):
+#     said_transcripts [<plan>]   the transcript of each session user_said reads for <plan>, witnessed the same way, and
+#                                 after each the transcripts of the agents it dispatched, in its own subagents directory
+#                                 (lib/stop.sh `_sg_subagents_dir`, that path's one home); one path per line
+#     said_failed <transcript>... one record per Bash call whose result the CLI marked an error, NUL-terminated, its four
+#                                 fields joined by 0x1f: the exit (N of the result's `Exit code N`, else -), 1 when the
+#                                 call was interrupted else 0, the command, the result's text
+# A result is joined to its call by tool_use_id, so a Bash call that passed and a failed call of another tool are no
+# records. One pass over each file: grep keeps the lines that can hold a Bash call or a failed result, which the CLI
+# writes compact, and jq parses only those, so the cost is one read of the bytes.
+said_transcripts() {
+  local sid tx f
+  command -v jq >/dev/null 2>&1 && _said_need_slug && bionic_need stop.sh _sg_subagents_dir || return 2
+  _SAID_ROOT="$(_said_root)" || _SAID_ROOT=""
+  while IFS= read -r sid; do
+    case "$sid" in ''|*' '*) continue ;; esac
+    tx="$(_said_transcript "$sid" "$_SAID_ROOT")" && [ -r "$tx" ] || continue
+    printf '%s\n' "$tx"
+    for f in "$(_sg_subagents_dir "$tx")"/*.jsonl; do
+      if [ -f "$f" ] && [ ! -L "$f" ]; then printf '%s\n' "$f"; fi
+    done
+  done <<SAID_RUN
+$(_said_sessions "${1:-}")
+SAID_RUN
+  return 0
+}
+
+said_failed() {
+  [ "$#" -gt 0 ] || return 0
+  command -v jq >/dev/null 2>&1 || return 2
+  LC_ALL=C grep -hF -e '"name":"Bash"' -e '"is_error":true' -- "$@" 2>/dev/null | jq -njR '
+    def text: if type == "string" then . elif type == "array" then [.[] | objects | .text? | strings] | join("\n") else "" end;
+    foreach (inputs | fromjson? | objects) as $e ({};
+      if $e.type == "assistant" then
+        reduce ($e.message.content[]? | objects | select(.type == "tool_use" and .name == "Bash")) as $u
+          (.; .[($u.id // "") | tostring] = (($u.input.command // "") | tostring))
+      else . end;
+      . as $ids
+      | if $e.type == "user" then
+          $e.message.content[]? | objects | select(.type == "tool_result" and .is_error == true)
+          | (.tool_use_id // "" | tostring) as $id | select($ids | has($id))
+          | (.content | text) as $t
+          | [(($t | capture("^Exit code (?<c>[0-9]+)") | .c) // "-"),
+             (if ($t | test("^\\[(Request|Tool call) interrupted")) or ([$e.toolUseResult | objects | .interrupted == true] | any) then "1" else "0" end),
+             $ids[$id], $t] | join("\u001f") + "\u0000"
+        else empty end)'
 }

@@ -3,9 +3,9 @@
 #
 # Every hook sources this file through the stub `bionic_loader_pin` prints, pasted on the line under the
 # hook's BIONIC_LIB_WANT, and then calls `loader_fail_closed` or `loader_fail_open` when nothing was
-# found. Sourcing it defines functions and runs nothing, so doctor and the check table source it too and
-# drive the stub against a hook's own path: a probe that re-derived where a hook looks could disagree
-# with where it does look.
+# found. Sourcing it defines functions, notes its own folder and runs nothing else, so doctor and the
+# check table source it too and drive the stub against a hook's own path: a probe that re-derived where
+# a hook looks could disagree with where it does look.
 #
 # THE STUB KNOWS TWO PLACES, both beside the hook: scripts/lib, where an install lays hooks/ and scripts/
 # as siblings, and payload/scripts/lib, where the repository lays them, payload/hooks being a link to the
@@ -124,6 +124,34 @@ BIONIC_LOADER_REFUSE
   exit 2
 }
 # --- bionic-loader/v2 END
+
+# This file's own folder, as an absolute path, noted once while it is being sourced and with shell builtins only:
+# a caller may run under a PATH with no dirname, and a relative path kept for later would be read against whatever
+# folder the caller has moved to since. A bare name was found in the current folder, the place `.` falls back to.
+# It is assigned on every source and never inherited, because a value an outer shell set, or an earlier copy noted,
+# names another copy, while the copy sourced last is the one whose bionic_need is defined. Empty when the folder
+# cannot be entered; bionic_need then has only BIONIC_LIB. Apart from this one assignment sourcing runs nothing.
+case "${BASH_SOURCE[0]:-}" in
+  ('') _bionic_loader_dir="" ;;
+  (*/*) _bionic_loader_dir="$(CDPATH='' cd -P -- "${BASH_SOURCE[0]%/*}/" >/dev/null 2>&1 && pwd -P)" || _bionic_loader_dir="" ;;
+  (*) _bionic_loader_dir="$(pwd -P)" || _bionic_loader_dir="" ;;
+esac
+
+# bionic_need <lib> <marker> -> 0 once the function <marker> is defined, sourcing <lib> if it is not. The library
+# folder a hook resolved (BIONIC_LIB) is tried first and this file's own folder second, so a library loaded late takes
+# the folder its hook found and a caller with no hook still finds its siblings. It returns a status and prints
+# nothing: each caller keeps its own way of failing.
+bionic_need() {
+  local _bn_d
+  declare -F "$2" >/dev/null 2>&1 && return 0
+  for _bn_d in "${BIONIC_LIB:-}" "${_bionic_loader_dir:-}"; do
+    [ -n "$_bn_d" ] && [ -f "$_bn_d/$1" ] || continue
+    # shellcheck source=/dev/null
+    . "$_bn_d/$1" >/dev/null 2>&1
+    declare -F "$2" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
 
 # The stub, printed for a hook to carry and for a probe to run with "$0" set to a hook's path. Without
 # this file beside the hook the stub sets what the loader would have set with nothing found, and defines

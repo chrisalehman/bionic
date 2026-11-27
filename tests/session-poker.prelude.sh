@@ -27,6 +27,9 @@ declare -F seal_fixture >/dev/null 2>&1 || { [ -r "$SP_HERE/lib/seal-fixture.sh"
   || { echo "session-poker.prelude.sh: cannot load $SP_HERE/lib/duty-read.sh" >&2; exit 1; }
 [ -r "$SP_HERE/lib/maker-stop.sh" ] && . "$SP_HERE/lib/maker-stop.sh" \
   || { echo "session-poker.prelude.sh: cannot load $SP_HERE/lib/maker-stop.sh" >&2; exit 1; }
+# sp_at15, the rewrite of a page at 14 as a run at 15 holds it, is the plan fixture's.
+[ -r "$SP_HERE/lib/plan-fixture.sh" ] && . "$SP_HERE/lib/plan-fixture.sh" \
+  || { echo "session-poker.prelude.sh: cannot load $SP_HERE/lib/plan-fixture.sh" >&2; exit 1; }
 # Under TMPDIR by name: macOS's bare `mktemp -d` ignores TMPDIR, and a run given a temp folder of its own must find
 # every world this file builds inside it, and anything a world leaves behind there too.
 TMPROOT="$(sp_t="${TMPDIR:-/tmp}"; mktemp -d "${sp_t%/}/sp.XXXXXX")" && [ -n "$TMPROOT" ] && [ -d "$TMPROOT" ] \
@@ -310,6 +313,8 @@ poke() {  # <repo> <args...> -> sets OUT, RC; POKE_BASH names the interpreter (d
   if kill -0 "$p" 2>/dev/null; then
     kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null
     RC=124
+    # A killed tick prints nothing (its output leaves from an exit trap), so say it here: a timeout, not missing text.
+    printf 'poke: killed %s at the bound (POKE_BOUND=%s, RC=124)\n' "${1:-the poker}" "$POKE_BOUND" >&2
   else
     wait "$p" 2>/dev/null; RC=$?
   fi
@@ -440,46 +445,6 @@ plant_answer() {  # <transcript file> <state: fresh|stale|none> <name[:status]>.
 poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
   local repo="$1" free="$2" load="$3"; shift 3
   BIONIC_PROBE_FREE_MB="$free" BIONIC_PROBE_LOAD_1M="$load" poke "$repo" "$@"
-}
-
-# sp_at15 <plan> -> the page a builder here wrote at 14, rewritten as a run at 15 holds it, and that run's log written
-#   whole beside it (<docs>/record/<stem>/run.log). The header gains the version and the branches the state section named;
-#   the state section, the dispatch ledger and the matrix go; each Tasks row keeps its nine authored cells, read by the
-#   table's own header names (an escaped bar a cell's own), its artifact cell when the template has one; and the log holds a step event for each step to current:, the plan's approval when the
-#   section carried approved-by:, then per row its dispatch (an agent cell on a row not pending), its tree (a worktree
-#   cell) and its landing (status landed). The matrix's criterion is an Eval design row. Instants are fixed and
-#   increasing, so the fold reads the lines in the order written.
-sp_at15() {
-  local p="$1" d n
-  d="${p%/*}"; case "$d" in */plans/*) d="${d%/plans/*}" ;; *) d="${d%/plans}" ;; esac
-  n="$(basename "$p" .plan.md)"; mkdir -p "$d/record/$n" || return 1
-  awk -v lf="$d/record/$n/run.log" '
-    function none(s) { gsub(/—|-/, "", s); return s == "" }
-    function ev(s) { printf "run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n", s, ++t > lf }
-    function cell(r, k) { return (k in col) ? r[col[k]] : "—" }
-    NR == FNR { if (/^current: /) cur = $2; if (/^approved-by: /) ok = 1
-      if (/^  base-sha: /) base = $2; if (/^  branch: /) br = $2; if (/^working-branch: /) br = $2
-      if (/^integration-branch: /) ib = $2; next }
-    FNR == 1 && /^---$/ { fm = 1; print; next }
-    fm && /^canonical_sdlc_version:/ { next }
-    fm && /^---$/ { fm = 0; print "canonical_sdlc_version: 15"; if (br != "") print "working-branch: " br
-      if (base != "") print "base-sha: " base; if (ib != "") print "integration-branch: " ib; print
-      for (i = 1; i <= cur; i++) ev("step|n=" i); if (ok) ev("approval|key=step3|by=fixture|said=approved"); next }
-    /^## / { skip = ($0 ~ /^## (SDLC State|Dispatch ledger|Verification Matrix)/); tab = ($0 ~ /^## Tasks/); hd = 0
-      if ($0 ~ /^## Verification Matrix/) eval = 1 }
-    skip { next }
-    tab && /^\| *id *\|/ { m = split($0, h, "|"); for (i = 2; i < m; i++) { k = tolower(h[i]); gsub(/^ +| +$/, "", k); col[k] = i }
-      print "| id | step | kind | task | deps | size | serves | Files | artifact |"; print "|---|---|---|---|---|---|---|---|---|"; hd = 1; next }
-    tab && hd && /^\|---/ { next }
-    tab && hd && /^\|/ { l = $0; gsub(/\\\|/, "\001", l); split(l, r, "|"); for (i in r) { gsub(/^[ \t]+|[ \t]+$/, "", r[i]); gsub(/\001/, "\\|", r[i]) }
-      printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", cell(r, "id"), cell(r, "step"), cell(r, "kind"), cell(r, "task"), cell(r, "deps"), cell(r, "size"), cell(r, "serves"), cell(r, "files"), cell(r, "artifact")
-      if (!none(cell(r, "agent")) && cell(r, "status") != "pending") ev("dispatch|row=" cell(r, "id") "|name=" cell(r, "agent"))
-      if (!none(cell(r, "worktree"))) ev("tree|row=" cell(r, "id") "|path=.worktrees/" cell(r, "worktree"))
-      if (cell(r, "status") == "landed") ev("published|row=" cell(r, "id")); next }
-    { print }
-    END { if (eval) { print "\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
-      print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p" || return
-  seal_fixture "$p" "$d/record/$n/run.log"
 }
 
 # sp_fact <plan> <line> -> a proof or waiver line in the shape lib/proof.sh's proof_line and proof_waiver_line print

@@ -135,11 +135,9 @@
 #
 # Sourcing defines functions and sets constants; it prints nothing. bash 3.2.
 
-_SEAL_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
-# shellcheck source=/dev/null
-declare -F git_common_dir >/dev/null 2>&1 || . "$_SEAL_LIB_DIR/root.sh"
-# shellcheck source=/dev/null
-declare -F _slots_lock >/dev/null 2>&1 || . "$_SEAL_LIB_DIR/slots.sh"
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need root.sh git_common_dir
+bionic_need slots.sh _slots_lock
 
 SEAL_HOME_NAME=bionic-seal
 _SEAL_EMPTY=4294967295   # POSIX cksum's crc of no bytes: the digest of a log sealed absent or empty
@@ -256,8 +254,11 @@ _seal_owed() {
 }
 
 _seal_note() {  # <note line> -> a note beside _SEAL_FILE, made whole by one mv
-  local tmp="$_SEAL_HOME/.new.$$.$RANDOM"
-  { printf '%s\n' "$1" > "$tmp" && mv -f "$tmp" "$_SEAL_FILE.owed.$$.$RANDOM"; } 2>/dev/null || { rm -f "$tmp"; return 1; }
+  local tmp
+  bionic_need root.sh bionic_new && bionic_new "$_SEAL_HOME/.new" || return 1
+  tmp="$BIONIC_NEW"
+  # The note's own name is final, never a scratch one, so it carries an id (lib/root.sh `bionic_id`) and not a create.
+  { bionic_id && printf '%s\n' "$1" >| "$tmp" && mv -f "$tmp" "$_SEAL_FILE.owed.$BIONIC_ID"; } 2>/dev/null || { rm -f "$tmp"; return 1; }
 }
 
 seal_owe() {  # <plan> <line> -> 0 the note left, 1 not, 2 no home
@@ -355,10 +356,11 @@ seal_write() {  # [--vouch plan|run] <plan> <log> [<command> [<arg>…]] -> 0 cl
   else
     llen=0; lsum="$_SEAL_EMPTY"
   fi
-  tmp="$_SEAL_HOME/.new.$$.$RANDOM"
+  bionic_need root.sh bionic_new && bionic_new "$_SEAL_HOME/.new" || { _seal_unlock; return 2; }
+  tmp="$BIONIC_NEW"
   if ! printf 'seal/v1\nplan=%s\nplan_sum=%s\nlog=%s\nlog_len=%s\nlog_sum=%s\nstate=%s\nwhat=%s\nhow=%s\n%s' \
        "$_SEAL_PLAN" "$psum" "$lpath" "$llen" "$lsum" "$state" "$what" "$how" "${kept:+vouched=$kept
-}" > "$tmp" 2>/dev/null \
+}" >| "$tmp" 2>/dev/null \
      || ! mv -f "$tmp" "$_SEAL_FILE" 2>/dev/null; then
     rm -f "$tmp"; _seal_unlock; return 2
   fi
@@ -460,8 +462,9 @@ seal_binding_put() {  # <root> <sid> <plan|none>
   case "$value" in ''|*$'\n'*|*$'\r'*) return 64 ;; none|/*) ;; *) return 64 ;; esac
   _seal_binding_place "$1" "${2:-}" || { rc=$?; [ "$rc" -eq 64 ] && return 64; return 2; }
   mkdir -p "${_SB_FILE%/*}" 2>/dev/null || return 1
-  tmp="${_SB_FILE%/*}/.new.$$.$RANDOM"
-  if ! printf 'binding/v1\nsession=%s\nstate=%s\nplan=%s\n' "$2" "$_SB_STATE" "$value" > "$tmp" 2>/dev/null \
+  bionic_need root.sh bionic_new && bionic_new "${_SB_FILE%/*}/.new" || return 1
+  tmp="$BIONIC_NEW"
+  if ! printf 'binding/v1\nsession=%s\nstate=%s\nplan=%s\n' "$2" "$_SB_STATE" "$value" >| "$tmp" 2>/dev/null \
      || ! mv -f "$tmp" "$_SB_FILE" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null; return 1
   fi

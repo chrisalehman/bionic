@@ -35,6 +35,12 @@
 # [WALL: tests/slots.test.sh]
 # [WALL: tests/gate.test.sh]
 
+# The loader, for `_slots_drop`'s load of lib/root.sh at call time. It defines functions and runs nothing.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
+
 SLOTS_ORPHAN_MIN=1   # a claim WITH a pid this many minutes old is stale (_slots_old)
 SLOTS_TAKING_SEC=5   # a claim with NO pid this many seconds old was left by a killed claimer
 _SLOTS_SINCE=""; _SLOTS_SINCE_PID=""
@@ -89,14 +95,14 @@ _slots_holds() {
 # _slots_old <dir> — rc 0 when <dir> is stale by age: a directory with no pid yet (a claim in
 # progress, or the token a stealer made) is stale past SLOTS_TAKING_SEC seconds, since the gap it
 # stands for is microseconds; one with a pid, past SLOTS_ORPHAN_MIN minutes. The mtime is read
-# the fleet's way, BSD `stat -f` then GNU `stat -c`; a directory that cannot be read is not old.
+# lib/time.sh's `file_mtime`; a directory that cannot be read is not old.
 _slots_old() {
   local m
   if [ -n "$(_slots_pid_of "$1")" ]; then
     [ -n "$(find "$1" -maxdepth 0 -mmin +"$SLOTS_ORPHAN_MIN" 2>/dev/null)" ]
     return
   fi
-  m="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
+  m="$(file_mtime "$1")"
   case "$m" in ''|*[!0-9]*) return 1 ;; esac
   [ $(( $(date +%s) - m )) -gt "$SLOTS_TAKING_SEC" ]
 }
@@ -129,10 +135,15 @@ _slots_claim() {  # <dir> <pid> [<what>] — rc 0 when this call created <dir>
 }
 
 _slots_drop() {  # <store> <dir> — remove <dir> whole: rename first, then delete
-  local gone="$1/.gone.$$.$RANDOM"
-  if mv "$2" "$gone" 2>/dev/null; then
-    rm -rf "$gone"
+  # The rename's target is inside a directory this call made (lib/root.sh `bionic_new`), never a name a sibling
+  # could have drawn too: a mv onto a directory that exists moves into it.
+  bionic_need root.sh bionic_new && bionic_new "$1/.gone" dir || return 0
+  if mv "$2" "$BIONIC_NEW/d" 2>/dev/null; then
+    rm -rf "$BIONIC_NEW"
+  else
+    rmdir "$BIONIC_NEW" 2>/dev/null
   fi
+  return 0
 }
 
 # THE TAKE-OVER OF A DEAD HOLDER'S CLAIM (kept at wave-28 T12 for lib/line.sh's publish lock, which

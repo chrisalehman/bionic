@@ -6,7 +6,8 @@
 # project, start and last landing), the ten steps, every task in execution order with its step, state, short
 # description and a few words of note, the measurements (the clock, the work, pace and the close, correctness and
 # waste, each line naming what it measures, its unit and its source), each goal's status, every ask open on
-# the run's register with what it holds, and every review result with its open findings. Every clock time is
+# the run's register with what it holds, and every review result with its open findings; waste counts the failed
+# commands of the run's transcripts by kind (§RED-KINDS). Every clock time is
 # local and 12-hour. `--line` is the Patrol's status, `<k> of <m> tasks · owed: <n> on you · <m> on events · close <time>`. The page,
 # its Score marks, the review rows, the grade verb and its log are gone; the card a later verb draws reads this.
 #
@@ -241,7 +242,7 @@ sr_tasks_f() { sr_lines task | while IFS= read -r l; do sr_f "$l" "$1"; done; } 
 # sr_keys -> the sheet's keys in order, a run of one key printed once
 sr_keys() { printf '%s\n' "$OUT" | tail -n +2 | awk -F': ' '$1 != p { print $1; p = $1 }' | sr_join; }
 SR_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
-SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|clock.now|clock.approved|clock.forecast|clock.elapsed|clock.elapsed-share|work.planned|work.added|work.dropped|work.landed|work.left|work.width|work.task-time|pace.time-used|pace.work-landed|close.chain|close.predicted|close.unscaled|close.waits-on-you|tests.suites-run|tests.suites-total|tests.whole-run|tests.cap|reviews|findings.open|waste.dropped|waste.runs-discarded|waste.ready-unstarted|waste.waiting-on-you|run.so-far|goal|ask|review"
+SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|clock.now|clock.approved|clock.forecast|clock.elapsed|clock.elapsed-share|work.planned|work.added|work.dropped|work.landed|work.left|work.width|work.task-time|pace.time-used|pace.work-landed|close.chain|close.predicted|close.unscaled|close.waits-on-you|tests.suites-run|tests.suites-total|tests.whole-run|tests.cap|reviews|findings.open|waste.dropped|waste.runs-discarded|waste.ready-unstarted|waste.failed-commands|waste.waiting-on-you|run.so-far|goal|ask|review"
 # sr_m <key> -> the measurement alone, the value before its ` — `; sr_d <key> -> what follows it
 sr_m() { sr_val "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, 1, i - 1) : $0) }'; }
 sr_d() { sr_val "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, i + 5) : "") }'; }
@@ -1285,7 +1286,7 @@ expect_eq "G3 a record that passes flips its goal to met; a clause of none is le
 # id's, and the run's log a passing proof of each one discharged and a waiver of each one waived
 sr_criteria() {
   local e a r
-  { printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+  { printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n'
     for e in "$@"; do a="${e%%:*}"; r="${a#AC-}"; printf '| REQ-%s | x | %s | hermetic | `tests/a.test.sh` | not |\n' "${r%%.*}" "$a"; done; } >> "$SR_PLAN"
   for e in "$@"; do a="${e%%:*}"
     case "${e#*:}" in discharged) sr_ev "ev=proof|kind=eval|ac=$a|head=$SR_H|rc=0|at=2026-10-06T10:00:00Z" ;;
@@ -1858,7 +1859,7 @@ SR_SC="$(SR_AT=$((SR_NOW - 3600)) sr_poke landing-report --scorecard "$SR_PLAN" 
 expect_eq "SCO1 the scorecard's widest landing prints against target < 15, the landing bar" \
   "widest landing ready→landed: T3 12.0 min · target < 15" "$(printf '%s\n' "$SR_SC" | /usr/bin/grep '^widest landing ')"
 expect_eq "SCO2 …and its last three lines are the sheet's pace, correctness and waste measurements, eight lines in all" \
-  "pace: $(sr_m pace.work-landed) of the live work's sized minutes landed, in $(sr_m pace.time-used) of the forecast time|correctness: suites run $(sr_m tests.suites-run); whole run $(sr_m tests.whole-run); reviews $(sr_m reviews); $(sr_m findings.open) open findings|waste: dropped $(sr_m waste.dropped); $(sr_m waste.runs-discarded) suite runs discarded; $(sr_m waste.ready-unstarted) ready and unstarted; $(sr_m waste.waiting-on-you) waiting on you|8" \
+  "pace: $(sr_m pace.work-landed) of the live work's sized minutes landed, in $(sr_m pace.time-used) of the forecast time|correctness: suites run $(sr_m tests.suites-run); whole run $(sr_m tests.whole-run); reviews $(sr_m reviews); $(sr_m findings.open) open findings|waste: dropped $(sr_m waste.dropped); $(sr_m waste.runs-discarded) suite runs discarded; $(sr_m waste.ready-unstarted) ready and unstarted; $(sr_m waste.waiting-on-you) waiting on you; failed commands $(sr_m waste.failed-commands)|8" \
   "$(printf '%s\n' "$SR_SC" | tail -3 | sr_join)|$(printf '%s\n' "$SR_SC" | /usr/bin/grep -c .)"
 printf 'run/v1|ev=approval|key=merge|by=fixture|said=1|at=2026-10-06T14:00:00Z\n' >> "$SR_DIR/run.log"; sr_launch T9 14:04:30
 expect_eq "SCO4 a merge approved in the log alone, no state line, starts the agent minutes: a launch 4.5 min after it reads 5" \
@@ -1931,6 +1932,35 @@ expect_eq "AS-1 AC-28.1 D1 and D2 overlap half an hour and count 90 minutes, whe
   "human-wait minutes: 120 · no target (the user's)|asks put to you: 2 · 90 min" "$AS_UNPUT"
 expect_eq "AS-2 …put at 12:00Z, the waiver is an ask put to you and adds its half hour past D2's close" \
   "human-wait minutes: 120 · no target (the user's)|asks put to you: 3 · 120 min" "$(sr_as)"
+
+# ============================================================
+section "§RED-KINDS: the scorecard counts each failed command of the run's transcripts under the first test of the table it meets"
+# ============================================================
+# The fixture holds one failed Bash call per kind, its id naming the kind, a call that passed and another tool's failure;
+# the kinds are read from SITREP_RED_TABLE, the table the classifier walks. fails-when: a command is counted under
+# another kind or none, a call that passed or is not Bash counts, or two rows trade places or one goes and nothing says so.
+RK_FX="$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move/failed-bash.jsonl"
+RK_KINDS="$(sed -n "/^SITREP_RED_TABLE='/,/'\$/{ s/^SITREP_RED_TABLE='//; s/|.*//p; }" "$BIONIC_HOOKS_DIR/poker/sitrep.sh" | paste -sd' ' -)"
+expect_eq "RK-0 the table's eight kinds are the fixture's, in its order" "8|$RK_KINDS" \
+  "$(echo $RK_KINDS | wc -w | tr -d ' ')|$(sed -n 's/.*"type":"tool_use","id":"toolu_\([a-z-]*\)".*/\1/p' "$RK_FX" | /usr/bin/grep -v '^decoy' | paste -sd' ' -)"
+sr_world red-kinds "6 6 12 12"
+SR_T="$CLAUDE_CONFIG_DIR/projects/$(cd "$SR_REPO" && pwd -P | sed 's/[^a-zA-Z0-9]/-/g')/$SID.jsonl"; mkdir -p "${SR_T%.jsonl}/subagents"; : > "$SR_REPO/.bionic/tmp/loaded-$SID.state"
+rk_got() { sr_poke_with "${1:-$POKER}" landing-report --scorecard "$SR_PLAN" 2>/dev/null | sed -n 's/^waste: .*; failed commands //p'; }
+rk_want() { local k o=""; for k in $RK_KINDS; do o="$o, $k $([ "$k" = "$1" ] && echo 1 || echo 0)"; done; printf '1: %s' "${o#, }"; }
+for RK_K in $RK_KINDS; do
+  /usr/bin/grep -F "\"toolu_$RK_K\"" "$RK_FX" > "$SR_T"
+  expect_eq "RK-1 $RK_K, planted alone in the session's transcript, is counted under its kind and no other" "$(rk_want "$RK_K")" "$(rk_got)"
+done
+: > "$SR_T"; cp "$RK_FX" "${SR_T%.jsonl}/subagents/agent-a1.jsonl"
+RK_ALL="8: $(for k in $RK_KINDS; do printf '%s 1, ' "$k"; done | sed 's/, $//')"
+expect_eq "RK-2 the whole fixture in an agent's transcript: each kind once, the call that passed and the Edit not at all" "$RK_ALL" "$(rk_got)"
+RK_M="$TMPROOT/rk-mut"; mkdir -p "$RK_M/payload"; cp -R "$BIONIC_HOOKS_DIR" "$RK_M/hooks" && cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$RK_M/payload/scripts"
+awk '/^meant-to-fail\|/ { h = $0; next } { print } /^red-suite\|/ { print h }' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$RK_M/hooks/poker/sitrep.sh"
+expect_eq "RK-3 a table with the declared run's test after the red suite's counts the declared run as a red suite" \
+  "8: refusal 1, killed 1, red-suite 2, meant-to-fail 0, ordinary 1, check 1, not-run 1, other 1" "$(rk_got "$RK_M/hooks/session-poker.sh")"
+sed '/^ordinary|/d' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$RK_M/hooks/poker/sitrep.sh"
+expect_eq "RK-4 a table without the ordinary answers' test counts the landing's WAITING as other" \
+  "8: refusal 1, killed 1, meant-to-fail 1, red-suite 1, check 1, not-run 1, other 2" "$(rk_got "$RK_M/hooks/session-poker.sh")"
 
 # ============================================================
 section "§WAIT: a decision's wait line names everything that waits on it: a row not landed or dropped that reads it, the release its newest approval page lists it on, the merge an open held-merge ask names it in"
@@ -2101,21 +2131,16 @@ SR_FM="$TMPROOT/fast-mut"; mkdir -p "$SR_FM/payload"
 cp -R "$BIONIC_HOOKS_DIR" "$SR_FM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_FM/payload/scripts"
 sed 's|^sitrep_gather() {$|sitrep_gather() { [ -z "${SR_GATHER_MARK:-}" ] \|\| echo gather >> "$SR_GATHER_MARK";|' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$SR_FM/hooks/poker/sitrep.sh"
 printf '#!/bin/bash\ncat "$2" > "$SR_CARD_KEPT"\necho drawn\n' > "$SR_FM/payload/scripts/card.sh"
-# and the kept fold counts its entries, so a sheet that reads its findings by folding again is seen: an entry is an ask
-# of _proof_facts that the fold this shell already holds under the same key does not answer. A fold is counted on
-# either path: outside a held command after the memo's check, inside one where the held fold reads the log.
+# and the folds are the reader's own count (BIONIC_COUNT, lib/reader.sh `reader_facts` writing `fold`), so a sheet that
+# reads its findings by folding again is seen: inside the command's hold a fold is made only for an ask the fold its
+# shell already holds under the same key does not answer. The library copies are the shipped ones, unplanted.
 SR_FA_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/proof.sh"
-sed -e '/^  if \[ "\$_PROOF_FACTS_KEY" = "\$key" \] && .*then _proof_facts_out; return; fi$/a\
-  [ -z "${SR_FOLD_MARK:-}" ] || echo fold >> "$SR_FOLD_MARK"
-' -e '/^  ev="\$d\/\.events-\$id\.\$\$\.\$RANDOM"$/a\
-  [ -z "${SR_FOLD_MARK:-}" ] || echo fold >> "$SR_FOLD_MARK"
-' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
-expect_eq "FA4 precondition: the counting plants took effect (each shipped file and its plant differ, the fold's by one line on each path)" "yes|2" \
-  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$SR_FM/hooks/poker/sitrep.sh" || echo yes)|$(diff "$SR_FA_LIB" "$SR_FM/payload/scripts/lib/proof.sh" | /usr/bin/grep -c '^> .*SR_FOLD_MARK')"
-SR_FA_MARK="$TMPROOT/fast-gathers"; SR_FA_KEPT="$TMPROOT/fast-kept"; : > "$SR_FA_MARK"
-export SR_GATHER_MARK="$SR_FA_MARK" SR_CARD_KEPT="$SR_FA_KEPT" SR_FOLD_MARK="$TMPROOT/fast-folds"
-SR_AT="$SR_FAST_AT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep "$SR_PLAN" > "$TMPROOT/fast-sheet2.out" 2>/dev/null
-SR_FA_G1="$(/usr/bin/grep -c gather "$SR_FA_MARK")"; SR_FA_F1="$(/usr/bin/grep -c fold "$SR_FOLD_MARK")"; unset SR_FOLD_MARK
+expect_eq "FA4 precondition: the gather plant took effect, and the stub tree's proof library is the shipped one" "yes|same" \
+  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$SR_FM/hooks/poker/sitrep.sh" || echo yes)|$(cmp -s "$SR_FA_LIB" "$SR_FM/payload/scripts/lib/proof.sh" && echo same)"
+SR_FA_MARK="$TMPROOT/fast-gathers"; SR_FA_KEPT="$TMPROOT/fast-kept"; SR_FA_COUNT="$TMPROOT/fast-counts"; : > "$SR_FA_MARK"; : > "$SR_FA_COUNT"
+export SR_GATHER_MARK="$SR_FA_MARK" SR_CARD_KEPT="$SR_FA_KEPT"
+SR_AT="$SR_FAST_AT" BIONIC_COUNT="$SR_FA_COUNT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep "$SR_PLAN" > "$TMPROOT/fast-sheet2.out" 2>/dev/null
+SR_FA_G1="$(/usr/bin/grep -c gather "$SR_FA_MARK")"; SR_FA_F1="$(/usr/bin/grep -cx 'fold reader_facts' "$SR_FA_COUNT")"
 expect_eq "FA4b the sheet verb enters the kept fold at least once and at most twice: its findings are answered from the fold its own shell holds" "yes" \
   "$([ "$SR_FA_F1" -ge 1 ] && [ "$SR_FA_F1" -le 2 ] && echo yes || echo "no: $SR_FA_F1 entries")"
 # an ask opened after the sheet was saved, and one answered no; neither is in the saved sheet

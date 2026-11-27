@@ -7,6 +7,7 @@
 #   §SHAPE   a line matches the shape and reads back by field name; no type, a bare word, a `|` in a
 #            value and a caller's own `at=` are refused; LOG_AT stamps the line when in the shape, is refused
 #            when not, and only the files its list names set it, each for its reason.
+#   §LOAD    a shell already holding the field reader and the tree library still gets the landing library from log.sh.
 #   §TYPES   a hyphenated type no list holds and a retired word are refused; each of the 30 listed types is accepted,
 #            and the list holds those thirty and no more.
 #   §SEAL    each append is checked against the run's seal, written, and sealed again: an append to a sealed run
@@ -48,6 +49,16 @@ LA_WHO="hooks/poker/proof.sh:the approval of the plan and its asks close at one 
 payload/scripts/close-out.sh:the delivery is restated with the archive line at its own second, so every reader of it reads one instant
 payload/scripts/lib/owed.sh:the asks library stamps a round of an ask at the instant it was raised"
 expect_eq "no file hands the appender an instant but those the list names, each for its reason" "$(printf '%s\n' "$LA_WHO" | cut -d: -f1 | paste -sd' ' -)" "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl 'LOG_AT=' payload hooks | LC_ALL=C sort | paste -sd' ' -)"
+
+section "LOAD"
+# Each library log.sh loads is asked for by a function that library defines, so a shell that already holds the field
+# reader and the tree library (worktree.sh loads fields.sh, and a verb loads it alone) still gets the landing library
+# and its clock from log.sh.
+LD_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+LD_OUT="$(bash -c '. "$1/worktree.sh"; declare -F line_value _wt_proofs_put; . "$1/log.sh"; declare -F _line_now' _ "$LD_LIB" 2>&1)"
+expect_contains "a shell holding the field reader before log.sh holds it still" "line_value" "$LD_OUT"
+expect_contains "…and the tree library" "_wt_proofs_put" "$LD_OUT"
+expect_contains "…and log.sh still brings the landing library's clock" "_line_now" "$LD_OUT"
 
 section "TYPES"
 refused "a hyphenated type no list holds" plant-type row=T1

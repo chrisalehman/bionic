@@ -48,15 +48,15 @@ OBSERVE_ROSTER_VERSION="v1"
 # roster.sh, THE SOFT SOURCE (wave-28 T80) — the idiom lib/refuse.sh uses for lib/width.sh. The
 # roster walk below reads rows with roster.sh's `_roster_kv`, and stop-check.sh does not name
 # roster.sh in its BIONIC_LIB_WANT. roster.sh defines constants and functions and prints nothing.
-if [ -z "${_ROSTER_OPEN_AWK:-}" ]; then
-  case "${BASH_SOURCE[0]}" in
-    */*) _obs_self_dir="${BASH_SOURCE[0]%/*}" ;;
-    *)   _obs_self_dir="." ;;
-  esac
-  # shellcheck source=/dev/null
-  . "$(cd "$_obs_self_dir" && pwd -P)/roster.sh"
-  unset _obs_self_dir
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need roster.sh roster_open_names
+# fields.sh, the same soft source, for `line_field`, which this file and the stop library read a row with, and for
+# `line_field_clean`, which folds every operator-supplied value on the machine line (the typed target, the deliverable
+# paths, the progress path) onto one field of 400 characters at most: normalized rather than refused, because this
+# library reports evidence, and a target with an odd character in it is still a target somebody asked about.
+bionic_need fields.sh line_field_v
+# time.sh, the same soft source, for `file_mtime` and `epoch_iso`.
+bionic_need time.sh _time_epoch
 
 # The machine line's schema token, printed by `observe_machine_line`. Versioned so a reader
 # can refuse a shape it does not read rather than guess at it.
@@ -78,8 +78,8 @@ OBSERVE_CADENCE_DEFAULT_S=900
 # tests/cross-gate-agreement.test.sh §C. The copies were the price of the no-library rule
 # (TDD §9: a sourced file the installer misses is a silently inert wall) and the loader's
 # fail-closed qualification is what repealed it — a hook whose library is missing refuses or
-# steps aside out loud, so there is no silent inertness left to buy.
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# steps aside out loud, so there is no silent inertness left to buy. `file_mtime` is time.sh's:
+# it prints nothing for a gone file, which a reader here takes as 0.
 file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
 
 # THE NEWEST COPY OF AN AGENT'S LOG, ANYWHERE UNDER ONE PROJECT DIRECTORY (D8; REQ-8;
@@ -100,7 +100,7 @@ agent_log_newest() {  # <agent-id> <project-dir> -> newest matching path on stdo
   [ -n "$proj" ] && [ -d "$proj" ] || return 1
   for f in "$proj"/*/subagents/"agent-${id}.jsonl"; do
     [ -f "$f" ] || continue
-    m="$(file_mtime "$f")"
+    m="$(file_mtime "$f" || echo 0)"
     case "$m" in ''|*[!0-9]*) m=0 ;; esac
     if [ "$m" -gt "$newest_m" ]; then
       newest="$f"; newest_m="$m"
@@ -111,27 +111,10 @@ agent_log_newest() {  # <agent-id> <project-dir> -> newest matching path on stdo
   return 0
 }
 
-# One field out of a versioned pipe-delimited line, BY KEY, never by position (checklist
-# A6): a fixed-field-order parser breaks undiagnosably the moment a field is added, so an
-# unknown extra field must be inert here.
-# In builtins since wave-34 T11 (D19); hooks/session-sweeper.sh's copy says how.
-line_field() {  # <line> <key>
-  local _lf_rest="${1//$'\n'/|}|" _lf_f
-  while [ -n "$_lf_rest" ]; do
-    _lf_f="${_lf_rest%%|*}"; _lf_rest="${_lf_rest#*|}"
-    case "$_lf_f" in "$2="*) printf '%s\n' "${_lf_f#"$2="}"; return 0 ;; esac
-  done
-  return 0
-}
-
 # Claude Code names a project directory by slugifying its path.
 slugify() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 
-fmt_epoch() {
-  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || printf 'epoch:%s\n' "$1"
-}
+fmt_epoch() { epoch_iso "$1" || printf 'epoch:%s\n' "$1"; }
 
 fmt_age() {  # <seconds> -> "3m 12s"
   local s="$1"
@@ -158,45 +141,75 @@ observe_claims_live() {  # <pattern> -> 0 if a process matches, 1 otherwise
   grep -qF -- "$pat" <<< "$procs"
 }
 
-# A `|`, a newline or a control character inside a VALUE would forge a field. Every value on
-# the machine line is operator-supplied — the typed target, the deliverable paths, the
-# progress path — so they are normalized rather than refused: this library's job is to report
-# evidence, and a target with an odd character in it is still a target somebody asked about.
-observe_mline_value() {  # <value>
-  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
-}
-
-# PROSE TO SECONDS. A third reading of the grammar `hooks/session-sweeper.sh` owns and
-# `hooks/session-poker.sh` copies (both at their own `parse_seconds`; §O of
-# tests/cross-gate-agreement.test.sh holds all three CODE-identical). It is restated rather
-# than shared for the reason run.sh's `live_runs` states: `parse_seconds` lives in two HOOKS
-# and a library cannot source a hook. The cadence a dispatch declares is prose — "~6m",
-# "5 min", "every 300 seconds" — and an unreadable one is the default rather than a guess.
+# PROSE TO SECONDS, the one reader of a duration a brief writes: the cadence a dispatch declares ("~6m", "5 min",
+# "every 300 seconds", "30–40 minutes"), which the tick, the sweeper and adopt read. An unreadable one is refused, never
+# guessed, and its caller takes its default. Deliberate limits, each one a refusal rather than a guess:
+#   * exactly one number-unit pair. "1h30m" and "10 min, checkpoint at 5m" are refused.
+#   * whole numbers only. "0.5h" is refused.
+#   * a range ("30–40 minutes") is read at its GENEROUS end: a promise is not broken until the longer bound passes.
+#   * zero is refused: a zero threshold would call every row late the instant it launched.
+# In builtins, so a caller reading a cadence per row starts no process. The pair walk is the reading `grep -oE` gave:
+# line by line, a match can only start where a digit run starts, so each run start is tried anchored and a run that
+# fails is skipped whole; a match resumes the walk at its end. Text outside ASCII keeps `tr` for the case fold, so the
+# locale's own case map is still the one read.
 parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be read
-  local raw="$1" s pairs count nums hi unit mult n allnums
+  local raw="$1" s pairs count nums hi unit mult n allnums line rest m k nl=$'\n'
+  local re='^[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)'
   [ -n "$raw" ] || return 1
-  s="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
-  s="${s//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
-  pairs="$(printf '%s' "$s" \
-    | grep -oE '[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)')"
-  count="$(printf '%s\n' "$pairs" | grep -c '[0-9]')"
+  s="${raw//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
+  case "$s" in
+    *[![:ascii:]]*) s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')" ;;
+    *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+      for n in Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz; do
+        s="${s//${n%?}/${n#?}}"
+      done ;;
+  esac
+  count=0; pairs=""; unit=""; rest="$s$nl"
+  while [ -n "$rest" ]; do
+    line="${rest%%"$nl"*}"; rest="${rest#*"$nl"}"
+    while :; do
+      case "$line" in *[0123456789]*) ;; *) break ;; esac
+      line="${line#"${line%%[0123456789]*}"}"
+      if [[ $line =~ $re ]]; then
+        m="${BASH_REMATCH[0]}"; count=$((count + 1)); pairs="$m"; unit="${BASH_REMATCH[2]}"
+        line="${line:${#m}}"
+      else
+        line="${line#"${line%%[!0123456789]*}"}"
+      fi
+    done
+  done
   [ "$count" -eq 1 ] || return 1
-  nums="$(printf '%s' "$pairs" | grep -oE '[0-9]+')"
+  nums=""; k=0; m="$pairs"
+  while :; do
+    case "$m" in *[0123456789]*) ;; *) break ;; esac
+    m="${m#"${m%%[0123456789]*}"}"; n="${m%%[!0123456789]*}"; m="${m#"$n"}"
+    nums="${nums}${nums:+$nl}$n"; k=$((k + 1))
+  done
   hi=0
   for n in $nums; do [ "$n" -gt "$hi" ] && hi="$n"; done
   [ "$hi" -gt 0 ] || return 1
-  unit="$(printf '%s' "$pairs" | grep -oE '[a-z]+' | tail -1)"
   case "$unit" in
     h|hr|hrs|hour|hours)         mult=3600 ;;
     m|min|mins|minute|minutes)   mult=60 ;;
     s|sec|secs|second|seconds)   mult=1 ;;
     *) return 1 ;;
   esac
-  grep -qE '[0-9]+\.[0-9]+' <<< "$s" && return 1
-  allnums="$(printf '%s' "$s" | grep -oE '[0-9]+')"
-  [ "$(printf '%s\n' "$allnums" | grep -c '[0-9]')" -eq "$(printf '%s\n' "$nums" | grep -c '[0-9]')" ] \
-    || return 1
+  # REFUSE what the pair walk silently skipped rather than matched. It keeps only what it
+  # matched, so two failure shapes above look identical to a single clean pair:
+  #   * a decimal point anywhere near a digit ("0.5h" matches the trailing "5h" and never
+  #     sees the "0."; the header's "whole numbers only" is a refusal, not a truncation).
+  #   * two pairs glued with no separator ("1h30m" — "1h" fails its own trailing-boundary
+  #     check and is silently skipped, leaving only "30m" for `pairs` to find).
+  # A decimal anywhere in the cleaned string fails outright; a mismatch between every digit
+  # run in the string and the digit run(s) actually captured inside the matched pair catches
+  # the glued case, because nothing legitimate is a digit run OUTSIDE the one pair.
+  case "$s" in *[0123456789].[0123456789]*) return 1 ;; esac
+  allnums=0; m="$s"
+  while :; do
+    case "$m" in *[0123456789]*) ;; *) break ;; esac
+    m="${m#"${m%%[0123456789]*}"}"; m="${m#"${m%%[!0123456789]*}"}"; allnums=$((allnums + 1))
+  done
+  [ "$allnums" -eq "$k" ] || return 1
   printf '%s' "$((hi * mult))"
 }
 
@@ -304,7 +317,7 @@ observe_agent() {  # <typed-target> [deliverable …]
   OBS_TYPED="$target"
   OBS_NOW=$(date -u +%s)
 
-  [ -n "${OBSERVE_ROSTER:-}" ] || OBSERVE_ROSTER="$OBSERVE_ROOT/.bionic/tmp/roster-${OBSERVE_SESSION}.state"
+  [ -n "${OBSERVE_ROSTER:-}" ] || OBSERVE_ROSTER="$(roster_path "$OBSERVE_ROOT" "$OBSERVE_SESSION")"
 
   # A typed reference is a NAME, an agent id, or `name@team` — all three are legal TaskStop
   # inputs and none of them is resolved for us. Comparison is LITERAL: a target string is
@@ -435,7 +448,7 @@ observe_agent() {  # <typed-target> [deliverable …]
 
   # ---------- evidence 1: the working log (unfakeable — written by working) ----------
   if [ -f "$OBS_LOG" ]; then
-    OBS_LOG_MTIME=$(file_mtime "$OBS_LOG")
+    OBS_LOG_MTIME=$(file_mtime "$OBS_LOG" || echo 0)
     OBS_LOG_SIZE=$(file_size "$OBS_LOG")
     OBS_LOG_AGE=$((OBS_NOW - OBS_LOG_MTIME))
     [ "$OBS_LOG_AGE" -lt 0 ] && OBS_LOG_AGE=0
@@ -456,18 +469,18 @@ observe_agent() {  # <typed-target> [deliverable …]
       dp="$(observe_abs_path "$d")"
       OBS_DELIV_PATHS="${OBS_DELIV_PATHS:+$OBS_DELIV_PATHS,}$d"
       if [ -f "$dp" ]; then
-        dsize=$(file_size "$dp"); dmtime=$(file_mtime "$dp")
+        dsize=$(file_size "$dp"); dmtime=$(file_mtime "$dp" || echo 0)
         if [ "$dsize" -eq 0 ]; then
-          OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}empty:$(observe_mline_value "$d")"
+          OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}empty:$(line_field_clean "$d" 400)"
           pending=$((pending + 1))
         else
-          OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}present:$(observe_mline_value "$d")"
+          OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}present:$(line_field_clean "$d" 400)"
         fi
         OBS_DELIV_LAST_SIZE="$dsize"; OBS_DELIV_LAST_MTIME="$dmtime"
       elif [ -d "$dp" ]; then
-        OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}dir:$(observe_mline_value "$d")"
+        OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}dir:$(line_field_clean "$d" 400)"
       else
-        OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}absent:$(observe_mline_value "$d")"
+        OBS_DELIVERABLES="${OBS_DELIVERABLES:+$OBS_DELIVERABLES,}absent:$(line_field_clean "$d" 400)"
         pending=$((pending + 1))
       fi
     done
@@ -492,7 +505,7 @@ observe_agent() {  # <typed-target> [deliverable …]
     OBS_PROGRESS_ABS="$pabs"
     if [ -e "$pabs" ]; then
       OBS_PROGRESS_STATE="present"
-      OBS_PROGRESS_MTIME=$(file_mtime "$pabs")
+      OBS_PROGRESS_MTIME=$(file_mtime "$pabs" || echo 0)
       OBS_PROGRESS_AGE=$((OBS_NOW - OBS_PROGRESS_MTIME))
       [ "$OBS_PROGRESS_AGE" -lt 0 ] && OBS_PROGRESS_AGE=0
     else
@@ -548,18 +561,18 @@ observe_class() {
 observe_machine_line() {
   printf '%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \
     "$OBSERVE_MACHINE_SCHEMA" \
-    "$(observe_mline_value "$OBS_ID")" \
-    "$(observe_mline_value "$OBS_TYPED")" \
-    "$(observe_mline_value "$OBS_LOG")" \
+    "$(line_field_clean "$OBS_ID" 400)" \
+    "$(line_field_clean "$OBS_TYPED" 400)" \
+    "$(line_field_clean "$OBS_LOG" 400)" \
     "$OBS_LOG_MTIME" \
     "$OBS_LOG_SIZE" \
     "$OBS_DELIVERABLES" \
-    "$(observe_mline_value "$OBS_PROGRESS")" \
+    "$(line_field_clean "$OBS_PROGRESS" 400)" \
     "$OBS_PROGRESS_MTIME" \
     "$OBS_PROGRESS_STATE" \
-    "$(observe_mline_value "$OBS_CLASSIFICATION")" \
-    "$(observe_mline_value "$OBS_DELIV_SOURCE")" \
-    "$(observe_mline_value "$OBS_PROGRESS_SOURCE")"
+    "$(line_field_clean "$OBS_CLASSIFICATION" 400)" \
+    "$(line_field_clean "$OBS_DELIV_SOURCE" 400)" \
+    "$(line_field_clean "$OBS_PROGRESS_SOURCE" 400)"
 }
 
 # ---------- the look, in one line ----------

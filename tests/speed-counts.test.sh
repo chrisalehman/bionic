@@ -254,8 +254,8 @@ section "§FIXTURE: each size is built, and each command runs the path its count
 # read nothing.
 expect_eq "FX-1 both sizes are built" " n 2n" "$SC_BUILT"
 for SC_SIZE in n 2n; do
-  expect_eq "FX-2 ($SC_SIZE) the exits: card 0, check 1 (it would refuse), tick 0, resume 0, watch 0, wall 0 (it admits), close 0" "0 1 0 0 0 0 0" \
-    "$(for SC_C in $SC_CMDS; do cat "$SC_OUT/$SC_SIZE.$SC_C.on.rc" 2>/dev/null || echo -; done | paste -sd' ' -)"
+  expect_eq "FX-2 ($SC_SIZE) the exits: card 0, check 0 (it would refuse, an answer), tick 0, resume 0, watch 0, wall 0 (it admits), close 0" "0 0 0 0 0 0 0|1" \
+    "$(for SC_C in $SC_CMDS; do cat "$SC_OUT/$SC_SIZE.$SC_C.on.rc" 2>/dev/null || echo -; done | paste -sd' ' -)|$(/usr/bin/grep -c -- '--check: would refuse' "$SC_OUT/$SC_SIZE.check.on.err" 2>/dev/null)"
   SC_ROWS="$(sc_rows "$SC_SIZE")"
   expect_regex "FX-3 ($SC_SIZE) the card's head counts every row, all but the integrate row landed" \
     " · $((SC_ROWS - 1)) of $SC_ROWS tasks landed\$" "$(head -1 "$SC_OUT/$SC_SIZE.card.on.out" 2>/dev/null)"
@@ -366,11 +366,16 @@ done
 section "§LIBS: a held fold is served only to a process whose reader's libraries made it"
 # fails-when: a process of a held command that loads another copy of the reader's libraries, one line apart, is served
 # the fold the first copy made instead of folding for itself; or a process of the same copy is not served it; or the
-# libraries are summed more than once a process.
-# The probe, on a copy of the n snapshot, with two copies of the libraries, B's reader.sh one comment line longer: one
-# shell opens the hold, and four processes it starts each ask twice: A, A again, B, and B with no hold (the control).
+# libraries are summed more than once a process; or a process outside a hold whose fields.sh is one line apart is
+# served the place another copy kept; or the facts key's list leaves out a library the folds' reader code reaches.
+# The probe, on a copy of the n snapshot, with three copies of the libraries, B's reader.sh one comment line longer and
+# C's fields.sh: one shell opens the hold, and five processes it starts each ask twice: A, A again, C, B, and B with no
+# hold (the control). C asks before B, while the hold's key is still A's. Then, with no hold, three processes ask the
+# place once: A, A again, C.
 SL_DIR="$TMPROOT/n/libs"; rm -rf "$SL_DIR" && cp -Rp "$TMPROOT/n/snap" "$SL_DIR"
-cp -R "$SC_LIB" "$SL_DIR/libA" && cp -R "$SC_LIB" "$SL_DIR/libB" && printf '\n# a reader one line apart\n' >> "$SL_DIR/libB/reader.sh"
+for SL_C in A B C; do cp -R "$SC_LIB" "$SL_DIR/lib$SL_C"; done
+printf '\n# a reader one line apart\n' >> "$SL_DIR/libB/reader.sh"
+printf '\n# a reader one line apart\n' >> "$SL_DIR/libC/fields.sh"
 SL_RC="$( cd "$SL_DIR/proj" && env TMPDIR="$SL_DIR/tmp" HOME="$SL_DIR/home" bash -c '
     . "$1/libA/proof.sh" || exit 2; proof_hold_begin || exit 2
     w="$1" p="$2"
@@ -378,17 +383,55 @@ SL_RC="$( cd "$SL_DIR/proj" && env TMPDIR="$SL_DIR/tmp" HOME="$SL_DIR/home" bash
       BIONIC_COUNT="$w/$2.count" bash -c ". \"\$1/proof.sh\" || exit 2; _proof_facts \"\$2\" >/dev/null && _proof_facts \"\$2\" >/dev/null" \
         _ "$w/$1" "$p"
     }
-    ask libA a && ask libA a2 && ask libB b && ( unset BIONIC_HELD; ask libB c ); r=$?
-    proof_hold_end; echo "$r"' _ "$SL_DIR" "$SL_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )"
+    ask libA a && ask libA a2 && ask libC d && ask libB b && ( unset BIONIC_HELD; ask libB c ); r=$?
+    proof_hold_end; unset BIONIC_HELD
+    place() {  # <library copy> <asker> -> the asker, a process of its own with no hold, asks the place once
+      BIONIC_COUNT="$w/$2.count" bash -c ". \"\$1/proof.sh\" || exit 2; proof_step_held \"\$2\" >/dev/null" _ "$w/$1" "$p"
+    }
+    [ "$r" -ne 0 ] || { place libA pa && place libA pa2 && place libC pc; r=$?; }
+    echo "$r"' _ "$SL_DIR" "$SL_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )"
 sl_n() { awk -v k="$2" '$1 == k { n++ } END { print n + 0 }' "$SL_DIR/$1.count" 2>/dev/null || echo -; }   # <asker> <kind> -> its count
 sl_of() { printf '%s' "fold $(sl_n "$1" fold) held $(sl_n "$1" held) libs $(sl_n "$1" libs)"; }   # <asker> -> its three counts
-expect_eq "LIBS-0 the probe's four processes each asked twice and exited 0" 0 "$SL_RC"
+expect_eq "LIBS-0 the probe's eight processes each asked and exited 0" 0 "$SL_RC"
 expect_eq "LIBS-1 A, the first asker in the hold, folds the log and sums its libraries once" "fold 1 held 0 libs 1" "$(sl_of a)"
 expect_eq "LIBS-2 a second process of A is served A's fold, summing its own libraries once to know it may be" \
   "fold 0 held 1 libs 1" "$(sl_of a2)"
 expect_eq "LIBS-3 B, whose reader is one line apart, folds for itself in the same hold and is not served A's fold" \
   "fold 1 held 0 libs 1" "$(sl_of b)"
 expect_eq "LIBS-4 CONTROL B with no hold folds, as it does in the hold" 1 "$(sl_n c fold)"
+expect_eq "LIBS-5 C, whose fields.sh is one line apart, folds for itself in the same hold and is not served A's fold" \
+  "fold 1 held 0 libs 1" "$(sl_of d)"
+expect_eq "LIBS-6 with no hold, A reads the log for the place and a second A is served the place A kept, but C, whose fields.sh is one line apart, reads it for itself" \
+  "1 0 1" "$(sl_n pa log) $(sl_n pa2 log) $(sl_n pc log)"
+# dk_reach <lib dir> [root…] -> the libraries the roots' code can read, measured from the code: each defining a function
+# or a top-level `_NAME=` variable that a root names, transitively, comments left out. With no root named, the roots are
+# the functions handed to `_proof_derive`.
+dk_reach() {
+  ( cd "$1" && shift && LC_ALL=C awk -v roots="$*" '
+    BEGIN { nr = split(roots, w, " "); for (i = 1; i <= nr; i++) root[w[i]] = 1 }
+    FNR == 1 { fn = "" }
+    !nr && / _proof_derive [A-Za-z_]/ { n = split($0, w, /[[:space:]]+/); for (i = 1; i + 3 <= n; i++) if (w[i] == "_proof_derive") root[w[i + 3]] = 1 }
+    /^[A-Za-z_][A-Za-z0-9_]*\(\)/ { fn = $0; sub(/\(.*/, "", fn); def[fn] = FILENAME; b[fn] = $0; if ($0 !~ /\{[[:space:]]*(#.*)?$/) fn = ""; next }
+    fn != "" { c = $0; sub(/(^|[[:space:]])#.*/, "", c); b[fn] = b[fn] " " c; if ($0 ~ /^\}/) fn = ""; next }
+    /^_[A-Z][A-Z0-9_]*=/ { v = $0; sub(/=.*/, "", v); if (!(v in def)) { def[v] = FILENAME; b[v] = $0 } }
+    END {
+      for (r in root) if (r in def) { q[++t] = r; seen[r] = 1 }
+      for (h = 1; h <= t; h++) { lib[def[q[h]]] = 1; s = b[q[h]]
+        while (match(s, /[A-Za-z_][A-Za-z0-9_]*/)) { id = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+          if ((id in def) && !(id in seen)) { seen[id] = 1; q[++t] = id } } }
+      for (l in lib) print l }' *.sh | sort | tr '\n' ' ' )
+}
+# The folds' reader code: every reader function the makers of the two kept folds of the run's log name, the facts'
+# (`_proof_facts`, `_proof_facts_held`) and the place's (`proof_step_held`). Their own code is proof.sh's, which the
+# place's key sums beside the reader's libraries.
+SL_ROOTS="$(awk '/^(_proof_facts|_proof_facts_held|proof_step_held)\(\)/ { p = 1 } p { print } p && /^\}/ { p = 0 }' "$SC_LIB/proof.sh" \
+  | grep -oE '(^|[^A-Za-z0-9_])reader_[a-z_]+' | sed 's/^[^r]*//' | sort -u | tr '\n' ' ')"
+SL_REACH="$(dk_reach "$SC_LIB" $SL_ROOTS)"
+expect_contains "LIBS-7 the folds' reader code names the fold and the place's questions" "reader_facts reader_log reader_log_stamp reader_q_approved" "$SL_ROOTS"
+expect_contains "LIBS-8 the measure from them reaches the reader and the field reader its questions run" "fields.sh plan-read.sh reader.sh" "$SL_REACH"
+SL_KEY="$(bash -c '. "$1/proof.sh" && printf "%s\n" $_PROOF_FACTS_LIBS' _ "$SC_LIB" 2>/dev/null | sort | tr '\n' ' ')"
+expect_eq "LIBS-9 the facts key sums every library the folds' reader code can read (key: $SL_KEY)" "" \
+  "$(for l in $SL_REACH; do case " $SL_KEY" in (*" $l "*) ;; (*) printf '%s ' "$l" ;; esac; done)"
 
 section "§TRUST: the log's writer trusts a hold exactly where the facts' reader trusts one"
 # fails-when: lib/log.sh `_log_moved` and lib/proof.sh `_proof_held_dir` part on a directory: a hold the reader trusts
@@ -710,12 +753,53 @@ sc_raw() { awk '$0 == "log line_lines" { n++ } END { print n + 0 }' "$SC_OUT/$1.
 expect_eq "DRV-3 the card over the run with a fixed finding computes its fixed findings, and reads the record raw more than the card with none" \
   "yes yes" "$([ "$(awk '$1 == "derive" && $2 == "proof_fixed" { n++ } END { print n + 0 }' "$SC_OUT/f.card.on.count")" -ge 1 ] && echo yes) $([ "$(sc_raw f card)" -gt "$(sc_raw n card)" ] && echo yes)"
 
+section "§DERIVE-KEY: a kept derived answer is served only to a process whose deriving code made it"
+# fails-when: a process of a held command whose proof.sh, units.sh or fields.sh is one line apart from the copy that
+# kept an answer is served that answer instead of computing its own, though the reader's libraries, and so the facts,
+# are the same; or a second process of the same copy computes it again; or the key's list of libraries leaves out one
+# that a derivation's code reaches.
+# The probe, on a copy of the n snapshot, with four copies of the libraries: B's proof.sh one comment line longer, C's
+# units.sh, D's fields.sh. One shell opens the hold, and five processes it starts each ask the proofs once.
+DK_DIR="$TMPROOT/n/derive-key"; rm -rf "$DK_DIR" && cp -Rp "$TMPROOT/n/snap" "$DK_DIR"
+for DK_C in A B C D; do cp -R "$SC_LIB" "$DK_DIR/lib$DK_C"; done
+printf '\n# a deriving library one line apart\n' >> "$DK_DIR/libB/proof.sh"
+printf '\n# a deriving library one line apart\n' >> "$DK_DIR/libC/units.sh"
+printf '\n# a deriving library one line apart\n' >> "$DK_DIR/libD/fields.sh"
+DK_OUT="$( cd "$DK_DIR/proj" && env TMPDIR="$DK_DIR/tmp" HOME="$DK_DIR/home" bash -c '
+    . "$1/libA/proof.sh" || exit 2; proof_hold_begin || exit 2
+    w="$1" p="$2"
+    ask() {  # <library copy> <asker> -> the asker, a process of its own, asks the proofs once; its counts in <asker>.count
+      BIONIC_COUNT="$w/$2.count" bash -c ". \"\$1/proof.sh\" && _proof_reader_load || exit 2; proof_lines \"\$2\"" \
+        _ "$w/$1" "$p" > "$w/$2.out"
+    }
+    ask libA a && ask libA a2 && ask libB b && ask libC c && ask libD d; r=$?
+    proof_hold_end; echo "$r"' _ "$DK_DIR" "$DK_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )"
+dk_n() { awk '$1 == "derive" && $2 == "proof_lines" && $3 != "-" { n++ } END { print n + 0 }' "$DK_DIR/$1.count" 2>/dev/null || echo -; }   # <asker> -> its kept computes
+expect_eq "DK-0 the probe's five processes each asked and exited 0, and the first printed the run's proofs" "0 yes" \
+  "$DK_OUT $([ -s "$DK_DIR/a.out" ] && echo yes)"
+expect_eq "DK-1 A, the first asker in the hold, computes the proofs once and keeps them" 1 "$(dk_n a)"
+expect_eq "DK-2 a second process of A is served A's kept answer, the same print" "0 same" \
+  "$(dk_n a2) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/a2.out" && echo same)"
+expect_eq "DK-3 B, whose proof.sh is one line apart, computes its own answer in the same hold" "1 same" \
+  "$(dk_n b) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/b.out" && echo same)"
+expect_eq "DK-4 C, whose units.sh is one line apart, computes its own answer in the same hold" "1 same" \
+  "$(dk_n c) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/c.out" && echo same)"
+expect_eq "DK-5 D, whose fields.sh is one line apart, computes its own answer in the same hold" "1 same" \
+  "$(dk_n d) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/d.out" && echo same)"
+DK_REACH="$(dk_reach "$SC_LIB")"
+expect_contains "DK-6 the measure reaches the deriving libraries themselves" "fields.sh line.sh" "$DK_REACH"
+expect_eq "DK-7 the key sums every library a derivation's code can read, the reader's and its own, and no other" "$DK_REACH" \
+  "$(bash -c '. "$1/proof.sh" && printf "%s\n" $_PROOF_FACTS_LIBS ${_PROOF_DERIVE_LIBS:-proof.sh units.sh}' _ "$SC_LIB" 2>/dev/null | sort | tr '\n' ' ')"
+
 section "§LOG: a command reads the run's log whole no more often than its ceiling"
 # fails-when: a reader in any of the commands reads the run's log whole once more, through the reader (`reader_events`)
 # or raw as the landing record (`line_lines`), in its first process or any it starts. Each ceiling is the command's
 # count over this fixture, the same at n rows and 2n (§SCALE); a row that removes reads lowers it, and one that adds a
 # read raises it in this table, by name.
-SC_LOG_MOST="card=9 check=2 tick=15 resume=21 watch=18 wall=2 close=5"
+# The close's sixth read asks who writes the continuation: a close row the log ever dispatched owns it, even once its
+# launch was taken back, and a cancel takes the dispatch out of the fold, so close-out.sh `co_rows_sent` reads the
+# log's lines, which no other read of the close keeps.
+SC_LOG_MOST="card=9 check=2 tick=15 resume=21 watch=18 wall=2 close=6"
 SC_LOG_MOST_FCARD=13
 expect_eq "LOG-0 a raw read of the log is counted: the card counts both readers (the counter proved)" "yes yes" \
   "$([ "$(sc_count n card log)" -gt "$(sc_raw n card)" ] && echo yes) $([ "$(sc_raw n card)" -ge 1 ] && echo yes)"

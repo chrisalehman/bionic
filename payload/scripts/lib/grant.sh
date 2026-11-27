@@ -138,14 +138,8 @@ if [ -n "${GRANT_LIB_LOADED:-}" ]; then
   return 0 2>/dev/null || true
 fi
 
-case "${BASH_SOURCE[0]}" in
-  */*) _GRANT_LIB_DIR="${BASH_SOURCE[0]%/*}" ;;
-  *) _GRANT_LIB_DIR="." ;;
-esac
-if ! declare -F git_argv_expand >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_GRANT_LIB_DIR/git-argv.sh" || return 1
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need git-argv.sh git_argv_expand || return 1
 GRANT_LIB_LOADED=1
 
 GRANT_TAB=$'\t'
@@ -751,7 +745,7 @@ _grant_verb() {
 # shared-reader call is made inside that block.
 _GRANT_CAT=""
 _grant_reserved_segment() {
-  local line="$1" oldifs="$IFS" hadf=0 w tool="" verb sub=""
+  local line="$1" w tool="" verb sub=""
   _GRANT_CAT=""
   git_argv_parse "$line" && sub="$GIT_SUB"
   _git_argv_skip "$line"
@@ -763,13 +757,10 @@ _grant_reserved_segment() {
       terraform|kubectl|vercel|aws|gcloud|az) tool=infra ;;
     esac
   fi
-  case "$-" in *f*) hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $line
-  IFS="$oldifs"
-  [ "$hadf" -eq 1 ] || set +f
+  git_argv_split_off
 
   shopt -s nocasematch
   case "$sub" in
@@ -785,12 +776,10 @@ _grant_reserved_segment() {
   fi
   if [ -z "$_GRANT_CAT" ] && [ -n "$tool" ]; then
     # The program's own words, as the reader left them; splitting asks the reader nothing.
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086
     set -- $GIT_ARGV_REST
-    IFS="$oldifs"
-    [ "$hadf" -eq 1 ] || set +f
+    git_argv_split_off
     shift
     case "$tool" in
       gh)

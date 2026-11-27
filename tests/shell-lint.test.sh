@@ -59,6 +59,7 @@
 #   §CENSUS-COMPLETE-1   a section with no census line, a suite with no heading and a suite with no line are refused.
 #   §CENSUS-COMPLETE-2   a verdict outside the five words, and a rule line marked as a cull, are refused.
 #   §CENSUS-COMPLETE-3   the census covers every suite and every section of the real tests tree.
+#   §CENSUS-ROWS         a row id the census cites that its suite does not hold is refused naming the suite, the section and the id.
 #   §CENSUS-1            a section the census culls that is still in its suite is refused.
 #   §CENSUS-2            a kept section gone from its suite, or a baseline one gone with no culled line, is refused.
 #   §CENSUS-3            a culled-list line that culls a keep or a rule pin is refused.
@@ -73,6 +74,10 @@
 #   §SETUP               a shared setup that loads a helper on a line with no stop is refused by file and line.
 #   §STOP                a maker that fails stops the suite that asked, its processes and nothing beside it, with one
 #                        line; a setup or a tests/lib file that calls maker_stop with no load of it is refused by line.
+#   §NO-BORROW           a suite that cuts a function by name out of another suite's file, on its line or through a
+#                        variable or a helper's argument, is refused by file and line; a product file's cut is no hit.
+#   §NO-PLANT            a suite that plants a counting line in a copy of a library that already counts its reads
+#                        (a sed or awk program or an appended line) is refused by file and line; the reader's own count is no hit.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
@@ -1274,7 +1279,7 @@ EXIT_WALLS="$REPO/payload/scripts/lib/walls.sh"
 EXIT_LIVE="$(LC_ALL=C awk '/^matrix_live_row_exit\(\)/ { on = 1 } on { print } on && /^}/ { exit }' "$EXIT_WALLS")"
 expect_contains "EXIT-3b the Verify gate's live-row exit in payload/scripts/lib/walls.sh names the walk's registration for a row the walk proved" \
   'session-poker.sh proof-add walk <its record>' "$EXIT_LIVE"
-expect_contains "…the person's change of the Eval design row for a row whose eval cannot fire" 'its ## Eval design row changed' "$EXIT_LIVE"
+expect_contains "…the person's change of the Test design row for a row whose test cannot fire" 'its ## Test design row changed' "$EXIT_LIVE"
 expect_contains "…and the user's waiver otherwise" 'needs: the user — a waiver' "$EXIT_LIVE"
 expect_eq "…and the live row's three evidence refusals each carry it" "3" \
   "$(LC_ALL=C grep -cF '"${live_exit:-' "$EXIT_WALLS")"
@@ -1333,6 +1338,33 @@ census_refusals() {
       }
       for (key in need) { split(key, p, SUBSEP); if (have[key] < need[key]) print "no verdict: " p[1] " §" p[2] }
     }' | LC_ALL=C sort
+}
+# census_row_refusals <tests dir> <census file> -> `unheld row: <suite> §<key> <id>` per labelled row id a record
+# line cites in its defect cell, inside a parenthesis, that its suite does not hold. A labelled id is NAME-n, an
+# upper-case stem of two letters or more, a hyphen, then a digit (`RV-3`, `AW-5-0`); the plain `7a` of a suite that
+# numbers its rows by position has nothing to be held against, and `AC-n` names a criterion, not a row. A suite holds
+# an id as a whole token in its own file or in a tests/lib file its text names.
+census_row_refusals() {
+  local s f lib libs pairs="$(mktemp "${TMPDIR:-/tmp}/cr.XXXXXX")"
+  census_records "$2" | awk -F'\t' '{
+    t = $5
+    while (match(t, /\([^()]*\)/)) {
+      g = substr(t, RSTART + 1, RLENGTH - 2); t = substr(t, RSTART + RLENGTH)
+      n = split(g, a, ", ")
+      for (i = 1; i <= n; i++)
+        if (a[i] ~ /^[A-Z][A-Z]+-[0-9][A-Za-z0-9]*(-[0-9A-Za-z]+)*$/ && a[i] !~ /^AC-/) print $2 "\t" $3 "\t" a[i]
+    }
+  }' | LC_ALL=C sort -u > "$pairs"
+  for s in $(cut -f1 "$pairs" | LC_ALL=C sort -u); do
+    f="$1/$s"; [ -f "$f" ] || continue
+    libs=("$f")
+    for lib in "$1"/lib/*.sh; do [ -f "$lib" ] && /usr/bin/grep -q -F "${lib##*/}" "$f" && libs+=("$lib"); done
+    # the suite's tokens, a token being a run of letters, digits and hyphens; an id is held when it is one of them
+    awk -F'\t' -v s="$s" '$1 == s { print $3 "\t" $2 }' "$pairs" | LC_ALL=C sort > "$pairs.s"
+    /usr/bin/grep -h -o -E '[A-Za-z0-9-]+' "${libs[@]}" | LC_ALL=C sort -u > "$pairs.t"
+    LC_ALL=C join -t "$(printf '\t')" -v 1 "$pairs.s" "$pairs.t" | awk -F'\t' -v s="$s" '{ printf "unheld row: %s §%s %s\n", s, $2, $1 }'
+  done | LC_ALL=C sort -u
+  rm -f "$pairs" "$pairs.s" "$pairs.t"
 }
 # census_scratch <dir> -> a tests tree of three suites: x with two sections, y with none, z holding a
 # section call only inside a heredoc body that writes a scratch suite.
@@ -1410,6 +1442,29 @@ expect_eq "the census file is there, with a heading for this suite" "yes" \
 expect_eq "the census path comes from the registry constant: the product's names tests/CENSUS.md, a scratch copy's another file" \
   "$TESTS_DIR/CENSUS.md|tests/OTHER.md" "$CENSUS_MD|$(census_registry <(echo 'REGISTRY_FILES="tests/OTHER.md"'))"
 expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(census_refusals "$TESTS_DIR" "$CENSUS_MD")"
+
+# ============================================================
+section "CENSUS-ROWS: a row id the census cites that its suite does not hold is refused by suite, section and id"
+# ============================================================
+# fails-when: a record line cites a labelled row (NAME-n) that neither its suite nor a tests/lib file the suite names
+# holds, and the sweep over the real census prints nothing for it.
+CR="$TMP/cr"; census_scratch "$CR"
+printf '%s\n' 'expect_eq "RV-1: the first row" 1 1' 'expect_eq "RV-1b: its second" 1 1' > "$CR/tests/x.test.sh.rows"
+cat "$CR/tests/x.test.sh.rows" >> "$CR/tests/x.test.sh"; rm -f "$CR/tests/x.test.sh.rows"
+mkdir -p "$CR/tests/lib"; printf '%s\n' 'expect_eq "LB-2: a row a library holds" 1 1' > "$CR/tests/lib/rows.sh"
+printf '%s\n' '. "$TESTS_DIR/lib/rows.sh"' >> "$CR/tests/x.test.sh"
+census_file "$CR/held.md" 'x.test.sh | §ONE | keep | lib/x.sh: an arm deleted (RV-1, RV-1b, LB-2, AC-9, 7a) | none (searched x in tests/)' "$CS_TWO"
+expect_eq "control: ids the suite holds, one in a library it names, a criterion id and a positional id are refused for nothing" "" \
+  "$(census_row_refusals "$CR/tests" "$CR/held.md")"
+census_file "$CR/lack.md" 'x.test.sh | §ONE | keep | lib/x.sh: an arm deleted (RV-1, RV-3, RV-3b, RV-1bb) | none (searched x in tests/)' "$CS_TWO"
+expect_eq "a cited id the suite lacks is refused by suite, section and id; a longer id does not stand in for a shorter one" \
+  "unheld row: x.test.sh §ONE RV-1bb|unheld row: x.test.sh §ONE RV-3|unheld row: x.test.sh §ONE RV-3b" \
+  "$(census_row_refusals "$CR/tests" "$CR/lack.md" | paste -sd'|' -)"
+census_file "$CR/other.md" 'x.test.sh | §ONE | keep | lib/x.sh: an arm deleted | none (searched x in tests/; y.test.sh §Q (RV-9))' "$CS_TWO"
+expect_eq "an id cited only in the catcher cell names another suite's row and is not read" "" \
+  "$(census_row_refusals "$CR/tests" "$CR/other.md")"
+CR_REAL="$(census_row_refusals "$TESTS_DIR" "$CENSUS_MD")"
+expect_eq "the real census cites only rows its suites hold" "" "$CR_REAL"
 
 
 # ── the cut ──────────────────────────────────────────────────────────────────
@@ -1909,5 +1964,214 @@ expect_eq "STOP-4 every real setup and library that calls maker_stop loads it" "
 cp "$ST/bad.prelude.sh" "$LT/tests/stopbad.prelude.sh" && mkdir -p "$LT/tests/lib" && cp "$ST/bad.prelude.sh" "$LT/tests/lib/stopbad.sh"
 expect_eq "STOP-5 the landing's run, told a setup and a library that call it unloaded, names each as a STOP hit" \
   "STOP tests/lib/stopbad.sh:4|STOP tests/stopbad.prelude.sh:4" "$(lint_at "$LT" tests/stopbad.prelude.sh tests/lib/stopbad.sh | tr '|' '\n' | LC_ALL=C sort | paste -sd'|' -)"
+
+# ============================================================
+section "NO-BORROW — a suite that reads a function by name out of another suite's file is refused by file and line"
+# ============================================================
+# A helper one suite reads out of another's file by name has two homes: the file it is written in and every file
+# that cuts it out, and a change to the first reaches the second unseen. A shared helper lives in tests/lib, and
+# every suite that needs it loads it. The reader is an awk or sed program that prints from `<name>() {`; its file is
+# named on its line, or reached through a variable it reads (an assignment) or a function argument (a call). A
+# product file read that way is a pin of that file's text, never a second home of a test helper, so it is no hit.
+# fails-when: a suite cuts a function out of another suite's file, directly or through a helper, and the sweep passes.
+cat > "$TMP/borrow.awk" <<'BORROW_AWK_EOF'
+# One file of tests/, heredoc bodies blanked. F is its path; ALL=1 prints every extraction, a borrow or not ("-").
+function strip(line,   i, n, c, st) {
+  n = length(line); st = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(line, i, 1)
+    if (st == "s") { if (c == "'") st = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (st == "d") { if (c == "\"") st = ""; continue }
+    if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) return substr(line, 1, i - 1)
+    if (c == "'") st = "s"; else if (c == "\"") st = "d"
+  }
+  return line
+}
+# The suite files a text names, its own and a load's operand left out.
+function names(line,   rest, m, pre, out) {
+  out = ""; rest = line
+  while (match(rest, /[A-Za-z0-9_.-]+\.(test|prelude)\.sh/)) {
+    m = substr(rest, RSTART, RLENGTH); pre = substr(rest, 1, RSTART - 1); rest = substr(rest, RSTART + RLENGTH)
+    if (m == OWN) continue
+    if (pre ~ /(^|[;&|({!][ \t]*|[ \t])(\.|source)[ \t]+[^;&|]*$/) continue
+    out = out (out == "" ? "" : " ") m
+  }
+  return out
+}
+# Every variable a text reads joins extraction e's set; a positional one stands for the calls of line i's function.
+function reads(e, i, text,   v, k) {
+  gsub(/'[^']*'/, "", text)
+  while (match(text, /\$\{?([A-Za-z_][A-Za-z0-9_]*|[1-9])/)) {
+    v = substr(text, RSTART, RLENGTH); text = substr(text, RSTART + RLENGTH); sub(/^\$\{?/, "", v)
+    k = (v ~ /^[1-9]$/) ? ("()" FN[i]) : v
+    if (k == "()" || (e, k) in S) continue
+    S[e, k] = 1; grew = 1
+  }
+}
+function add(e, n,   a, j, c) {
+  c = split(n, a, " ")
+  for (j = 1; j <= c; j++) if (index(" " HIT[e] " ", " " a[j] " ") == 0) HIT[e] = HIT[e] (HIT[e] == "" ? "" : " ") a[j]
+}
+BEGIN { OWN = F; sub(/.*\//, "", OWN) }
+{
+  L[NR] = strip($0)
+  if (match(L[NR], /^[ \t]*[A-Za-z_][A-Za-z0-9_]*\(\)[ \t]*\{/)) { fn = substr(L[NR], RSTART, RLENGTH); gsub(/[ \t(){]/, "", fn) }
+  FN[NR] = fn
+  if (L[NR] ~ /"\(\) \{"/ || L[NR] ~ /\/\^[ \t]*([A-Za-z_][A-Za-z0-9_]*|\$\{?[A-Za-z0-9_]+\}?)\(\) \{\/,/) E[++ne] = NR
+}
+END {
+  for (x = 1; x <= ne; x++) {
+    e = E[x]; HIT[e] = ""; add(e, names(L[e])); grew = 0; reads(e, e, L[e])
+    for (pass = 0; grew && pass < 8; pass++) {
+      grew = 0
+      for (i = 1; i <= NR; i++) {
+        if (i == e) continue
+        for (k in S) {
+          split(k, kk, SUBSEP); if (kk[1] != e) continue; v = kk[2]
+          if (v ~ /^\(\)/) {
+            f = substr(v, 3)
+            if (L[i] ~ ("(^|[ \t;&|(!])" f "[ \t]") && L[i] !~ ("^[ \t]*" f "\\(\\)")) { add(e, names(L[i])); reads(e, i, L[i]) }
+          } else if (match(L[i], "(^|[ \t;])" v "=")) {
+            t = substr(L[i], RSTART + RLENGTH); add(e, names(t)); reads(e, i, t)
+          }
+        }
+      }
+    }
+    if (HIT[e] != "") print F ":" e "\t" HIT[e]
+    else if (ALL) print F ":" e "\t-"
+  }
+}
+BORROW_AWK_EOF
+borrow_refusals() {  # [ALL=1] <file>... -> `<file>:<line> TAB <suite files>` per line that cuts a function out of another suite's file
+  local f; for f in "$@"; do awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk -v F="$f" -v ALL="${ALL:-}" -f "$TMP/borrow.awk"; done
+}
+NB="$TMP/borrow"; mkdir -p "$NB"
+# The plants are heredoc bodies, so the sweep of this suite's own file reads them as text.
+cat > "$NB/bad.test.sh" <<'NB_BAD'
+#!/bin/bash
+eval "$(sed -n '/^sp_at() {/,/^}/p' "$(dirname "$0")/poker.prelude.sh")"
+b="$(awk -v n=w 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$H/proof.test.sh")"
+imp() {  # <name> <file>
+  eval "$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$2")"
+}
+imp mk "$(dirname "$0")/close.prelude.sh"
+CO="$(dirname "$0")/walls.prelude.sh"
+imp2() { local body from="${2:-$CO}"
+  body="$(sed -n "/^$1() {/,/^}/p" "$from")"; eval "$body"; }
+imp2 eg
+NB_BAD
+cat > "$NB/good.test.sh" <<'NB_GOOD'
+#!/bin/bash
+. "$(dirname "$0")/close.prelude.sh" || exit 1
+GATE="$REPO/hooks/gate.sh"
+FN="$(sed -n '/^  budget() {/,/^  }$/p' "$GATE")"
+eval "$(sed -n '/^own() {/,/^}/p' "$(dirname "$0")/good.test.sh")"
+# eval "$(sed -n '/^x() {/,/^}/p' tests/close.prelude.sh)"
+cat > "$p/s.sh" <<'EOF'
+eval "$(sed -n '/^x() {/,/^}/p' "$H/close.prelude.sh")"
+EOF
+run_suite "a.test.sh"
+NB_GOOD
+for f in "$NB"/*.test.sh; do expect_true "the planted ${f##*/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+expect_eq "NO-BORROW-1 each cut is refused by line, naming the file it reads: a sed range, an awk program, a helper's argument, a helper's default" \
+  "$NB/bad.test.sh:2 poker.prelude.sh|$NB/bad.test.sh:3 proof.test.sh|$NB/bad.test.sh:5 close.prelude.sh|$NB/bad.test.sh:10 walls.prelude.sh" \
+  "$(borrow_refusals "$NB/bad.test.sh" | tr '\t' ' ' | paste -sd'|' -)"
+expect_eq "…and the same reader finds the control's two live cuts, a product file's and its own file's, and no more" \
+  "$NB/good.test.sh:4 -|$NB/good.test.sh:5 -" "$(ALL=1 borrow_refusals "$NB/good.test.sh" | tr '\t' ' ' | paste -sd'|' -)"
+expect_eq "control: a setup's load, a product file's cut, a cut of its own file, a comment, a heredoc body and a bare name are refused for nothing" "" \
+  "$(borrow_refusals "$NB/good.test.sh")"
+NB_REAL="$(ALL=1 borrow_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh | wc -l | tr -d ' ')"
+expect_true "the real sweep reads cuts: ${NB_REAL} in the suites, setups and libraries under tests/" [ "${NB_REAL:-0}" -gt 0 ]
+expect_eq "NO-BORROW-2 no suite, setup or library under tests/ cuts a function out of another suite's file" "" \
+  "$(borrow_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh)"
+
+# ============================================================
+section "NO-PLANT — a suite that writes a counting line into a copy of a library that already counts its reads is refused"
+# ============================================================
+# A library that counts its reads under BIONIC_COUNT already says how many it made, so a copy with a counting line
+# planted in it makes a second count that drifts from the first, and proves the copy, not the shipped code. A suite
+# reads the library's own count. The shape a suite wrote: a sed or awk program with an `echo … >> "$…MARK"` line, run
+# over a counting library and written out as its copy; or such a line appended to the copy. A counting write is one
+# to a variable named for a mark or a count; a program over a file that does not count (a stub's call marker), and a
+# planted line that writes anything else (an event, a log), are no hit.
+# fails-when: a suite plants a counting line in a copy of a library that counts its reads, and the sweep passes.
+cat > "$TMP/plant.awk" <<'PLANT_AWK_EOF'
+# One file of tests/, heredoc bodies blanked. F is its path, LIBS the counting libraries' file names; ALL=1 also prints
+# each statement that names a counting library and plants nothing ("-"). A statement runs on while a quote is open.
+function names(s,   k, n, a) {
+  n = split(LIBS, a, " ")
+  for (k = 1; k <= n; k++) if (s ~ ("(^|[^A-Za-z0-9_.-])" a[k] "([^A-Za-z0-9_]|$)")) return 1
+  for (k in V) if (index(s, "$" k) || index(s, "${" k)) return 1
+  return 0
+}
+{
+  line = $0; out = ""
+  for (i = 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (st != "s" && c == "\\") { out = out c substr(line, i + 1, 1); i++; continue }
+    if (st == "" && c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) break
+    if (st == "" && c == "'") st = "s"; else if (st == "s" && c == "'") st = ""
+    else if (st != "s" && c == "\"") st = (st == "d") ? "" : "d"
+    out = out c
+  }
+  if (S == "") at = NR
+  S = S (S == "" ? "" : "\n") out
+  if (st == "" && out !~ /\\$/) { n++; T[n] = S; A[n] = at; S = "" }
+}
+END {
+  for (x = 1; x <= n; x++)
+    if (T[x] ~ /^[ \t]*(export[ \t]+|local[ \t]+)?[A-Za-z_][A-Za-z0-9_]*=/ && names(T[x])) {
+      v = T[x]; sub(/^[ \t]*(export[ \t]+|local[ \t]+)?/, "", v); sub(/=.*/, "", v); V[v] = 1
+    }
+  for (x = 1; x <= n; x++) {
+    if (!names(T[x]) || T[x] ~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=[^ \t]*$/) continue
+    edits = T[x] ~ /(^|[^A-Za-z0-9_])(sed|awk)[ \t]/ || T[x] ~ />>[ \t]*"?[^ \t;&|]*\.sh"?[ \t]*$/
+    if (edits && T[x] ~ /(echo|printf)[^\n]*>>[ \t]*\\?"?\$\{?[A-Za-z_]*(MARK|COUNT)/) print F ":" A[x]
+    else if (ALL) print F ":" A[x] "\t-"
+  }
+}
+PLANT_AWK_EOF
+plant_refusals() {  # [ALL=1] <file>... -> `<file>:<line>` per statement that plants a counting line in a copy of a counting library
+  local f libs; libs="$(cd "$LIB_DIR" && LC_ALL=C grep -l 'BIONIC_COUNT' ./*.sh | sed 's|^\./||' | paste -sd' ' -)"
+  for f in "$@"; do awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk -v F="$f" -v LIBS="$libs" -v ALL="${ALL:-}" -f "$TMP/plant.awk"; done
+}
+NP="$TMP/plant"; mkdir -p "$NP"
+# The plants are heredoc bodies, so the sweep of this suite's own file reads them as text.
+cat > "$NP/bad.test.sh" <<'NP_BAD'
+#!/bin/bash
+SR_FA_LIB="$HOOKS/../payload/scripts/lib/proof.sh"
+sed -e '/^  if [ "$K" = "$key" ] then _proof_facts_out; fi$/a\
+  [ -z "${SR_FOLD_MARK:-}" ] || echo fold >> "$SR_FOLD_MARK"
+' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
+sed 's|^reader_facts() {$|reader_facts() { echo hit >> "$SR_MARK";|' "$LIB/reader.sh" > "$SR_FM/lib/reader.sh"
+CP="$SR_FM/payload/scripts/lib/walls.sh"
+awk '{ print } /^wall_evidence_gate\(\) \{/ { print "echo gate >> \"$SR_MARK\"" }' "$CP" > "$CP.new"
+echo 'echo hit >> "$SR_MARK"' >> "$SR_FM/lib/units.sh"
+NP_BAD
+cat > "$NP/good.test.sh" <<'NP_GOOD'
+#!/bin/bash
+SR_FA_LIB="$HOOKS/../payload/scripts/lib/proof.sh"
+sed 's|^sitrep_gather() {$|sitrep_gather() { echo gather >> "$SR_GATHER_MARK";|' "$HOOKS/poker/sitrep.sh" > "$SR_FM/hooks/poker/sitrep.sh"
+sed 's|^a$|b|' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
+cmp -s "$SR_FA_LIB" "$SR_FM/payload/scripts/lib/proof.sh" && echo same
+SR_AT="$AT" BIONIC_COUNT="$COUNTS" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep "$PLAN" > "$OUT" 2>/dev/null
+F1="$(/usr/bin/grep -cx 'fold reader_facts' "$COUNTS")"
+# sed 's|a|echo x >> "$M"|' "$LIB/proof.sh" > "$SR_FM/proof.sh"
+cat > "$p/s.sh" <<'EOF'
+sed 's|a|echo x >> "$M"|' "$LIB/proof.sh" > "$SR_FM/proof.sh"
+EOF
+NP_GOOD
+for f in "$NP"/*.test.sh; do expect_true "the planted ${f##*/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+expect_eq "NO-PLANT-1 each plant is refused by line: the sed program a suite wrote (a library path in a variable, a library named in the command), an awk program over a copy named by a variable, a line appended to a copy" \
+  "$NP/bad.test.sh:3|$NP/bad.test.sh:6|$NP/bad.test.sh:8|$NP/bad.test.sh:9" "$(plant_refusals "$NP/bad.test.sh" | paste -sd'|' -)"
+expect_eq "…and the control's statements that name a counting library are read, with a counting write over a file that does not count and the reader's own count among those not refused" \
+  "$NP/good.test.sh:4|$NP/good.test.sh:5" "$(ALL=1 plant_refusals "$NP/good.test.sh" | cut -f1 | paste -sd'|' -)"
+expect_eq "control: a stub's call marker, a copy edited with no count, a cmp, a run reading BIONIC_COUNT, a comment and a heredoc body are refused for nothing" "" \
+  "$(plant_refusals "$NP/good.test.sh")"
+NP_REAL="$(ALL=1 plant_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh | wc -l | tr -d ' ')"
+expect_true "the real sweep reads statements that name a counting library: ${NP_REAL} in the suites, setups and libraries under tests/" [ "${NP_REAL:-0}" -gt 0 ]
+expect_eq "NO-PLANT-2 no suite, setup or library under tests/ plants a counting line in a copy of a library that counts its reads" "" \
+  "$(plant_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh)"
 
 finish

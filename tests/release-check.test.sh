@@ -58,6 +58,15 @@
 #                   its code as well as the landing's base.
 #   §HOLD           the project's check, run from inside a held command, is started with no hold, so its facts are
 #                   folded by the reader at the judge and not by the verb's.
+#   §ONE-READER     the copy check runs over the tree at BIONIC_CHECK_HEAD, as the judge's one-reader-check.sh holds it: a
+#                   head with a planted second parser, a second writer of the plan or a copied loader is each refused in
+#                   one line naming the copy, a clean head passes with its counts, a plant in the working files alone is
+#                   not read, and a head with no hooks/ and payload/scripts/ passes saying it holds no copy to count.
+#   §DEFER-LANDING  a range whose base holds the release's entry as the head does (a landing of code, or of an older
+#                   entry) passes an unstated or omitted deferral with a note per line and one line saying why; the
+#                   landing that writes the entry, a range spanning that change and a run with no base refuse it.
+#   §NUMBERS-FLOOR  from 2.3.0 an entry with no landing numbers fails, by hand and at the landing that writes it, and
+#                   is a note at a landing that leaves it as it was; the 2.2.0 entry with none passes.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -119,28 +128,28 @@ lines_of() { printf '%s\n' "$1" | awk '/^release-check:/ { n++ } END { print n +
 
 section "§VERSION-PAIR — the newest CHANGELOG heading equals plugin.json's version, read from the HEAD tree"
 
-R="$TMP/agree"; fx_repo "$R" 2.3.4 2.3.4
+R="$TMP/agree"; fx_repo "$R" 2.2.4 2.2.4
 run_check "$R"
 expect_status "(i) an agreeing pair, a clean scan: the check passes" 0 "$RC"
 
-R="$TMP/chg"; fx_repo "$R" 2.3.4 2.3.4
-fx_changelog 2.3.5 > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "doctor the heading"
+R="$TMP/chg"; fx_repo "$R" 2.2.4 2.2.4
+fx_changelog 2.2.5 > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "doctor the heading"
 run_check "$R"
 expect_status "(ii) a doctored CHANGELOG heading: the check fails" 1 "$RC"
-expect_contains "(ii) …and the line names the CHANGELOG's version" "2.3.5" "$OUT"
-expect_contains "(ii) …and the line names the plugin's version" "2.3.4" "$OUT"
+expect_contains "(ii) …and the line names the CHANGELOG's version" "2.2.5" "$OUT"
+expect_contains "(ii) …and the line names the plugin's version" "2.2.4" "$OUT"
 expect_eq "(ii) …in one line" "1" "$(lines_of "$OUT")"
 
-R="$TMP/plg"; fx_repo "$R" 2.3.4 2.3.4
-fx_plugin 2.3.9 > "$R/payload/.claude-plugin/plugin.json"; git -C "$R" commit -q -am "doctor the version"
+R="$TMP/plg"; fx_repo "$R" 2.2.4 2.2.4
+fx_plugin 2.2.9 > "$R/payload/.claude-plugin/plugin.json"; git -C "$R" commit -q -am "doctor the version"
 run_check "$R"
 expect_status "(iii) a doctored plugin.json version: the check fails" 1 "$RC"
-expect_contains "(iii) …and the line names the plugin's version" "2.3.9" "$OUT"
-expect_contains "(iii) …and the CHANGELOG's" "2.3.4" "$OUT"
+expect_contains "(iii) …and the line names the plugin's version" "2.2.9" "$OUT"
+expect_contains "(iii) …and the CHANGELOG's" "2.2.4" "$OUT"
 expect_eq "(iii) …in one line" "1" "$(lines_of "$OUT")"
 
 # (iv) the HEAD tree, not the working file: the working CHANGELOG disagrees, nothing is committed.
-R="$TMP/dirty"; fx_repo "$R" 2.3.4 2.3.4
+R="$TMP/dirty"; fx_repo "$R" 2.2.4 2.2.4
 run_check "$R"
 expect_status "(iv) setup: the clean repository passes" 0 "$RC"
 CLEAN_OUT="$OUT"
@@ -151,8 +160,8 @@ expect_status "(iv) a working CHANGELOG edited and not committed: the check stil
 expect_eq "(iv) …and prints what the clean run of the same repository printed" "$CLEAN_OUT" "$OUT"
 
 # BIONIC_CHECK_HEAD picks the tree: the bad commit is HEAD, the good one is HEAD~1.
-R="$TMP/pick"; fx_repo "$R" 2.3.4 2.3.4
-fx_changelog 2.3.5 > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "doctor the heading"
+R="$TMP/pick"; fx_repo "$R" 2.2.4 2.2.4
+fx_changelog 2.2.5 > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "doctor the heading"
 run_check "$R"
 expect_status "(v) the doctored HEAD fails" 1 "$RC"
 OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD='HEAD~1' bash "$CHECK" "$LIST" 2>&1)"; RC=$?
@@ -160,7 +169,7 @@ expect_status "(v) …and BIONIC_CHECK_HEAD=HEAD~1 reads the agreeing tree and p
 
 section "§REFUSE — no list path, and a pair that cannot be read, are one-line refusals"
 
-R="$TMP/refuse"; fx_repo "$R" 2.3.4 2.3.4
+R="$TMP/refuse"; fx_repo "$R" 2.2.4 2.2.4
 OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD bash "$CHECK" 2>&1)"; RC=$?
 expect_ne "(a) no list path: non-zero" "0" "$RC"
 expect_eq "(a) …in one line" "1" "$(lines_of "$OUT")"
@@ -168,13 +177,13 @@ run_check "$R" "$TMP/lists/does-not-exist.list"
 expect_ne "(b) a list path that is not there: non-zero" "0" "$RC"
 expect_eq "(b) …in one line" "1" "$(lines_of "$OUT")"
 
-R="$TMP/nohead"; fx_repo "$R" 2.3.4 2.3.4
+R="$TMP/nohead"; fx_repo "$R" 2.2.4 2.2.4
 printf '# Changelog\n\nno release heading here\n' > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "no heading"
 run_check "$R"
 expect_ne "(c) a CHANGELOG with no release heading: non-zero" "0" "$RC"
 expect_eq "(c) …in one line" "1" "$(lines_of "$OUT")"
 
-R="$TMP/nover"; fx_repo "$R" 2.3.4 2.3.4
+R="$TMP/nover"; fx_repo "$R" 2.2.4 2.2.4
 printf '{ "name": "fixture" }\n' > "$R/payload/.claude-plugin/plugin.json"; git -C "$R" commit -q -am "no version"
 run_check "$R"
 expect_ne "(d) a plugin.json with no version: non-zero" "0" "$RC"
@@ -182,7 +191,7 @@ expect_eq "(d) …in one line" "1" "$(lines_of "$OUT")"
 
 section "§SCAN — the name scan still runs under the release check"
 
-R="$TMP/scan"; fx_repo "$R" 2.3.4 2.3.4
+R="$TMP/scan"; fx_repo "$R" 2.2.4 2.2.4
 run_check "$R"
 expect_status "(e) setup: the clean repository passes" 0 "$RC"
 printf 'a line holding %s in the middle\n' "$ENTRY" > "$R/b.txt"; git -C "$R" add -A; git -C "$R" commit -q -m "plant"
@@ -223,8 +232,8 @@ $(lim_def record/w/critic.md#4 S2 on 'fixed instead' 'A sentence the policy fixe
 LIM_UNSTATED="$(lim_def record/w/critic.md#3 S3 on 'an unstated one')"
 LIM_DASH="$(lim_def record/w/critic.md#3 S3 on 'an unstated one' -)"
 LIM_FIXED="$(lim_def record/w/critic.md#4 S2 on 'fixed instead' 'A sentence the policy fixes is no limit.')"
-lim_changelog() {  # <repo> <Known limits body of 2.3.4> [<older entry body>] -> commit a CHANGELOG whose newest entry is 2.3.4
-  { printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n### Known limits\n\n%s\n\n' "$2"
+lim_changelog() {  # <repo> <Known limits body of 2.2.4> [<older entry body>] -> commit a CHANGELOG whose newest entry is 2.2.4
+  { printf '# Changelog\n\n## 2.2.4 — 2026-01-02\n\n- a change\n\n### Known limits\n\n%s\n\n' "$2"
     printf '## 0.0.1 — 2026-01-01\n\n- first\n%s\n' "${3-}"; } > "$1/CHANGELOG.md"
   git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the changelog"
 }
@@ -232,25 +241,25 @@ LIM_BOTH="- Known limit: $LIM_A
 - Known limit: The second limit is long enough that a changelog
   wraps it across two lines."
 
-R="$TMP/lim-ok"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"; lim_changelog "$R" "$LIM_BOTH"
+R="$TMP/lim-ok"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4 "$LIM_DEFERRED"; lim_changelog "$R" "$LIM_BOTH"
 expect_false "(l0) setup: the plan is not committed (it is read from the docs root, as a real project's is)" git -C "$R" cat-file -e "HEAD:.bionic/docs/plans/epic-01/wave-01.plan.md"
 run_check "$R"
 expect_status "(l1) every stated deferral under the newest entry's Known limits, one of them wrapped: the check passes" 0 "$RC"
 expect_eq "(l1) …and no release-check line" "0" "$(lines_of "$OUT")"
 
-R="$TMP/lim-omit"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"; lim_changelog "$R" "- Known limit: $LIM_A"
+R="$TMP/lim-omit"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4 "$LIM_DEFERRED"; lim_changelog "$R" "- Known limit: $LIM_A"
 run_check "$R"
 expect_status "(l2) §LIMITS AC-11.4 Known limits omitting one stated sentence: the check fails" 1 "$RC"
 expect_eq "(l2) …in one line" "1" "$(lines_of "$OUT")"
 
-R="$TMP/lim-elsewhere"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
-{ printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change: %s\n\n### Known limits\n\n- Known limit: %s\n\n' "$LIM_B" "$LIM_A"
+R="$TMP/lim-elsewhere"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4 "$LIM_DEFERRED"
+{ printf '# Changelog\n\n## 2.2.4 — 2026-01-02\n\n- a change: %s\n\n### Known limits\n\n- Known limit: %s\n\n' "$LIM_B" "$LIM_A"
   printf '## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "the sentence outside Known limits"
 run_check "$R"
 expect_status "(l3) the sentence in the entry but outside its Known limits: the check fails" 1 "$RC"
 expect_contains "(l3) …naming it" "omit the deferred sentence of record/w/critic.md#2" "$OUT"
 
-R="$TMP/lim-older"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
+R="$TMP/lim-older"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4 "$LIM_DEFERRED"
 lim_changelog "$R" "- Known limit: $LIM_A" "
 ### Known limits
 
@@ -259,19 +268,19 @@ run_check "$R"
 expect_status "(l4) the sentence only under an older entry's Known limits: the check fails" 1 "$RC"
 expect_contains "(l4) …naming it" "omit the deferred sentence of record/w/critic.md#2" "$OUT"
 
-R="$TMP/lim-none"; fx_repo "$R" 2.3.4 2.3.4
-lim_plan "$R" 2.3.4 "$LIM_FIXED"; lim_changelog "$R" "- Known limit: none of note."
+R="$TMP/lim-none"; fx_repo "$R" 2.2.4 2.2.4
+lim_plan "$R" 2.2.4 "$LIM_FIXED"; lim_changelog "$R" "- Known limit: none of note."
 run_check "$R"
 expect_status "(l5) a plan with no deferral rated defer: the check passes" 0 "$RC"
-expect_contains "(l5) …in one line saying so" "known-limits: 2.3.4 — $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md states no deferred sentence" "$OUT"
+expect_contains "(l5) …in one line saying so" "known-limits: 2.2.4 — $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md states no deferred sentence" "$OUT"
 expect_eq "(l5) …one such line" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^known-limits:')"
 
-R="$TMP/lim-noplan"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.3 "$LIM_DEFERRED"; lim_changelog "$R" "- Known limit: none of note."
+R="$TMP/lim-noplan"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.3 "$LIM_DEFERRED"; lim_changelog "$R" "- Known limit: none of note."
 run_check "$R"
-expect_status "(l6) no plan names the release (the plan names 2.3.3): the check passes" 0 "$RC"
-lim_plan "$R" 2.3.4 "$LIM_DEFERRED"
+expect_status "(l6) no plan names the release (the plan names 2.2.3): the check passes" 0 "$RC"
+lim_plan "$R" 2.2.4 "$LIM_DEFERRED"
 run_check "$R"
-expect_status "(l6) …positive, the same repository once the plan names 2.3.4: the omissions fail it" 1 "$RC"
+expect_status "(l6) …positive, the same repository once the plan names 2.2.4: the omissions fail it" 1 "$RC"
 expect_eq "(l6) …one line for each of the two sentences" "2" "$(lines_of "$OUT")"
 
 section "§LIMITS-2 — a deferral rated defer with no stated sentence, or a dash for one, refuses the release"
@@ -279,30 +288,30 @@ section "§LIMITS-2 — a deferral rated defer with no stated sentence, or a das
 # The same fixture world as §LIMITS: one deferral, #3, rated defer by the policy. Unstated it is no limit anyone
 # can carry, so the check names it and refuses; stated and carried it passes. The mutant is a copy of the check
 # beside the real name scan, the real payload and the real hooks, with the arm's `if` made `if false`.
-L2_LINE() { printf 'release-check: 2.3.4 defers record/w/critic.md#3 with no stated sentence; state it or fix it'; }
-R="$TMP/l2-bare"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_UNSTATED"; lim_changelog "$R" "- Known limit: none of note."
+L2_LINE() { printf 'release-check: 2.2.4 defers record/w/critic.md#3 with no stated sentence; state it or fix it'; }
+R="$TMP/l2-bare"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4 "$LIM_UNSTATED"; lim_changelog "$R" "- Known limit: none of note."
 run_check "$R"
 expect_status "(L2-1) §LIMITS-2 a deferral rated defer with no sentence: the check fails" 1 "$RC"
 expect_contains "(L2-1) …one line naming the finding" "$(L2_LINE)" "$OUT"
 expect_eq "(L2-1) …and it is the only release-check line" "1" "$(lines_of "$OUT")"
 expect_eq "(L2-1) …no known-limits: line says the plan holds none" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^known-limits:')"
 
-R="$TMP/l2-dash"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_DASH"; lim_changelog "$R" "- Known limit: none of note."
+R="$TMP/l2-dash"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4 "$LIM_DASH"; lim_changelog "$R" "- Known limit: none of note."
 run_check "$R"
 expect_status "(L2-2) a dash for the sentence: the check fails" 1 "$RC"
 expect_contains "(L2-2) …the same line, naming the finding" "$(L2_LINE)" "$OUT"
 expect_eq "(L2-2) …and it is the only release-check line" "1" "$(lines_of "$OUT")"
 
-R="$TMP/l2-stated"; fx_repo "$R" 2.3.4 2.3.4
-lim_plan "$R" 2.3.4 "$(lim_def record/w/critic.md#3 S3 on 'an unstated one' 'The third limit is stated and carried.')"
+R="$TMP/l2-stated"; fx_repo "$R" 2.2.4 2.2.4
+lim_plan "$R" 2.2.4 "$(lim_def record/w/critic.md#3 S3 on 'an unstated one' 'The third limit is stated and carried.')"
 lim_changelog "$R" "- Known limit: The third limit is stated and carried."
 run_check "$R"
 expect_status "(L2-3) the same deferral with its sentence stated and carried in Known limits: the check passes" 0 "$RC"
-expect_contains "(L2-3) …and the known-limits: line says one sentence carried" "known-limits: 2.3.4 carries the 1 deferred sentences of $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md" "$OUT"
+expect_contains "(L2-3) …and the known-limits: line says one sentence carried" "known-limits: 2.2.4 carries the 1 deferred sentences of $(cd "$R" && pwd -P)/.bionic/docs/plans/epic-01/wave-01.plan.md" "$OUT"
 expect_eq "(L2-3) …no release-check line" "0" "$(lines_of "$OUT")"
 
 # A stated deferral beside an unstated one: the unstated one alone is named, and the stated one is still held to Known limits.
-R="$TMP/l2-both"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_UNSTATED
+R="$TMP/l2-both"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4 "$LIM_UNSTATED
 $(printf '%s\n' "$LIM_DEFERRED" | sed -n '2p')"
 lim_changelog "$R" "- Known limit: The second limit is long enough that a changelog wraps it across two lines."
 run_check "$R"
@@ -319,7 +328,7 @@ expect_eq "(L2-4) setup: the mutant has the arm disabled and nothing else" "1" "
 mut_check() { OUT="$(cd "$1" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_HEAD bash "$MUT/tests/lib/release-check.sh" "$LIST" 2>&1)"; RC=$?; }
 mut_check "$TMP/l2-stated"
 expect_status "(L2-4) MUTANT on the stated fixture: still passes (L2-3 stays green)" 0 "$RC"
-expect_contains "(L2-4) MUTANT …and it ran: the sentence is carried" "known-limits: 2.3.4 carries the 1 deferred sentences" "$OUT"
+expect_contains "(L2-4) MUTANT …and it ran: the sentence is carried" "known-limits: 2.2.4 carries the 1 deferred sentences" "$OUT"
 mut_check "$TMP/l2-bare"
 expect_status "(L2-4) MUTANT on the unstated fixture: the check passes, so L2-1 would go red" 0 "$RC"
 expect_absent "(L2-4) MUTANT …and the line naming the finding is gone" "with no stated sentence" "$OUT"
@@ -405,7 +414,7 @@ expect_contains "(L3-4) MUTANT …by the line naming the finding" "no stated sen
 
 section "§FROM-REPORT — release-note renders the landing numbers at a head; the check holds the entry to them"
 
-# FIXTURE FIDELITY: the run's plan names 2.3.4, and its log holds, in the line's event shapes, a queue
+# FIXTURE FIDELITY: the run's plan names 2.2.4, and its log holds, in the line's event shapes, a queue
 # landing at L1 and a hand landing at L2. The entry is rendered at L2 for 01:30 and committed as E, which a hand
 # landing carries at 02:00; a third row lands L3 on top at 03:00. The poker runs from the fixture as a user runs it.
 # SYNTHESIZED: the events.
@@ -414,13 +423,13 @@ rn_pub() { printf 'run/v1|ev=published|row=%s|commit=%s|kind=%s|by=t|why=w|at=%s
 rn_commit() {  # <file> -> commit a change to it, print the head
   printf '%s\n' "$1" > "$R/$1"; git -C "$R" add -- "$1"; git -C "$R" commit -q -m "$1"; git -C "$R" rev-parse HEAD
 }
-rn_entry() {  # <release-note output> -> commit a CHANGELOG whose 2.3.4 entry carries it, print the head
-  { printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n%s\n## 0.0.1 — 2026-01-01\n\n- first\n' "${1%rc=0}"
+rn_entry() {  # <release-note output> -> commit a CHANGELOG whose 2.2.4 entry carries it, print the head
+  { printf '# Changelog\n\n## 2.2.4 — 2026-01-02\n\n- a change\n\n%s\n## 0.0.1 — 2026-01-01\n\n- first\n' "${1%rc=0}"
   } > "$R/CHANGELOG.md"; git -C "$R" commit -q -am "the entry" >/dev/null; git -C "$R" rev-parse HEAD
 }
 rn_note() { (cd "$R" && bash "$POKER" release-note "$@" "$RN_PLAN" 2>&1; echo "rc=$?"); }
 rn_check() { OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD="$1" bash "$CHECK" "$LIST" 2>&1)"; RC=$?; }
-R="$TMP/rn"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4
+R="$TMP/rn"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4
 RN_REC="$R/.bionic/docs/record/wave-01/run.log"
 L1="$(rn_commit l1)"; L2="$(rn_commit l2)"
 { printf 'run/v1|ev=ready|row=T1|commit=%s|at=2026-01-02T00:00:00Z\n' "$L1"
@@ -444,7 +453,7 @@ rn_check "$D"
 expect_status "(f4) §FROM-REPORT a typed number that disagrees with the report at the entry's head: the check fails" 1 "$RC"
 rn_check "$K"
 expect_status "(f5) the killed count, which the gate holds and prunes, is not held to the report" 0 "$RC"
-expect_contains "(f5) …and the rest still agrees" "landing-numbers: 2.3.4 agrees" "$OUT"
+expect_contains "(f5) …and the rest still agrees" "landing-numbers: 2.2.4 agrees" "$OUT"
 
 section "§LAST — the entry is written after the last landing it describes"
 
@@ -455,20 +464,20 @@ rn_check "$(rn_entry "$(rn_note --on 2026-01-02T03:30:00Z)")"
 expect_status "(t2) the entry rendered again at the new head: the check passes" 0 "$RC"
 # A real CHANGELOG runs past a pipe's buffer, so the carrier is read whole after its match; here the carrier is a merge.
 RNL="$(rn_note --on 2026-01-02T04:30:00Z)"; git -C "$R" checkout -q -b carry
-{ printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n%s\n## 0.0.1 — 2026-01-01\n\n' "${RNL%rc=0}"
+{ printf '# Changelog\n\n## 2.2.4 — 2026-01-02\n\n- a change\n\n%s\n## 0.0.1 — 2026-01-01\n\n' "${RNL%rc=0}"
   awk 'BEGIN { for (i = 0; i < 20000; i++) print "- an older line" }'; } > "$R/CHANGELOG.md"
 git -C "$R" commit -q -am "the long entry"; git -C "$R" checkout -q -; git -C "$R" merge -q --no-ff -m "land" carry
 M="$(git -C "$R" rev-parse HEAD)"; rn_pub T7 "$M" hand 2026-01-02T05:00:00Z
 expect_eq "(t3) setup: the carrier is a merge of two parents" "2" "$(git -C "$R" rev-list --parents -n 1 "$M" | wc -w | awk '{ print $1 - 1 }')"
 rn_check "$M"
-expect_contains "(t3) §LAST the merge that carried a long entry is the newest landing: the check agrees" "landing-numbers: 2.3.4 agrees" "$OUT"
+expect_contains "(t3) §LAST the merge that carried a long entry is the newest landing: the check agrees" "landing-numbers: 2.2.4 agrees" "$OUT"
 
 
 section "§PROJECT — the check run from a tree with no plan reads the project's plan and record from BIONIC_CHECK_PROJECT"
 
 # FIXTURE FIDELITY: the judge runs in a landing tree, a detached worktree of the project with no `.bionic` beside it,
 # so the plan and the landing record are only where the project keeps them. Two projects: §LIMITS's world with one
-# unstated deferral of 2.3.4, and §LAST's world at the merge whose numbers agree. Each is judged from a tree of its
+# unstated deferral of 2.2.4, and §LAST's world at the merge whose numbers agree. Each is judged from a tree of its
 # own, once with BIONIC_CHECK_PROJECT naming the project and once without it. SYNTHESIZED: as §LIMITS and §LAST.
 pj_tree() {  # <repo> <rev> -> a detached worktree of <repo> at <rev>, under its own ignored tmp, with no .bionic
   local t="$1/.bionic/tmp/landing/1"
@@ -478,7 +487,7 @@ pj_check() {  # <tree> <head> [<project>] -> OUT, RC: the check run in <tree>, t
   OUT="$(cd "$1" && env -u BIONIC_CHECK_BASE -u BIONIC_CHECK_PROJECT BIONIC_CHECK_HEAD="$2" \
     ${3:+BIONIC_CHECK_PROJECT="$3"} bash "$CHECK" "$LIST" 2>&1)"; RC=$?
 }
-R="$TMP/pj-lim"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4 "$LIM_UNSTATED"; lim_changelog "$R" "- Known limit: none of note."
+R="$TMP/pj-lim"; fx_repo "$R" 2.2.4 2.2.4; lim_plan "$R" 2.2.4 "$LIM_UNSTATED"; lim_changelog "$R" "- Known limit: none of note."
 PJ_T="$(pj_tree "$R" HEAD)"
 expect_eq "(pj0) setup: the tree is the project's head, and holds no plan" "$(git -C "$R" rev-parse HEAD) no" \
   "$(git -C "${PJ_T:-/nonexistent}" rev-parse HEAD 2>/dev/null) $([ -e "${PJ_T:-/nonexistent}/.bionic" ] && echo yes || echo no)"
@@ -488,24 +497,24 @@ expect_contains "(pj1b) …naming the deferral of the project's plan" "$(L2_LINE
 pj_check "$PJ_T" HEAD
 expect_status "(pj2) CONTROL with the variable unset, the same tree passes" 0 "$RC"
 expect_contains "(pj2b) CONTROL …saying no plan under the tree's own docs names the release" \
-  "known-limits: 2.3.4 — no plan under $PJ_T/.bionic/docs names release: 2.3.4" "$OUT"
+  "known-limits: 2.2.4 — no plan under $PJ_T/.bionic/docs names release: 2.2.4" "$OUT"
 
 # §LAST's world: its numbers agree at the merge M, the plan and the record read from the project.
 R="$TMP/rn"; PJ_T="$(pj_tree "$R" "$M")"
 pj_check "$PJ_T" "$M" "$(cd "$R" && pwd -P)"
 expect_status "(pj3) the landing numbers judged from a tree, the project named: the check passes" 0 "$RC"
 expect_contains "(pj3b) …its numbers rendered from the project's plan and record, and agreeing" \
-  "landing-numbers: 2.3.4 agrees with the landing report at" "$OUT"
+  "landing-numbers: 2.2.4 agrees with the landing report at" "$OUT"
 pj_check "$PJ_T" "$M"
 expect_contains "(pj4) CONTROL the variable unset: no plan holds the numbers" \
-  "landing-numbers: 2.3.4 — no plan under $PJ_T/.bionic/docs names release: 2.3.4" "$OUT"
+  "landing-numbers: 2.2.4 — no plan under $PJ_T/.bionic/docs names release: 2.2.4" "$OUT"
 
 section "§JOIN — the cap reads the non-whitespace characters of tracked shell files, so joining lines changes no reading"
 
 # fx_lines <n> — n lines of `:`, so n characters; fx_ratio <dir> <tests> <code> — a committed pair holding that many.
 fx_lines() { awk -v n="$1" 'BEGIN { for (i = 0; i < n; i++) print ":" }'; }
 fx_ratio() {
-  fx_repo "$1" 2.3.4 2.3.4 || return 1
+  fx_repo "$1" 2.2.4 2.2.4 || return 1
   mkdir -p "$1/tests" &&
   fx_lines "$2" > "$1/tests/big.test.sh" && fx_lines "$3" > "$1/code.sh" &&
   git -C "$1" add -A && git -C "$1" commit -q -m "the shell files"
@@ -531,8 +540,24 @@ run_check "$R"
 expect_eq "(J-3) the head's tree is read, never the working files: an untracked test file and edited code change nothing" \
   "$J_SPLIT" "$(ratio_line)"
 
+# (J-5) the count mode prints the two numbers the cap reads and stops: no list path, no scan, no pair.
+R="$TMP/join-split"
+run_check "$R" --count HEAD
+expect_eq "(J-5) --count HEAD prints the tests and the code the J-1 line reads, and nothing else" "16 40" "$OUT"
+expect_status "(J-5b) …and exits 0" 0 "$RC"
+# (J-6) it reads the committed tree, as the cap does: files in the working directory change nothing.
+fx_lines 900 > "$R/tests/untracked.test.sh"; fx_lines 1 > "$R/code.sh"
+run_check "$R" --count HEAD
+expect_eq "(J-6) an untracked test file and edited code change nothing" "16 40" "$OUT"
+# (J-7) a name that is no revision exits 1 and prints nothing on stdout.
+J7_OUT="$(cd "$R" && bash "$CHECK" --count no-such-rev 2>/dev/null)"; J7_RC=$?
+expect_status "(J-7) a name that is not a revision: exit 1" 1 "$J7_RC"
+expect_eq "(J-7b) …and nothing on stdout" "" "$J7_OUT"
+J7_OUT="$(cd "$R" && bash "$CHECK" --count 2>/dev/null)"; J7_RC=$?
+expect_status "(J-7c) no revision named: refused, exit 2" 2 "$J7_RC"
+
 # (J-4) a link is no blob of text, so a directory reached through one counts once, by its real files.
-R="$TMP/ratio-link"; fx_repo "$R" 2.3.4 2.3.4
+R="$TMP/ratio-link"; fx_repo "$R" 2.2.4 2.2.4
 mkdir -p "$R/lib" "$R/tests" && fx_lines 20 > "$R/lib/x.sh" && fx_lines 5 > "$R/tests/t.test.sh"
 ln -s lib "$R/lib2" && ln -s lib/x.sh "$R/alias.sh" && ln -s ../lib "$R/tests/viaLink"
 git -C "$R" rm -q -f code.sh && fx_commit "$R" "links"
@@ -579,7 +604,7 @@ expect_status "(O-3) …and once the tests rise past the base's 60: refused" 1 "
 expect_contains "(O-3b) …naming both counts" "test-ratio: 61/40 chars" "$OUT"
 
 # (O-4) no shell outside tests/ is no code to count against: a refusal, never a pass.
-R="$TMP/ratio-nocode"; fx_repo "$R" 2.3.4 2.3.4
+R="$TMP/ratio-nocode"; fx_repo "$R" 2.2.4 2.2.4
 git -C "$R" rm -q -f code.sh; mkdir -p "$R/tests"; fx_lines 3 > "$R/tests/t.test.sh"; fx_commit "$R" "tests only"
 run_check "$R"
 expect_status "(O-4) a head with no shell outside tests/: the check refuses (exit 2)" 2 "$RC"
@@ -754,7 +779,7 @@ doctor c_nodate sed 's/^## 1\.19\.0 — .*/## 1.19.0 —/'
 # its run's log, the run's finding events from <events>: each deferral and each later move of one, so the declared check
 # judges the entry as the door will
 rel_world() {
-  fx_repo "$1" 2.3.4 "$3" && lim_plan "$1" "$3" "$(/usr/bin/grep '^run/v1|ev=finding|' "$4")" &&
+  fx_repo "$1" 2.2.4 "$3" && lim_plan "$1" "$3" "$(/usr/bin/grep '^run/v1|ev=finding|' "$4")" &&
   { cat "$2"; printf '\n## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$1/CHANGELOG.md" &&
   git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the $3 entry"
 }
@@ -821,7 +846,9 @@ section "§RELEASE — two landings through the runner: code deleted during a re
 # check is declared by its path in this suite's tree, outside the fixture, so the runner runs this copy whatever the
 # judge holds; which copy judges is §JUDGE's. One character of room at the release: 49 test characters against 40.
 RL="$TMP/release"; fx_ratio "$RL" 49 40; RL_B="$(git -C "$RL" rev-parse HEAD)"
-mkdir -p "$RL/.bionic/docs/plans" && printf '.bionic/\n' >> "$RL/.git/info/exclude"
+mkdir -p "$RL/.bionic/docs/plans" "$RL/.git/info" && printf '.bionic/\n' >> "$RL/.git/info/exclude"
+expect_eq "(rl0) the fixture's exclude file holds the line written into it: init --template= made no .git/info, so the section makes it" \
+  ".bionic/" "$(cat "$RL/.git/info/exclude" 2>&1)"
 printf 'release-check: bash %s %s\n' "$CHECK" "$LIST" > "$RL/.bionic/config.yaml"
 RL_PLAN="$RL/.bionic/docs/plans/x.plan.md"
 printf -- '---\nbase-sha: %s\nintegration-branch: main\n---\n# plan\n' "$RL_B" > "$RL_PLAN"
@@ -860,5 +887,109 @@ expect_contains "(hl0) the caller held its reads when it ran the check" "caller:
 expect_contains "(hl1) the check ran at the judge and printed what it was handed" "check: held=" "$HL_OUT"
 expect_contains "(hl2) …which is the head it judges, so the line is the check's own" "judge-head=$HL_J" "$HL_OUT"
 expect_contains "(hl3) …and no hold: the project's command is started holding nothing" "check: held=none " "$HL_OUT"
+
+section "§ONE-READER — a planted second parser, plan writer or loader at the head is refused by the check a landing runs"
+
+# A repository whose head holds this checkout's hooks/ and payload/scripts/, so the judge's copy check reads a whole
+# tree; each plant is one commit on that head of its own, judged through BIONIC_CHECK_HEAD.
+OR="$TMP/one-reader"; fx_repo "$OR" 2.2.4 2.2.4
+mkdir -p "$OR/payload" && cp -R "$BIONIC_SCRIPTS_DIR/hooks" "$OR/hooks" && cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$OR/payload/scripts" \
+  && fx_commit "$OR" "the code"; OR_B="$(git -C "$OR" rev-parse HEAD)"
+or_plant() {  # <name> <path> <text> -> the commit holding <text> at <path> on the clean head
+  git -C "$OR" checkout -q -B "plant-$1" "$OR_B" && printf '%s\n' "$3" > "$OR/$2" && fx_commit "$OR" "plant $1" && git -C "$OR" rev-parse HEAD
+}
+or_check() { OUT="$(cd "$OR" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD="$1" bash "$CHECK" "$LIST" 2>&1)"; RC=$?; }
+OR_P="$(or_plant parse payload/scripts/lib/planted-parse.sh "planted_rows() { awk -F'|' '\$2 ~ /^ T[0-9]+ \$/ { print \$2 }' \"\$plan\"; }")"
+OR_W="$(or_plant write payload/scripts/lib/planted-write.sh "planted_line() { printf -- '- %s: landed\\n' \"\$1\" >> \"\$plan\"; }")"
+OR_L="$(or_plant loader hooks/planted-loader.sh "$(printf '#!/bin/bash\n# --- bionic-loader/v2 BEGIN')")"
+git -C "$OR" checkout -q -B main "$OR_B"
+or_check "$OR_B"
+expect_status "(or0) the clean head passes" 0 "$RC"
+expect_regex "(or0) …with one line of its counts, each nought" "^one-reader: parsers=0 ([a-z_]+=0 )+homes=0$" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^one-reader: ')"
+or_check "$OR_P"
+expect_eq "(or1) a second parser at the head fails the release in one line naming it" \
+  "1|1|release-check: one-reader-check: refused — parser payload/scripts/lib/planted-parse.sh:1" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check: ')"
+or_check "$OR_W"
+expect_eq "(or2) a second writer of the plan at the head fails it in one line naming it" \
+  "1|1|release-check: one-reader-check: refused — plan-writer payload/scripts/lib/planted-write.sh:1" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check: ')"
+or_check "$OR_L"
+expect_eq "(or3) a copied loader at the head fails it in one line naming it" \
+  "1|1|release-check: one-reader-check: refused — loader hooks/planted-loader.sh:2" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check: ')"
+git -C "$OR" show "$OR_P:payload/scripts/lib/planted-parse.sh" > "$OR/payload/scripts/lib/planted-parse.sh"
+or_check "$OR_B"
+expect_eq "(or4) the parser in the working files alone is not read: the head passes" "0|0" "$RC|$(lines_of "$OUT")"
+rm -f "$OR/payload/scripts/lib/planted-parse.sh"
+run_check "$TMP/agree"
+expect_eq "(or5) a head with no hooks/ and payload/scripts/ passes, saying it holds no copy to count" \
+  "0|one-reader: HEAD holds no hooks/ and payload/scripts/, so no copy to count" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep '^one-reader: ')"
+
+section "§DEFER-LANDING — a landing that leaves the entry as it was is told of a deferral's missing sentence, and passes"
+
+# §LIMITS-2's world: the plan defers #3 with no sentence and #1 with a sentence the entry omits. Four commits: F, the
+# repository with the entry's bare first form; E, the entry with its Known limits; C, a change to code.sh alone; O, an
+# edit to the older entry only. Each range is judged as the runner judges a landing, BIONIC_CHECK_BASE its base.
+DL_PLAN="$LIM_UNSTATED
+$(printf '%s\n' "$LIM_DEFERRED" | sed -n '1p')"
+DL_OMIT="release-check: Known limits of 2.2.4 omit the deferred sentence of record/w/critic.md#1: $LIM_A"
+R="$TMP/dl"; fx_repo "$R" 2.2.4 2.2.4; DL_F="$(git -C "$R" rev-parse HEAD)"
+lim_plan "$R" 2.2.4 "$DL_PLAN"; lim_changelog "$R" "- Known limit: none of note."; DL_E="$(git -C "$R" rev-parse HEAD)"
+printf '#!/bin/bash\n:\n:\n:\n' > "$R/code.sh"; fx_commit "$R" "code only"; DL_C="$(git -C "$R" rev-parse HEAD)"
+sed 's/^- first$/- first, worded again/' "$R/CHANGELOG.md" > "$TMP/dl.cl" && cp "$TMP/dl.cl" "$R/CHANGELOG.md"
+fx_commit "$R" "the older entry only"; DL_O="$(git -C "$R" rev-parse HEAD)"
+dl_check() { OUT="$(cd "$R" && env BIONIC_CHECK_BASE="$1" BIONIC_CHECK_HEAD="$2" bash "$CHECK" "$LIST" 2>&1)"; RC=$?; }
+dl_notes() { printf '%s\n' "$OUT" | /usr/bin/grep -c '^known-limits: note — '; }
+expect_eq "(dl0) setup: the older entry's edit leaves the 2.2.4 entry as E wrote it" "1" \
+  "$(git -C "$R" diff "$DL_C" "$DL_O" -- CHANGELOG.md | /usr/bin/grep -c '^+- first, worded again$')"
+dl_check "$DL_F" "$DL_E"
+expect_status "(dl1) §DEFER-LANDING a landing that writes the entry is refused on the unstated deferral" 1 "$RC"
+expect_eq "(dl1) …in its two lines, the unstated one and the omitted one, and no note" "2|1|1|0" \
+  "$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep -cxF "$(L2_LINE)")|$(printf '%s\n' "$OUT" | /usr/bin/grep -cxF "$DL_OMIT")|$(dl_notes)"
+dl_check "$DL_E" "$DL_C"
+expect_status "(dl2) §DEFER-LANDING a landing that changes code only passes" 0 "$RC"
+expect_eq "(dl2) …with no release-check line, and each of the two told as a note" "0|2" "$(lines_of "$OUT")|$(dl_notes)"
+expect_contains "(dl2) …the unstated one named, with what to do" \
+  "known-limits: note — 2.2.4 defers record/w/critic.md#3 with no stated sentence; state it or fix it" "$OUT"
+expect_contains "(dl2) …the omitted one named with its sentence" "known-limits: note — Known limits of 2.2.4 omit the deferred sentence of record/w/critic.md#1: $LIM_A" "$OUT"
+expect_contains "(dl2) …and one line says why it passes, and what still refuses" \
+  "known-limits: 2.2.4 — this range leaves the entry as it was, so these are notes; a range that changes the entry refuses them" "$OUT"
+dl_check "$DL_C" "$DL_O"
+expect_eq "(dl3) a landing that edits an older entry only leaves this one as it was: it passes with the two notes" "0|0|2" \
+  "$RC|$(lines_of "$OUT")|$(dl_notes)"
+dl_check "$DL_F" "$DL_C"
+expect_eq "(dl4) a range that spans the entry's change, as the release check's does, is refused" "1|2|0" "$RC|$(lines_of "$OUT")|$(dl_notes)"
+OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD="$DL_C" bash "$CHECK" "$LIST" 2>&1)"; RC=$?
+expect_eq "(dl5) no range named, the check run by hand: the code-only head is refused" "1|2|0" "$RC|$(lines_of "$OUT")|$(dl_notes)"
+
+section "§NUMBERS-FLOOR — from 2.3.0 an entry with no landing numbers fails where the entry is asked; 2.2.0's passes"
+
+# The repository's own entries: 2.2.0 shipped with no landing numbers, and the floor is the release after it. N0 is a
+# repository whose newest entry is 2.2.0; N1 adds a 2.3.0 entry with no numbers (the version bumped with it); N2 changes
+# code alone on top. No plan names either release.
+NF_LINE='release-check: 2.3.0 holds no landing numbers; paste release-note'
+R="$TMP/nf"; fx_repo "$R" 2.2.0 2.2.0; NF_0="$(git -C "$R" rev-parse HEAD)"
+run_check "$R"
+expect_eq "(nf1) §NUMBERS-FLOOR the 2.2.0 entry with no landing numbers passes, and says it names no head" \
+  "0|0|landing-numbers: 2.2.0 — the entry names no head its numbers were rendered at, so none is held to the report" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^landing-numbers: ')"
+fx_changelog 2.3.0 > "$R/CHANGELOG.md"; fx_plugin 2.3.0 > "$R/payload/.claude-plugin/plugin.json"
+fx_commit "$R" "the 2.3.0 entry"; NF_1="$(git -C "$R" rev-parse HEAD)"
+printf '#!/bin/bash\n:\n' > "$R/code.sh"; fx_commit "$R" "code only"; NF_2="$(git -C "$R" rev-parse HEAD)"
+run_check "$R"
+expect_eq "(nf2) §NUMBERS-FLOOR a 2.3.0 entry with no landing numbers fails the check run by hand, in one line" \
+  "1|1|$NF_LINE" "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check: ')"
+OUT="$(cd "$R" && env BIONIC_CHECK_BASE="$NF_0" BIONIC_CHECK_HEAD="$NF_1" bash "$CHECK" "$LIST" 2>&1)"; RC=$?
+expect_eq "(nf3) …and at the landing that writes the entry" "1|1|$NF_LINE" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^release-check: ')"
+OUT="$(cd "$R" && env BIONIC_CHECK_BASE="$NF_1" BIONIC_CHECK_HEAD="$NF_2" bash "$CHECK" "$LIST" 2>&1)"; RC=$?
+expect_eq "(nf4) a landing that leaves the entry as it was passes, told of it as a note" \
+  "0|0|landing-numbers: note — 2.3.0 holds no landing numbers; paste release-note" \
+  "$RC|$(lines_of "$OUT")|$(printf '%s\n' "$OUT" | /usr/bin/grep '^landing-numbers: note — ')"
+NF_FN="$(awk '/^NUMS_RULE_FROM=/' "$CHECK")"
+expect_eq "(nf5) the floor is the release after 2.2.0, compared as dotted integers by the Known limits' own comparison" \
+  "NUMS_RULE_FROM=2.3.0" "$NF_FN"
 
 finish

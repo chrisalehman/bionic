@@ -323,9 +323,9 @@ base-sha: abc1234
 | T12 | 4 | prototype | E1: refusal wording (attended) | — | 30 | E1 | record/x.md | — |
 | T13 | 4 | build | E1: hooks migrated | T12 | 60 | E1 | hooks/*.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |
+| Requirement | Approach | Criterion | Test type | Test | Fails when | Task |
 |---|---|---|---|---|---|---|
 | E1 | the wording, read | AC-1 | static | \`tests/a.test.sh\` | the wording is untested | $2 |
 EOF
@@ -588,5 +588,28 @@ expect_eq "ST.3 control: the same call without its brief's line is refused" "den
 expect_contains "ST.3b …as naming no brief file of its row" "the prompt names no brief file of row T7" "$GATE_REASON"
 st_gate "$ST_CALL"
 expect_eq "ST.4 AC-14.2 the wall admits the call as printed" "allow" "$GATE_VERDICT${GATE_REASON:+ — $GATE_REASON}"
+
+# FIXTURE: the same run at double rigor, with rows that name no role: two review rows, one per role the rigor deals
+# (adversarial and structure the critic's, evidence the auditor's), a doc row, and a build row whose task carries no
+# complexity tag. Each start is refused before anything is made, and the retry it prints proposes the role that fits.
+# fails-when: a review row is offered an implementor, a doc row anyone but the senior implementor, or the untagged build
+# row anything but the implementor it was offered before.
+REPO=$(pf_repo rst2); write_attestation "$REPO" "$SID_A"; ST_P="$(pf_plan_path "$REPO")"
+awk 'NR == 2 { print "working-branch: wave/99-test" } { print }' "$ST_P" > "$ST_P.t" && mv "$ST_P.t" "$ST_P"
+pf_tasks "$REPO" '| T7 | 4 | build | Start the row. One verb starts it. · complexity: complex | — | 30 | REQ-1 | lib/s.sh | record/wave-01-test/T7.md |' \
+  '| T8 | 4 | build | No tag. Its task names no complexity. | — | 30 | REQ-1 | lib/t.sh | record/wave-01-test/T8.md |' \
+  '| T9 | 6 | review | The critic reads. · questions: adversarial,structure | T7 | 30 | REQ-1 | .bionic/docs/record/wave-01-test/critic-adversarial.md | .bionic/docs/record/wave-01-test/critic-adversarial.md |' \
+  '| T10 | 6 | review | The auditor reads. · questions: evidence | T7 | 30 | REQ-1 | .bionic/docs/record/wave-01-test/auditor-evidence.md | .bionic/docs/record/wave-01-test/auditor-evidence.md |' \
+  '| T11 | 7 | doc | The pages. Two pages are trued. | T9 | 30 | REQ-1 | docs/a.md | record/wave-01-test/T11.md |'
+seal_fixture "$ST_P" "$REPO/.bionic/docs/record/wave-01-test/run.log"
+st_refused() {  # <id> -> <rc>|<the --role words the refusal prints, sorted, space-joined>
+  local out rc
+  out="$(cd "$REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$ST_POKER" start "$1" 2>&1)"; rc=$?
+  printf '%s|%s' "$rc" "$(printf '%s\n' "$out" | grep -o -- "start $1 --role [a-z:-]*" | sed 's/.* --role //' | sort -u | paste -sd' ' -)"
+}
+expect_eq "ST.5 a review row with no role, on the critic's questions, is refused and offered the critic" "1|bionic:critic" "$(st_refused T9)"
+expect_eq "ST.6 a review row with no role, on the auditor's question, is refused and offered the auditor" "1|bionic:auditor" "$(st_refused T10)"
+expect_eq "ST.7 a doc row with no role is refused and offered the senior implementor" "1|bionic:senior-implementor" "$(st_refused T11)"
+expect_eq "ST.8 control: a build row with no complexity tag is refused and still offered the implementor" "1|bionic:implementor" "$(st_refused T8)"
 
 finish

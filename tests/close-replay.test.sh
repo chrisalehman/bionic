@@ -197,9 +197,7 @@ cr_reached() {  # -> 0 when the replay reached delivered:; else the failure asse
   return 1
 }
 
-# ============================================================
 section "§E2E: the whole run, from the configuration card to delivered, through commands alone"
-# ============================================================
 # fails-when: a gate refuses a step of the rehearsal, a step is entered with no card and approval before it, a step or
 # an approval is missing from the run's log or out of its order, or a command the run takes is one the skills' text
 # does not name.
@@ -217,9 +215,7 @@ expect_eq "E2-4b …and the skills' text names each of them and each poker verb 
   "$(printf '%s\n' "$E2_TOOLS" | while IFS= read -r t; do [ -z "$t" ] || /usr/bin/grep -qF -- "$t" <<< "$E2_TEXT" || printf '%s ' "$t"; done
     cr_called | while IFS= read -r v; do /usr/bin/grep -qx -- "$v" <<< "$E2_NAMED" || printf '%s ' "$v"; done)"
 
-# ============================================================
 section "§CLOSE: from the failed-review state, the verbs alone reach delivered:"
-# ============================================================
 # fails-when: the replay stops before close-out's delivered:, reaches it only past a hand landing, hand merge, plan
 # edit, step set back or waiver, or close-out counts a hand-hold.
 expect_eq "CL-1 the replay reaches delivered: through the verbs (rehearse exit 0, the run's step 9 delivered and archived)" \
@@ -261,9 +257,7 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$(printf '%s\n' "$CL_CMDS" | /usr/bin/grep -E -- '--by-hand|session-poker\.sh current [0-7]( |$)|session-poker\.sh waive |git .*(fetch|merge|update-ref)'; cr_marks 'by hand' | /usr/bin/grep '^\[prose\]')"
 fi
 
-# ============================================================
 section "§WINDOW: after the close, the hand-holds window ends at the delivery's instant, and an act after the card counts"
-# ============================================================
 # The window runs from the last build landing to `delivered:`; the release approval card ends nothing. The report read
 # over the delivered plan names that end, and a decline planted a second after the card's replay time is counted.
 # fails-when: the end is the card again, so the ends line names the page and the planted decline is outside.
@@ -290,9 +284,7 @@ if cr_reached "WINDOW-0"; then
   cp "$WORLD_ROOT/run.log.kept" "$CR_REC/run.log"
 fi
 
-# ============================================================
 section "§SR: a second record at the fix row's site is settled by the fix row's landing, with no move after it"
-# ============================================================
 # fails-when: the second record names another site, the replay's log shows a finding-move after the fix row's landing,
 # the second finding is not written fixed by the landing, or the close reads above zero.
 if cr_reached "SR-0"; then
@@ -310,9 +302,7 @@ if cr_reached "SR-0"; then
     "$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
 fi
 
-# ============================================================
 section "§PR: the integrate row's pull request is published by the verb, through a stand-in gh and a bare remote"
-# ============================================================
 # fails-when: the replay never reaches the publish, another gh is on its PATH, the stand-in's log does not hold one
 # request against main from the working branch, the remote does not hold the head the run's log names, the request's
 # body lacks the summary written beside the run's log or the facts pr-facts printed, the person's merge leaves main
@@ -346,9 +336,7 @@ else
   expect_eq "PR-0 the replay reached the integrate row's publish, so this section can be read" "reached" "not reached"
 fi
 
-# ============================================================
 section "§ENTRY: the release entry names the review the run failed and fixed, and the record names every commit after the fix"
-# ============================================================
 # fails-when: the replay stops before close-out, the working branch's release entry or main's after the merge lacks
 # the reviews part as the plan registered the failing review, the part lists a different number of reviews than the
 # plan registers, the part was written by another than the integrate row, or the branch holds a commit after the fix's
@@ -393,9 +381,7 @@ if cr_reached "EN-0"; then
     "$(git -C "$CR_ROOT" rev-parse --verify -q "refs/heads/$EN_BR")" "$(cr_field "$EN_WROTE" commit)"
 fi
 
-# ============================================================
 section "§REAL: the sandbox declares the project's real check, and nothing a verb writes is written by hand"
-# ============================================================
 # fails-when: the sandbox declares a stand-in check, the check that ran is not the sandbox's own copy, or a hand
 # write in the log is of a kind a person does not write or names a file a verb writes, or a line of the log is not
 # valid UTF-8.
@@ -427,9 +413,7 @@ else
   expect_eq "RE-0 the sandbox and its log were built, so this section can be read" "built" "not built"
 fi
 
-# ============================================================
 section "§LIVE: the run's live criterion is owed at the close, passes every gate before it pending, and the close writes it"
-# ============================================================
 # The replay's plan carries the live criterion a planner writes (DOOR_LIVE_ROW): an Eval design row of live type, its
 # eval the hand-holds line at the close, its Task cell the close row T9. The gate defers it until that row's step, so
 # each advance and the refused close-out pass with it pending; the release approval card lists it owed by the close,
@@ -438,7 +422,7 @@ section "§LIVE: the run's live criterion is owed at the close, passes every gat
 # with the continuation as its evidence.
 if cr_reached "LV-0"; then
   expect_eq "LV-1 the plan's live criterion is the planner's: its Eval design row names the close row in its Task cell, its eval the hand-holds line" "yes|yes" \
-    "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -qx 'task=T9' && echo yes)|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -q '^eval=.*landing-report --hand-holds' && echo yes)"
+    "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -qx 'task=T9' && echo yes)|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -q '^test=.*landing-report --hand-holds' && echo yes)"
   expect_eq "LV-2 each advance past the Verify gate exits 0 with the row pending" "0|0|0" \
     "$(cr_rc 'enter Step 6' | tail -1)|$(cr_rc 'enter Step 7' | tail -1)|$(cr_rc 'enter Step 8' | tail -1)"
   LV_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null)"
@@ -449,9 +433,7 @@ if cr_reached "LV-0"; then
   expect_contains "LV-5 …written by close-out from its last reading" "matrix: AC-2.1 discharged" "$(cr_out 'close-out, the tail')"
 fi
 
-# ============================================================
 section "§LOG: the landing record and the asks are events of the one log"
-# ============================================================
 # fails-when: a file of the record beside the log holds event lines, or the run's log lacks a landing's events or the
 # asks' opening and closing.
 if cr_reached "LG-0"; then
@@ -463,9 +445,7 @@ if cr_reached "LG-0"; then
     "$(awk -F'|' '$2 == "ev=ask" && $3 ~ /^key=approve:step[0-3]$/ && $4 ~ /^reply=/ { k = substr($3, 5); r = substr($4, 7); printf "%s%s>%s", (c++ ? " " : ""), k, r } END { print "" }' "$CR_REC/run.log" 2>/dev/null)"
 fi
 
-# ============================================================
 section "§GROWS: the log only grows"
-# ============================================================
 # fails-when: the log kept after a command is not a prefix of the log kept after the next, or of the log at the close.
 CG_N="$(cr_snaps | wc -l | tr -d ' ')"
 expect_eq "GR-1 a log is kept after each command of the run (it kept $CG_N), and the log at the close is longer than the first one kept" "yes|yes" \
@@ -474,9 +454,7 @@ expect_eq "GR-2 each log kept is a prefix of the next, and the last of the log a
   "$( { cr_snaps; printf '%s\n' "$CR_REC/run.log"; } | { p=""; while IFS= read -r f; do
       [ ! -s "$p" ] || head -c "$(wc -c < "$p")" "$f" 2>/dev/null | cmp -s - "$p" || printf '%s ' "${p##*/}"; p="$f"; done; })"
 
-# ============================================================
 section "§SESSION: a session's own bookkeeping stays out of the log"
-# ============================================================
 # fails-when: the log holds a line for a Patrol tick, the Patrol's arming or a stop order: a stop event, a line the
 # arming or the disarming wrote, or a line a tick wrote that is not one of the run's own facts.
 CS_ACTS="$(cr_all_rcs | awk -F'|' '$2 ~ /^the skill is invoked|, tick [0-9]+$|^the Patrol is disarmed/ { print NR "|" $2 }')"
@@ -492,18 +470,14 @@ expect_eq "CS-2b …and the arming and the disarming add no line" "" \
 expect_eq "CS-3 the log's events are read (it holds step events) and none is a stop" "yes|0" \
   "$(/usr/bin/grep -q '^run/v1|ev=step|' "$CR_REC/run.log" 2>/dev/null && echo yes)|$(/usr/bin/grep -c '^run/v1|ev=stop|' "$CR_REC/run.log" 2>/dev/null)"
 
-# ============================================================
 section "§PLANSUM: no command changes the plan"
-# ============================================================
 # fails-when: the plan's checksum differs across any command of the run, close-out's archiving among them.
 CP_SUMS="$(cat "$CR_DIR/plan-sums" 2>/dev/null)"
 expect_eq "PS-1 the plan's checksum is read on each side of every command, and the page grew between Step 0 and Step 4 by its person's hand" "yes|yes" \
   "$([ "$(printf '%s\n' "$CP_SUMS" | /usr/bin/grep -c .)" -eq "$(cr_all_rcs | wc -l | tr -d ' ')" ] && echo yes)|$([ "$(printf '%s\n' "$CP_SUMS" | awk -F'|' '$1 == "the Step 0 card" { print $3 }')" != "$(printf '%s\n' "$CP_SUMS" | awk -F'|' '$1 == "enter Step 4" { print $3 }')" ] && echo yes)"
 expect_eq "PS-2 …and no command changed it" "" "$(printf '%s\n' "$CP_SUMS" | awk -F'|' '$2 != $3 { print $1 }')"
 
-# ============================================================
 section "§VERBS: every command the poker lists is one a run needs"
-# ============================================================
 # fails-when: a command the poker's listing prints is neither called by the rehearsal, nor called by a hook or script a
 # run executes, nor named in a text loaded to tell an actor what to do (a skill of the plugin or an agent's role file).
 VB_LIST="$(bash "$BIONIC_SCRIPTS_DIR/hooks/session-poker.sh" 2>&1 | cr_verbs)"
@@ -516,9 +490,7 @@ expect_eq "VB-1 the listing and each proof's source are read by the one extracto
 expect_eq "VB-2 each command it lists is called by the rehearsal, called by a hook or script a run executes, or named in a skill or role file" "" \
   "$(printf '%s\n' "$VB_LIST" | while IFS= read -r v; do printf '%s\n%s\n%s\n' "$VB_RH" "$VB_HK" "$VB_TX" | /usr/bin/grep -qx -- "$v" || printf '%s ' "$v"; done)"
 
-# ============================================================
 section "§CANCEL: a cancel of the release approval appended to the run's log is followed by close-out's facts line"
-# ============================================================
 # The delivered plan is put back where close-out read it, its log the reader's own translation with step 9 cancelled,
 # so close-out's check reads the run at Step 8 and reaches its facts line. Both are removed after.
 # fails-when: close-out reads the release as approved after the log cancels that approval.
@@ -539,9 +511,7 @@ if cr_reached "CN-0"; then
   rm -f "$CN_L" "$CN_P"
 fi
 
-# ============================================================
 section "§SINGLE: the single-rigor run reaches the Verify gate, its criterion discharged by the walk"
-# ============================================================
 # fails-when: the rehearsal's single-rigor state does not build, its plan is not at rigor: single, it does not stand at
 # current: 5 with the build's criterion discharged by the walk's proof under the critic's verdict at the head, or the
 # evidence review is registered on any row but the critic's.

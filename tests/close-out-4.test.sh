@@ -422,6 +422,41 @@ expect_eq "LANDS-12 the close row dispatched owns the continuation: run exits 0,
   "0|landed|$LW_CK" "$CO_RC|$(lands_state "$PLW" T4)|$(cksum < "$PLW/$CONT_REL")"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -8 | sed 's/^/    | /'
 expect_contains "LANDS-12b …and the card says whose it is" "continuation: ${CONT_REL#.bionic/docs/} is the close row T4's" "$CO_OUT"
+# A writer once dispatched began the continuation, and the stand-down took its launch back: no dispatch stands, but the
+# file is still that writer's, so the close writes none of it.
+# fails-when: the close appends to a continuation whose writer's dispatch was taken back.
+PLK="$(mk_fixture lands-taken-back)"; advance_to "$PLK" 8; lands_rows "$PLK"
+awk -v c="$CONT_REL" '/^\| T4 \|/ { print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-1 | " c " | — |"; next } { print }' \
+  "$PLK/$PLAN_REL" > "$PLK/t4" && mv "$PLK/t4" "$PLK/$PLAN_REL"
+LK_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf 'run/v1|ev=dispatch|row=T4|name=w-T4|at=%s\nrun/v1|ev=cancel|of=dispatch|row=T4|name=w-T4|at=%s\n' "$LK_AT" "$LK_AT" >> "$PLK/$LOG_REL"
+seal_fixture "$PLK/$PLAN_REL" "$PLK/$LOG_REL"; lands_bind "$PLK" "$LA_SID"
+mkdir -p "$PLK/${CONT_REL%/*}"; printf '# continuation — begun by the close row T4\n\nthe writer'"'"'s words\n' > "$PLK/$CONT_REL"
+LK_CK="$(cksum < "$PLK/$CONT_REL")"
+expect_eq "LANDS-13 precondition: T4's launch was taken back, so no dispatch of it stands and it reads pending" "pending" "$(lands_state "$PLK" T4)"
+run_close_as "$LA_SID" "$PLK" run
+expect_eq "LANDS-13a a close row whose dispatch was taken back still owns the continuation: run exits 0 and the file is as its writer left it" \
+  "0|$LK_CK" "$CO_RC|$(cksum < "$PLK/$CONT_REL")"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -8 | sed 's/^/    | /'
+expect_contains "LANDS-13b …and the card says whose it is" "continuation: ${CONT_REL#.bionic/docs/} is the close row T4's" "$CO_OUT"
+# A close row whose record does not stand is not finished, so the merge does not land it: it stays open, named on the
+# card, and the integrate row beside it lands as before.
+# fails-when: the merge writes a landing for a close row whose record was never written.
+PLR="$(mk_fixture lands-no-record)"; advance_to "$PLR" 8; lands_rows "$PLR"
+LR_REC="record/wave-01-fixture/T4.md"
+awk -v c="$LR_REC" '/^\| T4 \|/ { print "| T4 | 9 | close | close-out, the close record | — | 10 | AC-1 | " c " | — |"; next } { print }' \
+  "$PLR/$PLAN_REL" > "$PLR/t4" && mv "$PLR/t4" "$PLR/$PLAN_REL"
+seal_fixture "$PLR/$PLAN_REL" "$PLR/$LOG_REL"; lands_bind "$PLR" "$LA_SID"
+LR_MAIN="$(fixture_git "$PLR" rev-parse --verify -q main)"
+expect_eq "LANDS-14 precondition: T4's record is not on disk and T3 and T4 read pending" "no|pending|pending" \
+  "$([ -e "$PLR/.bionic/docs/$LR_REC" ] && echo yes || echo no)|$(lands_state "$PLR" T3)|$(lands_state "$PLR" T4)"
+run_close_as "$LA_SID" "$PLR" run
+expect_eq "LANDS-14a a close row with no record reads open after the close, with no landing, and the integrate row lands" \
+  "0|landed|$LR_MAIN close close-out|pending|" \
+  "$CO_RC|$(lands_state "$PLR" T3)|$(lands_pub "$PLR" T3)|$(lands_state "$PLR" T4)|$(lands_pub "$PLR" T4)"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -8 | sed 's/^/    | /'
+expect_contains "LANDS-14b …and the card names it left open, beside the row it landed" \
+  "rows-landed: T3 at main @ ${LR_MAIN:0:7}; T4 left open — no record it names stands" "$CO_OUT"
 
 # ============================================================
 section "§PARKED — wave-38 T15 (REQ-4 AC-4.3; D17): close-out closes a parked wave without the merge act"
@@ -501,7 +536,7 @@ for _pk in unparked none fenced; do
   expect_contains "PK-11.$_pk control: an $_pk plan whose branch main never took still reads merge: WOULD REFUSE" \
     "merge: WOULD REFUSE — wave/01-fixture @ " "$CO_OUT"
   run_close "$PPU" run
-  expect_eq "PK-11b.$_pk …and run refuses it, naming the merge, the plan unchanged" "2|yes|$PPU_CK" \
+  expect_eq "PK-11b.$_pk …and run holds on it (exit 0), naming the merge, the plan unchanged" "0|yes|$PPU_CK" \
     "$CO_RC|$(contains "$CO_OUT" "is not reachable from main")|$(cksum < "$PPU/$PLAN_REL")"
 done
 
@@ -791,8 +826,8 @@ expect_contains "RV-2 check says run would render the part on the working branch
 expect_eq "RV-3 …and writes nothing: the branch is where it was" "$RV_H2" "$(rv_tip "$PRV")"
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PRV" run
 # The part is published before the merge readback, so the readback reads the branch the part is on. The fixture's release
-# merge predates the part, so main does not hold the published tip and the run holds there (rc 2) until the person merges it.
-expect_eq "RV-4 run publishes the part, then holds at the merge readback: the branch it moved to is not merged (rc 2)" "2|yes" \
+# merge predates the part, so main does not hold the published tip and the run holds there (exit 0) until the person merges it.
+expect_eq "RV-4 run publishes the part, then holds at the merge readback: the branch it moved to is not merged (exit 0)" "0|yes" \
   "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q 'is not reachable from' && echo yes)"
 RV_TIP="$(rv_tip "$PRV")"
 RV_WANT="$(
@@ -1031,19 +1066,19 @@ section "§OWED-AT-CLOSE — close-out settles the matrix row its own last readi
 # continuation path, else nothing and the line quoted in the report. The plan is not written.
 # FIXTURE FIDELITY: mk_fixture at Step 8; the close row T4 in its nine cells, pending, as a planner writes it, and the
 # close's own session engaged and bound by the verb (lands_bind), so close-out lands T4 itself, as a run's close does;
-# the two criteria are rows of `## Eval design` naming their task in its Task column, one the close row's on the close's
+# the two criteria are rows of `## Test design` naming their task in its Task column, one the close row's on the close's
 # measure and one the close's step's on another eval. Where a criterion stands is the reader's answer (`reader cell`).
 # fails-when: the run refuses on the pending row (OC-1; OC-1c shows the refusal live with the deferral off), or no proof names it at zero, one does above zero, a row on another eval is proved, or the plan is written.
 OC_SID="closeout-owed-sid"
-oc_rows() {  # <project> -> the page gains T4 (step 9, close) and two Eval design rows with a Task column: one owed by T4 on the close's measure, one by step 9 on another eval
+oc_rows() {  # <project> -> the page gains T4 (step 9, close) and two Test design rows with a Task column: one owed by T4 on the close's measure, one by step 9 on another eval
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "oc_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   awk '
     /^## / { sec = substr($0, 4) }
     sec == "Tasks" && /^\| T2 \|/ { print; print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-2 | .bionic/docs/record/wave-01-fixture/continuation.md | — |"; next }
-    sec == "Eval design" && /^\| Requirement \|/ { print $0 " Task |"; next }
-    sec == "Eval design" && /^\|---/ { print $0 "---|"; next }
-    sec == "Eval design" && /^\| .* \| AC-1 \|/ { print $0 " — |"
+    sec == "Test design" && /^\| Requirement \|/ { print $0 " Task |"; next }
+    sec == "Test design" && /^\|---/ { print $0 "---|"; next }
+    sec == "Test design" && /^\| .* \| AC-1 \|/ { print $0 " — |"
       print "| — | fixture | AC-2 | T3 | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero | T4 |"
       print "| — | fixture | AC-3 | T0 | the continuation names the release | the continuation is missing | 9 |"; next }
     { print }' "$plan" > "$plan.o" && mv "$plan.o" "$plan" && seal_fixture "$plan" "$1/$LOG_REL" && lands_bind "$1" "$OC_SID"
@@ -1051,7 +1086,7 @@ oc_rows() {  # <project> -> the page gains T4 (step 9, close) and two Eval desig
 oc_after() { find "$1/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1; }   # the plan where the close left it
 oc_ask() { bash "$REPO_ROOT/payload/scripts/reader.sh" "$@" 2>/dev/null; }   # <plan> <question> [args] -> the reader's answer
 oc_cell() { oc_ask "$1" cell "$2" | awk -F= '{ v[$1] = $2 } END { print v["state"] "|" v["by"] }'; }   # <plan> <AC> -> `<state>|<the event that discharged it>`
-oc_eval() { awk '/^## / { s = ($0 == "## Eval design"); next } s' "$1"; }   # <plan> -> its Eval design section
+oc_eval() { awk '/^## / { s = ($0 == "## Test design"); next } s' "$1"; }   # <plan> -> its Test design section
 oc_proofs() {  # <project> -> `<AC> <evidence>` of each proof naming a criterion in the run's log, space-joined
   awk -F'|' '$2 == "ev=proof" { a = ""; e = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^ac=/) a = substr($i, 4); if ($i ~ /^evidence=/) e = substr($i, 10) }
     if (a != "") printf "%s%s %s", (n++ ? " " : ""), a, e }' "$1/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null
@@ -1080,7 +1115,7 @@ expect_contains "OC-2 precondition: the line read last reads zero" "hand-holds: 
 OC_P="$(oc_after "$POC")"
 expect_eq "OC-3 the run's log holds one proof naming AC-2, its evidence the continuation path, beside the page's AC-1, and none naming AC-3, on another measure" \
   "$OC_AC1 AC-2 $OC_CONT" "$(oc_proofs "$POC")"
-expect_eq "OC-3b …so the reader reads AC-2 discharged by that proof and AC-3 still pending, and the delivered page's Eval design is as it was" \
+expect_eq "OC-3b …so the reader reads AC-2 discharged by that proof and AC-3 still pending, and the delivered page's Test design is as it was" \
   "discharged|proof|pending||$OC_EV0" "$(oc_cell "$OC_P" AC-2)|$(oc_cell "$OC_P" AC-3)|$(oc_eval "$OC_P")"
 expect_contains "OC-3c …and the card names the row and the status it wrote" "matrix: AC-2 discharged" "$CO_OUT"
 expect_eq "OC-3e …and a run with no act by hand has no ## Hand acts section beside its ## Hand-holds" "1|0" \
@@ -1100,7 +1135,7 @@ expect_eq "OC-5 a measure above zero still delivers: run exits 0" "0" "$CO_RC"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -15 | sed 's/^/    | /'
 expect_contains "OC-5b precondition: the line read last counts the amend" "amends=1 " "$OB_LINE"
 OB_P="$(oc_after "$POB")"
-expect_eq "OC-6 above zero the log's one proof naming a criterion is the page's AC-1, the reader reads AC-2 pending, and the delivered page's Eval design is as it was" \
+expect_eq "OC-6 above zero the log's one proof naming a criterion is the page's AC-1, the reader reads AC-2 pending, and the delivered page's Test design is as it was" \
   "$OC_AC1|pending||$OB_EV0" "$(oc_proofs "$POB")|$(oc_cell "$OB_P" AC-2)|$(oc_eval "$OB_P")"
 expect_contains "OC-6c …and the card says it is blocked, naming the line" "matrix: AC-2 blocked — $OB_LINE" "$CO_OUT"
 

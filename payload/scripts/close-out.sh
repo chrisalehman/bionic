@@ -42,7 +42,7 @@
 #
 # A ROW THE CLOSE ITSELF PROVES IS NOT OWED TO THE DRY-RUN. A matrix row owed at Step 9 is
 # judged by the gate only once the Step-9 line carries `delivered:` (lib/walls.sh
-# `matrix_row_deferred`), and the row whose eval is the hand-holds line is written by this script
+# `matrix_row_deferred`), and the row whose test is the hand-holds line is written by this script
 # after that line, from its last reading (`co_matrix_settle`). The pre-flight and the dry-run judge
 # the plan at current 8, before either, and owe it nothing.
 #
@@ -95,7 +95,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh seal.sh; do
+for _co_lib in loader.sh roots.sh root.sh run.sh plan.sh handoff.sh archive.sh patrol.sh units.sh proof.sh debt.sh seal.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -109,6 +109,8 @@ if [ ! -f "${CO_SCRIPTS}/card.sh" ]; then
   exit 2
 fi
 
+# shellcheck source=/dev/null
+. "${CO_LIB}/loader.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/roots.sh"
 # shellcheck source=/dev/null
@@ -126,6 +128,8 @@ fi
 . "${CO_LIB}/seal.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/patrol.sh"
+# The clock's one home, asked by name: patrol.sh loads it only softly.
+bionic_need time.sh _time_epoch
 # shellcheck source=/dev/null
 . "${CO_LIB}/units.sh"
 # shellcheck source=/dev/null
@@ -172,9 +176,13 @@ say() { printf '%s\n' "$*"; }
 # §Refuse(e), "Refuse refuse() is defined exactly once in the tree"), and the two are
 # not interchangeable — the renderer takes five arguments, this one takes a sentence.
 # Same rename spawn-worktree.sh's private helper took (`_wt_refuse`, ruling D-6).
+# A hold the list of ordinary answers holds (lib/refuse.sh: the close run before its merge is seen) names its key in
+# CO_ORDINARY and exits 0 with the same line, so its caller reads the line, never the exit; every other refusal exits 2.
+CO_ORDINARY=""
 _co_refuse() {
   printf 'bionic: close-out refused — %s\n' "$*"
   co_hold "${CO_HOLD_SAYS:-close-out stopped}" "bionic: close-out refused — $*"
+  if [ -n "$CO_ORDINARY" ] && bionic_need refuse.sh refuse_ordinary_exit; then exit "$(refuse_ordinary_exit "$CO_ORDINARY" 2)"; fi
   exit 2
 }
 # _co_held <what holds the merge, in a few words> <sentence> -> _co_refuse's line and exit 2, the words the ask's title
@@ -198,25 +206,34 @@ _co_held() {
 CO_HOLD=no
 CO_HOLD_WHY=""
 CO_HOLD_SAYS=""
+# co_hold_sid -> CO_HOLD_SID, the session the asks are written under: this script's own, else a stand-in made once by
+# this process (lib/root.sh `bionic_id`, its dots written `-`, a session id's alphabet being letters, digits, _ and -), so a hold opened and closed later in the run meet under one session and no
+# other close-out's stand-in is the same; rc 1 when no stand-in can be made.
+CO_HOLD_SID=""
+co_hold_sid() {
+  [ -z "$CO_HOLD_SID" ] || return 0
+  if [ -n "$CO_SID" ]; then CO_HOLD_SID="$CO_SID"; return 0; fi
+  bionic_need root.sh bionic_id && bionic_id && CO_HOLD_SID="closeout-${BIONIC_ID//./-}"
+}
 co_hold() {  # <what holds the merge, in a few words> <the printed line> -> always 0, prints nothing
   local r
   [ "$CO_HOLD" = yes ] && [ "${BASH_SUBSHELL:-0}" -eq 0 ] || return 0
-  declare -F owed_open >/dev/null 2>&1 || return 0
-  r="$(OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_list 2>/dev/null \
+  declare -F owed_open >/dev/null 2>&1 && co_hold_sid || return 0
+  r="$(OWED_ROOT="$ROOT" OWED_SID="$CO_HOLD_SID" OWED_PLAN="$PLAN" owed_list 2>/dev/null \
     | awk -F'\t' '$1 == "hold:merge" { print $4; exit }')"
   if [ -n "$r" ]; then
     [ "$r" = "$(printf '%s' "$2" | tr '|\t\r\n' '    ')" ] && return 0
-    OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_close hold:merge "close-out refused again" >/dev/null 2>&1
+    OWED_ROOT="$ROOT" OWED_SID="$CO_HOLD_SID" OWED_PLAN="$PLAN" owed_close hold:merge "close-out refused again" >/dev/null 2>&1
   fi
-  OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_open hold:merge "merge held: $1" "$2" >/dev/null 2>&1
+  OWED_ROOT="$ROOT" OWED_SID="$CO_HOLD_SID" OWED_PLAN="$PLAN" owed_open hold:merge "merge held: $1" "$2" >/dev/null 2>&1
   return 0
 }
 # co_hold_release -> always 0, prints nothing: the run delivered, its merge is no longer held, and no later refusal holds it
 co_hold_release() {
   [ "$CO_HOLD" = yes ] || return 0
   CO_HOLD=no
-  declare -F owed_close >/dev/null 2>&1 || return 0
-  OWED_ROOT="$ROOT" OWED_SID="${CO_SID:-closeout-$$}" OWED_PLAN="$PLAN" owed_close hold:merge "close-out delivered" >/dev/null 2>&1
+  declare -F owed_close >/dev/null 2>&1 && co_hold_sid || return 0
+  OWED_ROOT="$ROOT" OWED_SID="$CO_HOLD_SID" OWED_PLAN="$PLAN" owed_close hold:merge "close-out delivered" >/dev/null 2>&1
   return 0
 }
 # co_would <line> [<what holds the merge, in a few words>] -> the line said; the first such line `check` reports is the
@@ -494,7 +511,7 @@ CO_MERGE_RC=2; CO_MERGE_COMMIT=""; CO_MERGE_REF=""; CO_MERGE_WHY=""; CO_MERGE_WS
 co_merge_read() {
   local out c
   CO_MERGE_COMMIT=""; CO_MERGE_WS="$(git -C "$ROOT" rev-parse --short "refs/heads/$WORKING" 2>/dev/null)"
-  if co_line_load && declare -F line_merge_seen >/dev/null 2>&1; then
+  if bionic_need line.sh line_merge_seen; then
     out="$(line_merge_seen "$PLAN" "$ROOT" --fetch)"; CO_MERGE_RC=$?
   else
     out="$(printf 'unread\t-\t%s\t%s/line.sh, the merge'"'"'s reader, cannot be loaded' "$INTEGRATION" "$CO_LIB")"; CO_MERGE_RC=2
@@ -534,6 +551,9 @@ act_merge() {
     MERGE_LINE="$verdict"
     return 0
   fi
+  # A working branch not merged yet is the close asked before its merge, an ordinary answer; a request closed unmerged
+  # and a merge that cannot be read are refusals.
+  [ "$CO_MERGE_RC" != 1 ] || CO_ORDINARY=close-out
   _co_held "$(co_merge_holds)" "${verdict#WOULD REFUSE — } — the tail runs once the merge is seen"
 }
 
@@ -547,7 +567,7 @@ co_tag_merge() {
   local out rc flag=""
   [ "${1:-run}" != check ] || flag=--check
   [ -n "$CO_MERGE_COMMIT" ] || { TAG_LINE="none — no merge was read, so there is no commit to tag"; return 0; }
-  if ! co_line_load || ! declare -F line_tag_merge >/dev/null 2>&1; then
+  if ! bionic_need line.sh line_tag_merge; then
     TAG_LINE="none — $CO_LIB/line.sh, the tag's writer, cannot be loaded"; return 0
   fi
   out="$(line_tag_merge "$PLAN" "$ROOT" "$CO_MERGE_COMMIT" $flag)"; rc=$?
@@ -595,7 +615,8 @@ co_lands_refusal() {  # <rows> -> why this session cannot land them, or nothing
 # row out and the writer holding it. THE CLOSE LANDS NO ROW A WRITER HOLDS, and removes nothing a writer still reads:
 # landed at the merge, an active close row reads finished while its writer is mid-work. Who is out is the watcher's
 # own question (lib/patrol.sh `patrol_rows_out`), so the close typed by hand and the merge pass refuse on one answer;
-# an answer that cannot be had refuses too. It is asked in a command substitution, never in this shell: the rosters'
+# an answer that cannot be had refuses too. It asks whether a writer is out now, never whether one ever began a row's
+# file (co_cont_owner): a writer acked or gone holds nothing, though the file it began is still its own. It is asked in a command substitution, never in this shell: the rosters'
 # reader sources lib/fill.sh and through it lib/gate.sh, whose `gate_ask` would replace this file's own.
 co_rows_out() {
   local held said
@@ -605,23 +626,42 @@ co_rows_out() {
   said="$(printf '%s\n' "$held" | awk -F'\t' '$1 != "" { printf "%s%s (%s on roster %s)", (n++ ? ", " : ""), $1, $2, substr($3, 1, 8) }')"
   _co_held "rows of the run are out" "rows out: $said — the close runs once each writer is acked or gone — nothing was done"
 }
-act_lands() {  # <rows> -> each landed by one published event at the integration head; LANDS_LINE
-  local rows="$1" id ih left
+# co_lands_open <rows> -> the close rows among <rows> that name a record none of which stands, space-joined, in table
+# order. A CLOSE ROW IS FINISHED BY ITS RECORD, not by the merge: landed without it, a row whose writer never wrote it
+# reads done. A close row that names no record has nothing to wait for and lands with the merge. The record is read as
+# the tick reads it (lib/units.sh `units_record_stands`).
+co_lands_open() {
+  local id files out=""
+  while IFS=$'\t' read -r id files; do
+    [ -n "$id" ] || continue
+    units_record_stands "$PLAN" "$id" "$files" "$ROOT" "$DROOT"; [ "$?" != 1 ] || out="$out${out:+ }$id"
+  done <<< "$(units_rows "$PLAN" 2>/dev/null | CO_ROWS=" $1 " awk -F'\t' '$3 == "close" && index(ENVIRON["CO_ROWS"], " " $1 " ") { print $1 "\t" $9 }')"
+  printf '%s' "$out"
+}
+co_lands_said() {  # <rows landed> <rows left open> <where> -> the rows-landed line's words
+  if [ -n "$1" ]; then printf '%s at %s' "$1" "$3"; else printf 'none'; fi
+  [ -z "$2" ] || printf '; %s left open — no record it names stands' "$2"
+}
+act_lands() {  # <rows> -> each landed by one published event at the integration head, a close row once its record stands; LANDS_LINE
+  local rows="$1" id ih left open landed=""
   if [ -z "$rows" ]; then
     LANDS_LINE="none — no open integrate or close row"
     return 0
   fi
   ih="$CO_MERGE_COMMIT"
   [ -n "$ih" ] || _co_refuse "no merge was read, so rows $rows have no commit to land at"
-  co_line_load || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
+  bionic_need line.sh line_published_event || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
+  open="$(co_lands_open "$rows")"
   for id in $rows; do
+    case " $open " in *" $id "*) continue ;; esac
     line_published_event "$PLAN" "row=$id" "commit=$ih" kind=close by=close-out why=merged >/dev/null \
       || _co_refuse "the landing of $id cannot be written to the run's log — rows before it are landed; run close-out again"
+    landed="$landed${landed:+ }$id"
   done
   # The readback: the act's own result, asked of the units helper rather than assumed from the writes.
   left="$(co_lands_rows)"
-  [ -z "$left" ] || _co_refuse "rows $left still read open after their landing was written — the run's log is not as written"
-  LANDS_LINE="$rows at $CO_MERGE_REF @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)"
+  [ "$left" = "$open" ] || _co_refuse "rows ${left:-none} read open after the landings were written, where only ${open:-none} should — the run's log is not as written"
+  LANDS_LINE="$(co_lands_said "$landed" "$open" "$CO_MERGE_REF @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)")"
 }
 
 # ─── Act 2: worktree branches ────────────────────────────────────────────────
@@ -778,14 +818,15 @@ co_hand_holds_last() {
   local was="$CO_HH_LINE" tmp
   co_hand_holds
   [ -n "$was" ] && [ "$was" != "$CO_HH_LINE" ] && [ "$CO_HH_CONT" = "$was" ] && [ -f "$CONT" ] || return 0
-  tmp="$CONT.close-out.$$"
+  bionic_need root.sh bionic_new && bionic_new "$CONT.close-out" || return 0
+  tmp="$BIONIC_NEW"
   CO_WAS="$was" CO_NOW="$CO_HH_LINE" awk '
     /^## / { sec = ($0 == "## Hand-holds") }
     sec && !done && $0 == ENVIRON["CO_WAS"] { print ENVIRON["CO_NOW"]; done = 1; next }
-    { print }' "$CONT" > "$tmp" 2>/dev/null && mv -f "$tmp" "$CONT" || rm -f "$tmp"
+    { print }' "$CONT" >| "$tmp" 2>/dev/null && mv -f "$tmp" "$CONT" || rm -f "$tmp"
 }
 # THE CLOSE PROVES THE CRITERIA ITS LAST READING MEASURES. A criterion is owed at the step whose task proves it. The
-# ones owed at Step 9 whose eval names `landing-report --hand-holds` (lib/walls.sh `matrix_close_rows`, the gate's own
+# ones owed at Step 9 whose test names `landing-report --hand-holds` (lib/walls.sh `matrix_close_rows`, the gate's own
 # readers, asked in a subshell as the facts judge asks them) are proved by the line `co_hand_holds_last` reads after
 # `delivered:`, so they are settled here, in the same act and before the archive move, while the plan still finds its
 # run's log: at total=0 one proof event naming each, its evidence the continuation where the line is kept, through the
@@ -797,7 +838,7 @@ co_matrix_settle() {  # -> CO_MX_LINES, one `matrix: <AC> <state>` line per crit
   local acs ac
   CO_MX_LINES=""
   [ -f "${CO_LIB}/walls.sh" ] || return 0
-  acs="$( . "${CO_LIB}/walls.sh" >/dev/null 2>&1 && declare -F matrix_close_rows >/dev/null 2>&1 || exit 0
+  acs="$( bionic_need walls.sh matrix_close_rows || exit 0
           matrix_close_rows "$PLAN" )"
   for ac in $acs; do
     if ! /usr/bin/grep -qE '^hand-holds: total=0( |$)' <<< "$CO_HH_LINE"; then
@@ -837,19 +878,13 @@ co_scorecard() {  # -> sets CO_SC_LINES
 # part that already reads as rendered: nothing is made and no line is written.
 # Sets CO_RV_LINE (the `reviews:` line's words), CO_RV_COMMIT (the commit, made, not yet published), CO_RV_BASE.
 CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
-co_line_load() {  # -> 0 once lib/line.sh (the renderer, the landing record's writer and the checkout reader) is loaded
-  declare -F line_reviews_state >/dev/null 2>&1 && declare -F line_event >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$CO_LIB/line.sh" ] && . "$CO_LIB/line.sh" >/dev/null 2>&1
-  declare -F line_reviews_state >/dev/null 2>&1 && declare -F line_event >/dev/null 2>&1
-}
 co_reviews_prepare() {  # <check|run> -> CO_RV_LINE, and in run CO_RV_COMMIT; rc 1 when run cannot make the commit
   local mode="$1" tip tmp why
   CO_RV_LINE=""; CO_RV_COMMIT=""; CO_RV_BASE=""
   [ -n "$RELEASE" ] || { CO_RV_LINE="none — the plan names no release:"; return 0; }
   tip="$(git -C "$ROOT" rev-parse --verify -q "refs/heads/${WORKING}^{commit}" 2>/dev/null)" \
     || { CO_RV_LINE="none — $WORKING is not a branch in $ROOT"; return 0; }
-  co_line_load || { CO_RV_LINE="not rendered — $CO_LIB/line.sh, the renderer and the landing record's writer, cannot be loaded"; return 1; }
+  bionic_need line.sh line_reviews_state || { CO_RV_LINE="not rendered — $CO_LIB/line.sh, the renderer and the landing record's writer, cannot be loaded"; return 1; }
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/close-out-reviews.XXXXXX")" || { CO_RV_LINE="not rendered — no temporary directory"; return 1; }
   if ! line_reviews_state "$PLAN" "$ROOT" "$tip" "$WORKING" "$tmp/new"; then
     rm -rf "$tmp"; CO_RV_LINE="not rendered — $LINE_RV_SAID"; return 1
@@ -1013,7 +1048,7 @@ _co_tmp_scratch() {
   local root="$1" live own="" s n
   CO_SCRATCH_KEPT=0
   live="$(patrol_live_session_ids 2>/dev/null)"
-  [ -z "$CO_SID" ] || own="$(roster_open_names "$TMP_DIR/roster-$CO_SID.state" "$TMP_DIR/sweeper-$CO_SID.state" "$CO_SID")"
+  [ -z "$CO_SID" ] || own="$(roster_open_names "$(roster_path "$ROOT" "$CO_SID")" "$TMP_DIR/sweeper-$CO_SID.state" "$CO_SID")"
   while IFS= read -r s; do
     [ -n "$s" ] || continue
     if [ -n "$CO_SID" ] && [ "${s##*/}" = "$CO_SID" ] && [ -d "$s" ] && [ ! -L "$s" ]; then
@@ -1320,8 +1355,10 @@ $CO_CARRIED}"
 # blank lines kept after it. Both walk the file once, holding the section's lines until the next unfenced `## ` heading
 # or the end; a heading the file does not carry is a refusal, nothing written.
 co_cont_write() {  # <heading> <text> <lines|section> -> $CONT with the text added
-  local tmp="$CONT.close-out.$$" why="could not add to $1 in the continuation at $CONT"
+  local tmp why="could not add to $1 in the continuation at $CONT"
   [ "$3" = lines ] || why="could not add a section to the continuation at $CONT"
+  { bionic_need root.sh bionic_new && bionic_new "$CONT.close-out"; } || _co_refuse "$why"
+  tmp="$BIONIC_NEW"
   CO_ADD="$2" CO_HEAD="$1" CO_MODE="$3" awk '
     function isfence(l) { return l ~ /^[[:space:]]*```/ }
     function fin(more,   i, f, l, nf, add) {
@@ -1349,7 +1386,7 @@ co_cont_write() {  # <heading> <text> <lines|section> -> $CONT with the text add
     !insec { print; if (!fence && $0 == ENVIRON["CO_HEAD"]) insec = 1; next }
     !fence && /^## / { fin(1); print; next }
     { buf[++nb] = $0 }
-    END { if (!done && insec) fin(0); if (!done) exit 3 }' "$CONT" > "$tmp" 2>/dev/null \
+    END { if (!done && insec) fin(0); if (!done) exit 3 }' "$CONT" >| "$tmp" 2>/dev/null \
     || { rm -f "$tmp"; _co_refuse "$why"; }
   [ -s "$tmp" ] || { rm -f "$tmp"; _co_refuse "$why"; }
   mv "$tmp" "$CONT" 2>/dev/null || { rm -f "$tmp"; _co_refuse "$why"; }
@@ -1625,15 +1662,25 @@ co_cont_hh_none() {  # -> 0 when the continuation holds no `hand-holds: ` line u
   [ -f "$CONT" ] || return 0
   ! awk '/^## / { s = ($0 == "## Hand-holds"); next } s && index($0, "hand-holds: ") == 1 { f = 1 } END { exit !f }' "$CONT"
 }
-# THE CONTINUATION HAS ONE WRITER. A close row whose Files name it, and which was dispatched (the run's log holds its
-# dispatch), has a writer of its own for that file, so the close writes none of it, the file there or not: two writers
-# of one file is how a close appended to a continuation its row's writer was still writing. A close row nobody
-# dispatched has no writer, and the close stays the file's one writer, as before. Files entries are read from the
-# project's root and from the docs root, the two spellings a planner writes.
+# THE CONTINUATION HAS ONE WRITER. A close row whose Files name it, and which was ever dispatched (the run's log holds a
+# dispatch of it, whether or not the launch was taken back since), has a writer of its own for that file, so the close
+# writes none of it, the file there or not: two writers of one file is how a close appended to a continuation its row's
+# writer was still writing, or had begun before the stand-down took its launch back. A close row nobody dispatched has
+# no writer, and the close stays the file's one writer, as before. Files entries are read from the project's root and
+# from the docs root, the two spellings a planner writes. Whether a writer is out NOW is another question, the one that
+# holds the close (co_rows_out); this one asks whether a writer ever began the file.
+# co_rows_sent -> every row the run's log ever dispatched, one per line: read off the log's lines, since a cancel takes
+# the dispatch out of the standing facts. 2 when the lines cannot be read.
+co_rows_sent() {
+  local said
+  bionic_need reader.sh reader_events || return 2
+  said="$(reader_events "$PLAN")" || return 2
+  printf '%s\n' "$said" | awk -F'|' "$_READER_AWK"'ev() == "dispatch" { print line_kv("row") }'
+}
 # co_cont_owner -> the id of the close row that owns the continuation, or nothing
 co_cont_owner() {
   local rows id files e
-  rows="$(units_rows "$PLAN" 2>/dev/null | CO_SENT=" $(co_facts dispatch row 2>/dev/null | tr '\n' ' ') " awk -F'\t' '
+  rows="$(units_rows "$PLAN" 2>/dev/null | CO_SENT=" $(co_rows_sent 2>/dev/null | tr '\n' ' ') " awk -F'\t' '
     $3 == "close" && $10 != "dropped" && index(ENVIRON["CO_SENT"], " " $1 " ") { print $1 "\t" $9 }')"
   while IFS=$'\t' read -r id files; do
     [ -n "$id" ] || continue
@@ -1848,7 +1895,7 @@ co_close_step8() {
 CO_TARGET=""; CO_DEPLOY_NAMED=no; CO_DEPLOY_WHY=""; CO_DEPLOY_SAYS=""
 CO_DEPLOY_FIELDS=()
 co_walls_ask() {  # <lib/walls.sh function> [args] -> its exit status, asked of the gate's library in a subshell; 9 when it cannot be asked
-  ( . "${CO_LIB}/walls.sh" >/dev/null 2>&1 && declare -F "$1" >/dev/null 2>&1 || exit 9
+  ( bionic_need walls.sh "$1" || exit 9
     DEPLOY_TARGET="$CO_TARGET"
     "$@" )
 }
@@ -1918,7 +1965,7 @@ co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the def
   rel="$(co_ask reader_q_handoff 2>/dev/null | sed -n 's/^path=//p')"
   case "$rel" in '') CO_HO_FILE="$(handoff_default_of "$PLAN" "$ROOT")" ;; /*) CO_HO_FILE="$rel" ;; *) CO_HO_FILE="$ROOT/$rel" ;; esac
   CO_HO_REL="${CO_HO_FILE#"$ROOT"/}"
-  CO_HO_WRITTEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  CO_HO_WRITTEN="$(iso_now)"
   CO_HO_LOCAL="$(date '+%Y-%m-%d %H:%M %Z')"
   CO_HO_CLOCK="$(date '+%-I:%M %p')"
 }
@@ -1933,13 +1980,14 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
   co_handoff_where
   mkdir -p "${CO_HO_FILE%/*}" 2>/dev/null || return 1
   [ ! -L "$CO_HO_FILE" ] || return 1
-  if [ -f "$CO_HO_FILE" ] && [ "$(sed -n 1p "$CO_HO_FILE" 2>/dev/null)" = "bionic-handoff/v1" ]; then
+  if handoff_is_one "$CO_HO_FILE" link-ok; then
     title="$(sed -n '2{/^Handoff · /p;}' "$CO_HO_FILE" 2>/dev/null)"
     src="$CO_HO_FILE"
     [ -n "$title" ] || old=1
   fi
   [ -n "$title" ] || title="Handoff · ${ROOT##*/} · $(date '+%A %-I:%M %p') · $WAVE_SLUG · closed"
-  tmp="$CO_HO_FILE.close-out.$$"
+  bionic_need root.sh bionic_new && bionic_new "$CO_HO_FILE.close-out" || return 1
+  tmp="$BIONIC_NEW"
   {
     printf 'bionic-handoff/v1\n%s\n\n' "$title"
     CO_HO_STATE="$(printf 'written: %s\ninstant: %s\nplan: %s\n%s\nworking branch: %s\ncontinuation: %s' \
@@ -1990,7 +2038,7 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
           print "Resume"
         }' "$src"
     printf '/bionic:canonical-sdlc %s\n' "$CO_HO_REL"
-  } > "$tmp" 2>/dev/null && mv -f "$tmp" "$CO_HO_FILE" 2>/dev/null && return 0
+  } >| "$tmp" 2>/dev/null && mv -f "$tmp" "$CO_HO_FILE" 2>/dev/null && return 0
   rm -f "$tmp" 2>/dev/null
   return 1
 }
@@ -2035,7 +2083,7 @@ gate_ask() {
   marker="$(engaged_marker_path "$ROOT" "$sid")" \
     || { GATE_LINE="could not build an engagement marker path for the dry-run"; return 9; }
   mkdir -p "${marker%/*}" 2>/dev/null
-  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$(iso_now)" > "$marker"
   input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
     '{session_id: $s,
       cwd: $cwd,
@@ -2055,7 +2103,8 @@ gate_ask() {
 # in the log and still open at 8. A refusal here is rare now that the pre-flight asked the same question first; it is
 # kept because the pre-flight judged what the acts would write and this judges what they wrote.
 gate_dry_run() {
-  gate_ask "$PLAN" "closeout-$$" || _co_refuse "$GATE_LINE — the close cannot be attested"
+  { bionic_need root.sh bionic_id && bionic_id; } || _co_refuse "no id could be made for the attestation's session — the close cannot be attested"
+  gate_ask "$PLAN" "closeout-${BIONIC_ID//./-}" || _co_refuse "$GATE_LINE — the close cannot be attested"
   if [ "$GATE_RC" -eq 0 ]; then
     say "gate: ok"
     return 0
@@ -2115,7 +2164,7 @@ presence_missing() {
 FACTS_RC=9; FACTS_HEAD=""; FACTS_LINES=""; FACTS_WHY=""; FACTS_SAYS="the run's proofs cannot be read"
 facts_judge() {
   # The close judges on the run's log, never the kept facts the tick reads (lib/proof.sh `_PROOF_FRESH`).
-  local out err ah _PROOF_FRESH=1
+  local out err ah ef _PROOF_FRESH=1
   if ! declare -F facts_state >/dev/null 2>&1; then
     FACTS_WHY="the proof record (lib/proof.sh) cannot be loaded from $CO_LIB, so the facts the run owes cannot be judged"
     return 0
@@ -2150,8 +2199,9 @@ facts_judge() {
       return 0
     fi
   fi
-  out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>"$TMP_DIR/.facts-judge.$$")"; FACTS_RC=$?
-  err="$(cat "$TMP_DIR/.facts-judge.$$" 2>/dev/null)"; rm -f "$TMP_DIR/.facts-judge.$$"
+  ef=/dev/null; ! bionic_need root.sh bionic_new || ! bionic_new "$TMP_DIR/.facts-judge" || ef="$BIONIC_NEW"
+  out="$(facts_state "$PLAN" "$FACTS_HEAD" 2>|"$ef")"; FACTS_RC=$?
+  err=""; [ "$ef" = /dev/null ] || { err="$(cat "$ef" 2>/dev/null)"; rm -f "$ef"; }
   case "$FACTS_RC" in
     0) FACTS_WHY="" ;;
     2) FACTS_LINES="$(printf '%s\n%s' "$err" "$out" | awk 'NF')"
@@ -2189,7 +2239,8 @@ co_facts_says() {
 
 gate_preflight() {
   PREFLIGHT_RC=9; PREFLIGHT_LINE=""; PREFLIGHT_ERR=""
-  gate_ask "$PLAN" "closeout-preflight-$$" "$(co_close_facts)"
+  { bionic_need root.sh bionic_id && bionic_id; } || { PREFLIGHT_LINE="no id could be made for the pre-flight's session"; return 0; }
+  gate_ask "$PLAN" "closeout-preflight-${BIONIC_ID//./-}" "$(co_close_facts)"
   [ "$GATE_RC" -eq 9 ] && { PREFLIGHT_LINE="$GATE_LINE"; return 0; }
   PREFLIGHT_RC="$GATE_RC"; PREFLIGHT_LINE="$GATE_LINE"; PREFLIGHT_ERR="$GATE_ERR"
   return 0
@@ -2292,7 +2343,10 @@ do_check() {
   elif [ -z "$CO_MERGE_COMMIT" ]; then
     say "rows-landed: none — run lands $CO_LANDS only once the merge is seen"
   else
-    say "rows-landed: run would land $CO_LANDS at $CO_MERGE_REF @ ${is:-?}"
+    local ck_open ck_id ck_land=""
+    ck_open="$(co_lands_open "$CO_LANDS")"
+    for ck_id in $CO_LANDS; do case " $ck_open " in *" $ck_id "*) ;; *) ck_land="$ck_land${ck_land:+ }$ck_id" ;; esac; done
+    say "rows-landed: run would land $(co_lands_said "$ck_land" "$ck_open" "$CO_MERGE_REF @ ${is:-?}")"
   fi
 
   # THE CENSUS NAMES ITS SOURCE, NOT JUST ITS RESULT (D5). `wt_branches` reads the
@@ -2383,7 +2437,8 @@ do_check() {
   # AS RUN WOULD WRITE IT: the pre-flight `run` itself asks before its first act, so this
   # line and `run`'s outcome cannot disagree (critic3 P-1). Its refusal is the gate's own
   # line, never a sentence of this script's about what would clear it.
-  gate_ask "$PLAN" "closeout-check-$$" || { say "gate: skipped — $GATE_LINE"; return 0; }
+  { bionic_need root.sh bionic_id && bionic_id; } || { say "gate: skipped — no id could be made for the check's session"; return 0; }
+  gate_ask "$PLAN" "closeout-check-${BIONIC_ID//./-}" || { say "gate: skipped — $GATE_LINE"; return 0; }
   if [ "$GATE_RC" -eq 0 ]; then
     say "gate: ok against the plan as it stands"
   else

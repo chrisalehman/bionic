@@ -16,6 +16,8 @@
 #   refuse_plugin_root -> the plugin root this library was loaded from, for a fix line.
 #   refuse_shell_word <word> [placeholder] -> <word> as one shell argument, quoted if needed.
 #   refuse_quote <word> -> <word> as one single-quoted shell argument, always.
+#   refuse_ordinary -> the list of ordinary answers, the answers that exit 0, one per line.
+#   refuse_ordinary_exit <key> <code> -> the exit a command gives for <code>: 0 for an answer the list holds.
 #
 # THE VERDICT IS EXACTLY ONE LINE:
 #
@@ -171,8 +173,8 @@
 # (the loader block runs it with stderr closed for exactly that reason), and a wall
 # that cannot format its refusal must not therefore fail open.
 #
-# SOURCED, NEVER EXECUTED. The only top-level command is the soft source of
-# width.sh below, which defines functions and prints nothing.
+# SOURCED, NEVER EXECUTED. The only top-level commands are the loader's bootstrap and
+# the soft source of width.sh below, which define functions and print nothing.
 #
 # [WALL: tests/refuse.test.sh]
 # [WALL: tests/cross-gate-agreement-2.test.sh]
@@ -181,14 +183,8 @@
 # lib/detect.sh for lib/deps.sh. The 100-column budget and the column counter that
 # knows `—` is one column wide already have an owner; a second count of the same
 # thing here is the duplication epic-19 W1 S9 removed.
-_refuse_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-if ! declare -F bionic_cols >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_refuse_self_dir)" && pwd -P)/width.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need width.sh bionic_cols
 
 # THE FIX BUDGET. Six words is REQ-E1/AC-E1.3's number. Forty columns is the same
 # criterion's other half: AC-E1.3's regex is `\(.{1,40}\)$`, so a `fix` wider than
@@ -280,6 +276,53 @@ refuse_modes() {
   printf '%s\n' "$BIONIC_REFUSE_TABLE" | awk -F'|' '$3=="yes" { print $1 }'
 }
 
+# ── THE ORDINARY ANSWERS, BESIDE THE REFUSALS ─────────────────────────────────
+#
+# A command that answers "waiting", "busy", "nothing ran" or "no" to what it was asked has done its work: it exits 0
+# and says the answer in its words. A refusal, a failed check, a stall and a row returned stay non-zero. This list is
+# the one place that says which answers are ordinary: a command maps its code to its exit through it, and a reader that
+# must tell an answer from a failure reads the same rows. Five fields, `|`-separated, one row an answer:
+#
+#   1  key      the answer's command, the first operand of `refuse_ordinary_exit`
+#   2  command  the command as a session types it
+#   3  code     the code the answer keeps inside the tool: a library's return, the run record's stamp, the roster's
+#               run_rc=, the judge's `judged <N> exit <rc>` line. A reader of the record branches on it, never on
+#               the exit, which is 0
+#   4  word     the words that say the answer, which a caller that needs it reads in place of the exit
+#   5  answer   what it means
+#
+# A command not admitted by the gate ran nothing and keeps 75 in its record (the shim's stamp, the roster's
+# run_rc=75); one that a caller must tell from a green run says so through the note file BIONIC_NOT_ADMITTED names,
+# never through its exit. Every other answer here is told from a success by its words alone: the tick's decision line,
+# the CARD-EARLY line, the close's last line (`bionic: close-out refused — …`), which the tick's merge look reads.
+BIONIC_ORDINARY_TABLE='ready|spawn-worktree.sh ready|75|WAITING|the landing waits its turn behind a row ahead or for room on the machine; run the same command again
+ready|spawn-worktree.sh ready|75|BUSY|another landing holds the publish lock; run the same command again
+door|tests/run.sh|75|refused at the gate|the gate admitted nothing, so no suite ran; the note gets one line
+booked|booked.sh|75|did not admit|the gate did not admit the wrapped command, so it ran nothing; stamped rc=75
+regression-run|session-poker.sh regression-run|75|did not admit the whole run|nothing ran and no log was written; the note gets one line
+check|session-poker.sh current <N> --check|1|would refuse|the step would not advance; the lines under the verdict say why
+judge|session-poker.sh judge <N>...|1|would refuse|a step would not advance; its block closes with judged <N> exit 1
+tick|session-poker.sh tick|1|decision=NOTIFY|a row or a gate request wants the orchestrator; the lines above the decision line say which
+card-early|card.sh early <plan>|1|CARD-EARLY —|the release approval card may not render yet; the line on stderr names the first fact that fails
+release-approval|session-poker.sh release-approval [<plan>]|1|CARD-EARLY —|the page is early: nothing is rendered or written, and the line on stderr says why
+close-out|close-out.sh <plan> run|2|the tail runs once the merge is seen|the working branch is not merged yet; nothing is done, the merge ask stays open, and the close runs again once the merge is seen'
+
+# refuse_ordinary -> the list, one row a line, table order.
+refuse_ordinary() { printf '%s\n' "$BIONIC_ORDINARY_TABLE"; }
+
+# refuse_ordinary_exit <key> <code> -> the exit for a command that gave <code>: 0 when the list holds an answer of
+# <key> with that code, else <code> itself. Where a command exits, it asks this once, so the code its answer keeps
+# inside the tool and the exit it gives are told apart in one place.
+refuse_ordinary_exit() {
+  local key="${1:-}" code="${2:-}"
+  case "$code" in ''|*[!0-9]*) printf '%s' "${code:-1}"; return 0 ;; esac
+  if [ "$code" -ne 0 ] && printf '%s\n' "$BIONIC_ORDINARY_TABLE" \
+      | awk -F'|' -v k="$key" -v c="$code" '$1 == k && $3 == c { f = 1 } END { exit !f }'; then
+    code=0
+  fi
+  printf '%s' "$code"
+}
+
 # _refuse_words <string> -> its word count. `set -f` because a `fix` naming a path
 # or a glob must be counted, not expanded; the subshell keeps the option local.
 _refuse_words() {
@@ -369,9 +412,8 @@ _refuse_log_need() {
   case "$2" in "needs: "*) ;; *) return 0 ;; esac
   [ -n "${BIONIC_ROOT:-}" ] && [ -n "${BIONIC_SID:-}" ] || return 0
   (
-    lib="${BIONIC_LIB:-$(cd "$(_refuse_self_dir)" && pwd -P)}"
-    declare -F session_plan >/dev/null 2>&1 || . "$lib/run.sh" || exit 0
-    declare -F line_hand_event >/dev/null 2>&1 || . "$lib/line.sh" || exit 0
+    bionic_need run.sh session_plan || exit 0
+    bionic_need line.sh line_hand_event || exit 0
     plan="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID")" || exit 0
     line_hand_event "$plan" refusal "$3 ($2)" needs=person "wall=$1"
   ) >/dev/null 2>&1 || :

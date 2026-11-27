@@ -64,14 +64,8 @@
 # lib/detect.sh uses for lib/deps.sh and lib/checks.sh for lib/patrol.sh. Guarded on the
 # function, so a caller that already has either pays nothing. run.sh soft-sources
 # roots.sh itself, so sourcing it here is sufficient for both.
-_archive_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-if ! declare -F run_open >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_archive_self_dir)" && pwd -P)/run.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need run.sh run_open
 
 # _archive_leaf <path> -> the last path segment. Never `basename`, for lib/detect.sh's
 # reason restated in roots.sh: a library that cannot be sourced without coreutils dies on

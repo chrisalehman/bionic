@@ -24,24 +24,16 @@
 # [WALL: tests/brief-file.test.sh]
 # [WALL: tests/dispatch-preflight.test.sh]
 
-_brief_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-_BRIEF_LIB_DIR="$(cd "$(_brief_self_dir)" && pwd -P)"
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 # THE ONE RUN RULE ON BOTH SIDES OF THE ROW: a declared run is stored through `cmdnorm_run`, the rule the
 # writer-side budget arm builds its claim with, so the two compare one spelling. THE ONE SUITE-NAME GRAMMAR:
 # a `Lands-on:` entry is named by suite.sh's `suite_name`, the function line.sh reads a roster's `lands_on=`
-# with. Each is guarded on its variable, so a caller that has sourced the file already pays nothing.
-if [ -z "${CMD_RUN_NORM_AWK:-}" ]; then
-  # shellcheck source=/dev/null
-  . "$_BRIEF_LIB_DIR/cmd-class.sh"
-fi
-if [ -z "${BIONIC_SUITE_NAME_AWK:-}" ]; then
-  # shellcheck source=/dev/null
-  . "$_BRIEF_LIB_DIR/suite.sh"
-fi
+# with. Each is guarded on a function the same file defines beside that variable, so a caller that has sourced
+# the file already pays nothing.
+bionic_need cmd-class.sh _cmd_class_awk
+bionic_need suite.sh bionic_suite_start
+bionic_need fields.sh line_field_clean
 
 # Values are pipe-delimited on one line, so a field carrying a newline or a `|` would forge a row. Never a
 # refusal: the ledger normalizes and records. The third argument is the field name: `files=`,
@@ -49,15 +41,14 @@ fi
 # every other field is prose or one path and keeps its cap. `re_executes=` keeps its `|`, which the row
 # writer (`roster_row`, lib/roster.sh) escapes for that field alone, because a declared run is read back and
 # compared to what an agent typed.
+# Every field but `re_executes=` is lib/fields.sh's `line_field_clean`; that one keeps its own fold, since it
+# keeps the `|`.
 sanitize() {  # <value> <max-chars> [<field name>]
-  local out _s1='\n\r\t|' _s2='    '
-  case "${3:-}" in re_executes) _s1='\n\r\t'; _s2='   ' ;; esac
-  out="$(printf '%s' "$1" \
-    | tr "$_s1" "$_s2" \
-    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')"
   case "${3:-}" in
-    files|suites_allowed|re_executes) printf '%s' "$out" ;;
-    *) printf '%s' "$out" | cut -c "1-$2" ;;
+    re_executes)
+      printf '%s' "$1" | tr '\n\r\t' '   ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//' ;;
+    files|suites_allowed) line_field_clean "$1" ;;
+    *) line_field_clean "$1" "$2" ;;
   esac
 }
 

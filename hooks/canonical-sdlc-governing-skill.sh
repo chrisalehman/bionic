@@ -117,35 +117,16 @@ fi
 # Write tool creates parent directories, so the non-existent segment was never an obstacle
 # to the write — only to the wall seeing where it was going.
 #
-# The loop is hooks/dispatch-preflight.sh resolve_in_repo()'s, which already folds this way
-# before comparing a deliverable path against the repo, and whose `set -f` guard is
-# load-bearing here too: a `*` inside a tool-supplied path is a character, never a glob.
-# Two walls in one wave had disagreed about how to resolve a path, and this is the weaker
-# one adopting the stronger one.
-#
-# A LEXICAL fold, deliberately, not realpath: `<symlink>/..` folds to the symlink's parent
-# rather than to its target's parent. Same reading resolve_in_repo takes, and for a wall
-# whose question is "which tree does this path NAME" it is the right one.
+# The fold is lib/root.sh's path_normal, which hooks/dispatch-preflight.sh resolve_in_repo()
+# calls too before comparing a deliverable path against the repo, so the two walls cannot
+# disagree about where a path goes. It is lexical, and a `*` in the path is a character. This
+# function is defined above the loader but runs only after it, so root.sh is in place by then.
 fold_dots() {  # $1=path → `.` and `..` folded lexically, absolute
-  local p="$1" abs out part had_f
-  case "$p" in
-    /*) abs="$p" ;;
-    *)  abs="$(pwd)/$p" ;;
+  case "$1" in
+    /*) path_normal "$1" ;;
+    *)  path_normal "$(pwd)/$1" ;;
   esac
-  case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
-  set -f
-  out=""
-  local IFS=/
-  for part in $abs; do
-    case "$part" in
-      ''|.) ;;
-      ..)   out="${out%/*}" ;;
-      *)    out="$out/$part" ;;
-    esac
-  done
-  unset IFS
-  [ "$had_f" -eq 1 ] || set +f
-  printf '%s\n' "${out:-/}"
+  printf '%s\n' "$PATH_NORMAL"
 }
 
 physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resolved
@@ -407,9 +388,7 @@ gs_bind_fold() {
     case "$dir" in */*) dir="${dir%/*}" ;; *) dir="" ;; esac
   done
   [ -d "$dir" ] || return 1
-  common=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 1
-  [ -n "$common" ] || return 1
-  case "$common" in /*) ;; *) common="$dir/$common" ;; esac
+  common="$(git_common_dir "$dir")" || return 1
   main=$(cd "$common/.." 2>/dev/null && pwd -P) || return 1
   [ "$main" = "$root" ] || return 1
   top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 1
@@ -911,14 +890,28 @@ fi
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 CONTENT=$(printf '%s' "$CONTENT" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }')
 
-# Extract the leading YAML frontmatter block (between the first two `---`
-# lines at column 0). If absent, block.
+# THE ARTIFACT AS THE PARSER READS IT. The parser reads a path, and the text judged here is the
+# posted body or the Edit applied, which no file holds yet: so it is written once to a temporary
+# file, removed on every way out, and every read below is of that one copy. The header is read
+# once; `yaml_get` and `gs_has_key` answer from that reading with no further process. The copy is
+# made only for text that opens on a header, so an ordinary file outside the docs home costs no
+# temporary file. A header is the leading `---` block: its first line says whether there is one,
+# and the parser says what it holds.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-FRONTMATTER=$(echo "$CONTENT" | awk '
-  NR == 1 && $0 == "---" { inside = 1; next }
-  inside && $0 == "---" { exit }
-  inside { print }
-')
+GS_PAGE=""; GS_HEADER=""; GS_HEADED=0
+case "$CONTENT" in ---|---$'\n'*) GS_HEADED=1 ;; esac
+_gs_page() {
+  [ -z "$GS_PAGE" ] || return 0
+  GS_PAGE="$(mktemp "${TMPDIR:-/tmp}/bionic-page.XXXXXX")" || GS_PAGE=""
+  [ -n "$GS_PAGE" ] || _gs_refuse no-temp-file
+  trap 'rm -f "$GS_PAGE"' EXIT
+  printf '%s\n' "$CONTENT" > "$GS_PAGE"
+  GS_HEADER="$(plan_read_header "$GS_PAGE")" || GS_HEADER=""
+}
+# yaml_get <key> -> the header's value for <key>, empty when it is absent.
+yaml_get() { plan_header_value "$GS_HEADER" "$1" || :; }
+# gs_has_key <key> -> 0 when the header holds <key>, its value empty or not.
+gs_has_key() { plan_header_value "$GS_HEADER" "$1" >/dev/null; }
 
 # The misplacement verdict, now that the frontmatter is in hand.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
@@ -935,7 +928,8 @@ FRONTMATTER=$(echo "$CONTENT" | awk '
 # business, wherever it lives — which is why an ordinary file in an ordinary
 # project, in a project with no `.bionic/` at all, passes untouched.
 if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
-  if grep -qE '^[[:space:]]*(canonical_sdlc_version[[:space:]]*:|governing-skill[[:space:]]*:[[:space:]]*canonical-sdlc[[:space:]]*$)' <<< "$FRONTMATTER"; then
+  [ "$GS_HEADED" = 0 ] || _gs_page
+  if gs_has_key canonical_sdlc_version || [ "$(yaml_get governing-skill)" = canonical-sdlc ]; then
     case "$BASENAME" in
       *.spec.md|*.requirements.md) MISPLACED_SUBDIR=specs ;;
       adr-*.md)                    MISPLACED_SUBDIR=adrs ;;
@@ -963,35 +957,14 @@ fi
 
 # The hint names the version the artifact is written at: a plan's is 15, and a document that is no plan may declare
 # 14 or 15, as the version arms below admit.
-if [ -z "$FRONTMATTER" ]; then
+if [ "$GS_HEADED" = 0 ]; then
   case "$BASENAME" in
     *.plan.md) _gs_refuse no-frontmatter 15 ;;
     *) _gs_refuse no-frontmatter "15   # a document that is no plan may declare 14 or 15" ;;
   esac
 fi
 
-# THE ARTIFACT AS THE PARSER READS IT. The parser reads a path, and the text judged here is the
-# posted body or the Edit applied, which no file holds yet: so it is written once to a temporary
-# file, removed on every way out, and every read below is of that one copy. The header is read
-# once; `yaml_get` and `gs_has_key` answer from that reading with no further process.
-GS_PAGE="$(mktemp "${TMPDIR:-/tmp}/bionic-page.XXXXXX")" || GS_PAGE=""
-[ -n "$GS_PAGE" ] || _gs_refuse no-temp-file
-trap 'rm -f "$GS_PAGE"' EXIT
-printf '%s\n' "$CONTENT" > "$GS_PAGE"
-GS_HEADER="$(plan_read_header "$GS_PAGE")" || GS_HEADER=""
-
-# yaml_get <key> -> the header's value for <key>, empty when it is absent.
-yaml_get() {
-  local l
-  while IFS= read -r l; do
-    case "$l" in "$1="*) printf '%s\n' "${l#*=}"; return 0 ;; esac
-  done <<GS_HEADER_LINES
-$GS_HEADER
-GS_HEADER_LINES
-  return 0
-}
-# gs_has_key <key> -> 0 when the header holds <key>, its value empty or not.
-gs_has_key() { case $'\n'"$GS_HEADER" in *$'\n'"$1="*) return 0 ;; esac; return 1; }
+_gs_page
 
 # Enforce presence of the governing-skill field with a non-empty value.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
@@ -1207,29 +1180,8 @@ case "$BASENAME" in
     LEASE_AGENT=0
     [ -n "$(echo "$BIONIC_INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
     LEASE_CWD=$(bionic_jq .cwd)
-    if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ]; then
-      # A linked worktree's `.git` is a FILE pointing into the shared repository; the main
-      # checkout's is a directory. Same test scripts/lib/worktree.sh's land verb uses.
-      LEASE_TOP=$(git -C "$LEASE_CWD" rev-parse --show-toplevel 2>/dev/null) || LEASE_TOP=""
-      if [ -n "$LEASE_TOP" ] && [ -f "$LEASE_TOP/.git" ]; then
-        LEASE_TOP=$( cd "$LEASE_TOP" 2>/dev/null && pwd -P ) || LEASE_TOP=""
-      else
-        LEASE_TOP=""
-      fi
-      if [ -n "$LEASE_TOP" ]; then
-        # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
-        # answer against the tree, as lib/root.sh's own walk does.
-        LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || LEASE_COMMON=""
-        if [ -z "$LEASE_COMMON" ]; then
-          LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --git-common-dir 2>/dev/null) || LEASE_COMMON=""
-          case "$LEASE_COMMON" in ""|/*) ;; *) LEASE_COMMON="$LEASE_TOP/$LEASE_COMMON" ;; esac
-        fi
-        LEASE_MAIN=""
-        [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
-        if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
-          _gs_refuse lease "$LEASE_CWD" "$LEASE_TOP" "$LEASE_MAIN"
-        fi
-      fi
+    if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ] && git_tree_lease "$LEASE_CWD"; then
+      _gs_refuse lease "$LEASE_CWD" "$BIONIC_LEASE_TOP" "$BIONIC_LEASE_MAIN"
     fi
     ;;
 esac

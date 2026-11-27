@@ -351,6 +351,12 @@ od_poke() {  # <args...> -> OD_OUT, OD_RC: session-poker.sh as this session, in 
   OD_OUT="$(cd "$OD" && env CLAUDE_CODE_SESSION_ID="$OD_SID" HOME="$OD_ROOT/home" CLAUDE_CONFIG_DIR="$OD_ROOT/config" BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_SWAP_PCT=0 \
     BIONIC_GATE_DIR="$OD_ROOT/gate" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" "$@" 2>&1)" || OD_RC=$?
 }
+# ck_said <rc> <output> -> <rc>:<advance|refuse>: the checked advance's exit and the answer its verdict line gives. The
+# check exits 0 on either answer, so the answer is read from its words, never from the exit alone.
+ck_said() {
+  printf '%s:%s' "$1" "$(printf '%s\n' "$2" | awk 'index($0, "--check: would advance") { print "advance"; exit }
+    index($0, "--check: would refuse") { print "refuse"; exit }')"
+}
 od_logs() { find "$OD_REC" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
 od_lrec() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$OD_LIB" "$OD_PLAN" || printf '%s/none' "$OD_ROOT"; }
 od_lall() { cat "$(od_lrec)" 2>/dev/null; }   # the record's lines: the run's log
@@ -432,6 +438,51 @@ expect_true "HL-3 a hand landing whose ready says none, with no verdict recorded
 printf 'line/v1|ev=verdict|row=T8|commit=%s|suite=b.test.sh|result=green|log=/fixture/T8.log|at=2026-10-12T12:32:00Z\n' "$OD_R2" >> "$(od_lrec)"
 expect_eq "HL-4 …and covered once the verdicts the row recorded name a green suite at the row head" "covered" "$(od_state)"
 
+# ============================================================
+section "§POINT-PROOF — a point's run is a proof of its own kind: run beside a later open row, it never proves the head"
+# ============================================================
+# The point T3 follows T1; T7, a later build, is open. The whole run is refused for T7; the point's run is not, and its log
+# and proof are its own kind's. A landing past it, green on its own suites, leaves the integrate row's regression wait
+# unmet and the judge owing a whole run; the same run recorded as a regression proof would meet both (the control).
+# FIXTURE FIDELITY: §WHOLE-RUN's repository, runner and verbs; the landing past the point in its writers' shapes, as FX-3.
+# fails-when: the point's run is refused for the later open row, written as the head's whole run, or read as the head's proof.
+OD_PH="$(od_git rev-parse HEAD)"
+od_prows() {  # <regression row status> -> the point's page: T1 landed, the point T3 after it, T7 a later build, the
+  # regression row, the integrate row
+  od_row T1 4 build 'the lib writer' implementor lib/b.sh landed 'approval:plan'
+  od_row T3 4 test 'the whole run after T1 · point' test-runner .bionic/docs/record/w/T3.md pending 'T1'
+  od_row T7 4 build 'a later build' implementor lib/c.sh pending 'T3'
+  od_row T2 5 test 'the whole regression' test-runner — "$1" 'approval:plan'
+  od_row T5 8 integrate 'merge into main' orchestrator — pending 'approval:release, approval:merge'
+}
+od_plan 5 '' "$(od_prows pending)"
+od_poke regression-run
+expect_eq "PP-0 control: the whole run beside the open later row T7 is refused (exit 1), naming it" "1|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'T7 (step 4, pending)' && echo yes)"
+od_poke regression-run --point T3
+expect_eq "PP-1 the point's run beside the same open row runs (exit 0) and keeps its own log, no whole run's" "0|yes|0" \
+  "$OD_RC|$([ -f "$OD_REC/point-run-T3-$OD_PH.log" ] && echo yes)|$(find "$OD_REC" -name "regression-run-$OD_PH*.log" | wc -l | tr -d ' ')"
+[ "$OD_RC" = 0 ] || printf '      the verb said: %s\n' "$OD_OUT"
+od_poke proof-add point "$OD_RL/point-run-T3-$OD_PH.log"
+OD_PPL="$(bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_lines "$2"' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null | /usr/bin/grep '^proved: kind=point ' || :)"
+expect_eq "PP-2 …and proof-add point records it as a point's proof naming its row, at the head it ran (exit 0)" "0|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_PPL" | /usr/bin/grep -q "head=$OD_PH .*point=T3" && echo yes)"
+printf 'four\n' > "$OD/lib/c.sh"; od_git add lib/c.sh; od_git commit -qm 'T7: the later build'; OD_PC="$(od_git rev-parse HEAD)"
+{ printf 'line/v1|ev=ready|row=T7|suites=tests/a.test.sh,tests/b.test.sh|at=2026-10-13T12:00:00Z\n'
+  printf 'line/v1|ev=published|row=T7|commit=%s|at=2026-10-13T12:10:00Z\n' "$OD_PC"
+  for od_s in a.test.sh b.test.sh; do
+    printf 'line/v1|ev=verdict|row=T7|commit=%s|suite=%s|result=green|log=/fixture/T7.log|at=2026-10-13T12:05:00Z\n' "$OD_PC" "$od_s"
+  done; } >> "$(od_lrec)"
+# The regression row lands here, so the integrate row's regression wait turns on the proof alone; the point's proof stays.
+printf 'run/v1|ev=published|row=T2|at=2026-10-13T12:20:00Z\n' >> "$OD_REC/run.log"; seal_fixture "$OD_PLAN" "$OD_REC/run.log"
+od_regw() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && . "$1/units.sh" && units_waiting "$2" 8' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null | awk -F'\t' '$1 == "T5" && $2 == "proof:regression" { print "unmet"; exit }'; }
+od_whole() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_whole_text "$2" "$3"' _ "$OD_LIB" "$OD_PLAN" "$OD" 2>/dev/null; }
+expect_eq "PP-3 a green point run and a landing past it: the integrate row's regression wait is unmet, the judge owes a whole run" \
+  "unmet|uncovered|none" "$(od_regw)|$(od_state)|$(od_whole)"
+od_plan 5 "run/v1|ev=proof|kind=regression|head=$OD_PH|evidence=$OD_RL/point-run-T3-$OD_PH.log|at=2026-10-13T11:00:00Z" "$(od_prows landed)"
+expect_eq "PP-4 control: the same run recorded as a regression proof is the head's proof past the landing, so PP-3 reads the kind" \
+  "|covered" "$(od_regw)|$(od_state)"
+
 section "§HL — a ready line's none is no suite at every landing kind, so a hand and a queue landing of one row read alike"
 # ============================================================
 # A queue ready writes `suites=none` for a row that lands on no suite, and so does a hand ready. The landing-record fold maps
@@ -484,13 +535,13 @@ od_s8 "$(od_appr "$OD_A")"
 expect_eq "AH-0 precondition: the plan is in the order, the regression row named" "T2" \
   "$(bash -c '. "$1/units.sh" && units_order "$2"' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null || :)"
 od_poke current 8 --check
-expect_eq "AH-1 approved head A, the working head A, the whole run at H with C fixed on its suites: refused as regression unproved, naming both exits" "1|yes" \
-  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
+expect_eq "AH-1 approved head A, the working head A, the whole run at H with C fixed on its suites: refused as regression unproved, naming both exits" "0:refuse|yes" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
 od_mu() { printf 'run/v1|ev=approval|key=merge-unproved|by=chris|head=%s|said=merge|at=2026-10-26T00:00:00Z' "$1"; }  # the merge approval, at the head it names
 od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_A")"; od_poke current 8 --check
-expect_eq "AH-1b …and with the person's merge-unproved word at head A beside it: passes" "0" "$OD_RC"
+expect_eq "AH-1b …and with the person's merge-unproved word at head A beside it: passes" "0:advance" "$(ck_said "$OD_RC" "$OD_OUT")"
 od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_C")"; od_poke current 8 --check
-expect_eq "AH-1c …the same word naming a head that is not A leaves it refused" "1" "$OD_RC"
+expect_eq "AH-1c …the same word naming a head that is not A leaves it refused" "0:refuse" "$(ck_said "$OD_RC" "$OD_OUT")"
 # §EXIT7: the unproved exit is the step's. At 7 no release card can exist yet, so the exit is the pass; at 8 it is the card's reply, and a
 # docs head past the whole run is admitted at 7. fails-when: current 7 over an unproved head names a reply or a release card, current 8
 # stops naming the reply, or a docs commit past the run draws a refusal at 7.
@@ -498,31 +549,31 @@ OD_N7='needs: the pass — wait for it (the tick starts it once no row is ready)
 od_x7() { OD_FL="$2" OD_S=$(($1 - 1)) od_s8 "$(od_appr "$OD_A")"; od_poke current "$1" --check; }  # <step> <floor line> -> the plan one step before it, asked for <step>
 od_rg() { printf '%s\n' "$OD_OUT" | /usr/bin/grep 'regression.*unproved' | awk -F'\t' '{ print $NF }'; }
 od_x7 7 "$OD_FL"
-expect_eq "X7-1 AC-2.1 current 7 over the unproved head A: refused, the exit is the pass and names no reply and no release card" "1|$OD_N7|0" \
-  "$OD_RC|$(od_rg)|$(od_rg | /usr/bin/grep -ciE 'reply|release card' || :)"
+expect_eq "X7-1 AC-2.1 current 7 over the unproved head A: refused, the exit is the pass and names no reply and no release card" "0:refuse|$OD_N7|0" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(od_rg)|$(od_rg | /usr/bin/grep -ciE 'reply|release card' || :)"
 od_x7 8 "$OD_FL"
 expect_eq "X7-2 AC-2.2 current 8 at the same head: refused, the exit is the card's reply, as before" \
-  "1|needs: the user — reply <n> on the release card (merge without a whole run at this head), or wait for the pass" "$OD_RC|$(od_rg)"
+  "0:refuse|needs: the user — reply <n> on the release card (merge without a whole run at this head), or wait for the pass" "$(ck_said "$OD_RC" "$OD_OUT")|$(od_rg)"
 printf 'notes\n' >> "$OD/README.md"; od_git commit -qam 'a docs commit past the pass'
 od_x7 7 "run/v1|ev=proof|kind=regression|head=$OD_A|evidence=$OD_RL/regression-run-$OD_H.log|at=2026-10-12T11:30:00Z"
-expect_eq "X7-3 AC-2.3 the pass at A and one docs commit past it: current 7 admitted (exit 0), no regression unproved" "0|" "$OD_RC|$(od_rg)"
+expect_eq "X7-3 AC-2.3 the pass at A and one docs commit past it: current 7 admitted (exit 0), no regression unproved" "0:advance|" "$(ck_said "$OD_RC" "$OD_OUT")|$(od_rg)"
 od_git reset -q --hard "$OD_A"
 
 od_s8 "$(od_appr "$OD_C")"
 od_poke current 8 --check
-expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 1)" "1" "$OD_RC"
+expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 0: would refuse)" "0:refuse" "$(ck_said "$OD_RC" "$OD_OUT")"
 od_s8 'run/v1|ev=approval|key=release|by=Dana Fixture|said=Ship it.|at=2026-10-12T14:00:00Z'$'\n'"$(od_mu "$OD_A")"
 od_poke current 8 --check
-expect_eq "AH-3 an approval line that names no head: refused (exit 1), saying so" "1|yes" \
-  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "names no head" && echo yes || echo no)"
+expect_eq "AH-3 an approval line that names no head: refused (exit 0: would refuse), saying so" "0:refuse|yes" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "names no head" && echo yes || echo no)"
 od_s8 ''
 od_poke current 8 --check
-expect_eq "AH-4a no approved: release line and the regression unproved: refused (exit 1) on the regression, the approval asked last" "1|yes|no" \
-  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && echo yes || echo no)|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
+expect_eq "AH-4a no approved: release line and the regression unproved: refused (exit 0: would refuse) on the regression, the approval asked last" "0:refuse|yes|no" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && echo yes || echo no)|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
 od_s8 "$(od_mu "$OD_A")"
 od_poke current 8 --check
-expect_eq "AH-4 no approved: release line, every other fact holding: refused (exit 1), naming the verb that writes it" "1|yes" \
-  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
+expect_eq "AH-4 no approved: release line, every other fact holding: refused (exit 0: would refuse), naming the verb that writes it" "0:refuse|yes" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
 
 # A WHOLE RUN AT AN ANCESTOR IS CITED THROUGH proof-add AS THE JUDGE JUDGES IT: the verb accepts the log at the head A
 # where the judge says covered, and a later commit no run proves is refused by that commit, not by "a whole run".
@@ -536,5 +587,23 @@ od_poke proof-add regression "$OD_RL/regression-run-$OD_H.log"
 expect_eq "PA-2 …and one commit later that no landing proves: refused (exit 1), naming that commit and that it is not proved" "1|yes" \
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "commit ${OD_D:0:12} .*is not proved" && echo yes || echo no)"
 expect_absent "PA-2b …and the same refusal offers no second whole run (the positive above reads this output)" "run the whole" "$OD_OUT"
+
+# ============================================================
+section "§STRAY-BYTE — a run's log holding a byte that is no character is still read whole by the floor's readers, in a UTF-8 locale"
+# ============================================================
+# A failing suite can print a byte that is no character in any encoding, and the runner captures it into the whole run's log. In a
+# UTF-8 locale awk stops reading at such a byte and the readers hide its error, so a red run's log named no failed suites and no
+# counts, and proof-add refused it as a run that failed none. FIXTURE FIDELITY: the log is the runner's own shape (the header, a
+# captured line holding the byte, the `Gating:` verdict, the `Failed:` block, the closing rc line), read by the library functions the
+# verbs call. fails-when: a reader of the log reads in the caller's locale, so the byte ends its read and its owed suites or counts are empty.
+SB_LOG="$OD_ROOT/stray-byte.log"
+{ printf 'head=%s dirty=0\n' "$OD_B"; printf 'a suite printed \377 here\n'; printf 'Gating: 1 passed, 1 failed\nFailed:\n    - a.test.sh\nrc=1\n'; } > "$SB_LOG"
+sb_read() {  # <locale> <function> -> what that library function prints for the log, read in that locale
+  LC_ALL="$1" bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && "$3" "$2"' _ "$OD_LIB" "$SB_LOG" "$2" 2>/dev/null || :
+}
+expect_eq "SB-1 a red log with the byte before its Failed: block: the owed suites are read in the C locale (the positive beside SB-1b)" "a.test.sh" "$(sb_read C proof_floor_owed)"
+expect_eq "SB-1b …and the same log names the same suite in a UTF-8 locale" "a.test.sh" "$(sb_read en_US.UTF-8 proof_floor_owed)"
+expect_eq "SB-2 the run's counts read in a UTF-8 locale as they do in the C locale" "1 2|1 2" "$(sb_read en_US.UTF-8 proof_run_counts)|$(sb_read C proof_run_counts)"
+expect_eq "SB-3 the log's header and close read in a UTF-8 locale as they do in the C locale" "$(sb_read C _proof_floor_ends | paste -sd'|' -)" "$(sb_read en_US.UTF-8 _proof_floor_ends | paste -sd'|' -)"
 
 finish

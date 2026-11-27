@@ -4,7 +4,7 @@ set +x +v
 # D1, REQ-3 AC-3.5). The release gate runs it from the repository being published, from the last
 # release to the working head, and refuses the release on a non-zero exit.
 #
-# FIVE CHECKS, each always run, and the exit is 0 only when all pass:
+# SIX CHECKS, each always run, and the exit is 0 only when all pass:
 #
 #   1. the name scan (tests/lib/name-scan.sh <list path>, same working directory, same
 #      environment: BIONIC_CHECK_BASE and BIONIC_CHECK_HEAD are the scan's own). Its output is
@@ -29,6 +29,11 @@ set +x +v
 #      head's tree holds no plan to read. No plan naming the release (a closed run is archived), and
 #      a plan with no stated deferral, each pass with one `known-limits:` line saying so; a pass with
 #      sentences held says how many, in one such line.
+#      Checks 3 and 4 ask only a run that changes the entry (`entry_asked`): with BIONIC_CHECK_BASE named and the base's
+#      entry of the release equal to the head's, a landing that leaves the entry as it was, each line that would fail
+#      is printed after `known-limits: note — ` or `landing-numbers: note — `, one more line says why, and the check
+#      passes. The landing that writes the entry, the release check over the release's range, and a run with no base
+#      are judged in full.
 #   4. the landing numbers: the entry's `### The landing numbers` part names the head and the instant it
 #      was rendered for (``landing-report --rows` at <40-hex> on <ISO-UTC>:`, the line `release-note`
 #      prints), and its fenced block must equal, field for field, what `hooks/session-poker.sh release-note
@@ -37,8 +42,8 @@ set +x +v
 #      line naming the entry's and the report's. A landing in the run's landing record whose commit the
 #      checked head holds and the entry's head does not is ONE line naming the row, unless that landing
 #      carried the entry (its commit's CHANGELOG.md holds the head line, its first parent's does not): the
-#      entry is rendered again after it. An entry naming no head, and no plan naming the release, each
-#      pass with one `landing-numbers:` line.
+#      entry is rendered again after it. An entry naming no head is ONE line and exit 1 for a release at or past
+#      NUMS_RULE_FROM; before it, it passes with one `landing-numbers:` line, as no plan naming the release does.
 #
 #   5. the cap on tests: the non-whitespace characters of the tracked `*.sh` files under tests/ against those
 #      everywhere else, in the tree at BIONIC_CHECK_HEAD, never the working files, so joining lines changes no reading.
@@ -50,14 +55,50 @@ set +x +v
 #      line and exit 2, never a pass. A head over the limit is admitted when its tests are at or under the base's. A
 #      symlink is not counted, so a directory reached through one counts once. One `git ls-tree` and one `git cat-file
 #      --batch` read the head: a `git show` per file would cost a minute where this costs a second.
+#   6. the copies: payload/scripts/one-reader-check.sh beside this file's tests/lib/, so the copy the judge holds, run
+#      over the tree at BIONIC_CHECK_HEAD written out with `git archive`, never the working files. Each refusal it prints
+#      is ONE line after `release-check: ` and the exit is 1: a second parser of a plan or a log, a second writer of a
+#      plan, a copied loader, whatever its REFUSING list names. A pass prints its counts on one `one-reader:` line. A
+#      head holding no hooks/ and payload/scripts/ has no copy to count, and passes with one `one-reader:` line saying
+#      so; a head that cannot be written out, or a judge with no copy check, is ONE line and exit 2.
 #
 # On a mismatch it prints ONE line naming both versions and exits 1. A missing list path, a list
 # that is not a file, and a pair that cannot be read (no release heading, no `.version`, a path
 # the head does not hold) are each ONE line and a non-zero exit (2 for a refusal).
 #
+# COUNT MODE: `release-check.sh --count <rev>` prints `<tests> <code>`, the two numbers check 5 reads, for the tree at
+# <rev>, and stops before any check runs. It exits with the count's own status: 1 for a name that is no tree, 2 for a tree
+# with no shell file outside tests/, 3 for blobs that cannot be read; no revision named is a refusal, 2.
+#
 # bash 3.2 (ADR-001). Not part of the shipped plugin.
 unset BASH_ENV ENV
 set -u -o pipefail
+
+# ratio_count <rev> -> `<tests> <code>`, the non-whitespace characters of the shell files of the tree at <rev>, on
+# stdout, status 0; status 1 when the tree cannot be read, 2 when it holds no shell file outside tests/, 3 when its
+# blobs cannot be read. Characters, not lines, so joining lines changes no reading. Every blob rides one
+# `git cat-file --batch` whose header is its size and its side; the size says where its content ends, so no line of
+# content is ever read as a header. LC_ALL=C counts bytes, so a file that is not valid text is still read whole.
+ratio_count() {
+  local rev="$1" lst
+  # One line per counted blob, its object and its side: T for a path under tests/, C for any other; links, trees and submodules are not blobs of text.
+  lst="$(git ls-tree -r -z "$rev" 2>/dev/null | tr '\0' '\n' | LC_ALL=C awk -F'\t' '
+    { split($1, m, " "); p = substr($0, length($1) + 2)
+      if (m[2] == "blob" && m[1] != "120000" && p ~ /\.sh$/) print m[3] (index(p, "tests/") == 1 ? " T" : " C") }')" || lst=""
+  if [ -z "$lst" ] && ! git rev-parse --verify -q "$rev^{tree}" >/dev/null 2>&1; then
+    return 1
+  fi
+  case "$lst" in *' C'|*' C'$'\n'*) ;; *) return 2 ;; esac
+  printf '%s\n' "$lst" | git cat-file --batch='%(objectsize) %(rest)' 2>/dev/null | LC_ALL=C awk '
+    left <= 0 { if ($2 != "T" && $2 != "C") { bad = 1; next } left = $1 + 1; k = $2; next }
+    { left -= length($0) + 1; gsub(/[[:space:]]/, ""); n[k] += length($0) }
+    END { if (bad || left > 0) exit 1; printf "%d %d\n", n["T"], n["C"] }' || return 3
+}
+
+if [ "${1:-}" = --count ]; then
+  [ -n "${2:-}" ] || { echo "release-check: refused — usage: release-check.sh --count <rev>" >&2; exit 2; }
+  ratio_count "$2"; exit $?
+fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)" || exit 2
 refusals=0
@@ -182,6 +223,9 @@ $plans
 LIM_PLANS
   return "$bad"
 }
+# The first release whose entry must hold its landing numbers. 2.2.0 shipped with none, under the rule that passed an
+# entry naming no head; from this release on the page's word holds: the entry pastes release-note's numbers whole.
+NUMS_RULE_FROM=2.3.0
 # nums_fence <text> -> the lines of the first fence after the line naming the head the numbers were rendered at.
 nums_fence() {
   printf '%s\n' "$1" | awk '
@@ -199,6 +243,9 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
   hl="$(entry_part "$cl" "$ver" 'The landing numbers' | /usr/bin/grep -E -m 1 '^`landing-report --rows` at [0-9a-f]{40} on [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z:$')"
   at="${hl#* at }"; at="${at%% *}"; on="${hl##* on }"; on="${on%:}"
   if [ -z "$hl" ]; then
+    if lim_version_at_least "$ver" "$NUMS_RULE_FROM"; then
+      echo "release-check: $ver holds no landing numbers; paste release-note"; return 1
+    fi
     echo "landing-numbers: $ver — the entry names no head its numbers were rendered at, so none is held to the report"
     return 0
   fi
@@ -245,26 +292,6 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
   [ "$bad" -ne 0 ] || echo "landing-numbers: $ver agrees with the landing report at $h12"
   return "$bad"
 }
-# ratio_count <rev> -> `<tests> <code>`, the non-whitespace characters of the shell files of the tree at <rev>, on
-# stdout, status 0; status 1 when the tree cannot be read, 2 when it holds no shell file outside tests/, 3 when its
-# blobs cannot be read. Characters, not lines, so joining lines changes no reading. Every blob rides one
-# `git cat-file --batch` whose header is its size and its side; the size says where its content ends, so no line of
-# content is ever read as a header. LC_ALL=C counts bytes, so a file that is not valid text is still read whole.
-ratio_count() {
-  local rev="$1" lst
-  # One line per counted blob, its object and its side: T for a path under tests/, C for any other; links, trees and submodules are not blobs of text.
-  lst="$(git ls-tree -r -z "$rev" 2>/dev/null | tr '\0' '\n' | LC_ALL=C awk -F'\t' '
-    { split($1, m, " "); p = substr($0, length($1) + 2)
-      if (m[2] == "blob" && m[1] != "120000" && p ~ /\.sh$/) print m[3] (index(p, "tests/") == 1 ? " T" : " C") }')" || lst=""
-  if [ -z "$lst" ] && ! git rev-parse --verify -q "$rev^{tree}" >/dev/null 2>&1; then
-    return 1
-  fi
-  case "$lst" in *' C'|*' C'$'\n'*) ;; *) return 2 ;; esac
-  printf '%s\n' "$lst" | git cat-file --batch='%(objectsize) %(rest)' 2>/dev/null | LC_ALL=C awk '
-    left <= 0 { if ($2 != "T" && $2 != "C") { bad = 1; next } left = $1 + 1; k = $2; next }
-    { left -= length($0) + 1; gsub(/[[:space:]]/, ""); n[k] += length($0) }
-    END { if (bad || left > 0) exit 1; printf "%d %d\n", n["T"], n["C"] }' || return 3
-}
 # ratio_check -> `test-ratio: <tests>/<code> chars · limit <n> · room <n>` on a pass; the same line after
 # `release-check: ` and exit 1 when the tests pass the limit; one line and exit 2 when the head cannot be read or holds
 # no shell code outside tests/. The limit is 1.25 times the largest of the head's code, BIONIC_CHECK_BASE's and, when it
@@ -305,15 +332,62 @@ fold_rc() {
     *) refusals=1 ;;
   esac
 }
+# entry_text <changelog text> <version> -> the whole entry of <version>, its heading to the next `## ` heading.
+entry_text() {
+  printf '%s\n' "$1" | awk -v v="$2" '/^## / { inb = (index($0, "## " v " ") == 1) } inb'
+}
+# entry_asked <version> -> 0 when this run asks the entry: no range is named (the check run by hand judges the whole
+# history), the base cannot be read, or the base's entry of <version> differs from the head's or is absent. A landing
+# that leaves the entry as it was is not the entry's to answer for: what it would refuse is told as a note, and the
+# landing that writes the entry, and the release check over the release's range, refuse it.
+entry_asked() {
+  local base="${BIONIC_CHECK_BASE:-}" was
+  [ -n "$base" ] || return 0
+  was="$(git show "$base:CHANGELOG.md" 2>/dev/null)" || return 0
+  [ "$(entry_text "$was" "$1")" != "$(entry_text "$changelog" "$1")" ]
+}
+# entry_rule <check> <prefix> <version> <changelog text> -> the check's lines and exit when the entry is asked; else a
+# failing check's `release-check: ` lines after `<prefix>: note — `, one line saying why, and exit 0. A refusal (exit 2)
+# is never softened: a check that could not run judged nothing.
+entry_rule() {
+  local chk="$1" pre="$2" out rc
+  if entry_asked "$3"; then "$chk" "$3" "$4"; return; fi
+  out="$("$chk" "$3" "$4")"; rc=$?
+  if [ "$rc" -ne 1 ]; then [ -z "$out" ] || printf '%s\n' "$out"; return "$rc"; fi
+  printf '%s\n' "$out" | sed "s/^release-check: /$pre: note — /"
+  echo "$pre: $3 — this range leaves the entry as it was, so these are notes; a range that changes the entry refuses them"
+  return 0
+}
 # The libraries they source are written for callers without `set -u`, so each plan-reading check runs in a subshell
 # without it; its lines pass through and its status is read.
 if [ -n "$chg_version" ]; then
-  for chk in lim_check nums_check; do
-    ( set +u; "$chk" "$chg_version" "$changelog" ); fold_rc $?
-  done
+  ( set +u; entry_rule lim_check known-limits "$chg_version" "$changelog" ); fold_rc $?
+  ( set +u; entry_rule nums_check landing-numbers "$chg_version" "$changelog" ); fold_rc $?
 fi
 # The cap reads the head's tree alone, so it runs whatever the release heading says.
 ( set +u; ratio_check ); fold_rc $?
+
+# copies_check -> the judge's copy check over the head's tree; 0 passes, 1 a refused copy, 2 not run. Run in a subshell,
+# so its scratch tree goes with it.
+copies_check() {
+  local orc="$HERE/../../payload/scripts/one-reader-check.sh" t out rc
+  if ! git cat-file -e "$head:hooks" 2>/dev/null || ! git cat-file -e "$head:payload/scripts" 2>/dev/null; then
+    echo "one-reader: $head holds no hooks/ and payload/scripts/, so no copy to count"; return 0
+  fi
+  [ -f "$orc" ] || { echo "release-check: refused — the judge holds no copy check at $orc"; return 2; }
+  t="$(mktemp -d "${TMPDIR:-/tmp}/release-check-copies.XXXXXX")" || { echo "release-check: refused — no scratch directory for the copy check"; return 2; }
+  trap 'rm -rf "$t"' EXIT
+  mkdir "$t/tree" && git archive "$head" | tar -x -C "$t/tree" \
+    || { echo "release-check: refused — the tree at $head cannot be written out for the copy check"; return 2; }
+  out="$(bash "$orc" "$t/tree" 2>"$t/err")"; rc=$?
+  case "$rc" in
+    0) printf '%s\n' "$out" | awk -F= 'NF == 2 && $1 ~ /^[a-z_]+$/ && $2 ~ /^[0-9]+$/ { s = s (s == "" ? "" : " ") $0 } END { print "one-reader: " s }' ;;
+    1) sed 's/^/release-check: /' "$t/err" ;;
+    *) echo "release-check: refused — the copy check could not read the tree at $head: $(tr '\n' ' ' < "$t/err")" ;;
+  esac
+  return "$rc"
+}
+( set +u; copies_check ); fold_rc $?
 
 # ---- the name scan ---------------------------------------------------------------------------
 bash "$HERE/name-scan.sh" "$list" || { rc=$?; [ "$status" -ne 0 ] || status="$rc"; }

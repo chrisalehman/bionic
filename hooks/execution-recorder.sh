@@ -68,48 +68,10 @@ esac
 START_QUESTION="${1-}"
 [ -z "$START_QUESTION" ] || [ -n "$IS_START" ] || exit 0
 
-# ---------- portable file facts ----------
-# DELIBERATELY DUPLICATED from payload/scripts/lib/observe.sh, the copy hooks/stop-check.sh
-# and the stop guard load, byte for byte. A shared library is rejected by design (TDD §9): a sourced file the
-# installer misses is a silently inert wall. The copies are held together by the
-# agreement battery in tests/cross-gate-agreement.test.sh §C.
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
-
-# One field out of a versioned pipe-delimited line, BY KEY. Never by position —
-# a fixed-field-order parser broke undiagnosably the moment a field was added
-# (checklist A6), so an unknown extra field must be inert here. The same reader
-# serves the machine line and the roster row, which is why both artifacts carry
-# the same shape.
-line_field() {  # <line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
-}
-
-# DELIBERATELY DUPLICATED from hooks/dispatch-preflight.sh's sanitize(), pipeline
-# for pipeline, and for the same reason its comment gives: values are
-# pipe-delimited on one line, so a `|` forges a field and a newline forges a row.
-# This script checked for `|` alone until the Step-6 six-axis review (S-1) named
-# the asymmetry — a newline in a platform id then aborted the completion awk
-# outright and appended a blank line to the roster, and in the observation case
-# split one record across two lines, the second of them still schema-shaped.
-# Neither value is repo-supplied, so no §8 wall was open; what was open was one
-# artifact family normalizing two different ways forty lines apart. Normalizing
+# A value written onto a roster row is folded by lib/fields.sh's `line_field_clean`, the fold the dispatch wall
+# gives its own row through lib/brief.sh's `sanitize`: values are pipe-delimited on one line, so a `|` forges a field
+# and a newline forges a row, and one row normalised two ways by its two writers is the defect it prevents. Normalising
 # rather than refusing is the writer's rule too: the ledger records what it saw.
-sanitize() {  # <value> <max-chars>
-  printf '%s' "$1" \
-    | tr '\n\r\t|' '    ' \
-    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//' \
-    | cut -c "1-$2"
-}
-
-# The session's own subagent directory, from the payload's transcript path.
-# §2.5 of record/epic-15-kill-interception-experiment.md captures the layout
-# verbatim: "<transcript-dir>/<session-id>/subagents/agent-<id>.jsonl".
-session_subagents_dir() {  # <transcript-path>
-  local tr="$1"
-  [ -n "$tr" ] || return 1
-  case "$tr" in *.jsonl) : ;; *) return 1 ;; esac
-  printf '%s/subagents\n' "${tr%.jsonl}"
-}
 
 # ---------- relevance first (checklist A7) ----------
 #
@@ -218,6 +180,9 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 . "$BIONIC_LIB/session.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/resources.sh"
+# A field of a machine line or a roster row is read by key, never by place: `line_field` in the shell and `line_kv_of`
+# in awk, both lib/fields.sh's.
+bionic_need fields.sh line_field_v
 # THE ONE CLOSE PREDICATE (epic-23 wave-20 T20, REQ-10, D10): `roster_open_names`, asked by
 # the duplicate-start check below. STILL WANTED HERE (so the loader's directory pick still
 # requires it to exist beside the other five), but no longer sourced on this line — every
@@ -325,66 +290,48 @@ ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
 # DIFFERENT agents — ARM 3's own join below exists for exactly that case, and
 # each dispatch is entitled to its own launch reference — so this must never
 # key on the field the join already uses. Only a repeat of the SAME agent id
-# is a resume. The scan returns the EARLIEST `launched_at` this session's
-# roster carries for that id: on a first sighting nothing matches yet (the
-# caller's own row is the first), so the caller's own value survives
-# untouched; on a resume it is the ORIGINAL dispatch's, however many fresher
-# rows now carry the same id.
-prior_launch_for_agent() {  # <agent-id> -> earliest launched_at for that id this session, or empty
-  local aid="$1" line found=""
+# is a resume.
+#
+# TWO ANSWERS, ONE WALK. With no second argument the walk returns the EARLIEST
+# `launched_at` this session's roster carries for that id: on a first sighting
+# nothing matches yet (the caller's own row is the first), so the caller's own
+# value survives untouched; on a resume it is the ORIGINAL dispatch's, however
+# many fresher rows now carry the same id. That is the contract's original
+# launch, right for an ordinary resume: the takeover case, where the roster's
+# first row for this id IS the contract.
+# With `last` it keeps walking to the LAST match, the id's LATEST launch, and the
+# restart-after-ack path alone asks that. `hooks/session-poker.sh`'s `extend` verb
+# re-opens a MET row by appending a FRESH row for the SAME id, "launched now, so
+# the old deliverable reads stale". If that extended contract is then acked and
+# the id restarts, the contract as it stood at the ack is the EXTEND's launch, not
+# the first dispatch's: carrying the earliest stamp forward instead rolls a revoked
+# contract's clock back past the extend, so the stale pre-extend deliverable reads
+# MET again with acked=no, and a tree `stopped` had left standing for salvage
+# becomes landable. The roster is append-only, so the last matching row is the
+# latest launch, whatever else has been appended for other ids in between.
+# lib/roster.sh `roster_row_for_id` is not this question: it takes the id's last
+# row of any session and any `launched_at`, and this walk takes only this
+# session's rows that carry one.
+launch_for_agent() {  # <agent-id> [last] -> the earliest (or last) launched_at for that id this session, or empty
+  local aid="$1" line found="" lf
   [ -n "$aid" ] || return 0
   [ -f "$ROSTER_FILE" ] || return 0
   while IFS= read -r line; do
     case "$line" in '#'*|'') continue ;; esac
     case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-    # Same prefilter discipline as ARM 2/ARM 3 below (Step-6 critic F-1): a
-    # cheap in-shell superset match before the exact `line_field` reads, so an
-    # unbounded roster does not pay four processes per row for a lookup that
-    # matches at most a handful of rows.
+    # Same prefilter discipline as ARM 2/ARM 3 below: a cheap in-shell superset
+    # match before the exact `line_field` reads, so an unbounded roster does not
+    # pay four processes per row for a lookup that matches at most a handful of rows.
     case "$line" in
       *"|agent_id=$aid"|*"|agent_id=$aid|"*) : ;;
       *) continue ;;
     esac
     [ "$(line_field "$line" agent_id)" = "$aid" ] || continue
     [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
-    found=$(line_field "$line" launched_at)
-    [ -n "$found" ] || continue
-    printf '%s' "$found"
-    return 0
-  done < "$ROSTER_FILE"
-  return 0
-}
-
-# THE LATEST LAUNCH, FOR THE RESTART-AFTER-ACK PATH ONLY (epic-23 wave-20 T20d, critic
-# C3-1). `prior_launch_for_agent` above answers "the contract's original launch", which is
-# right for an ordinary resume — the takeover case, where the roster's own first row for
-# this id IS the contract, however many join rows have picked the id up since. A restart
-# after an ack is a different question: `hooks/session-poker.sh`'s `extend` verb re-opens a
-# MET row by appending a FRESH row for the SAME id, "launched now, so the old deliverable
-# reads stale" (session-poker.sh, `extend`). If that extended contract is then acked and the
-# id restarts, "the contract as it stood at the ack" is the EXTEND's launch, not the first
-# dispatch's — carrying the earliest stamp forward instead rolls a revoked, abandoned
-# contract's clock back past the extend, so the stale pre-extend deliverable reads MET again
-# with acked=no, and a tree `stopped` had left standing for salvage becomes landable.
-# Same scan as `prior_launch_for_agent`, but kept running to the LAST match rather than
-# returning at the first: this session's roster is append-only, so the last matching row is
-# the latest launch, whatever else has been appended for other ids in between.
-latest_launch_for_agent() {  # <agent-id> -> latest launched_at for that id this session, or empty
-  local aid="$1" line found=""
-  [ -n "$aid" ] || return 0
-  [ -f "$ROSTER_FILE" ] || return 0
-  while IFS= read -r line; do
-    case "$line" in '#'*|'') continue ;; esac
-    case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-    case "$line" in
-      *"|agent_id=$aid"|*"|agent_id=$aid|"*) : ;;
-      *) continue ;;
-    esac
-    [ "$(line_field "$line" agent_id)" = "$aid" ] || continue
-    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
-    local lf
     lf=$(line_field "$line" launched_at)
-    [ -n "$lf" ] && found="$lf"
+    [ -n "$lf" ] || continue
+    found="$lf"
+    [ "${2:-}" = last ] || break
   done < "$ROSTER_FILE"
   printf '%s' "$found"
   return 0
@@ -403,13 +350,8 @@ latest_launch_for_agent() {  # <agent-id> -> latest launched_at for that id this
 unplaced_carry() {  # <the placing row> <agent id> -> that row, carrying the id's amended set
   local _uc_up
   [ -n "$2" ] && [ -f "$ROSTER_FILE" ] || { printf '%s' "$1"; return 0; }
-  _uc_up=$(awk -v id="$2" -v sid="$BIONIC_SID" -v pre="roster-state/${ROSTER_VERSION}|" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    index($0, pre) == 1 && kv($0, "agent_id") == id && kv($0, "session") == sid && kv($0, "status") == "unplaced" { row = $0 }
+  _uc_up=$(awk -v id="$2" -v sid="$BIONIC_SID" -v pre="roster-state/${ROSTER_VERSION}|" "$_LINE_FIELDS_AWK"'
+    index($0, pre) == 1 && line_kv_of($0, "agent_id") == id && line_kv_of($0, "session") == sid && line_kv_of($0, "status") == "unplaced" { row = $0 }
     END { if (row != "") print row }' "$ROSTER_FILE" 2>/dev/null)
   [ -n "$_uc_up" ] || { printf '%s' "$1"; return 0; }
   printf '%s' "$1" | UC_SA="$(line_field "$_uc_up" suites_allowed)" UC_RX="$(line_field "$_uc_up" re_executes)" awk '
@@ -603,31 +545,31 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   # A `|` or a newline reaching here would forge a field or a row. The id comes
   # from the platform and the row from our own launch half, so this is a belt
   # rather than a repair — but it is the SAME belt the writer wears (S-1).
-  AGENT_ID=$(sanitize "$AGENT_ID" 200)
+  AGENT_ID=$(line_field_clean "$AGENT_ID" 200)
   [ -n "$AGENT_ID" ] || exit 0
 
   # The namespace split, spent. `teammate_spawned` is the platform's own word for
   # the branch it took, so the mode is READ rather than inferred from the id's
   # shape — an id-shape sniff would be a second grammar guessing at what the
   # first one did, which is the defect class this whole script exists to avoid.
-  # The addressing form keeps the `@` that makes it addressable: sanitize strips
+  # The addressing form keeps the `@` that makes it addressable: line_field_clean folds
   # `|`, newlines and control characters, and `@` is none of those.
   ROW_AGENT_ID="$AGENT_ID"
   ROW_TEAMMATE_ID=""
   if [ "$DISPATCH_STATUS" = "teammate_spawned" ]; then
-    ROW_TEAMMATE_ID=$(sanitize "$TEAMMATE_ID" 200)
+    ROW_TEAMMATE_ID=$(line_field_clean "$TEAMMATE_ID" 200)
     [ -n "$ROW_TEAMMATE_ID" ] || exit 0
     ROW_AGENT_ID=""
   fi
 
   # S6 (AC-5, R6): a resume's fresh Agent-tool completion carries the SAME
   # transcript-form id an earlier row on this session's roster already wrote
-  # down — see prior_launch_for_agent() above. Empty in the ordinary case (a
+  # down — see launch_for_agent() above. Empty in the ordinary case (a
   # first confirmation's own id has never appeared before), so this changes
   # nothing there; teammate mode never reaches it, since ROW_AGENT_ID is empty
   # until identification (ARM 3) supplies the transcript form.
   PRIOR_LAUNCH=""
-  [ -n "$ROW_AGENT_ID" ] && PRIOR_LAUNCH=$(prior_launch_for_agent "$ROW_AGENT_ID")
+  [ -n "$ROW_AGENT_ID" ] && PRIOR_LAUNCH=$(launch_for_agent "$ROW_AGENT_ID")
 
   # Substitute the fields that execution confirms, leaving every other field
   # of the launched row — the contract state especially — where the brief put it,
@@ -638,7 +580,7 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   # takes the FIRST match for a key. In async mode it is not written at all —
   # the field's presence is itself the statement of which namespace the row's id
   # is in, and an always-empty field would say that much less clearly.
-  ROW_NAME=$(sanitize "$DISPATCH_NAME" 200)
+  ROW_NAME=$(line_field_clean "$DISPATCH_NAME" 200)
 
   COMPLETED=$(printf '%s' "$ROW" | awk -v id="$ROW_AGENT_ID" -v tid="$ROW_TEAMMATE_ID" -v pl="$PRIOR_LAUNCH" -v nm="$ROW_NAME" '
     BEGIN { RS = "|"; ORS = ""; seen = 0 }
@@ -737,6 +679,8 @@ fi
 # cadence, waiver — off that row alone. A row that dropped a field would not
 # merely be terse; it would silently retract the contract it inherited.
 if [ -n "$IS_START" ]; then
+  # The clock's one home, asked by name and only here: every clock reading this hook makes is a start's.
+  bionic_need time.sh _time_epoch
   # ---------- SURVIVAL TERMS DELIVERY (wave-11 1c-b, design D2, probe P2) ----------
   #
   # D2 (spec §2, "Dispatcher ↔ agent"): this hook already reads `agent_type` on every
@@ -917,8 +861,7 @@ if [ -n "$IS_START" ]; then
   start_clock() {  # -> START_NOW, epoch seconds: one reading per start, shared by its registrations
     [ -z "$START_NOW" ] || return 0
     local _sc_f _sc_was _sc_tmp
-    START_NOW="${BIONIC_NOW_EPOCH:-}"
-    case "$START_NOW" in ''|*[!0-9]*) START_NOW=$(date -u +%s) ;; esac
+    START_NOW=$(time_now)
     _sc_f=$(start_clock_path) || return 0
     { [ -d "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ] && [ ! -L "$_sc_f" ]; } || return 0
     _sc_was=$(head -c 20 "$_sc_f" 2>/dev/null | tr -d '\n')
@@ -938,13 +881,11 @@ if [ -n "$IS_START" ]; then
   type_join_candidates() {  # <subagent type> -> the candidate count, then each candidate's row
     local _tj_plan _tj_nowiso _tj_from _tj_ledger="$STATE_DIR/sweeper-${BIONIC_SID}.state"
     roster_sh_load
-    _tj_plan=$(sanitize "$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" 400)
+    _tj_plan=$(line_field_clean "$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" 400)
     [ -n "$_tj_plan" ] || _tj_plan="none"
     start_clock
-    _tj_nowiso=$(date -u -r "$START_NOW" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-      || date -u -d "@$START_NOW" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
-    _tj_from=$(date -u -r "$((START_NOW - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-      || date -u -d "@$((START_NOW - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+    _tj_nowiso=$(epoch_iso "$START_NOW")
+    _tj_from=$(epoch_iso "$((START_NOW - START_JOIN_WINDOW_S))")
     { [ -f "$_tj_ledger" ] && [ ! -L "$_tj_ledger" ] && [ -r "$_tj_ledger" ]; } || _tj_ledger=""
     TJ_LEDGER="$_tj_ledger" \
     awk -v sid="$BIONIC_SID" -v ty="$1" -v plan="$_tj_plan" -v from="$_tj_from" -v now="$_tj_nowiso" \
@@ -1004,7 +945,7 @@ if [ -n "$IS_START" ]; then
   launch_claim() {  # <tool_use_id> -> one claim line for this start's agent id, appended to the roster
     case "$1" in ''|*'|'*) return 0 ;; esac
     printf 'start-claim/v1|at=%s|session=%s|launch=%s|claimed_by=%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BIONIC_SID" "$1" "$START_ID" >> "$ROSTER_FILE" 2>/dev/null
+      "$(iso_now)" "$BIONIC_SID" "$1" "$START_ID" >> "$ROSTER_FILE" 2>/dev/null
     return 0
   }
   type_join_pick() {  # <subagent type> -> what type_join_candidates prints, a group of one claimed first
@@ -1041,7 +982,7 @@ if [ -n "$IS_START" ]; then
       _us_names="${_us_names:+$_us_names,}${_us_l//,/ }"
     done <<< "$1"
     printf 'start-unchecked/v1|event=start|at=%s|session=%s|agent_id=%s|role=%s|candidates=%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BIONIC_SID" "$START_ID" "$START_TYPE" "$_us_names" \
+      "$(iso_now)" "$BIONIC_SID" "$START_ID" "$START_TYPE" "$_us_names" \
       >> "$ROSTER_FILE" 2>/dev/null
     return 0
   }
@@ -1067,8 +1008,8 @@ if [ -n "$IS_START" ]; then
       *) exit 0 ;;
     esac
     [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ] || exit 0
-    START_ID=$(sanitize "$START_ID" 200)
-    START_TYPE=$(sanitize "$START_TYPE" 200)
+    START_ID=$(line_field_clean "$START_ID" 200)
+    START_TYPE=$(line_field_clean "$START_TYPE" 200)
     [ -n "$START_ID" ] || exit 0
     roster_sh_load
     Q_ROW=$(awk -v id="$START_ID" -v sid="$BIONIC_SID" -v pre="roster-state/${ROSTER_VERSION}|" "$_ROSTER_OPEN_AWK"'
@@ -1124,7 +1065,7 @@ if [ -n "$IS_START" ]; then
   # followed out of the tree.
   TERMS_NAME=""
   scratch_line() {  # -> the scratch line, its directory made; nothing when it cannot be
-    local _sl_leaf="${TERMS_NAME:-$(sanitize "$START_ID" 200)}" _sl_dir
+    local _sl_leaf="${TERMS_NAME:-$(line_field_clean "$START_ID" 200)}" _sl_dir
     _sl_dir="$STATE_DIR/scratch/$BIONIC_SID/$_sl_leaf"
     case "$_sl_leaf" in
       ''|.|..|*/*)
@@ -1149,7 +1090,7 @@ if [ -n "$IS_START" ]; then
     { cat "$_dt_f"; [ -z "$_dt_line" ] || printf '%s\n' "$_dt_line"; } \
       | push_string "$_dt_f" && TERMS_DELIVERED=1
   }
-  case "$(sanitize "$START_TYPE" 200)" in
+  case "$(line_field_clean "$START_TYPE" 200)" in
     bionic:*) TERMS_OWED=1 ;;
   esac
   trap '[ -n "$TERMS_OWED" ] && [ -z "$TERMS_DELIVERED" ] && deliver_terms' EXIT
@@ -1160,7 +1101,7 @@ if [ -n "$IS_START" ]; then
   # The same belt the writer wears (S-1): a `|` or a newline in a platform value
   # forges a field or a row. The id is sanitized BEFORE it is compared, so the
   # value matched against the roster is the value that was written there.
-  START_ID=$(sanitize "$START_ID" 200)
+  START_ID=$(line_field_clean "$START_ID" 200)
   [ -n "$START_ID" ] || exit 0
 
   # ---------- T22: A SECOND START FOR ONE ID IS A RESUMED COPY ----------
@@ -1208,22 +1149,17 @@ if [ -n "$IS_START" ]; then
   # where the ORIGINAL `confirmed` row was still on the append-only roster, in which case it
   # was joined a second time and a second `identified` row appended. Both of those are what
   # this replaces.
-  DUP_PRIOR=$(awk -F'|' -v id="$START_ID" -v sid="$BIONIC_SID" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
+  DUP_PRIOR=$(awk -F'|' -v id="$START_ID" -v sid="$BIONIC_SID" "$_LINE_FIELDS_AWK"'
     /^roster-state\/v1\|/ {
-      if (kv($0, "agent_id") != id) next
-      if (kv($0, "session") != sid) next
+      if (line_kv_of($0, "agent_id") != id) next
+      if (line_kv_of($0, "session") != sid) next
       # THE LAST ROW OF THIS ID, WHATEVER ITS STATUS. A RESUME is a fresh
       # intended/confirmed cycle for the same id, written moments ago by the dispatch wall
       # and ARM 2 — a contract deliberately re-opened, which this event is then the ordinary
       # identification of. A DUPLICATE START has no such cycle: the last thing said about
       # this id is that it already started. That difference is the whole predicate, and it
       # is read off the ordering of an append-only file.
-      row = $0; st = kv($0, "status")
+      row = $0; st = line_kv_of($0, "status")
       next
     }
     # A DUPLICATE-START ROW IS NOT A RE-CONTRACT EITHER. The predicate is "nothing has
@@ -1352,7 +1288,7 @@ if [ -n "$IS_START" ]; then
   # The same belt the writer wears, before the value is compared against what the
   # writer stored: the roster holds sanitized names, so an unsanitized needle would
   # miss a row it should match rather than merely failing safe.
-  START_TYPE=$(sanitize "$START_TYPE" 200)
+  START_TYPE=$(line_field_clean "$START_TYPE" 200)
   # The loop itself is `name_join_row` above (T30), which a question registration asks too.
   if [ -z "$ROW" ] && [ -n "$START_TYPE" ]; then
     ROW=$(name_join_row "$START_TYPE")
@@ -1426,25 +1362,25 @@ if [ -n "$IS_START" ]; then
   TERMS_NAME=$(line_field "$ROW" name)
   [ -n "$TERMS_OWED" ] && [ -z "$TERMS_DELIVERED" ] && deliver_terms
   TERMS_AT=""
-  [ -n "$TERMS_DELIVERED" ] && TERMS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  [ -n "$TERMS_DELIVERED" ] && TERMS_AT=$(iso_now)
 
   # S6 (AC-5, R6): THE RESUME CASE. `agent_id` here is the transcript form, and
   # a resume delivers this same event again for an id the roster already
-  # carries — see prior_launch_for_agent() above (defined beside ROSTER_FILE).
+  # carries — see launch_for_agent() above (defined beside ROSTER_FILE).
   # On a first identification the id has never appeared before, so this is
   # empty and changes nothing; on a resume it recovers the ORIGINAL dispatch's
   # launch reference regardless of how many fresher rows now name the same id,
   # including one this very join just picked up.
-  PRIOR_LAUNCH=$(prior_launch_for_agent "$START_ID")
+  PRIOR_LAUNCH=$(launch_for_agent "$START_ID")
 
   # ON THE RESTART_AFTER_ACK PATH ONLY, take the id's LATEST launched_at instead of its
-  # earliest (epic-23 wave-20 T20d, critic C3-1; see latest_launch_for_agent() above). Every
+  # earliest (`launch_for_agent <id> last`, above). Every
   # other identification — the first, and an ordinary resume — keeps the earliest reading:
   # this override reaches only the one case where a contract may have been extended (a fresh
   # row for this same id, launched later) since the first dispatch and before the ack that
   # `RESTART_AFTER_ACK` names.
   if [ -n "${RESTART_AFTER_ACK:-}" ]; then
-    LATEST_LAUNCH=$(latest_launch_for_agent "$START_ID")
+    LATEST_LAUNCH=$(launch_for_agent "$START_ID" last)
     [ -n "$LATEST_LAUNCH" ] && PRIOR_LAUNCH="$LATEST_LAUNCH"
   fi
 
@@ -1459,7 +1395,7 @@ if [ -n "$IS_START" ]; then
   # every ordinary resume carries it, and the restart's own time rides `restarted_at=`, which
   # roster_open_names — the one close predicate — reads, and no contract reader does.
   RESTARTED_AT=""
-  [ -n "${RESTART_AFTER_ACK:-}" ] && RESTARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  [ -n "${RESTART_AFTER_ACK:-}" ] && RESTARTED_AT=$(iso_now)
 
   # `agent_id` is appended when the joined row has no such field and substituted
   # when it has one — ARM 2's rule for `teammate_id`, for ARM 2's reason: every

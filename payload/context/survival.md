@@ -39,7 +39,7 @@ about doing the job well; they are about still being alive to report it.
   silently for a dispatched agent, so inside this role foreground-first stands whole: run
   the suite here. Add the prefix only when your brief tells you to.
 - **Suite output always goes to a file, with its exit code.** In a project whose `tests/run.sh` takes `--only`:
-  `cd <TREE> || exit 1; LOG=<path>; set -o pipefail; tests/run.sh --only <suite>.test.sh 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc` — with no such runner, or for a build or a drill, the same shape with that command in place of `tests/run.sh --only <suite>.test.sh`; never `PIPESTATUS`,
+  `cd <TREE> || exit 1; LOG=<path>; set -o pipefail; tests/run.sh --only <suite>.test.sh 2>&1 | tee "$LOG"; rc=$?; echo "rc=$rc" >> "$LOG"; exit $rc`; a run meant to fail leads the suite segment: `BIONIC_EXPECT=red tests/run.sh --only <suite>.test.sh` — with no such runner, or for a build or a drill, the same shape with that command in place of `tests/run.sh --only <suite>.test.sh`; never `PIPESTATUS`,
   which the tool shell leaves empty; validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
   forbidden for evidence-producing commands** — a suite, a build, a drill — even under the
   fallback below: the harness's background-Bash output file is ephemeral and can vanish before
@@ -55,7 +55,7 @@ about doing the job well; they are about still being alive to report it.
   path and stop; the orchestrator reads that line at its next tick and arms no watch on it.
 - **You do not set your test width.** Every suite asks the gate for its place, and the gate
   admits it when the machine has room under the share; a run it cannot admit in its time
-  exits 75 with the line to run again, and nothing ran, so run that line again. There is
+  prints the line to run again, and nothing ran, so run that line again. There is
   nothing here for you to compute or export. Set `BIONIC_TEST_JOBS_CEILING`
   only when your brief names a ceiling, and never above the one it names.
 

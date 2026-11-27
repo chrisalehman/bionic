@@ -117,7 +117,7 @@ run_close "$PPR" check
 expect_eq "PR1: check on an unmerged task-scale fix/x says the merge would refuse, naming no request" "0|yes" \
   "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q '^merge: WOULD REFUSE — fix/x @ [0-9a-f]* is not reachable from main (no pull request of fix/x against main is recorded)' && echo yes)"
 run_close "$PPR" run
-expect_eq "PR3: run holds (exit 2), saying fix/x is not reachable from main" "2|yes" \
+expect_eq "PR3: run holds (exit 0), saying fix/x is not reachable from main" "0|yes" \
   "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q 'fix/x @ [0-9a-f]* is not reachable from main' && echo yes)"
 expect_eq "PR4: …and writes no continuation, the run's step still 8" "no|n=8" \
   "$([ -f "$PPR/$CONT_REL" ] && echo yes || echo no)|$(co_step_answer "$PPR" | sed -n 1p)"

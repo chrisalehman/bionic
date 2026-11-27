@@ -163,7 +163,7 @@ BIONIC_BOUND_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || 
 bw_open_asks() {
   [ -n "$BIONIC_WALL_OWED" ] || return 0
   case "$BIONIC_SID" in planverb-*) return 0 ;; esac
-  { declare -F owed_open >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/owed.sh" ] && . "$BIONIC_LIB/owed.sh"; }; } 2>/dev/null || return 0
+  bionic_need owed.sh owed_open || return 0
   while IFS=$'\t' read -r _bw_key _bw_title _bw_reply; do
     [ -n "$_bw_key" ] || continue
     OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" OWED_PLAN="${OWED_PLAN:-}" owed_open "$_bw_key" "$_bw_title" "$_bw_reply" >/dev/null 2>&1
@@ -191,10 +191,7 @@ case "$SEAL_LINE" in
   changed*|busy)
     BIONIC_SEAL_LINE="$SEAL_LINE"; BIONIC_SEAL_PLAN="$BIONIC_BOUND_PLAN"; BIONIC_SEAL_LOG="$SEAL_LOG"
     EVENT=$(bionic_jq .hook_event_name); [ -n "$EVENT" ] || EVENT="PreToolUse"
-    bionic_fold "$EVENT" wall_run_seal; _bw_rc=$?
-    # The catch is kept in the seal before the ask is written, so the ask's own line, which the appender cannot
-    # seal for a plan that is gone, never reads later as the log added to, and a plan put back reads changed.
-    case "$SEAL_LINE" in changed*) seal_write "$BIONIC_SEAL_PLAN" "$BIONIC_SEAL_LOG" >/dev/null 2>&1 ;; esac
+    bionic_fold "$EVENT" wall_run_seal_kept; _bw_rc=$?
     bw_open_asks
     exit $_bw_rc ;;
 esac
@@ -229,13 +226,8 @@ fi
 # THE ENGAGEMENT GUARD, asked once for all five. EVERY UNREADABLE STATE READS AS NOT
 # ENGAGED — absent marker, a symlink at the path, a foreign or unshaped session key, no key
 # at all — and the fail direction is inverted here on purpose: a session that never invoked
-# the skill never consented, and no wall binds it. But consent is given once, by binding, not
-# held by the engaged file: under D3 a session the binding record holds to a plan stays judged
-# whatever became of that file, since a tool can remove it or replace it with a link, and a
-# guard that let that lift every wall would make the file a switch any command can throw. So
-# such a session is judged as engaged, by every wall below. A record of `none`, or no record,
-# leaves the file the one answer, as before.
-[ "$BIONIC_ENGAGED" = 1 ] || [ -n "$BIONIC_BOUND_PLAN" ] || exit 0
+# the skill never consented, and no wall binds it. A bound session is judged as engaged.
+bionic_judged || exit 0
 BIONIC_ENGAGED=1
 
 # AN ABSENT FIELD IS NOT A MISMATCH, so a hand-run payload still reaches the walls — the
@@ -343,11 +335,11 @@ BIONIC_RULINGS_UNREAD=""; BIONIC_RULINGS_WRITER=""
 case "$COMMAND" in
   *commit*)
     _bw_aid="$(bionic_jq .agent_id)"
-    if [ -n "$_bw_aid" ] && git_argv_has_sub "$COMMAND" commit && [ -r "$BIONIC_LIB/roster.sh" ] \
-       && { declare -F ruling_take_unread >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null; then
-      _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+    if [ -n "$_bw_aid" ] && git_argv_has_sub "$COMMAND" commit && bionic_need roster.sh ruling_take_unread \
+      && bionic_need fields.sh line_value; then
+      _bw_roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
       if _bw_row="$(roster_row_for_id "$_bw_roster" "$_bw_aid")"; then
-        BIONIC_RULINGS_WRITER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
+        BIONIC_RULINGS_WRITER="$(line_value "$_bw_row" name)"
         BIONIC_RULINGS_UNREAD="$(ruling_take_unread "$_bw_roster" "$BIONIC_RULINGS_WRITER" commit)"
       fi
     fi ;;
@@ -361,39 +353,64 @@ wall_ruling_unread() {  # <event> -> 0 nothing · 2 block
   ruling_unread_refusal "$BIONIC_RULINGS_WRITER" "$BIONIC_RULINGS_UNREAD"
 }
 
+# _bw_runs_ack — 0 when one expanded segment (one argv, its words joined by GIT_ARGV_US) runs `session-poker.sh
+# ruling-ack`, the runner and the script read the way `_wall_poker_contract_verb` reads them. It reads the segment as
+# it stands, never expanding it again: the expansion lists a `bash -c` string's inner segments as segments of their own
+# beside the wrapper, and a second read of the wrapper would count each of them twice.
+_bw_runs_ack() {  # <segment> -> 0 runs the verb · 1 does not
+  local _oldifs="$IFS" _hadf=0
+  _git_argv_skip "$1"
+  [ -n "$GIT_ARGV_REST" ] || return 1
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f; IFS="$GIT_ARGV_US"
+  # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+  set -- $GIT_ARGV_REST
+  IFS="$_oldifs"; [ "$_hadf" -eq 1 ] || set +f
+  [ $# -gt 0 ] || return 1
+  cmd_word_fold "${1##*/}"
+  case "$CMD_WORD_FOLDED" in
+    bash|sh|zsh|dash|ksh|.|source)
+      shift
+      while [ $# -gt 0 ]; do case "$1" in -*) shift ;; *) break ;; esac; done ;;
+  esac
+  [ "${1##*/}" = session-poker.sh ] && [ "${2:-}" = ruling-ack ]
+}
+
 # THE TWO FACTS OF AN ACKNOWLEDGEMENT, gathered for `wall_ruling_ack` (wave-34 T5; REQ-4 AC-4.3, D9 "1"). `ruling-ack
 # <id>` marks a ruling read, and only the writer it is addressed to has read it: an ack from the main thread or from
 # another writer would mark it shown while its writer never saw it (walk.md §8). The verb cannot see its caller, so
 # for a call that runs the verb (`_wall_poker_contract_verb`'s argv, asked for this one verb) this reads the ruling's
 # writer off the session's roster (lib/roster.sh `ruling_fold`) and the caller's roster name off the payload's
-# `agent_id` (`roster_row_for_id`, empty for the main thread or an agent no row names), and counts the call's segments:
-# the ack is admitted alone in one call. An id no ruling carries gathers nothing; the verb refuses it.
-BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_ALONE=0
+# `agent_id` (`roster_row_for_id`, empty for the main thread or an agent no row names), and counts the acknowledgements
+# the call runs (`_bw_runs_ack`): the call is admitted when it holds exactly one, which is the one checked here. A second
+# could name another writer's ruling that nothing here read; every other segment is left to the other walls. An id no ruling carries gathers nothing; the verb refuses it.
+BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_COUNT=0
 case "$COMMAND" in
   *ruling-ack*)
-    if _wall_poker_contract_verb "$COMMAND" ruling-ack && [ -r "$BIONIC_LIB/roster.sh" ] \
-       && { declare -F ruling_fold >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null; then
+    if _wall_poker_contract_verb "$COMMAND" ruling-ack && bionic_need roster.sh ruling_fold && bionic_need fields.sh line_value; then
       BIONIC_ACK_ID="${_WALL_POKER_ARGS%%"$GIT_ARGV_US"*}"
-      _bw_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+      _bw_roster="$(roster_path "$BIONIC_ROOT" "$BIONIC_SID")"
       if [ -n "$BIONIC_ACK_ID" ]; then
         BIONIC_ACK_WRITER="$(ruling_fold "$_bw_roster" | awk -F"$RULING_US" -v id="$BIONIC_ACK_ID" '$1 == id { print $2; exit }')"
       fi
       BIONIC_ACK_AGENT="$(bionic_jq .agent_id)"
       if [ -n "$BIONIC_ACK_AGENT" ] && _bw_row="$(roster_row_for_id "$_bw_roster" "$BIONIC_ACK_AGENT")"; then
-        BIONIC_ACK_CALLER="$(printf '%s\n' "$_bw_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
+        BIONIC_ACK_CALLER="$(line_value "$_bw_row" name)"
       fi
-      _bw_n=0
-      while IFS= read -r _bw_l; do [ -z "$_bw_l" ] || _bw_n=$((_bw_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
-      [ "$_bw_n" -ne 1 ] || BIONIC_ACK_ALONE=1
+      while IFS= read -r _bw_l; do
+        [ -z "$_bw_l" ] || ! _bw_runs_ack "$_bw_l" || BIONIC_ACK_COUNT=$((BIONIC_ACK_COUNT + 1))
+      done <<< "$(git_argv_expand "$COMMAND")"
+      # The whole-call match above found one; a segment this read cannot match still counts as that one.
+      [ "$BIONIC_ACK_COUNT" -ge 1 ] || BIONIC_ACK_COUNT=1
     fi ;;
 esac
 
-# wall_ruling_ack — an acknowledgement from anyone but the ruling's writer, or not alone in its call, is refused naming
+# wall_ruling_ack — an acknowledgement from anyone but the ruling's writer, or in a call holding two, is refused naming
 # the writer it needs, and the ruling stays unread. The facts are gathered above (the freeze); the words and the
 # decision are lib/roster.sh `ruling_ack_refusal`'s, defined only when the gathering loaded that library.
 wall_ruling_ack() {  # <event> -> 0 nothing · 2 block
   declare -F ruling_ack_refusal >/dev/null 2>&1 || return 0
-  ruling_ack_refusal "$BIONIC_ACK_ID" "$BIONIC_ACK_WRITER" "$BIONIC_ACK_CALLER" "$BIONIC_ACK_AGENT" "$BIONIC_ACK_ALONE"
+  ruling_ack_refusal "$BIONIC_ACK_ID" "$BIONIC_ACK_WRITER" "$BIONIC_ACK_CALLER" "$BIONIC_ACK_AGENT" "$BIONIC_ACK_COUNT"
 }
 
 bionic_fold "$EVENT" \

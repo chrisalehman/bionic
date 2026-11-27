@@ -54,7 +54,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 | piece | shape |
 |---|---|
 | approval | `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim: one approval event, at the working head for a named one. `approve step0`, `step1`, `step2` and `plan` are Steps 0 to 3's, each once |
-| proof | `session-poker.sh proof-add <kind> <evidence>`: one proof event, `kind=<regression\|review\|task\|walk>`, `head=` and `evidence=<path under record/>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
+| proof | `session-poker.sh proof-add <kind> <evidence>`: one proof event, `kind=<regression\|point\|review\|task\|walk>`, `head=` and `evidence=<path under record/>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
 | review | `proof-add review <record> --question <q> --reader <name>` adds `question=`, `reader=`, `result=<pass\|flag\|fail>` and `scope=<piece\|whole>`; the reviewer's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
 | declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and a `kind=check` proof (`result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged. `session-poker.sh check-from '<their words>' [<commit>]` records the person's typed word that the commit, the working head unless named, judges every landing and release check after it |
 | declared regression | `regression-command:` (run by `regression-run`) in `.bionic/config.yaml`, its record `steps/5.md`'s; with neither, the regression is `tests/run.sh`'s whole run |
@@ -122,21 +122,21 @@ The load-bearing row of the section, and the only part later steps consume mecha
 - **Rendering surfaces include prose.** A constant read by two scripts and quoted in a doc has three surfaces, and the doc is the one that drifts, because nothing runs it.
 - **The agreement test is a real hermetic test that fails when the surfaces disagree** — named, not a suite and not "covered by the unit tests". The exemplar is the version pin in `tests/canonical-sdlc-evidence-gate.test.sh` §Section 2b: the commit gate and the write hook, each holding the literal `15`, driven on one plan at three versions so that they cannot disagree. Name what a test leaves out rather than rounding up to "pinned"; a surface becomes pinnable by changing its format or by naming it in the same test as the origin. `none — <why>` is a legitimate cell (prose against prose has no seam to test), but the reviewer stops on it: give the reason.
 
-### The Eval design table
+### The Test design table
 
-`## Eval design` sits beside `## Design` in a wave-or-epic spec; SKILL.md carries its contract. How to fill one in:
+`## Test design` sits beside `## Design` in a wave-or-epic spec; SKILL.md carries its contract. How to fill one in:
 
-- **Approach is one line, and it is a design decision.** "Grep the rendered file for the six column headers" is an approach; "test it" is not. It names the seam the eval reaches through, which is why the table is authored at Step 2, once the architecture has decided what is observable.
-- **Eval type is the ladder in words** — static · unit · hermetic · live · human, T0–T4 — because the Step-2 card counts types per requirement and `T0 T0 T2` tells a reader nothing to push back on.
-- **Eval is `command → expected observation`,** both halves: a command alone is a thing you ran, an observation alone is a hope. The observation is what the terminal shows — `rc=2, stderr names AC-K2.3`, never `the wall works`.
-- **Fails when names a PLANTED DEFECT, singular and specific.** "the code is broken" fails the column; "the `fails-when:` line is deleted from one AC block" passes it, because a writer can make that mutation and watch the eval turn red, first, before the code.
-- **A criterion that admits no "Fails when" goes back to Step 1.** The defect is in the criterion's wording, and an eval rewritten around an unfalsifiable criterion buys a green that means nothing.
-- **One row per criterion, read in place.** Step 3 adds sequencing and authors no eval.
-- **The gate reads the Fails when column.** From step 4 on, a criterion whose Fails when is empty refuses the commit, naming the row. A waiver dissolves the obligation to RUN an eval, never the obligation to have designed one.
+- **Approach is one line, and it is a design decision.** "Grep the rendered file for the six column headers" is an approach; "test it" is not. It names the seam the test reaches through, which is why the table is authored at Step 2, once the architecture has decided what is observable.
+- **Test type is the ladder in words** — static · unit · hermetic · live · human, T0–T4 — because the Step-2 card counts types per requirement and `T0 T0 T2` tells a reader nothing to push back on.
+- **Test is `command → expected observation`,** both halves: a command alone is a thing you ran, an observation alone is a hope. The observation is what the terminal shows — `rc=2, stderr names AC-K2.3`, never `the wall works`.
+- **Fails when names a PLANTED DEFECT, singular and specific.** "the code is broken" fails the column; "the `fails-when:` line is deleted from one AC block" passes it, because a writer can make that mutation and watch the test turn red, first, before the code.
+- **A criterion that admits no "Fails when" goes back to Step 1.** The defect is in the criterion's wording, and a test rewritten around an unfalsifiable criterion buys a green that means nothing.
+- **One row per criterion, read in place.** Step 3 adds sequencing and authors no test.
+- **The gate reads the Fails when column.** From step 4 on, a criterion whose Fails when is empty refuses the commit, naming the row. A waiver dissolves the obligation to RUN a test, never the obligation to have designed one.
 
 ## Close-out report (Step 9)
 
-SKILL.md §Step 9 carries the terminal-disposition rule, rendered from `agents-src/blocks/terminal-disposition.md`; this is the authoring detail per part, and the report's bound.
+`steps/9.md` carries the terminal-disposition rule, rendered from `agents-src/blocks/terminal-disposition.md`; this is the authoring detail per part, and the report's bound.
 
 **The report is one turn**: the close-out message itself, sent once at Step 9, never a file the user has to open. A close-out that spans turns or defers its verdict to a linked artifact is the ceremony the rule forbids.
 

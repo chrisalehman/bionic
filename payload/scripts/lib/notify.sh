@@ -37,6 +37,11 @@
 #
 # SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME. BASH 3.2.
 
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
+
 NOTIFY_RC=1
 
 _notify_home() {
@@ -93,7 +98,7 @@ _notify_fail() {  # <why> -> one line in the project's audit stream; nothing pri
   fi
   [ -n "$root" ] || return 0
   f="$(audit_path "$root" 2>/dev/null)" || return 0
-  line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) notify notify-failed: $1 key=${NOTIFY_KEY:--}"
+  line="- $(iso_now) notify notify-failed: $1 key=${NOTIFY_KEY:--}"
   mkdir -p "${f%/*}" 2>/dev/null && printf '%s\n' "$(printf '%s' "$line" | tr '\r\n' '  ')" >> "$f" 2>/dev/null
   return 0
 }

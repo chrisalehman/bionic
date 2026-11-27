@@ -33,9 +33,7 @@ POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
-# ============================================================
 section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §CUR8-sev: a reading pushed the severity scale carries each finding's severity and reach, and the tool derives the priority and the verdict (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.5, AC-8.6, AC-8.8; D19)"
-# ============================================================
 #
 # With `severity` in the reader row's `pushed=`, `proof-add review <record> --question <q> --reader <name>` requires
 # `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>` lines, and a `<path>:<line>` with
@@ -61,7 +59,7 @@ SEV_C1="$(s57_commit "$SEV_WT" lib/a.sh C1)"
 SEV_DIR="$RSEV/.bionic/docs/record/wave-01-fixture"
 SEV_RECS="r-ok r-nosev r-noreach r-s5 r-maybe r-count r-none r-twice r-where r-pri-bad r-pri-ok
 t-S1-on t-S1-off t-S2-on t-S2-off t-S3-on t-S3-off t-S4-on t-S4-off
-d-fix-flag d-defer-fail d-none-flag d-none-pass sh-dash sh-noshown sh-unsure sh-defer-unsure c-fix c-later"
+d-fix-flag d-defer-fail d-none-flag d-none-pass sh-dash sh-noshown sh-unsure sh-defer-unsure f-said c-fix c-later"
 sev_files() { local o="" n; for n in $1; do o="${o:+$o,}.bionic/docs/record/wave-01-fixture/$n.md"; done; printf '%s' "$o"; }
 SEV_RS="$(roster_of "$RSEV")"; new_roster "$RSEV"
 roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$SEV_RS"
@@ -253,10 +251,27 @@ expect_contains "SEV-shown3 …is refused as a fix shown nowhere, naming the lin
 expect_absent "SEV-shown3b …and the refusal offers no unsure: line" "unsure:" "$OUT"
 sev_rec sh-defer-unsure flag "findings: 2" 'finding: 1 S3 on - a "quoted" word wrong' "unsure: 1 which platforms" "finding: 2 S4 on - a typo"
 sev_add sh-defer-unsure
+SEV_DEFER_OUT="$OUT"; SEV_DEFER_RC="$RC"
 expect_eq "SEV-shown4 a finding the table defers, beside an unsure: line, appends its deferral alone; a note appends none" \
   "record/wave-01-fixture/sh-defer-unsure.md#1 S3 on defer \"a 'quoted' word wrong\"" \
   "$(sev_lines | /usr/bin/grep -F 'record/wave-01-fixture/sh-defer-unsure.md#' | paste -sd'|' -)"
 expect_eq "SEV-shown6 …and no check: line names it" "0" "$(/usr/bin/grep -c '^check: record/wave-01-fixture/sh-defer-unsure.md#' "$PSEV")"
+# A DEFERRAL ASKS FOR ITS SENTENCE AT ITS BIRTH: the registration names each finding it defers with no Known-limits
+# sentence, and the command that states one; it stands, exit 0. The second record's #1 carries a sentence the run
+# already holds (a stated event written before it, as the move verb writes one), so only its #2 is named.
+sev_said() {  # <text> <id> -> the count of lines naming <id> as deferred unstated, with the command that states it
+  printf '%s\n' "$1" | /usr/bin/grep -F "proof-add — $2 is deferred with no Known-limits sentence: bash /" \
+    | /usr/bin/grep -cF "/session-poker.sh finding-move $2 stated '<its sentence>'"
+}
+expect_eq "SEV-said §FACT a review deferring a finding with no sentence registers (exit 0) and names it with the command to state it" \
+  "0|1" "$SEV_DEFER_RC|$(sev_said "$SEV_DEFER_OUT" record/wave-01-fixture/sh-defer-unsure.md#1)"
+expect_eq "SEV-said2 …the finding the table notes is not named" "1|0" \
+  "$(sev_said "$SEV_DEFER_OUT" record/wave-01-fixture/sh-defer-unsure.md#1)|$(printf '%s\n' "$SEV_DEFER_OUT" | /usr/bin/grep -c 'sh-defer-unsure.md#2 is deferred')"
+printf 'run/v1|ev=finding|ref=record/wave-01-fixture/f-said.md#1|stated=A limit already said.|by=Dana Fixture|at=2026-10-04T00:20:00Z\n' >> "$(plan_fixture_log "$PSEV")"
+sev_rec f-said flag "findings: 2" "finding: 1 S3 on - the first deferral" "finding: 2 S2 off - the second deferral"
+sev_add f-said
+expect_eq "SEV-said3 …a deferral whose sentence the run already holds is not named, and its unstated sibling is" "0|0|1" \
+  "$RC|$(sev_said "$OUT" record/wave-01-fixture/f-said.md#1)|$(sev_said "$OUT" record/wave-01-fixture/f-said.md#2)"
 
 # ---------- the priority a record never states: library, release-check and the tick ----------
 SEV_OWED="$(bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null)"
@@ -394,9 +409,7 @@ expect_eq "RPC-2 …showing the ruling closes it at once: nothing left open for 
 expect_contains "RPC-3 …and the register keeps the item, closed" "|key=ruling:$SEV_RID|state=closed|by=ruling read|" "$(sev_store)"
 POKE_BOUND="$SEV_BOUND_WAS"
 
-# ============================================================
 section "§DEBT-PARSE §DEBT-LEDGER §DEBT-ADVISORY (the verb half): a debt: line is a flag-class finding the reader names by kind and concept, and the run's ledger holds one line per item (wave-30 T22; REQ-11 AC-11.1, AC-11.2, AC-11.3; D2, P2; A-orch-8)"
-# ============================================================
 #
 # severity.md writes `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]` flush left beside the `finding:` lines,
 # uncounted in `findings:`. lib/proof.sh `proof_findings` reads it as `debt<TAB><kind><TAB><concept><TAB><sites>
@@ -620,9 +633,7 @@ poke "$RDU" debt adopt "$DBT_CONT" "$DBU_PLAN"
 expect_eq "DEBT-U2 control: the same adopt naming the plan writes that plan's ledger (exit 0)" \
   "0|poker: debt adopt — 1 adopted, 1 already there: record/wave-00-prior/run.log" "$RC|$OUT"
 
-# ============================================================
 section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"
-# ============================================================
 #
 # `ready` appends `standing` when a red also fails at the accepted head (the branch's, not a row's) and `stalled` when
 # an entry's runs twice gave no verdict. The tick prints each off the bound plan's landing record as a note, once; a
@@ -642,9 +653,7 @@ printf 'run/v1|ev=standing|head=%s|suite=a.test.sh|lines=1|log=/rec/line/T2-a-%s
 s60_tick
 POKE_BOUND="$LT_BOUND_WAS"
 
-# ============================================================
 section "§COPIED-LOG §REVIEW-RANGE §CUR7-COVERED: what a run's close wrote by hand, a verb writes or reads"
-# ============================================================
 # FIXTURE FIDELITY. §SEV's shape, built fresh: a plan bound to this session at Step 5, its working branch in a
 # linked worktree, real commits, a reader row from the production writer, and the run line through the product's
 # writer (regression_fixture). Every write goes through the real verb.
@@ -689,6 +698,31 @@ poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question ad
 expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no reading before it (exit 0)" "0|1" \
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_C .* evidence=record/wave-01-fixture/past-waiver.md question=adversarial ")"
 
+# THE SECOND PASS REGISTERS THE FIRST TIME: the brief of a review row whose last proof is past the run's base prints that
+# range with scope: piece beside it, and a record that carries the range and the scope as the brief printed them is
+# taken. A record that says scope: whole over the same range is refused (the control, read by the same verb).
+VG_R9_ROW='| R9 | 6 | review | the critic reads it again · questions: adversarial | critic | — | 30 | REQ-1 | record/wave-01-fixture/second-pass.md | — | — | pending |'
+awk -v row="$VG_R9_ROW" '{ print } /^\| T5 \| 5 \| verify / { print row }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$SID" name=vg-crit2 agent_id=a-vg-crit2 \
+  subagent_type=bionic:critic files=.bionic/docs/record/wave-01-fixture/second-pass.md,.bionic/docs/record/wave-01-fixture/second-whole.md)" >> "$(roster_of "$RVG")"
+poke "$RVG" brief R9 vg-R9
+expect_eq "VG-2c the second pass's brief is rendered (exit 0)" "0" "$RC"
+VG_RANGE="$(sed -n 's/^Reviewed range: \([0-9a-f]*\)\.\.\([0-9a-f]*\) (scope: \([a-z]*\))$/\1 \2 \3/p' "$VG_DIR/briefs/vg-R9.md")"
+expect_eq "VG-2d …its range starts at the last reading's head, past the base, and says scope: piece" "$VG_C piece" "$(printf '%s\n' "$VG_RANGE" | awk '{ print $1, $3 }')"
+VG_D="$(s57_commit "$VG_WT" lib/a.sh D)"
+VG_PRINTED="$(printf '%s\n' "$VG_RANGE" | awk '{ print $1, $3 }')"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: whole\n' "$VG_C" "$VG_D" > "$VG_DIR/second-whole.md"
+printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: %s\n' "${VG_PRINTED% *}" "$VG_D" "${VG_PRINTED#* }" > "$VG_DIR/second-pass.md"
+poke "$RVG" proof-add review record/wave-01-fixture/second-whole.md --question adversarial --reader vg-crit2
+expect_eq "VG-2e control: the same range under scope: whole is refused for its range (exit 1)" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'says scope: whole, but its range starts at')"
+poke "$RVG" proof-add review record/wave-01-fixture/second-pass.md --question adversarial --reader vg-crit2
+expect_eq "VG-2f a record carrying the scope the brief printed registers on its first try (exit 0)" "0|1" \
+  "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_D .* evidence=record/wave-01-fixture/second-pass.md question=adversarial ")"
+
+# The review row served the one brief and is taken off the plan again, so the rows below read the plan they were written for.
+/usr/bin/grep -v '^| R9 |' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+
 # ---------- §CUR7-COVERED: prose landed past the whole run is green, code landed past it is unproved ----------
 # The plan holds a whole-run row, a release row and an open integrate row reading the release; the user approves the
 # release at C2 and waives there, then two prose commits land: green, admitted with no word. A code commit after them
@@ -719,6 +753,12 @@ vg_mu() {  # [<head>] -> the person's merge-unproved word at <head> the run's on
   /usr/bin/grep -v '|ev=approval|key=merge-unproved|' "$VG_DIR/run.log" > "$VG_DIR/run.log.n"; mv "$VG_DIR/run.log.n" "$VG_DIR/run.log"
   [ -z "$1" ] || printf 'run/v1|ev=approval|key=merge-unproved|by=chris|head=%s|said=merge|at=2026-10-26T00:00:00Z\n' "$1" >> "$VG_DIR/run.log"
 }
+# ck_said <rc> <output> -> <rc>:<advance|refuse>: the checked advance's exit and the answer its verdict line gives. The
+# check exits 0 on either answer, so the answer is read from its words, never from the exit alone.
+ck_said() {
+  printf '%s:%s' "$1" "$(printf '%s\n' "$2" | awk 'index($0, "--check: would advance") { print "advance"; exit }
+    index($0, "--check: would refuse") { print "refuse"; exit }')"
+}
 vg_unproved() { printf '%s\n' "$OUT" | /usr/bin/grep -c 'regression.*unproved'; }
 # C3, code, lands green on its suite; the release is approved again at C3, as code past an approval is refused by it.
 VG_C3="$(s57_commit "$VG_WT" lib/b.sh C3)"
@@ -727,9 +767,9 @@ VG_C3="$(s57_commit "$VG_WT" lib/b.sh C3)"
 CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RVG" approve release 'ship C3'
 expect_eq "VG-5c precondition: the user approves the release at the code head C3 (exit 0)" "0|$VG_C3" "$RC|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
 poke "$RVG" current 8 --check
-expect_eq "VG-5c a code commit C3 past them, landed green on its own suite: covered, not green, refused as regression unproved, naming the reply" "1|1|1" "$RC|$(vg_unproved)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'reply .* on the release card')"
+expect_eq "VG-5c a code commit C3 past them, landed green on its own suite: covered, not green, refused as regression unproved, naming the reply" "0:refuse|1|1" "$(ck_said "$RC" "$OUT")|$(vg_unproved)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'reply .* on the release card')"
 vg_mu "$VG_C2"; poke "$RVG" current 8 --check
-expect_eq "VG-5d …the person's word at C2's head, not the working head, leaves the regression unproved" "1|1" "$RC|$(vg_unproved)"
+expect_eq "VG-5d …the person's word at C2's head, not the working head, leaves the regression unproved" "0:refuse|1" "$(ck_said "$RC" "$OUT")|$(vg_unproved)"
 vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
 expect_eq "VG-5e …and the word at the working head holds it: no regression line unproved (VG-5d read the same extractor)" "0" "$(vg_unproved)"
 vg_mu ""; /usr/bin/grep -v '|row=T10|' "$VG_DIR/run.log" > "$VG_DIR/run.log.n" && mv "$VG_DIR/run.log.n" "$VG_DIR/run.log"
@@ -738,9 +778,7 @@ poke "$RVG" current 8 --check
 POKE_BOUND="$VG_BOUND_WAS"
 
 
-# ============================================================
 section "§REPLY-SEQ: one reply orders the release approval card's decisions in sequence, each applied in order and recorded"
-# ============================================================
 # FIXTURE FIDELITY. §COPIED-LOG's plan at its working head, its reading's record given one S3 finding; the page's
 # record carries the replay table in its writer's row shape (release-approval.test.sh §SHAPE pins that row). Decision
 # 1's default names a row the plan lacks, so taking it refuses; 2 waives the plan's one matrix row; 3 moves the
@@ -776,11 +814,69 @@ rs_page "key=row:AC-9.1|default=waive AC-9.1|${RS_ROW/pick=default/pick=other}" 
 poke "$RVG" reply 'all recommended'
 expect_eq "RS-4 AC-13.3 'all recommended' takes the orchestrator's choice on each, in order (exit 0)" \
   "0|withheld: row:AC-9.1|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+
+# ---------- §REPLY-SEQ, a short reply after its card or its ask, and a reply quoted with its line breaks ----------
+# The person writes around a short reply ("Re: release card: all default", "approved — and …"), so its words are not
+# their whole prompt. Typed after the card was drawn (its header's at=) or the ask was opened (its round's at=), they
+# are their word on it; the same words typed only before it are not (the controls). The transcript is begun again so no
+# earlier whole prompt holds the words. A reply quoted whole, with its line breaks, is folded to the words it holds.
+# fails-when: a short reply typed after its instant is refused as too short; one typed only before it is taken; a reply
+# quoted with its line breaks is refused for its shape.
+rs_typed() {  # <ISO stamp> <prompt> -> the prompt, typed at that instant, appended to this section's transcript
+  jq -c --arg t "$2" --arg at "$1" '.message.content = $t | .timestamp = $at' "$RS_FX/typed.jsonl" >> "$RS_TX"
+}
+rs_approval() { /usr/bin/grep -F "|ev=approval|key=$1|" "$VG_DIR/run.log"; }  # <key> -> the run's approval lines of it
+cat "$RS_FX/frame.jsonl" > "$RS_TX"
+RS_CARRY="${RS_FIND/pick=other/pick=default}"
+rs_page "$RS_CARRY"
+rs_typed 2026-10-19T23:59:00.000Z 'Re: release card: all default'
+poke "$RVG" reply 'all default'
+expect_eq "RS-5 control: 'all default' typed only before the card was drawn is refused as too short, nothing recorded" \
+  "1|1|" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -c 'too short')|$(rs_done)"
+rs_typed 2026-10-20T00:00:30.000Z 'Re: release card: all default'
+poke "$RVG" reply 'all default'
+expect_eq "RS-5b AC-18.1 'all default' typed after the card was drawn, inside a longer prompt, is applied (exit 0)" \
+  "0|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+rs_page "$RS_CARRY"
+rs_typed 2026-10-20T00:01:00.000Z 'Re: release card: all recommended'
+poke "$RVG" reply 'all recommended'
+expect_eq "RS-6 AC-18.1 'all recommended' typed after the card was drawn, inside a longer prompt, is applied (exit 0)" \
+  "0|applied: finding:$RS_F carried" "$RC|$(rs_done)"
+rs_page "$RS_CARRY"
+poke "$RVG" reply $'all default\n'
+expect_eq "RS-7 AC-18.3 a reply quoted with its line break is folded and applied, its words recorded on one line (exit 0)" \
+  "0|applied: finding:$RS_F carried|1" "$RC|$(rs_done)|$(/usr/bin/grep -c '^replied: .* words="all default"$' "$RS_P")"
+# The ask is opened by its one writer (lib/owed.sh `owed_open`) at a fixed instant, 2026-10-21T00:00:00Z.
+bash -c '. "$1/owed.sh" && OWED_ROOT="$2" OWED_PLAN="$3" OWED_SID="$4" BIONIC_NOW_EPOCH=1792540800 owed_open approve:step0 "Step 0" "approve step0"' \
+  _ "${S46_LIB%/*}" "$RVG" "$PVG" "$SID"
+expect_eq "RS-8a precondition: the ask approve:step0 stands open in the run's log at its instant" "1" \
+  "$(/usr/bin/grep -c '|ev=ask|key=approve:step0|.*|at=2026-10-21T00:00:00Z$' "$VG_DIR/run.log")"
+rs_typed 2026-10-20T23:00:00.000Z 'approved, and keep the scope as written'
+poke "$RVG" approve step0 'approved'
+expect_eq "RS-8 control: 'approved' typed only before its ask was opened is refused as too short, no approval written" \
+  "1|1|" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -c 'too short')|$(rs_approval step0)"
+rs_typed 2026-10-21T00:00:30.000Z 'approved — and the second requirement can wait for the next wave'
+poke "$RVG" approve step0 'approved'
+expect_eq "RS-8b AC-18.2 'approved' opening a longer message typed after its ask was opened is recorded (exit 0)" \
+  "0|1" "$RC|$(rs_approval step0 | /usr/bin/grep -c '|said=approved|')"
+RS_TWO=$'approved for step one.\nThe second requirement can wait.'
+rs_typed 2026-10-21T00:01:00.000Z "$RS_TWO"
+poke "$RVG" approve step1 "$RS_TWO"
+expect_eq "RS-9 AC-18.3 the person's whole message, quoted with its line break, is recorded folded to one line (exit 0)" \
+  "0|1" "$RC|$(rs_approval step1 | /usr/bin/grep -c '|said=approved for step one. The second requirement can wait.|')"
+RS_TWOW=$'I waive the readings here.\nThey were read at the last head.'
+rs_typed 2026-10-21T00:02:00.000Z "$RS_TWOW"
+poke "$RVG" waive structure "$RS_TWOW"
+expect_eq "RS-9b AC-18.3 a question's waiver quoted with its line break is written folded (exit 0)" "0|1" \
+  "$RC|$(/usr/bin/grep -c '|ev=waiver|question=structure|.*|said=I waive the readings here. They were read at the last head.|' "$VG_DIR/run.log")"
+RS_TWOJ=$'judge from this head on.\nIts copy of the check is the one.'
+rs_typed 2026-10-21T00:03:00.000Z "$RS_TWOJ"
+poke "$RVG" check-from "$RS_TWOJ"
+expect_eq "RS-9c AC-18.3 the judge moved on words quoted with their line break, recorded folded (exit 0)" "0|1" \
+  "$RC|$(rs_approval judge | /usr/bin/grep -c '|said=judge from this head on. Its copy of the check is the one.|')"
 export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
-# ============================================================
 section "§BRIEF-PINS: a suite declares the files it pins with one header line, and the brief names them on Files, each marked"
-# ============================================================
 # A row's Suites name the suites a writer runs; each suite's `# pins: <path> [<path>…]` header line names the files
 # whose changes it holds, so a brief carries them on Files and the writer is not left waiting on an amend. The reader
 # is the suite's own header, never a search of its text. Fixture: scratch suites under a scratch repository, one
@@ -864,9 +960,7 @@ expect_nonempty "BP-7 setup: the search finds the pins reader in hooks/" "$(/usr
 expect_eq "BP-7b AC-12.2 /usr/bin/grep -rn 'reads_suites\\|poker_brief_index_suites' hooks/ prints nothing" "" \
   "$(/usr/bin/grep -rn "reads_suites\|poker_brief_index_suites" "$BIONIC_HOOKS_DIR")"
 
-# ============================================================
 section "§AMEND-NARROW: amend --suites= narrows a live contract's suites and its lands_on= with them; the collector hands the wall the suites that exist"
-# ============================================================
 # `amend` was a union, old members first, never a narrowing. `--suites=<a,b>` sets the row's suite set to exactly those,
 # each of which the row already holds (a name it does not hold widens, and `--suites+` is the verb for that), and
 # `lands_on=` keeps only the suites still in the set: a row that lands on a suite it may not run is a contract the
@@ -918,9 +1012,7 @@ expect_eq "AN-8b --suites+ naming no file under tests/ is refused (exit 1) and w
   "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN3")")"
 expect_contains "AN-8c …naming the entry" "nosuch.test.sh" "$OUT"
 
-# ============================================================
 section "§REVIEW-FILES §FILES-UNHELD: each verb a close meets writes its cell, or names the edit that does"
-# ============================================================
 # A close met verbs that sent it in a circle: a review row's Files held one record for three questions; amend sent a closed
 # contract to a new dispatch. FIXTURE FIDELITY: a task-scale plan at single rigor with a
 # reads table carrying an artifact cell and no ledger, bound to this session, its working branch the repository's
@@ -1065,9 +1157,7 @@ expect_eq "FU-4 amend on a closed contract is refused (exit 1)" "1" "$RC"
 expect_contains "FU-4b …and names the edit of the Files cell of the row its contract held" "edit the Files cell of T3 in the plan" "$VC_AREF"
 expect_absent "FU-4c …not a new dispatch" "dispatch the work again" "$VC_AREF"
 
-# ============================================================
 section "§TICK-LANDS: the tick lands a record row on the registration its kind owes, one published event, no cell"
-# ============================================================
 # A record row has no tree and no ready: the tick lands it (hooks/poker/line.sh `record_row_land`) once its checks
 # pass, and nothing else does. A row nobody launched lands when it is ready; a row that owes a registration lands on it,
 # never on its file: a review on its review registered, a regression row on the whole run's proof at the head, a walk
@@ -1077,6 +1167,9 @@ section "§TICK-LANDS: the tick lands a record row on the registration its kind 
 # run's log (`sp_fact`).
 # fails-when: a row lands on its file alone, a landing writes a cell or a step line, a reason is told at every tick,
 # a refusal names no fix, or a row that waits on a landed row stays unready.
+# The tick prints only from its exit trap, so a tick the watchdog kills at the bound prints nothing and every row that reads
+# its output goes red as missing text; the sections that tick a run use the wide bound so a slow machine does not kill it.
+TL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 TL="$(make_repo tick-lands)"; ( cd "$TL" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
 git -C "$TL" config user.name "Dana Fixture"
 TL_RD="record/wave-01-fixture"; TL_D=".bionic/docs/$TL_RD"
@@ -1192,10 +1285,55 @@ expect_eq "TL-15 precondition: the page is at 15, its integrate row pending and 
 poke "$TI" tick
 expect_eq "TL-16 on a page at 15 the tick lands the orchestrator's integrate row whose reviews stand: one published event of the record kind" \
   "1|1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c "^poker: LANDED T5 — the orchestrator's integrate row")|$(TI_PUB)"
+POKE_BOUND="$TL_BOUND_WAS"
 
-# ============================================================
+# A WRITER WITH A TREE LANDS THROUGH `ready`, and the tick names one that has met its record and committed but has not
+# landed: its writer ends with its contract met before `ready`, and no line of the tick said so. FIXTURE FIDELITY: the
+# task-scale plan at 15 of §TICK-LANDS (`vc_15`), each build row active under its writer, its tree a linked worktree on
+# its own branch at the working head (`git worktree add`, the `tree` event the row's launch writes), its roster row MET
+# (the record in the tree, the agent's done marker); T31 holds a commit past the head, T32 none, T33 a commit and no
+# record, T34 a commit and a tracked edit left uncommitted.
+# fails-when: the committed writer is on no line, or its line names no landing command, or it is told at every tick,
+# or a writer with no commit, no record or an unfinished edit is named.
+UL="$(make_repo tick-unlanded)"; ( cd "$UL" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
+git -C "$UL" config user.name "Dana Fixture"
+UL_RD="record/wave-01-fixture"; UL_D=".bionic/docs/$UL_RD"
+UL_P="$(vc_plan "$UL" \
+  "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |" \
+  "| T31 | 4 | build | the committed writer | w-T31 | — | 30 | REQ-1 | lib/z31.sh, $UL_D/T31.md | active | — | $UL_D/T31.md |" \
+  "| T32 | 4 | build | the writer with no commit | w-T32 | — | 30 | REQ-1 | lib/z32.sh, $UL_D/T32.md | active | — | $UL_D/T32.md |" \
+  "| T33 | 4 | build | the writer with no record | w-T33 | — | 30 | REQ-1 | lib/z33.sh, $UL_D/T33.md | active | — | $UL_D/T33.md |" \
+  "| T34 | 4 | build | the writer with an edit under way | w-T34 | — | 30 | REQ-1 | lib/z34.sh, $UL_D/T34.md | active | — | $UL_D/T34.md |")"
+vc_15 "$UL" "$UL_P"; sed "s/^base-sha: abc1234$/base-sha: $(git -C "$UL" rev-parse main)/" "$UL_P" > "$UL_P.t" && mv "$UL_P.t" "$UL_P"
+( cd "$UL" && git add -f "$UL_P" && git commit -qm base ) >/dev/null 2>&1; new_roster "$UL"
+UL_LOG="$(plan_fixture_log "$UL_P")"; UL_RC_DIR="$UL/.bionic/tmp/ul-done"; mkdir -p "$UL_RC_DIR"
+for ul_t in T31 T32 T33 T34; do
+  git -C "$UL" worktree add -q -b "wt/$ul_t" "$UL/.worktrees/01-$ul_t" main >/dev/null 2>&1
+  printf 'run/v1|ev=tree|row=%s|path=.worktrees/01-%s|at=2026-10-04T01:%02d:00Z\n' "$ul_t" "$ul_t" "${ul_t#T}" >> "$UL_LOG"
+  mkdir -p "$UL/.worktrees/01-$ul_t/$UL_D"
+  [ "$ul_t" = T33 ] || printf 'record of %s\n' "$ul_t" > "$UL/.worktrees/01-$ul_t/$UL_D/$ul_t.md"
+  add_row "$UL" name="w-$ul_t" deliverable="$UL/.worktrees/01-$ul_t/$UL_D/$ul_t.md" duration="4 hours" launched_at="$(iso_ago 600)" "$(said "$UL_RC_DIR" "w-$ul_t")"
+done
+seal_fixture "$UL_P" "$UL_LOG"
+ul_said() { printf '%s\n' "$OUT" | /usr/bin/grep "NOT-LANDED $1 "; }
+poke "$UL" tick
+expect_eq "UL-0 precondition: no tree holds a commit past the head yet, so no writer is named" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T3[1-4] ')"
+for ul_t in T31 T33 T34; do ( cd "$UL/.worktrees/01-$ul_t" && printf 'code\n' > "lib-$ul_t.sh" && git add . && git commit -qm "code of $ul_t" ) >/dev/null 2>&1; done
+( cd "$UL/.worktrees/01-T34" && printf 'more\n' >> "lib-T34.sh" ) >/dev/null 2>&1
+poke "$UL" tick
+expect_contains "UL-1 a MET writer whose tree holds its record and a commit past the head is named once, the line naming its row and its writer" "NOT-LANDED T31 — w-T31" "$(ul_said T31)"
+expect_contains "UL-2 …and giving the landing command: ready, from its tree" "spawn-worktree.sh ready --within" "$(ul_said T31)"
+expect_contains "UL-2b …naming the commit that is past the head" "$(git -C "$UL/.worktrees/01-T31" rev-parse --short=12 HEAD)" "$(ul_said T31)"
+expect_eq "UL-3 a MET writer whose tree holds no commit past the head is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T32 ')"
+expect_eq "UL-4 a committed writer whose tree holds no record is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T33 ')"
+expect_eq "UL-5 a committed writer with a tracked edit uncommitted is on no line" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T34 ')"
+poke "$UL" tick
+expect_eq "UL-6 a second tick over the same tree head names it again nowhere" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T31 ')"
+( cd "$UL/.worktrees/01-T31" && printf 'again\n' >> "lib-T31.sh" && git add . && git commit -qm "a second commit" ) >/dev/null 2>&1
+poke "$UL" tick
+expect_contains "UL-7 a new commit is a new tree head: the writer is told again" "NOT-LANDED T31 — w-T31" "$(ul_said T31)"
+
 section "§STACK: the regression's health is the judge's rendering, and no verb writes it into the plan"
-# ============================================================
 # `proof-add regression` registers the whole run's proof and leaves the plan's text as it was; lib/proof.sh
 # `proof_health_line` renders the health the sheet and the card print: green only at a pass that left nothing owed.
 # FIXTURE FIDELITY. §COPIED-LOG's shape at Step 5, a run at 15; run lines from regression_fixture; every later write goes
@@ -1255,16 +1393,15 @@ expect_eq "VT-17b AC-5.2 …and the function still renders red at G, owed= empty
   "$(vt_sh_line red "$VT_G" 2 3 record/wave-01-fixture/whole-red2.log "" c.test.sh)" "$(vt_health)"
 POKE_BOUND="$VT_BOUND_WAS"
 
-# ============================================================
 section "§STARTER: the tick starts the whole run itself when nothing is ready, no writer is open and the head is past the last regression proof"
-# ============================================================
 # The tick starts `regression-run --starter tick` detached through booked.sh as roster object `regression@<h8>`, whose
 # one suite is run.sh, never waiting; the proof lands through proof-add regression. A landing past it moves the head, so
 # the next tick starts again. A live object guards against a second start; a run the gate did not admit (75) is told as
 # waiting and started again.
 # FIXTURE FIDELITY: §STACK's shape at Step 4, with a regression proof at an older head from proof-add over a run line
 # from regression_fixture. The runner is the worktree's committed tests/run.sh stub: it holds while a hold file stands,
-# exits 75 with no verdict while a full file stands, else reports a green whole run; it books nothing at the gate, so the
+# answers as the real runner does when the gate admits nothing while a full file stands (no verdict, a line in the
+# caller's BIONIC_NOT_ADMITTED note, exit 0), else reports a green whole run; it books nothing at the gate, so the
 # open whole request beside it is the verb's own. Everything else is real, and the writer row is mkrow's, closed by the
 # real ack.
 # fails-when: the quiet condition inverted; the head compared to anything but the last regression proof's; proof-add
@@ -1277,9 +1414,13 @@ ST_CTL="$TMPROOT/starter-ctl"; mkdir -p "$ST_CTL"
 mkdir -p "$RST/tests"
 cat > "$RST/tests/run.sh" <<RUNNER
 #!/bin/bash
-# The fixture's whole run: marks its start, holds while the hold file stands, exits 75 with no verdict while the full file stands.
+# The fixture's whole run: marks its start, holds while the hold file stands, and while the full file stands ends as the
+# runner the gate did not admit ends: no verdict, a line in the caller's note, exit 0.
 : > "$ST_CTL/ran"; i=0; while [ -e "$ST_CTL/hold" ] && [ "\$i" -lt 600 ]; do i=\$((i + 1)); sleep 0.1; done
-[ ! -e "$ST_CTL/full" ] || exit 75
+if [ -e "$ST_CTL/full" ]; then
+  [ -z "\${BIONIC_NOT_ADMITTED:-}" ] || printf 'tests/run.sh: not admitted\n' >> "\$BIONIC_NOT_ADMITTED"
+  printf 'bionic: tests/run.sh refused at the gate; nothing ran\n'; exit 0
+fi
 printf 'Gating: 1 passed, 0 failed\n'
 RUNNER
 ( cd "$RST" && git add tests/run.sh && git commit -qm runner ) >/dev/null 2>&1
@@ -1438,12 +1579,54 @@ expect_eq "ST-14 AC-10.2 the one open writer is T9's, whose row waits on the reg
 [ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
 rm -f "$ST_CTL/hold"
 expect_true "ST-14b …and its run ends" st_until 60 st_ended "$(st_log "${ST_H4:0:8}")"
+
+section "§POINT-ASKED: a point whose rows have landed is run by the tick while a later build is open, and the tick lands it"
+# The point T11 follows T7 and T8, both landed; T10, a later build, is under way with its writer open, which declines a whole
+# run. The tick starts the point's run as `point-T11@<h8>` all the same, its proof lands through proof-add point, and the
+# next tick lands the point's row on that proof.
+# FIXTURE FIDELITY: §STARTER's repository, runner, roster and verbs, the two rows added by an edit as st_row adds them.
+# fails-when: the tick asks the whole run's declines of a point (no start beside T10's open writer); the detached call
+# records no point proof; the row is left unlanded on its proof, or landed by the regression row's rule; the detached
+# run folds its facts inside the hold of the tick that started it.
+# THE TICK OUTLIVES ITS RUN. On a loaded machine the tick is still alive while its detached run folds the run's facts,
+# and the tick removes its hold (lib/proof.sh `proof_hold_end`) when it ends, under any fold still going in it. The
+# fixture holds that moment still: the tick runs inside a hold this shell keeps, which a poker trusts while the pid in its
+# name lives and opens none beside, and once the tick has returned the hold is emptied and made unwritable, standing for
+# its removal. A detached run that shared it could fold nothing and would leave no proof; one with a hold of its own does.
+st_row '| T11 | 4 | test | the whole run after T7 and T8 · point | T7, T8 | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/T11.md | — |'
+st_row '| T10 | 4 | build | a build after the point | — | 30 | REQ-1 | g.sh | — |'
+st_dispatched T10 w-T10 6
+add_row "$RST" name=w-T10 agent_id=a-w-T10 subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$RST/record/T10.md" duration=60m
+ST_H5="$(s57_commit "$ST_WT" lib/e.sh H5)"
+PA_HELD="$(mktemp -d "$TMPROOT/bionic-held-$$.XXXXXX")" && chmod 700 "$PA_HELD"
+: > "$ST_CTL/hold"
+export BIONIC_HELD="$PA_HELD"
+forget_digest "$RST"; poke "$RST" tick
+unset BIONIC_HELD
+expect_contains "PA-1 T7 and T8 landed, T10's writer open: the tick starts the point's run as point-T11@<h8>" \
+  "poker: regression-run started point-T11@${ST_H5:0:8} " "$(st_started)"
+[ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
+expect_eq "PA-1b …and starts no whole run beside it" "0" "$(st_started | /usr/bin/grep -c "regression@" || :)"
+expect_nonempty "PA-1c …and it folded the run's facts inside the hold the fixture keeps, so that hold is the tick's" \
+  "$(ls -A "$PA_HELD" 2>/dev/null | /usr/bin/grep '^fold-' || :)"
+find "$PA_HELD" -mindepth 1 -delete 2>/dev/null; chmod 500 "$PA_HELD"
+rm -f "$ST_CTL/hold"
+ST_PLOG="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p' | head -n 1)"
+expect_true "PA-2-pre the point's detached run ends" st_until 60 st_ended "${ST_PLOG:-$TMPROOT/none}"
+chmod 700 "$PA_HELD"
+expect_eq "PA-2 …and its proof is the point's own kind, naming T11, at the head it ran" "1" \
+  "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=point head=$ST_H5 .*point=T11" || :)"
+[ "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=point head=$ST_H5 " || :)" = 1 ] \
+  || { printf '      the run ended rc=%s; its log:\n' "$(cat "${ST_PLOG:-$TMPROOT/none}.rc" 2>/dev/null)"; sed -n '1,40p' "${ST_PLOG:-$TMPROOT/none}" 2>/dev/null; }
+expect_eq "PA-2b …never a regression proof at that head" "0" "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H5 " || :)"
+forget_digest "$RST"; poke "$RST" tick
+expect_contains "PA-3 the next tick lands the point's row on its proof" "poker: LANDED T11 — " "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: LANDED T11 ' || :)"
+expect_eq "PA-3b …once: the run's log holds one landing of T11" "1" \
+  "$(/usr/bin/grep -c '|ev=published|row=T11|' "$(st_rec)" 2>/dev/null || :)"
 POKE_BOUND="$ST_BOUND_WAS"
 
 
-# ============================================================
 section "§WALK: a walk's record discharges each criterion it confirms by one proof naming it, the plan unwritten"
-# ============================================================
 # The walk record carries the critic's shape, read by proof_verdicts. `proof-add walk <record>` appends one walk proof
 # and, for each CONFIRMED row, one proof naming the criterion with the record as its evidence; the plan is not written.
 # A run has one walk record and it only grows: a record that leaves out a criterion a standing walk confirms is refused,
@@ -1529,6 +1712,16 @@ wk_rec walk-nohead 'verdict: CONFIRMED — fine' "head: 012345678901234567890123
 s42_snap "$RWK" "$PWK"; wk_add walk-nohead
 s42_unchanged "WK-12 a head: line naming no commit of the working branch" 1 "$PWK"
 expect_contains "WK-12b …named in the refusal" "head: 0123456789012345678901234567890123456789" "$OUT"
+
+section "§HAND-HOLDS: the report of a run with no delivery says the run's log holds none yet (AC-27.1)"
+# The end of the window is the delivery, and the delivery is read from the run's log (its Step 9 event), never from a
+# line of the plan. The walk's run has no Step 9 event, so its report runs the window to now and says where it looked.
+poke "$RWK" landing-report --hand-holds
+expect_contains "HH-1 AC-27.1 the run has no delivery: the report's window line says the run's log holds none yet" \
+  "until now: the run's log holds no delivery yet" "$OUT"
+expect_eq "HH-2 …on the window line, after the start it read, and nowhere says the plan names a delivered time" "1|0" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^hand-holds window: since .* · until now: the run.s log holds no delivery yet$')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'the plan names no delivered')"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 
 POKE_BOUND="$WK_BOUND_WAS"
 

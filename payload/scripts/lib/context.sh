@@ -102,43 +102,24 @@
 # variables and library verbs through `$( )`; anything printed on the way in would
 # corrupt the first field of every one of those answers.
 #
-# IT BRINGS ITS OWN DEPENDENCIES through the self-dir idiom lib/roots.sh and
-# lib/run.sh use, guarded on the function rather than the file so a caller that
+# IT BRINGS ITS OWN DEPENDENCIES through lib/loader.sh's `bionic_need`, guarded
+# on the function rather than the file so a caller that
 # already sourced one pays nothing. `. lib/context.sh` is therefore a complete
 # thing rather than a fragment — which is what lets a hook name `context.sh` in
 # BIONIC_LIB_WANT and get a working `bionic_context`.
 #
 # BASH 3.2. No associative arrays, no `${var^^}`, no `mapfile`.
 #
-# NO `dirname`/`basename` IN THE SELF-LOCATOR, for lib/roots.sh's reason: a
+# NO `dirname`/`basename` IN THE BOOTSTRAP LINE, for lib/roots.sh's reason: a
 # library that cannot be sourced without coreutils dies on the half-broken machine
 # it is most needed on.
 #
 # [WALL: tests/context.test.sh]
 
-_context_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-
-# RESOLVED AT SOURCE TIME, for the reason lib/roots.sh states at `_ROOTS_LIB_DIR`:
-# `${BASH_SOURCE[0]%/*}` is RELATIVE when the file was sourced by a relative path,
-# and a soft source that re-derived it later would read against whatever the
-# caller's cwd had become.
-_CONTEXT_LIB_DIR="$(cd "$(_context_self_dir)" && pwd -P)"
-
-if ! declare -F project_root >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_CONTEXT_LIB_DIR/root.sh"
-fi
-if ! declare -F session_id >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_CONTEXT_LIB_DIR/session.sh"
-fi
-if ! declare -F session_run >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_CONTEXT_LIB_DIR/run.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need root.sh project_root
+bionic_need session.sh session_id
+bionic_need run.sh session_run
 
 # ─── The one payload reader ──────────────────────────────────────────────────
 #
@@ -423,3 +404,7 @@ bionic_context() {
 
   return 0
 }
+
+# bionic_judged -> 0 when the session engaged or its binding holds it to the BIONIC_BOUND_PLAN its caller read: a bound
+# session stays judged whatever became of its engaged file, which BIONIC_ENGAGED alone still reports.
+bionic_judged() { [ "${BIONIC_ENGAGED:-0}" = 1 ] || [ -n "${BIONIC_BOUND_PLAN:-}" ]; }

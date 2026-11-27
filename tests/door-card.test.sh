@@ -150,10 +150,13 @@ dc_approved() { bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$DC_PLAN" 
 expect_eq "(c26) the run holds the plan's own approval" "0" "$(dc_approved step3)"
 expect_eq "(c27) …and no release approval" "1" "$(dc_approved release)"
 dc_verb "(c28) current 6 --check would advance at the release head" current 6 --check
+expect_contains "(c28b) …saying so: the check exits 0 on either answer" "current 6 --check: would advance" "$DOOR_OUT"
 dc_verb "(c29) current 7 --check would advance: every fact the run owes holds at the release head" current 7 --check
+expect_contains "(c29b) …saying so" "current 7 --check: would advance" "$DOOR_OUT"
 door_run "$DC" bash "$DOOR_POKER" current 8 --check
 DC_C8="$DOOR_OUT"; printf 'dc: current 8 --check -> rc %s: %s\n' "$DOOR_RC" "$(printf '%s\n' "$DC_C8" | /usr/bin/grep '^poker: REFUSED' | head -1)"
-expect_eq "(c30) current 8 --check refuses" "1" "$DOOR_RC"
+expect_eq "(c30) current 8 --check refuses, an answer: exit 0, saying it would refuse" "0|1" \
+  "$DOOR_RC|$(printf '%s\n' "$DC_C8" | /usr/bin/grep -c -- 'current 8 --check: would refuse')"
 expect_contains "(c31) …on the release approval the plan does not carry" "carries no approved: release line" "$DC_C8"
 expect_eq "(c32) …and on nothing else: one refusal line" "1" "$(printf '%s\n' "$DC_C8" | /usr/bin/grep -c '^poker: REFUSED')"
 
@@ -208,7 +211,7 @@ read -r DCM1_R _ <<EOF
 $(door_copy "$DC" "$WORLD_ROOT/door-unsettled")
 EOF
 dcm_card "$DCM1" "$DCM1_R"
-expect_eq "(m1b) with the settle deleted the card does not render" "1" "$DOOR_RC"
+expect_eq "(m1b) with the settle deleted the card does not render (exit 0, no page)" "0|" "$DOOR_RC|$(ls "$DCM1_R"/.bionic/docs/record/wave-x/release-approval-*.md 2>/dev/null)"
 expect_contains "(m1c) …it is early on the advance to 8" "CARD-EARLY — current 8 --check" "$DOOR_OUT"
 
 DCM2="$WORLD_ROOT/tree-reworded"; dcm_tree "$DCM2"

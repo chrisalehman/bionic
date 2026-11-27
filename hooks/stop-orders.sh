@@ -236,8 +236,7 @@ fi
 # byte-identical private copy — one of eight — held together by an agreement suite;
 # there is one answer now, and it maps a worktree onto its main repository before it
 # walks for the nearest real `.bionic`.
-REPO="$(project_root "$PWD")"
-REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
 
 # stopped_row_back <name> -> the plan row still running under <name> returned to pending, its launch taken back by
 # lib/units.sh `units_row_back` (the log's cancel), and said; 1 when this session's open run holds no
@@ -245,11 +244,7 @@ REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
 # offered again, so stopping it is the whole of returning it.
 stopped_row_back() {
   local run plan rows id
-  # shellcheck source=/dev/null
-  { declare -F session_run >/dev/null 2>&1 || . "$BIONIC_LIB/run.sh"; } >/dev/null 2>&1
-  # shellcheck source=/dev/null
-  { declare -F units_row_back >/dev/null 2>&1 || . "$BIONIC_LIB/units.sh"; } >/dev/null 2>&1
-  declare -F session_run >/dev/null 2>&1 && declare -F units_row_back >/dev/null 2>&1 || return 1
+  bionic_need run.sh session_run && bionic_need units.sh units_row_back || return 1
   run="$(session_run "$REPO_REAL" "$SESSION_ID" 2>/dev/null)" || return 1
   case "$run" in 'bound-open '*) plan="${run#bound-open }" ;; *) return 1 ;; esac
   rows="$(units_rows "$plan" 2>/dev/null)" || return 1
@@ -261,10 +256,6 @@ stopped_row_back() {
   fi
   say "stopped: $1 — its row $id is pending again, its launch taken back, and is offered at the next tick."
 }
-if [ -z "$REPO_REAL" ]; then
-  die "REFUSED — cannot resolve the working directory."
-  exit 2
-fi
 
 BIONIC_DIR="$REPO_REAL/.bionic"
 STATE_DIR="$BIONIC_DIR/tmp"
@@ -290,8 +281,7 @@ done
 own_transcript() {  # -> the transcript file of THIS session, or nothing
   local projects slug d
   projects="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
-  declare -F project_slug >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/detect.sh" ] && . "$BIONIC_LIB/detect.sh"; } >/dev/null 2>&1
-  if declare -F project_slug >/dev/null 2>&1; then
+  if bionic_need detect.sh project_slug; then
     for slug in "$(project_slug "$PWD")" "$(project_slug "$REPO_REAL")"; do
       [ -n "$slug" ] && [ -f "$projects/$slug/$SESSION_ID.jsonl" ] || continue
       printf '%s\n' "$projects/$slug/$SESSION_ID.jsonl"; return 0
@@ -303,7 +293,8 @@ own_transcript() {  # -> the transcript file of THIS session, or nothing
   return 1
 }
 
-ROSTER_FILE="$STATE_DIR/roster-${SESSION_ID}.state"
+bionic_need roster.sh roster_path
+ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
 ORDERS_FILE="$STATE_DIR/stop-orders-${SESSION_ID}.state"
 
 if [ -L "$ORDERS_FILE" ]; then
@@ -316,22 +307,20 @@ SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
 
 # ---------------------------------------------------------------- shared readers
 
+# The machine's clock, never a suite's pinned one, which lib/time.sh's `time_now` follows. The instant a record is
+# stamped with is lib/time.sh's `iso_now`.
 now_epoch() { date -u +%s; }
-iso_now()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
+bionic_need time.sh _time_epoch
 
-line_field() {  # <line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
-}
+# A field of a record line is read by key: `line_field` in the shell and `line_kv_of` in awk, both lib/fields.sh's.
+bionic_need fields.sh line_field_v
 
 # Values reach this file from a brief and from the operator's keyboard, and every record
 # here is pipe-delimited key=value. A `|`, a newline or a control character inside a value
-# forges a field, so they are folded to spaces exactly as hooks/session-sweeper.sh's
-# clean() folds them — the two must agree, because a name written by one is matched by the
-# other.
-clean() {  # <value>
-  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
-}
+# forges a field, so they are folded to spaces by lib/fields.sh's `line_field_clean`, cut at
+# 400 characters. hooks/session-sweeper.sh's clean() folds and cuts a value of valid characters
+# the same way, so a name written by one is matched by the other; a byte the locale cannot read
+# is where the two part (the library's `tr` drops what follows it).
 
 # THE ROSTER IS FOLDED ONCE, not once per row. The roster is append-only and a contract
 # advances along it (`intended` → `confirmed` → `identified`), every writer copying the
@@ -371,7 +360,7 @@ fold_roster() {
   [ -L "$ROSTER_FILE" ] && return 0
   [ -f "$ROSTER_FILE" ] || return 0
   local _fn _frow
-  # The name is normalised here exactly as clean() normalises it, because that is what the
+  # The name is normalised here exactly as `line_field_clean` normalises it, because that is what the
   # per-line comparison this replaces did: control characters (a tab included, which would
   # otherwise forge the delimiter below) folded to spaces, runs squeezed, ends trimmed,
   # 400 characters kept. A `|` cannot survive into a field, having been the split point.
@@ -394,7 +383,7 @@ $(awk -v pfx="roster-state/${ROSTER_VERSION}|" '
       name = ""; got = 0
       nf = split($0, f, "|")
       for (i = 1; i <= nf; i++) {
-        # FIRST name= field wins, empty or not — line_field takes head -1 and so did the
+        # FIRST name= field wins, empty or not — line_field takes the first and so did the
         # comparison this fold replaces. A forged later name= must not overrule the writer.
         if (!got && substr(f[i], 1, 5) == "name=") { name = substr(f[i], 6); got = 1 }
       }
@@ -485,22 +474,17 @@ order_spellings() {  # <target> -> spellings, one per line
   for f in "$STATE_DIR"/roster-*.state; do
     [ -f "$f" ] && [ ! -L "$f" ] && [ "$f" != "$ROSTER_FILE" ] || continue
     printf '%s\n' "$f"
-  done | SO_KEY="$key" SO_TYPED="$1" awk '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
+  done | SO_KEY="$key" SO_TYPED="$1" awk "$_LINE_FIELDS_AWK"'
     function out(v) { if (v != "" && !(v in seen)) { seen[v] = 1; print v } }
     BEGIN { if (ENVIRON["SO_TYPED"] != ENVIRON["SO_KEY"]) out(ENVIRON["SO_KEY"]) }
     {
       f = $0
       while ((getline line < f) > 0) {
         if (index(line, "roster-state/") != 1) continue
-        st = kv(line, "status"); if (st != "confirmed" && st != "identified") continue
-        nm = kv(line, "name"); id = kv(line, "agent_id")
+        st = line_kv_of(line, "status"); if (st != "confirmed" && st != "identified") continue
+        nm = line_kv_of(line, "name"); id = line_kv_of(line, "agent_id")
         if (nm == "" || (nm != ENVIRON["SO_KEY"] && id != ENVIRON["SO_KEY"])) continue
-        sid = kv(line, "adopted_from"); if (sid == "") sid = kv(line, "session")
+        sid = line_kv_of(line, "adopted_from"); if (sid == "") sid = line_kv_of(line, "session")
         out(nm); out(id); if (sid != "") out(nm "@session-" substr(sid, 1, 8))
       }
       close(f)
@@ -512,7 +496,7 @@ order_spellings() {  # <target> -> spellings, one per line
 case "$VERB" in
 
   order)
-    _target="$(clean "$ORDER_TARGET")"
+    _target="$(line_field_clean "$ORDER_TARGET" 400)"
     [ -n "$_target" ] || usage "order needs a non-empty target."
 
     mkdir -p "$STATE_DIR" 2>/dev/null
@@ -567,9 +551,7 @@ EOF
     # operator is owed the difference in one line.
     # The read is the stop library's, the one the stop guard asks: the first line of the call scoped
     # to the name. Loaded here alone, so no other verb pays for it; a library without it says nothing.
-    # shellcheck source=/dev/null
-    { declare -F stop_verdict_line >/dev/null 2>&1 || . "$BIONIC_LIB/stop.sh"; } >/dev/null 2>&1
-    if [ -f "$SWEEPER" ] && declare -F stop_verdict_line >/dev/null 2>&1; then
+    if bionic_need stop.sh stop_verdict_line && [ -f "$SWEEPER" ]; then
       _line=$(stop_verdict_line "$REPO_REAL" "$SESSION_ID" "$SWEEPER" "$_target")
       if [ -n "$_line" ]; then
         _state=$(line_field "$_line" state)
@@ -612,7 +594,7 @@ EOF
     # refused. AMBIGUOUS is always refused, naming the state. The ack this verb writes is
     # `--by human`, never `--by patrol` — this is a deliberate model-callable verb, not the
     # tick's own automated sweep, and the ledger's `by=` field says which one happened.
-    _target="$(clean "$ORDER_TARGET")"
+    _target="$(line_field_clean "$ORDER_TARGET" 400)"
     [ -n "$_target" ] || usage "stopped needs a non-empty target."
     if [ ! -f "$SWEEPER" ]; then
       die "REFUSED — the sweeper is not beside this script ($SWEEPER); nothing was acked."
@@ -631,9 +613,7 @@ EOF
     # already acked (MET and gone) still has its tree: `stopped` writes no second ack for it, and removes the
     # tree below, behind the same fresh-panel check as any other. An acked row with no mark is refused as ever.
     _mark=""
-    # shellcheck source=/dev/null
-    { declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh"; } 2>/dev/null \
-      && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
+    bionic_need roster.sh roster_landed && _mark="$(roster_landed "$ROSTER_FILE" "$_target" 2>/dev/null)" || _mark=""
     # AN ADOPTED ROW'S MARK IS FOUND ON ANY ROSTER OF THE PROJECT (wave-38 T14; REQ-3 AC-3.6, L12; A-orch-17).
     # The landing marks the roster of the session whose carrier ran `ready`, which for a row adopted after a
     # `/clear` is the PREDECESSOR's: this session's roster holds the adopted row (the row lookup above, and the
@@ -646,7 +626,7 @@ EOF
       _best_at=""
       while IFS='|' read -r _msid _mstat; do
         [ -n "$_msid" ] && [ "$_msid" != "$SESSION_ID" ] || continue
-        _m="$(roster_landed "$STATE_DIR/roster-${_msid}.state" "$_target" 2>/dev/null)" || continue
+        _m="$(roster_landed "$(roster_path "$REPO_REAL" "$_msid")" "$_target" 2>/dev/null)" || continue
         [ -n "$_m" ] || continue
         git -C "$REPO_REAL" merge-base --is-ancestor "${_m%%$'\t'*}" HEAD 2>/dev/null || continue
         _m_at="${_m#*$'\t'}"
@@ -808,8 +788,8 @@ EOF
         exit 2
         ;;
     esac
-    _target="$(clean "$ORDER_TARGET")"
-    _why="$(clean "$ORDER_WHY")"
+    _target="$(line_field_clean "$ORDER_TARGET" 400)"
+    _why="$(line_field_clean "$ORDER_WHY" 400)"
     [ -n "$_target" ] || usage "unrostered needs a non-empty target."
     [ -n "$_why" ] || usage "unrostered needs a reason: say why the roster never saw $_target."
     fold_roster
@@ -821,7 +801,7 @@ EOF
     # agent" is asked of every `roster-*.state` under the state directory, a predecessor's and a dead
     # session's included: a writer a predecessor's roster still holds, its contract unmet, is exactly what a
     # `/clear` leaves until `adopt` copies the rows, and recording it as unrostered would pass its stop.
-    declare -F roster_sessions_with_name >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    bionic_need roster.sh roster_sessions_with_name
     _held="$(roster_sessions_with_name "$STATE_DIR" "$_target")"
     if [ -n "$_held" ]; then
       while IFS='|' read -r _hsid _hstat; do
@@ -890,8 +870,7 @@ EOF
     [ -f "$_wt_lib" ] || _wt_lib="${HOOK_DIR}/../scripts/lib/worktree.sh"
     # shellcheck source=/dev/null
     [ -f "$_wt_lib" ] && . "$_wt_lib"
-    # shellcheck source=/dev/null
-    declare -F roster_landed >/dev/null 2>&1 || . "$BIONIC_LIB/roster.sh" 2>/dev/null
+    bionic_need roster.sh roster_landed
     _mark_of() { declare -F roster_landed >/dev/null 2>&1 && roster_landed "$ROSTER_FILE" "$1" 2>/dev/null; }   # <name>
 
     # THE LIVE SET, read ONCE for the whole batch through the shared `read_panel` above the

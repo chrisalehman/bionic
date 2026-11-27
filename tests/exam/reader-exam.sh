@@ -932,6 +932,7 @@ SD_MIRROR="$TMP/sd-mirror"
 mkdir -p "$SD_MIRROR/tests/reader-exam" "$SD_MIRROR/payload/scripts/lib"
 cp "$EXAM/score.sh" "$SD_MIRROR/tests/reader-exam/score.sh"
 cp "$REPO/payload/scripts/lib/proof.sh" "$SD_MIRROR/payload/scripts/lib/proof.sh"
+cp "$REPO/payload/scripts/lib/loader.sh" "$SD_MIRROR/payload/scripts/lib/loader.sh"
 expect_eq "SD7: a byte copy of score.sh and proof.sh in a mirrored tree scores the record as the real one does" \
   "$(exam_score "$DCK" "$R/sd7-declared.md")" \
   "$(bash -c '. "$1"; exam_score "$2" "$3"' _ "$SD_MIRROR/tests/reader-exam/score.sh" "$DCK" "$R/sd7-declared.md")"
@@ -949,6 +950,7 @@ expect_eq "SD7: …and the real tree's answer on the record is unchanged" "met: 
 SD_MUT="$TMP/sd-mutant"
 mkdir -p "$SD_MUT/tests/reader-exam" "$SD_MUT/payload/scripts/lib"
 cp "$REPO/payload/scripts/lib/proof.sh" "$SD_MUT/payload/scripts/lib/proof.sh"
+cp "$REPO/payload/scripts/lib/loader.sh" "$SD_MUT/payload/scripts/lib/loader.sh"
 sed 's/^exam_declared() {$/exam_declared() { echo declared; return 0/' "$EXAM/score.sh" > "$SD_MUT/tests/reader-exam/score.sh"
 expect_ne "SD8: the doctored scorer differs from score.sh" "$(cat "$EXAM/score.sh")" "$(cat "$SD_MUT/tests/reader-exam/score.sh")"
 expect_true "SD8: …and still parses" bash -n "$SD_MUT/tests/reader-exam/score.sh"

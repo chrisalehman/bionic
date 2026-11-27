@@ -925,4 +925,16 @@ expect_contains "(rf1) the integrate row's tree is refused, naming the kind and 
 expect_eq "(rf2) …exit 2, and no tree, no branch, no event" "rc=2|0|0|$TRN" "$(printf '%s\n' "$TROUT9" | tail -n1)|$([ -e "$TR/.worktrees/45-T8" ] && echo 1 || echo 0)|$(git -C "$TR" branch --list wt/45-T8 | grep -c .)|$(tr_trees | grep -c .)"
 
 
+
+section "§ONEHOME: a row adding a load-once guard, a lookup or a field reader is returned LINT ONEHOME, naming the line and the home"
+# fails-when: the landing's lint reads no refusing count of the copy check, so the row lands. The wave holds the project's lint and check.
+mkdir -p "$LWAVE/tests/lib" "$LWAVE/payload" && cp "$REPO/tests/lib/lint.sh" "$LWAVE/tests/lib/" && cp -R "$REPO/payload/scripts" "$LWAVE/payload/"
+git -C "$LWAVE" add tests/lib payload && git -C "$LWAVE" commit -qm lint
+OHT="$(spawn_out "$LR" create "$(sha_of "$LR" wave/20-demo)" wt/20-T5 | tr ' ' '\n' | sed -n 's/^path=//p')"
+printf '%s\n' '[ -n "${_F:-}" ] || . "$d/f.sh"' 'g() { git rev-parse --git-common-dir; }' "v() { awk '{ for (i = 2; i <= NF; i++) if (index(\$i, k \"=\") == 1) print }'; }" > "$OHT/payload/scripts/p.sh"
+git -C "$OHT" add -A && git -C "$OHT" commit -qm copies
+OHO="$( cd "$LR" && CLAUDE_CODE_SESSION_ID="$LSID" bash "$SPAWN" land "$OHT" --by-hand --reason r 2>&1 )"; OHC=$?
+expect_eq "(oh1) the row is refused, each copy named by its line and its home" \
+  "2||p.sh:1 loader.sh)|p.sh:2 root.sh)|p.sh:3 fields.sh)" "$OHC|$(printf '%s\n' "$OHO" | awk '$1 == "LINT" && $3 == "ONEHOME" { sub(/.*\//, "", $4); sub(/.*\//, "", $NF); printf "|%s %s", $4, $NF }')"
+
 finish

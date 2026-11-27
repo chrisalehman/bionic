@@ -67,19 +67,13 @@
 
 # roots.sh, THE SOFT SOURCE — the idiom lib/detect.sh uses for lib/deps.sh and lib/checks.sh
 # for lib/patrol.sh. Guarded on the function, so a caller that already has it pays nothing.
-_run_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-if ! declare -F docs_root >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_run_self_dir)" && pwd -P)/roots.sh"
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need roots.sh docs_root
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 # plan-read.sh, the same way: the plan's header has one parser, and `plan_frontmatter_get` asks it.
-if ! declare -F plan_read_header >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/plan-read.sh" ;; *) . ./plan-read.sh ;; esac
-fi
+bionic_need plan-read.sh plan_read_header
 # normalize_newlines [file] -> that document with its line endings TRANSLATED to \n, never
 # deleted. A trailing \r is stripped from each record (CRLF: \r\n → \n) and any remaining
 # lone \r becomes a real newline (classic-Mac CR-only). Called with NO argument it reads
@@ -148,31 +142,14 @@ plan_frontmatter_get() {
   return 0
 }
 
-# frontmatter_value_v <var> <frontmatter text> <key> -> rc 0 and the value in <var> when a line
-# carries the key, rc 1 and an empty <var> when none does. THE HEADER PARSER'S GRAMMAR, IN BUILTINS:
-# the first line that is `<key>` between optional whitespace and a `:`, the text after the
-# colon with its surrounding whitespace trimmed, then one leading and one trailing quote of either
-# kind dropped — what `grep | head -1 | sed | sed | sed` used to say with five processes. The key is
-# matched as text, which is what every key a caller names (`rigor`, `working-branch`) already was
-# to the regex. Its one caller is walls.sh's `frontmatter_get`, over the evidence gate's FRONTMATTER
-# text, which it holds already captured and so cannot hand the parser as a file.
-frontmatter_value_v() {
-  local _fv_rest="${2}"$'\n' _fv_l
-  printf -v "$1" '%s' ''
-  while [ -n "$_fv_rest" ]; do
-    _fv_l="${_fv_rest%%$'\n'*}"; _fv_rest="${_fv_rest#*$'\n'}"
-    _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
-    case "$_fv_l" in "$3"*) ;; *) continue ;; esac
-    _fv_l="${_fv_l#"$3"}"; _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
-    case "$_fv_l" in :*) ;; *) continue ;; esac
-    _fv_l="${_fv_l#:}"; _fv_l="${_fv_l#"${_fv_l%%[![:space:]]*}"}"
-    _fv_l="${_fv_l%"${_fv_l##*[![:space:]]}"}"
-    case "$_fv_l" in [\'\"]*) _fv_l="${_fv_l#?}" ;; esac
-    case "$_fv_l" in *[\'\"]) _fv_l="${_fv_l%?}" ;; esac
-    printf -v "$1" '%s' "$_fv_l"
-    return 0
-  done
-  return 1
+# plan_header_value <header> <key> -> the value of <key> and rc 0, or nothing and rc 1 when no line names it. The
+# header is the `key=value` lines `plan_read_header` printed, already read: a gate that asks for many keys reads the
+# plan once and answers each from that reading in builtins, and the governing hook's text, which no file holds until
+# it writes one, is read the same way. The parser printed each key once, so the one line that names it answers.
+plan_header_value() {
+  local v=$'\n'"$1"
+  case "$v" in *$'\n'"$2="*) ;; *) return 1 ;; esac
+  v="${v#*$'\n'"$2="}"; printf '%s\n' "${v%%$'\n'*}"
 }
 
 # plan_regression <plan> -> `no` when the plan's leading frontmatter says exactly `regression: no`,
@@ -229,7 +206,7 @@ plan_regression() {
 #
 # TEXT, NOT A FILE, because one reader has no file: the governing-skill hook judges the
 # content of a Write before it lands. The text is the frontmatter block's lines, without the
-# `---` delimiters — the shape that hook already holds as `$FRONTMATTER`.
+# `---` delimiters.
 budget_line_of() {  # <frontmatter text> -> the budget line's value, or empty
   awk '
     /^parallel-budget:/ { sub(/^parallel-budget:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }
@@ -524,19 +501,11 @@ run_open() {
 # _run_place <plan> -> the reader's held answer of where the run stands (`n=`, `state=`, `approved=`), also left in
 # _PROOF_PLACE; 2 when it cannot be read. lib/proof.sh, beside this file, is loaded the first time.
 _run_place() {
-  if ! declare -F proof_step_held >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(_run_self_dir)" && pwd -P)/proof.sh" >/dev/null 2>&1
-    declare -F proof_step_held >/dev/null 2>&1 || return 2
-  fi
+  bionic_need proof.sh proof_step_held || return 2
   proof_step_held "$1"
 }
 
-_run_reader() {  # -> 0 once lib/reader.sh, beside this file, is loaded in this shell
-  declare -F reader_main >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$(cd "$(_run_self_dir)" && pwd -P)/reader.sh"
-}
+_run_reader() { bionic_need reader.sh reader_main; }  # -> 0 once lib/reader.sh, beside this file, is loaded in this shell
 
 # run_step <plan> -> the reader's `step` answer for the plan's run: `n=<step>` when one stands, then
 # `state=open|delivered|abandoned`, read from its log. A caller that prints a run's step or tells a delivered run
@@ -715,12 +684,10 @@ live_runs() {
   done
   [ -n "$secs" ] || return 1
 
-  now="${BIONIC_NOW_EPOCH:-}"
-  case "$now" in ''|*[!0-9]*) now=$(date +%s) ;; esac
+  now="$(time_now)"
   cutoff=$(( now - secs ))
 
-  # THE MTIME READ IS THE FLEET'S (hooks/session-poker.sh:422 et al.): BSD `stat -f` first,
-  # GNU `stat -c` second. A path this cannot stat is NOT live — the fail-closed direction,
+  # THE MTIME READ IS lib/time.sh's `file_mtime`. A path this cannot stat is NOT live — the fail-closed direction,
   # because the cost of dropping it is `plan=none` and a bind the model makes by hand, while
   # the cost of admitting it is a session bound to a file nothing can read.
   #
@@ -730,7 +697,7 @@ live_runs() {
   # and it preserves the order it was handed line for line.
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    mt=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null) || mt=""
+    mt=$(file_mtime "$f") || mt=""
     case "$mt" in ''|*[!0-9]*) continue ;; esac
     [ "$mt" -ge "$cutoff" ] || continue
     printf '%s\n' "$f"
@@ -816,12 +783,7 @@ session_binding() {
   seal_binding_get "$1" "$2"
 }
 
-_run_seal() {  # -> 0 once lib/seal.sh, beside this file, is loaded in this shell
-  declare -F seal_binding_get >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$(cd "$(_run_self_dir)" && pwd -P)/seal.sh" >/dev/null 2>&1
-  declare -F seal_binding_get >/dev/null 2>&1
-}
+_run_seal() { bionic_need seal.sh seal_binding_get; }  # -> 0 once lib/seal.sh, beside this file, is loaded in this shell
 
 # session_plan <root> <sid> -> the session's bound plan on stdout, exit 0; exit 1 and silent
 # when there is no binding to report.
@@ -988,11 +950,14 @@ session_working_branch() {
   esac
   wb=$(plan_working_branch "$plan")
   if [ -z "$wb" ]; then
-    printf 'no-working-branch plan=%s\n' "$plan"
+    run_no_branch_why "$plan"; printf '\n'
     return 4
   fi
   printf '%s\n' "$wb"
 }
+
+# run_no_branch_why <plan> -> the no-working-branch reason, no newline, as the landing prints it too
+run_no_branch_why() { printf 'no-working-branch plan=%s' "$1"; }
 
 # plan_working_branch <plan> -> the plan's `working-branch:`, or nothing (wave-35 T7; REQ-5 AC-5.3, D14).
 # THE ONE READER OF THE WORKING BRANCH. The frontmatter key, which a plan written by Step 0 carries, read by the

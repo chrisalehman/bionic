@@ -923,4 +923,43 @@ else
   fi
 fi
 
+section "Section 7: a split on the separator saves and restores the shell's state through one pair"
+# fails-when: the pair leaves globbing off or IFS on the separator after the split, globs a word
+# while splitting, or a library splits a separator-joined list with a save-and-restore of its own.
+SPLIT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/git-argv-split.XXXXXX")"; cleanup_dirs+=("$SPLIT_DIR")
+: > "$SPLIT_DIR/planted"
+split_words() {  # <globbing before: on|off> -> the words, the IFS after, the globbing after
+  ( cd "$SPLIT_DIR" || exit 1
+    IFS=":"; if [ "$1" = off ]; then set -f; else set +f; fi
+    _sw_in="a b${US}*${US}c:d"
+    git_argv_split_on
+    # shellcheck disable=SC2086  # the split under test
+    set -- $_sw_in
+    git_argv_split_off
+    _sw_f=on; case "$-" in *f*) _sw_f=off ;; esac
+    printf '%s|' "$#" "$@" "[$IFS]" "$_sw_f" )
+}
+eq "7a: with globbing on, three words split on the separator, the star unglobbed, and both put back" \
+  "3|a b|*|c:d|[:]|on|" "$(split_words on)"
+eq "7b: with globbing already off, it stays off after the split" \
+  "3|a b|*|c:d|[:]|off|" "$(split_words off)"
+# Each `set -- $list` in the three libraries is read with the statement before it. Every one led by
+# the pair is the positive; one led by an IFS set to the separator by hand is a copy.
+split_leads() {  # <lib>... -> the statement before each `set -- $…` line, trimmed
+  awk 'FNR == 1 { prev = "" }
+       /^[[:space:]]*set -- \$/ { print prev }
+       { s = $0; sub(/^[[:space:]]+/, "", s) }
+       s != "" && s !~ /^#/ { prev = s }' "$@"
+}
+SPLIT_LIBS=("$LIBDIR/git-argv.sh" "$LIBDIR/grant.sh" "$LIBDIR/walls.sh")
+SPLIT_LEADS="$(split_leads "${SPLIT_LIBS[@]}")"
+SPLIT_PAIRED="$(printf '%s\n' "$SPLIT_LEADS" | /usr/bin/grep -c '^git_argv_split_on$' || true)"
+SPLIT_COPIES="$(printf '%s\n' "$SPLIT_LEADS" | /usr/bin/grep -cE 'IFS="\$(GIT_ARGV_US|_u)"$' || true)"
+if [ "$SPLIT_PAIRED" -gt 0 ]; then
+  ok "7c: the libraries' splits on the separator are led by the pair ($SPLIT_PAIRED found)"
+else
+  no "7c: the libraries' splits on the separator are led by the pair" "only $SPLIT_PAIRED found"
+fi
+eq "7d: no split in the three libraries sets IFS to the separator by hand" "0" "$SPLIT_COPIES"
+
 finish

@@ -53,20 +53,24 @@ RP_PAYLOAD
 # The orchestrator's own call carries no agent_id: it is never a ruling's writer.
 [ -n "${_rp_aid:-}" ] || exit 0
 [ -n "$_rp_sid" ] || _rp_sid="${_rp_psid:-}"
-if [ -z "$_rp_root" ] && [ -n "${_rp_cwd:-}" ] && [ -r "$_rp_lib/root.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_rp_lib/root.sh" 2>/dev/null && _rp_root="$(project_root "$_rp_cwd" 2>/dev/null)"
+if [ -z "$_rp_root" ] && [ -n "${_rp_cwd:-}" ]; then
+  bionic_need root.sh project_root 2>/dev/null && _rp_root="$(project_root "$_rp_cwd" 2>/dev/null)"
 fi
 { [ -n "$_rp_sid" ] && [ -n "$_rp_root" ]; } || exit 0
-_rp_roster="$_rp_root/.bionic/tmp/roster-${_rp_sid}.state"
+_rp_roster="$(roster_path "$_rp_root" "$_rp_sid")"
 _rp_flag="$(ruling_pending_flag "$_rp_roster")" || exit 0
 [ -e "$_rp_flag" ] || exit 0
 
 _rp_name=""
-if _rp_row="$(roster_row_for_id "$_rp_roster" "$_rp_aid")"; then
-  _rp_name="$(printf '%s\n' "$_rp_row" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }')"
+if _rp_row="$(roster_row_for_id "$_rp_roster" "$_rp_aid")" && bionic_need fields.sh line_value 2>/dev/null; then
+  _rp_name="$(line_value "$_rp_row" name)"
 fi
-[ -n "$_rp_call" ] || _rp_call="pid$$-$RANDOM"
+# A call the payload names no id for gets one made from this process's own pid (lib/root.sh `bionic_id`, loaded
+# through roster.sh's loader); with no id to claim by, nothing is pushed.
+if [ -z "$_rp_call" ]; then
+  { bionic_need root.sh bionic_id && bionic_id; } 2>/dev/null || exit 0
+  _rp_call="pid$BIONIC_ID"
+fi
 # A ruling already shown (acknowledged, or printed by a guard) is read, so it is never pushed.
 _rp_ctx=""
 while IFS="$RULING_US" read -r _rp_id _rp_w _rp_rec _rp_p _rp_c _rp_s _rp_b _rp_t; do

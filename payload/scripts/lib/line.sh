@@ -64,24 +64,19 @@
 #
 # bash 3.2 (ADR-001): no associative arrays in bash, no BASHPID; the fold is one awk.
 
-_line_self_dir() { dirname "${BASH_SOURCE[0]}"; }
-_LINE_LIB_DIR="$( cd "$(_line_self_dir)" 2>/dev/null && pwd -P )"
-if ! declare -F _wt_proofs_put >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_LINE_LIB_DIR/worktree.sh"
-fi
+_LINE_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
+# shellcheck source=/dev/null
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
+bionic_need worktree.sh _wt_proofs_put
 # THE LIVENESS RULE IS slots.sh's (`_slots_alive`, `_slots_since`) and so is the lock's take-over
 # (`_slots_take_one`: mkdir, then a dead holder reaped under the store's reap lock, once).
-if ! declare -F _slots_take_one >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_LINE_LIB_DIR/slots.sh"
-fi
+bionic_need slots.sh _slots_take_one
 # HOW A SUITE RUNS IS suite.sh's (wave-33 T2; D3): the landing's two spawns, the runner and its suite,
 # are jobs of their own (`bionic_job`, `bionic_suite_start`), so the suite starts as the whole run starts it.
-if ! declare -F bionic_suite_start >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$_LINE_LIB_DIR/suite.sh"
-fi
+bionic_need suite.sh bionic_suite_start
 
 # What the caller of `line_publish` says it is: the queue's carrier (`ready`) by default; the hand
 # landing sets kind=hand, the git user and the reason. Both set the session the publish's plan write
@@ -92,15 +87,20 @@ LINE_PROMISED=-; LINE_ACTUAL=-   # the last run's promised and actual seconds (w
 # THE SUITE BAR (wave-39 T6; D1; spec §3 "the two bars"): ten minutes of the gate's promise (`_gate_seconds`).
 # Defined here and nowhere else; `ready` refuses a Lands-on suite promising more (`_line_too_long`, wave-39 T39).
 LINE_SUITE_BAR=600
+# THE LOAD THE BAR IS JUDGED AT: none. The gate scales a promise by the load at the moment of asking, so the same suite
+# passed the bar on a quiet machine and failed it on a busy one, and the landing and the brief could differ at one
+# instant. The bar asks the promise at this load (a load below one counts as one), so its verdict is the same at any load.
+# The gate's own waits keep the scaling by the load now; only the bar's verdict is fixed.
+LINE_BAR_LOAD=0
 # THE LANDING BAR (wave-39 T9; D12, D25; AC-5.1, AC-5.2): fifteen minutes ready→landed. The sitrep's schedule
 # line prints the run's median ready→landed against it, and the scorecard's widest landing names it as its
 # target; both read it through session-poker.sh `sitrep_bar`, and nothing else defines it.
 LINE_LANDING_BAR=15
 
-_line_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-_line_pid() { exec sh -c 'echo "$PPID"'; }   # as `$(_line_pid)`: this (sub)shell's own pid, which `$$` is not
+_line_now() { iso_now; }
 _line_me() {  # sets LINE_ME to `<pid>:<start>` of the calling (sub)shell; never call it inside `$( )`
-  local p; p="$(_line_pid)"
+  local p=""   # this (sub)shell's own pid, which `$$` is not, as lib/root.sh `bionic_id` reads it
+  ! bionic_need root.sh bionic_id || ! bionic_id || p="${BIONIC_ID%%.*}"
   LINE_ME="${p}:$(_slots_since "$p")"
 }
 _line_alive() {  # <pid>:<start> -> 0 while that process lives and started then
@@ -121,30 +121,18 @@ line_record() {  # <plan> -> the run's log, the record every landing fact is rea
   root="$(_line_root "${1:-}")" || return 1
   _wt_proofs_path "$root" "$1"
 }
-_line_load_run() {
-  declare -F plan_working_branch >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/run.sh" ] && . "$_LINE_LIB_DIR/run.sh" 2>/dev/null
-  declare -F plan_working_branch >/dev/null 2>&1
-}
 # The plan's working branch through lib/run.sh `plan_working_branch`, the one reader: SDLC State, then
 # frontmatter (wave-35 T7; D14). It read the frontmatter alone, so the publish disagreed with `ready`.
 _line_branch() {  # <plan> -> its working-branch
-  _line_load_run || return 1
+  bionic_need run.sh plan_working_branch || return 1
   plan_working_branch "$1"
 }
 # The accepted head is the working branch's REF, read by lib/proof.sh `proof_branch_head`, the one reader of the
 # head the judge, proof-add, waive and a record row's landing ask: this read the ref by hand, a second spelling of the
 # same question.
-_line_load_proof() {
-  declare -F proof_branch_head >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
-  declare -F proof_branch_head >/dev/null 2>&1
-}
 line_head() {  # <plan> -> the accepted head
   local root
-  root="$(_line_root "${1:-}")" && _line_load_proof || return 1
+  root="$(_line_root "${1:-}")" && bionic_need proof.sh proof_branch_head || return 1
   proof_branch_head "$1" "$root"
 }
 
@@ -161,13 +149,8 @@ line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not
   local plan="${1:-}" ev="${2:-}" log
   [ -n "$plan" ] && [ -n "$ev" ] || return 1
   shift 2
-  log="$(line_log "$plan")" && _line_log_load || return 1
+  log="$(line_log "$plan")" && bionic_need log.sh log_append || return 1
   RUN_LOG="$log" log_append "$ev" "$@" || return 1
-}
-_line_log_load() {  # -> 0 once lib/log.sh's appender is loaded
-  declare -F log_append >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$_LINE_LIB_DIR/log.sh" 2>/dev/null && declare -F log_append >/dev/null 2>&1
 }
 # ONE WRITER FOR EACH EVENT TYPE MORE THAN ONE PLACE APPENDS: each place calls its type's function with its own fields,
 # so a type is written one way. A type that names two facts is told apart by a field it already carries: a part's
@@ -180,7 +163,7 @@ line_returned_event() { local p="${1:-}"; shift; line_event "$p" returned "$@"; 
 line_verdict_event() { local p="${1:-}"; shift; line_event "$p" verdict "$@"; }
 line_run_event() {  # <run log> <key=value>... -> 0 appended, 1 not
   local log="${1:-}"
-  [ -n "$log" ] && shift && _line_log_load || return 1
+  [ -n "$log" ] && shift && bionic_need log.sh log_append || return 1
   RUN_LOG="$log" log_append run "$@"
 }
 # AN ACT TAKEN BY HAND SAYS WHAT IT WAS AND WHY: every hand event is written here, and one with no reason (empty, blank,
@@ -224,8 +207,7 @@ line_hand_event() {  # <plan> <what> <why> [<key=value>...] -> 0 appended, 1 not
 #   is asked. The gate reads it so.
 line_merge_seen() {
   local plan="${1:-}" root="${2:-}" mode="${3:-}" wb ib head ref name tip pr url pc pb pbase err ans st oid
-  _line_load_run && _line_load_proof && { declare -F plan_integration_branch >/dev/null 2>&1 || . "$_LINE_LIB_DIR/plan.sh" 2>/dev/null; } \
-    && declare -F plan_integration_branch >/dev/null 2>&1 \
+  bionic_need run.sh plan_working_branch && bionic_need proof.sh proof_branch_head && bionic_need plan.sh plan_integration_branch \
     || { printf 'unread\t-\t-\tthe plan readers (lib/run.sh, lib/proof.sh, lib/plan.sh) cannot be loaded\n'; return 2; }
   wb="$(plan_working_branch "$plan")"; ib="$(plan_integration_branch "$plan")"
   [ -n "$wb" ] || { printf 'unread\t-\t-\tthe plan names no working branch in its header\n'; return 2; }
@@ -293,7 +275,7 @@ line_merge_seen() {
 #       2  failed   the tags of origin cannot be read, or the tag or its push failed; nothing was left made
 line_tag_merge() {
   local plan="${1:-}" root="${2:-}" c="${3:-}" mode="${4:-}" rel tag ah here="" there="" out err made=no s
-  _line_load_run && _line_load_proof \
+  bionic_need run.sh plan_working_branch && bionic_need proof.sh _proof_records \
     || { printf 'none\t-\tthe plan readers (lib/run.sh, lib/proof.sh) cannot be loaded\n'; return 1; }
   rel="$(plan_frontmatter_get "$plan" release 2>/dev/null)"
   [ -n "$rel" ] || { printf 'none\t-\tno tag: the plan names no release:\n'; return 1; }
@@ -338,17 +320,20 @@ line_tag_merge() {
   printf 'tagged\t%s\t%s at the merge commit %s, pushed to origin\n' "$tag" "$tag" "$s"
   return 0
 }
-# line_merge_ask_key <working branch> -> the register's key of a request closed unmerged: each character outside
-# [A-Za-z0-9._-] written `:`, as the publish verb writes its own `pr:` key
-line_merge_ask_key() { printf 'pr-closed:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }
+# line_ask_key <prefix> <branch> -> the one maker of the pr: and pr-closed: keys open asks are found by
+line_ask_key() { printf '%s:%s' "$1" "$(printf '%s' "$2" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }
+line_merge_ask_key() { line_ask_key pr-closed "$1"; }   # <working branch>
 _line_merge_ask() {  # <plan> <root> <mode> <working branch> <open|close> [<address>] -> always 0; acts under --fetch alone
-  [ "$3" = --fetch ] && _line_load_owed || return 0
-  local key; key="$(line_merge_ask_key "$4")"
+  [ "$3" = --fetch ] && bionic_need owed.sh owed_close || return 0
+  local key sid="${CLAUDE_CODE_SESSION_ID:-}"; key="$(line_merge_ask_key "$4")"
+  # With no session, the store's stand-in is an id of this process (lib/root.sh `bionic_id`, its dots written `-` as
+  # a session id's alphabet asks), so two landings in sibling subshells never write under one.
+  [ -n "$sid" ] || { bionic_need root.sh bionic_id && bionic_id && sid="merge-seen-${BIONIC_ID//./-}"; } || return 0
   case "$5" in
-    open) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${CLAUDE_CODE_SESSION_ID:-merge-seen-$$}" owed_open "$key" \
+    open) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="$sid" owed_open "$key" \
             "the pull request was closed unmerged" \
             "$6 of $4 was closed without a merge: reopen it, or park the run with a ## Wake Note" >/dev/null 2>&1 ;;
-    close) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${CLAUDE_CODE_SESSION_ID:-merge-seen-$$}" owed_close "$key" "merge-seen" >/dev/null 2>&1 ;;
+    close) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="$sid" owed_close "$key" "merge-seen" >/dev/null 2>&1 ;;
   esac
   return 0
 }
@@ -469,7 +454,7 @@ $(_line_fold "$rec")
 EOF
   last="$(printf '%s\n' "$named" | awk 'NF { l = $0 } END { print l }')"
   [ -n "$last" ] || last="$(git -C "$root" rev-parse --verify -q "${head}^1" 2>/dev/null)"
-  _wt_units_load || return 0
+  bionic_need units.sh units_rows || return 0
   while IFS= read -r rec_row; do
     row="$(units_field "$rec_row" id)"; cell="$(units_field "$rec_row" worktree)"
     case "$row" in ''|*[[:space:]\|]*) continue ;; esac
@@ -627,12 +612,8 @@ _line_roster_mark() {  # <plan> <root> <row> <commit> <at>
   local roster
   LINE_MARKED=""
   [ -n "$LINE_SID" ] || return 0
-  if ! declare -F roster_mark_landed >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    [ -r "$_LINE_LIB_DIR/roster.sh" ] && . "$_LINE_LIB_DIR/roster.sh" 2>/dev/null
-    declare -F roster_mark_landed >/dev/null 2>&1 || return 0
-  fi
-  roster="${2%/}/.bionic/tmp/roster-${LINE_SID}.state"
+  bionic_need roster.sh roster_mark_landed || return 0
+  roster="$(roster_path "${2%/}" "$LINE_SID")"
   # A run adopted after a clear (no launch line on this roster) is marked too: the writer is then the
   # plan row's agent cell. No row of the name, no mark.
   line_row_writer "$roster" "$1" "$3" || return 0
@@ -646,7 +627,7 @@ _line_roster_mark() {  # <plan> <root> <row> <commit> <at>
 # have to touch a path the set lacks, and the person who reads the line decides.
 _line_release_rows() {  # <plan> -> the id of each doc row at step 7 or later, one a line
   local rec s
-  _wt_units_load || return 1
+  bionic_need units.sh units_rows || return 1
   while IFS= read -r rec; do
     [ -n "$rec" ] && [ "$(units_field "$rec" kind)" = doc ] || continue
     s="$(units_field "$rec" step)"
@@ -667,7 +648,7 @@ EOF
 }
 _line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
   local b
-  _line_release_row "$1" "$2" && _line_load_proof && declare -F proof_door_cover >/dev/null 2>&1 || return 0
+  _line_release_row "$1" "$2" && bionic_need proof.sh proof_door_cover || return 0
   b="$(proof_door_cover "$3" "$4" "$5")" || return 0
   case "$b" in
     owes*) printf 'COVER %s %s owes outside=%s — the release row touches paths outside the release set, so the judge reads its merge as owing and no reading reaches past it; land them in a row of their own, or add them to the set (lib/proof.sh _proof_release_path)\n' "$2" "$5" "${b#*	}" ;;
@@ -693,7 +674,7 @@ _line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
 # whether the release has landed; nothing when none has.
 _line_release_landed() {
   local r lands
-  _wt_units_load || return 0
+  bionic_need units.sh units_rows || return 0
   lands="$(units_record_landings "$2" | cut -f2)"
   while IFS= read -r r; do
     [ -n "$r" ] || continue
@@ -709,7 +690,7 @@ _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothi
   _line_release_row "$plan" "$row" && return 0
   landed="$(_line_release_landed "$plan" "$rec")"
   [ -n "$landed" ] || return 0
-  _line_load_run || { LINE_NUMBERS_SAID="the run library ($_LINE_LIB_DIR/run.sh) cannot be loaded to read the release"; return 1; }
+  bionic_need run.sh plan_working_branch || { LINE_NUMBERS_SAID="the run library ($_LINE_LIB_DIR/run.sh) cannot be loaded to read the release"; return 1; }
   ver="$(plan_frontmatter_get "$plan" release)"
   [ -n "$ver" ] || return 0
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/line-numbers.XXXXXX")" || { LINE_NUMBERS_SAID="no temporary directory"; return 1; }
@@ -718,7 +699,7 @@ _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothi
     inb && /^### / { t = $0; sub(/[[:space:]]+$/, "", t); if (t == "### The landing numbers") f = 1 }
     END { exit !f }' "$tmp/old" || { rm -rf "$tmp"; return 0; }
   now="$(date -u +%s)"
-  on="$(date -u -r "$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((now - 1))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  on="$(epoch_iso "$((now - 1))")"
   # THE JUDGE'S COPY RENDERS. The release check compares the block with its own release-note, and the copy that runs
   # is the release base's (lib/worktree.sh `worktree_check_run`), so the block is rendered by that copy too, checked
   # out in a landing tree: a change to the renderer reaches the entry one release later, never refused by its own
@@ -772,7 +753,7 @@ _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothi
 # the render must stay deterministic: the run's facts and the entry alone decide it.
 line_reviews_part() {  # <plan> -> the rendered part, heading to its closing blank line; nothing when it lists nothing; 2 unread
   local f
-  _line_load_proof || return 1
+  bionic_need proof.sh _proof_records || return 1
   f="$(_proof_ask "$1" reader_q_reviews "$1")" || return 2
   printf '%s\n' "$f" | awk -F'|' "$(proof_fact_awk)"'
     function base(p,   n, e) { n = split(p, e, "/"); return e[n] }
@@ -823,7 +804,7 @@ LINE_RV_STATE=""; LINE_RV_VER=""; LINE_RV_N=0; LINE_RV_SAID=""
 line_reviews_state() {
   local plan="$1" root="$2" c="$3" nm="$4" out="$5" tmp
   LINE_RV_STATE=none; LINE_RV_VER=""; LINE_RV_N=0; LINE_RV_SAID=""
-  _line_load_run || { LINE_RV_SAID="the run library ($_LINE_LIB_DIR/run.sh) cannot be loaded to read the release"; return 1; }
+  bionic_need run.sh plan_working_branch || { LINE_RV_SAID="the run library ($_LINE_LIB_DIR/run.sh) cannot be loaded to read the release"; return 1; }
   LINE_RV_VER="$(plan_frontmatter_get "$plan" release)"
   [ -n "$LINE_RV_VER" ] || { LINE_RV_SAID="the plan names no release:"; return 0; }
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/line-reviews.XXXXXX")" || { LINE_RV_SAID="no temporary directory"; return 1; }
@@ -899,13 +880,13 @@ line_reviews_move() {
 # (lib/owed.sh `owed_close`), so neither a waiver nor a step back is needed. Fail closed: a judge that cannot answer
 # admits nothing and closes nothing.
 _line_born_records() {  # <plan> <row> -> each review record the row's born marker names, once each
-  _wt_units_load || return 1
+  bionic_need units.sh units_rows || return 1
   units_born_findings "$1" 2>/dev/null | awk -F'\t' -v r="$2" '
     $1 == r { sub(/#[0-9]+$/, "", $3); if (!($3 in s)) { s[$3] = 1; print $3 } }'
 }
 _line_judged() {  # <plan> -> the judge's lines at the accepted head; 1 when it cannot answer
   local head out rc
-  _line_load_proof && declare -F facts_state >/dev/null 2>&1 || return 1
+  bionic_need proof.sh facts_state || return 1
   head="$(line_head "$1")" && [ -n "$head" ] || return 1
   out="$(facts_state "$1" "$head" 2>/dev/null)"; rc=$?
   [ "$rc" -le 1 ] || return 1
@@ -922,12 +903,6 @@ line_born_failing() {  # <plan> <root> <tree abs> -> 0 when the tree's row is bo
   recs="$(_line_born_records "$1" "$row")" && [ -n "$recs" ] || return 1
   judged="$(_line_judged "$1")" || return 1
   [ -n "$(_line_failing "$judged" "$recs")" ]
-}
-_line_load_owed() {
-  declare -F owed_close >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/owed.sh" ] && . "$_LINE_LIB_DIR/owed.sh" 2>/dev/null
-  declare -F owed_close >/dev/null 2>&1
 }
 # The records a landed row answers: those its born marker names, and those of every finding a landing of it settled,
 # once each. A settlement is the landing's move to fixed (`line_settled`); an older run's stands as an `ev=settled`
@@ -954,7 +929,7 @@ _line_landing_moves() {
 _line_born_close() {  # <plan> <root> <row>
   local recs qs judged q pl
   recs="$(_line_answered_records "$1" "$3")" && [ -n "$recs" ] || return 0
-  _line_load_proof || return 0
+  bionic_need proof.sh _proof_records || return 0
   pl="$(proof_lines "$1")" || return 2
   qs="$(printf '%s\n' "$pl" | LINE_RECS="$recs" awk "$(proof_awk)"'
     BEGIN { n = split(ENVIRON["LINE_RECS"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1 }
@@ -962,7 +937,7 @@ _line_born_close() {  # <plan> <root> <row>
       && !(PROOF_QUESTION in s) { s[PROOF_QUESTION] = 1; print PROOF_QUESTION }')"
   [ -n "$qs" ] || return 0
   judged="$(_line_judged "$1")" || return 0
-  _line_load_owed || return 0
+  bionic_need owed.sh owed_close || return 0
   for q in $qs; do
     printf '%s\n' "$judged" | awk -F'\t' -v q="$q" '$1 == "review" && $2 == q && $5 == "failing" { y = 1 } END { exit !y }' \
       && continue
@@ -975,8 +950,7 @@ _line_born_close() {  # <plan> <root> <row>
 # that event, so each open `finding:` ask answered carry with the event `<row> lands` closes here, by the landing.
 _line_carried_close() {  # <plan> <root> <row>
   local k
-  _line_load_owed || return 0
-  declare -F owed_answers >/dev/null 2>&1 || return 0
+  bionic_need owed.sh owed_answers || return 0
   for k in $(owed_answers "$1" "$2" 2>/dev/null | awk -F'\t' -v ev="$3 lands" 'index($1, "finding:") == 1 && $2 == "carry" && $4 == ev { print $1 }'); do
     OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${LINE_SID:-line}" owed_close "$k" "landing ${3}" >/dev/null 2>&1
   done
@@ -1016,7 +990,7 @@ _line_site_map() {  # <root> <path> <line> <from head> <to head> -> the line's n
 }
 _line_review_sites() {  # <plan> <docs root> -> `<record>#<n> TAB <path> TAB <line> TAB <head>` per finding with a site, every registered review; 2 the run's facts unread
   local ev h pl
-  _line_load_proof || return 0
+  bionic_need proof.sh _proof_records || return 0
   pl="$(proof_lines "$1")" || return 2
   for ev in $(printf '%s\n' "$pl" | awk "$(proof_awk)"'
       proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" && !(PROOF_EVIDENCE in s) { s[PROOF_EVIDENCE] = 1; print PROOF_EVIDENCE }'); do
@@ -1065,10 +1039,10 @@ line_settle() {
   local plan="$1" row="$2" com="$3" copy="$4" at="$5" root docs own sites osites moves id
   LINE_SETTLED_F=""
   root="$(_line_root "$plan")" || return 0
-  _line_load_proof || return 0
+  bionic_need proof.sh _proof_records || return 0
   _proof_roots_load; docs="$(docs_root "$root" 2>/dev/null)"
   moves="$(_line_moves "$plan")" || return 1
-  _wt_units_load >/dev/null 2>&1
+  bionic_need units.sh units_rows >/dev/null 2>&1
   # What the row answers: born of it, moved fixed to it, carried to it.
   own="$( { units_born_findings "$copy" 2>/dev/null | awk -F'\t' -v r="$row" '$1 == r { print $3 }'
             printf '%s\n' "$moves" | awk -F'\t' -v r="$row" '($2 == "fixed" || $2 == "carried") && $3 == r { print $1 }'; } | awk 'NF && !s[$0]++')"
@@ -1098,7 +1072,7 @@ line_settled() {
       || printf 'line: the landing of %s settled %s, and its move to fixed could not be written to the run log\n' "$row" "$id" >&2
   done
   if [ -n "$LINE_SETTLED_F" ]; then
-    _line_load_owed || return 1
+    bionic_need owed.sh owed_close || return 1
     for id in $LINE_SETTLED_F; do
       k="$(finding_owed_key "$id")"
       OWED_ROOT="$root" OWED_PLAN="$plan" OWED_SID="${LINE_SID:-line}" owed_close "$k" "landing ${row}" >/dev/null 2>&1
@@ -1227,7 +1201,7 @@ line_landing_writes() {
   local plan="$1" row="$2" com="$3" at="$4" root
   LINE_SETTLED_F=""
   _line_plan_agent "$plan" "$row" >/dev/null || return 0
-  root="$(_line_root "$plan")" && _line_load_proof || return 1
+  root="$(_line_root "$plan")" && bionic_need proof.sh _proof_records || return 1
   line_settle "$plan" "$row" "$com" "$plan" "$at" || return 1
   line_settled "$plan" "$root" "$row" "$com"
 }
@@ -1240,7 +1214,7 @@ line_landing_writes() {
 # session bound to it, whose run closes with these last landings (lib/run.sh `session_working_branch` admits a closed
 # bound plan for the same reason). A tree with no record of its own is read through the binding alone, as before.
 # Sets LINE_RUN_PLAN, LINE_RUN_ONTO and LINE_RUN_BY (the spawning session; empty for a tree with no record); rc 1 with
-# the refusal's words in LINE_RUN_WHY. Needs lib/run.sh loaded (`_line_load_run`).
+# the refusal's words in LINE_RUN_WHY. Needs lib/run.sh loaded.
 _line_same_file() {  # <path> <path> -> 0 when both name one file, spelled alike or through links
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   [ "$1" = "$2" ] && return 0
@@ -1275,7 +1249,7 @@ line_tree_run() {  # <tree> <root> <sid>
        esac ;;
   esac
   LINE_RUN_ONTO="$(plan_working_branch "$tp")"
-  [ -n "$LINE_RUN_ONTO" ] || { LINE_RUN_WHY="no-working-branch plan=${tp}"; return 1; }
+  [ -n "$LINE_RUN_ONTO" ] || { LINE_RUN_WHY="$(run_no_branch_why "$tp")"; return 1; }
   LINE_RUN_PLAN="$tp"
 }
 # THE SESSION A LANDING RUNS UNDER. The publish writes the plan through a plan verb, which writes only the plan its
@@ -1311,7 +1285,7 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
     case "$log" in *'|'*|*$'\n'*|*$'\r'*) _wt_refuse "log-unwritable path=${target:-<none>} — the log path holds a | or a line break"; return 2 ;; esac
   fi
   [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
-  _line_load_run || { _wt_refuse "run-library-unloadable path=${_LINE_LIB_DIR}/run.sh"; return 2; }
+  bionic_need run.sh plan_working_branch || { _wt_refuse "run-library-unloadable path=${_LINE_LIB_DIR}/run.sh"; return 2; }
   line_tree_run "$target" "$root" "$sid" || { _wt_refuse "$LINE_RUN_WHY"; return 2; }
   onto="$LINE_RUN_ONTO"; plan="$LINE_RUN_PLAN"
   for s in "$sid" "$LINE_RUN_BY"; do _line_bound_to "$root" "$s" "$plan" && break; s=""; done
@@ -1395,7 +1369,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
         esac
         _line_stale_say "$plan" "$row" "$root" "$base" "$c"; lc=$?
         if [ "$lc" != 0 ]; then
-          [ "$lc" != 1 ] || _wt_refuse "stale branch=${branch} — the row deletes what the eval of a criterion cites; restate the criterion or have it waived, land again"
+          [ "$lc" != 1 ] || _wt_refuse "stale branch=${branch} — the row deletes what the test of a criterion cites; restate the criterion or have it waived, land again"
           rc=2; break
         fi
         line_candidate_event "$plan" "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
@@ -1437,15 +1411,9 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
 LINE_POLL="${BIONIC_LINE_POLL:-1}"
 case "$LINE_POLL" in ''|.|*.*.*|*[!0-9.]*) LINE_POLL=1 ;; esac   # seconds, whole or decimal; else the default
 
-_line_load_gate() {
-  declare -F gate_ask >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/gate.sh" ] && . "$_LINE_LIB_DIR/gate.sh" 2>/dev/null
-  declare -F gate_ask >/dev/null 2>&1
-}
 _line_plan_agent() {  # <plan> <row> -> the plan row's agent cell
   local rec
-  _wt_units_load || return 1
+  bionic_need units.sh units_rows || return 1
   while IFS= read -r rec; do
     [ "$(units_field "$rec" id)" = "$2" ] || continue
     units_field "$rec" agent; return 0
@@ -1496,12 +1464,6 @@ _line_cmd_suite() {  # <command>
 # off the launch line alone. The id is the latest one a row of the name carries since the name's latest launch
 # line: a launch line has none until the recorder identifies the agent, and a roster with no launch line of the
 # name (the adopted one) holds the id on the adopted row. No id, no pick: the caller keeps the launch line.
-_line_load_roster() {
-  declare -F roster_row_for_id >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/roster.sh" ] && . "$_LINE_LIB_DIR/roster.sh" 2>/dev/null
-  declare -F roster_row_for_id >/dev/null 2>&1
-}
 # THE ROW'S WRITER, FOUND ONCE (wave-34 T4; burns debt row-writer-name). The launch line is the roster's
 # row by `row=`, else by the plan row's agent cell as `name=` (labels, D4); the row the walls read is the
 # latest row of that name's agent id (`_line_current_row`), else the launch line (an adopted row, with no
@@ -1530,12 +1492,12 @@ line_row_writer() {  # <roster> <plan> <row> [<agent>]
 _line_current_row() {  # <roster> <name> -> the row the walls read for that agent; 1 when no id is known
   local roster="${1:-}" name="${2:-}" id
   { [ -n "$name" ] && [ -f "$roster" ] && [ ! -L "$roster" ]; } || return 1
-  _line_load_roster || return 1
-  id="$(awk -F'|' -v k="|name=${name}|" '
+  bionic_need roster.sh roster_row_for_id || return 1
+  id="$(awk -F'|' -v k="|name=${name}|" "$_LINE_FIELDS_AWK"'
     index($0, "roster-state/") != 1 || !index($0 "|", k) { next }
     index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|extended=") \
       && !index($0, "|held=") && !index($0, "|adopted_from=") { id = "" }
-    { for (i = 2; i <= NF; i++) if (index($i, "agent_id=") == 1) { if (length($i) > 9) id = substr($i, 10); break } }
+    (v = line_kv("agent_id")) != "" { id = v }
     END { print id }' "$roster" 2>/dev/null)"
   [ -n "$id" ] || return 1
   roster_row_for_id "$roster" "$id"
@@ -1562,8 +1524,8 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   local target="${1:-}" root="${2:-}" sid="${3:-}" within="${4:-}" again="${5:-}"
   local onto plan wt branch head acc c row roster roster0="" lsid launch now key name lands suites debt rec deadline=""
   [ -n "$sid" ] || { _wt_refuse "no-session path=${target:-<none>}"; return 2; }
-  _line_load_run || { _wt_refuse "run-library-unloadable path=${_LINE_LIB_DIR}/run.sh"; return 2; }
-  _line_load_gate || { _wt_refuse "gate-library-unloadable path=${_LINE_LIB_DIR}/gate.sh"; return 2; }
+  bionic_need run.sh plan_working_branch || { _wt_refuse "run-library-unloadable path=${_LINE_LIB_DIR}/run.sh"; return 2; }
+  bionic_need gate.sh gate_ask || { _wt_refuse "gate-library-unloadable path=${_LINE_LIB_DIR}/gate.sh"; return 2; }
   line_tree_run "$target" "$root" "$sid" || { _wt_refuse "$LINE_RUN_WHY"; return 2; }
   onto="$LINE_RUN_ONTO"; plan="$LINE_RUN_PLAN"
   # THE TREE, JUDGED ONCE: on its branch, then land's own checks.
@@ -1590,9 +1552,10 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   # row's `lands_on=`; the debt is the launch line's `lands_red=` suite, carried on the `ready` event for
   # the debt write (`line_publish` step 6). The asking session's roster first, which holds a row adopted
   # after a clear, then the spawning session's, which holds the launch line a successor never saw.
+  bionic_need roster.sh roster_path
   for lsid in "$sid" "$LINE_RUN_BY"; do
     [ -n "$lsid" ] || continue
-    roster="${root%/}/.bionic/tmp/roster-${lsid}.state"
+    roster="$(roster_path "${root%/}" "$lsid")"
     [ -n "$roster0" ] || roster0="$roster"
     line_row_writer "$roster" "$plan" "$row"
     [ -z "$LINE_NOW" ] || break
@@ -1605,7 +1568,7 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   # recorded for this writer and nobody has shown it is printed here, marked shown (lib/roster.sh
   # `ruling_take_unread`, the commit wall's same read), and the row is not entered in the line: the
   # writer reads it, acts on it, and says ready again, which then passes. Before any record is written.
-  if _line_load_roster && c="$(ruling_take_unread "$roster" "$name" ready)" && [ -n "$c" ]; then
+  if bionic_need roster.sh roster_row_for_id && c="$(ruling_take_unread "$roster" "$name" ready)" && [ -n "$c" ]; then
     _wt_refuse "ruling-unread row=${row} name=${name} — the orchestrator ruled while you worked; read it below, act on it, say ready again"
     printf '%s\n' "$c"
     return 2
@@ -1721,9 +1684,10 @@ LINE_ASSUME
 }
 # The roster row's ack, when the session's roster still holds it open. Sets LINE_ACKED to 1 when this call wrote it.
 _line_close_ack() {  # <root> <name> -> 0 acked or closed already · 1 not written
-  local roster="${1%/}/.bionic/tmp/roster-${LINE_SID:-}.state"
+  local roster
   LINE_ACKED=""
-  [ -n "${LINE_SID:-}" ] && _line_load_roster || return 1
+  [ -n "${LINE_SID:-}" ] && bionic_need roster.sh roster_row_for_id || return 1
+  roster="$(roster_path "${1%/}" "$LINE_SID")"
   roster_open_names "$roster" "$(roster_ack_ledger "$roster")" "$LINE_SID" | grep -xF -- "$2" >/dev/null || return 0
   ( cd "$1" && CLAUDE_CODE_SESSION_ID="$LINE_SID" \
       bash "$_LINE_LIB_DIR/../../hooks/session-sweeper.sh" ack "$2" --by patrol --reason landed ) >/dev/null 2>&1 || return 1
@@ -1735,13 +1699,9 @@ _line_close_ack() {  # <root> <name> -> 0 acked or closed already · 1 not writt
 # last line of ready's output. Nothing when the run holds no debt.
 _line_debt() {  # <plan> <row>
   local cell="" rec
-  if ! declare -F proof_debt_row_counts >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
-    declare -F proof_debt_row_counts >/dev/null 2>&1 || return 0
-  fi
+  bionic_need proof.sh proof_debt_row_counts || return 0
   [ -n "$(proof_debt_items "${1:-}")" ] || return 0
-  _wt_units_load || return 0
+  bionic_need units.sh units_rows || return 0
   while IFS= read -r rec; do
     [ "$(units_field "$rec" id)" = "$2" ] || continue
     cell="$(units_field "$rec" Files)"; break
@@ -1759,7 +1719,7 @@ LINE_DEBT_ROWS
 # owed line stays last. Nothing when the plan has neither field nor level, or when its rows cannot be counted.
 _line_review_born() {  # <plan>
   local cap rows
-  _line_load_run && _wt_units_load || return 0
+  bionic_need run.sh plan_working_branch && bionic_need units.sh units_rows || return 0
   declare -F units_fix_cap >/dev/null 2>&1 && declare -F units_born_counted >/dev/null 2>&1 || return 0
   cap="$(units_fix_cap "${1:-}")" && [ -n "$cap" ] || return 0
   rows="$(units_born_counted "$1" 2>/dev/null)" || return 0
@@ -1807,7 +1767,13 @@ _line_promise_total() {  # <suites, comma-joined | none> <tree> <root> <accepted
   printf '%s\n' "$t"
 }
 
-# THE SUITE BAR, HELD: each Lands-on entry the row's candidate will hold whose `_gate_promise` is over LINE_SUITE_BAR,
+# The seconds the bar judges <gate key> by, in <tree>'s project: the gate's promise asked at LINE_BAR_LOAD. The one reader
+# of the bar's number, for the landing's `_line_too_long` and the brief's bar step alike.
+_line_bar_seconds() {  # <gate key> <tree> -> whole seconds
+  _gate_seconds "$1" "$(_gate_project "${2:-}")" "$LINE_BAR_LOAD" 2>/dev/null
+}
+
+# THE SUITE BAR, HELD: each Lands-on entry the row's candidate will hold whose `_line_bar_seconds` is over LINE_SUITE_BAR,
 # one `too-long <entry> <s>s — split it` line; nothing when none is. The candidate is not built yet, so whether it
 # holds a suite is read as its merge will (`_line_merge_holds`). A suite it will not hold is not judged: one the row
 # removed is recorded absent by the carrier, so a split row naming its old whole still lands, and a name no tree
@@ -1821,7 +1787,7 @@ _line_too_long() {  # <suites, comma-joined | none> <tree> <root> <accepted head
   for s in $(printf '%s\n' "$1" | tr ',' ' '); do
     [ "$s" != none ] || continue
     bionic_lands_cmd "$s" >/dev/null || _line_merge_holds "$3" "$mb" "${4:-}" "${5:-}" "$s" || continue
-    p="$(_gate_promise "$(_line_gate_key "$s")" "${2:-}" 2>/dev/null)"; p="${p##*:}"
+    p="$(_line_bar_seconds "$(_line_gate_key "$s")" "${2:-}")"
     case "$p" in ''|*[!0-9]*) continue ;; esac
     [ "$p" -gt "$LINE_SUITE_BAR" ] && printf 'too-long %s %ss — split it\n' "$s" "$p"
   done
@@ -1988,8 +1954,8 @@ EOF
         *) _wt_refuse "lint-unreadable row=${row} — ${c:-the lint printed nothing}"; return 2 ;;
       esac
     fi
-    # 3c. WHAT AN EVAL CITES, once per candidate and before any suite: a candidate that deletes a section or words a
-    # criterion's eval cites, while the criterion reads as at the row's dispatch and is not waived, returns the row.
+    # 3c. WHAT A TEST CITES, once per candidate and before any suite: a candidate that deletes a section or words a
+    # criterion's test cites, while the criterion reads as at the row's dispatch and is not waived, returns the row.
     if [ "$cited" != "$cand" ]; then
       _line_stale_say "$plan" "$row" "$root" "$cbase" "$cand"
       case $? in 0) cited="$cand" ;; 1) _line_run "$again"; return 1 ;; *) return 2 ;; esac
@@ -2022,7 +1988,10 @@ EOF
       if [ "$(printf '%s\n' "$said" | awk 'NF { n++ } END { print n + 0 }')" -ge 2 ]; then
         said="$(printf '%s\n' "$said" | awk 'NF { l[++n] = $0 } END { print l[n - 1] "," l[n] }')"
         line_event "$plan" stalled "row=${row}" "logs=${said}" >/dev/null
-        printf 'STALLED %s %s\n' "$row" "$said"; return 70
+        # NAME WHAT WAS READ FOR: a none is a log with no end line as often as a run that did not start, and a writer
+        # who is told only the logs cannot tell which. The shape is the one `_line_verdict` matches, for the suite
+        # that lacks it.
+        printf 'STALLED %s %s — neither log holds the end line ready reads: "%s: <p>/<t> passed, <f> failed"\n' "$row" "$said" "$s"; return 70
       fi
       _line_drain_add "$s"
     done
@@ -2119,13 +2088,8 @@ _line_order() {  # <root>
 # The anchor check (lib/anchors.sh), loaded on first use: its lines, and 0 every anchor holds · 1 one moved
 # or cannot be read · 2 the library is not there.
 _line_anchors() {  # <root> <commit>
-  _line_load_anchors || { printf 'anchors-library-unloadable path=%s/anchors.sh\n' "$_LINE_LIB_DIR"; return 2; }
+  bionic_need anchors.sh anchors_check || { printf 'anchors-library-unloadable path=%s/anchors.sh\n' "$_LINE_LIB_DIR"; return 2; }
   anchors_check "$1" "$2"
-}
-_line_load_anchors() {
-  declare -F anchors_check >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/anchors.sh" ] && . "$_LINE_LIB_DIR/anchors.sh" && declare -F anchors_check >/dev/null 2>&1
 }
 
 # THE COMMENT LINT. A comment says what the code does and why; where its history lives belongs to the record. The
@@ -2321,7 +2285,7 @@ _line_lints() {  # <root> <tree> <base> <candidate> -> the row's hits; 0 none ·
   return 1
 }
 
-# A LANDING THAT REMOVES WHAT AN EVAL CITES. An eval names its proof in two shapes a landing can match: a section, the
+# A LANDING THAT REMOVES WHAT A TEST CITES. A test names its proof in two shapes a landing can match: a section, the
 # `§NAME` after the suite it names (`x.test.sh §NAME`), and words it quotes, in backticks or in double quotes. A
 # backtick span that names a suite or a section is the command around them, not words. Free prose is never read, so a
 # criterion written in it holds nothing here. The row's dispatch recorded each criterion's sum
@@ -2360,24 +2324,18 @@ _LINE_CITES_AWK='
       if (ct[k] == "S" && (f == cs[k] || f == "tests/" cs[k]) && sect(s, cw[k])) hit[k] = f
       else if (ct[k] == "W" && index(s, cw[k])) hit[k] = "-" } }
   END { for (k = 1; k <= nk; k++) if (k in hit) printf "%s\t%s\t%s\t%s\n", ct[k], cc[k], hit[k], cw[k] }'
-_line_load_plan_read() {
-  declare -F plan_read_criterion_sums >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/plan-read.sh" ] && . "$_LINE_LIB_DIR/plan-read.sh" 2>/dev/null
-  declare -F plan_read_criterion_sums >/dev/null 2>&1
-}
 _line_stale() {  # <plan> <row> <root> <base> <candidate> -> `<criterion><TAB><what it deletes>` per criterion held; 0 none · 1 held · 2 unreadable
   # The run's facts are the reader's: the sums are the row's dispatch contract as `status` answers it, and a criterion
   # is waived while a waiver is what discharges it (`reader_cells`, the cell question's one fold). The landing decides,
   # so the facts are folded from the log, never served from the kept file.
   local plan="$1" row="$2" root="$3" base="$4" cand="$5" _PROOF_FRESH=1 rec rc cells crit diff hits out="" k c p w
-  _line_load_proof || { printf 'proof-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
+  bionic_need proof.sh _proof_records || { printf 'proof-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
   rec="$(_proof_ask "$plan" reader_q_status "$plan" "$row")"; rc=$?
   case $rc in 0) ;; 1) return 0 ;; *) printf 'log-unreadable plan=%s\n' "$plan"; return 2 ;; esac
   rec="$(printf '%s\n' "$rec" | sed -n 's/^criteria=//p')"
   [ -n "$rec" ] || return 0
-  _line_load_plan_read || { printf 'plan-read-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
-  crit="$(plan_read_criterion_sums "$plan" eval)"
+  bionic_need plan-read.sh plan_read_criterion_sums || { printf 'plan-read-unloadable lib=%s\n' "$_LINE_LIB_DIR"; return 2; }
+  crit="$(plan_read_criterion_sums "$plan" test)"
   case $? in 0) ;; 1) return 0 ;; *) printf 'plan-unreadable plan=%s\n' "$plan"; return 2 ;; esac
   cells="$(_proof_ask "$plan" reader_cells "$plan")" || { printf 'log-unreadable plan=%s\n' "$plan"; return 2; }
   diff="$(git -C "$root" -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --no-renames \
@@ -2415,7 +2373,7 @@ _line_stale_say() {  # <plan> <row> <root> <base> <candidate> -> 0 nothing held 
     0) return 0 ;;
     1) line_returned_event "$1" "row=$2" why=stale "detail=$(printf '%s\n' "$out" | head -1 | tr '|\t' '/ ')" >/dev/null
        printf '%s\n' "$out" | while IFS=$'\t' read -r c w; do
-         printf 'STALE %s %s — the row deletes %s, which the eval of %s cites; restate its row in the Eval design of the plan, or have it waived, then land again\n' "$2" "$c" "$w" "$c"
+         printf 'STALE %s %s — the row deletes %s, which the test of %s cites; restate its row in the Test design of the plan, or have it waived, then land again\n' "$2" "$c" "$w" "$c"
        done
        return 1 ;;
     *) _wt_refuse "stale-unreadable row=$2 — ${out:-the check printed nothing}"; return 2 ;;
@@ -2547,7 +2505,7 @@ EOT
 # --unplaced leaves none), so the runs read here are runs at the tree each record's commit names.
 _line_cause() {  # <plan> <rec> <head> <candidate | empty> <suite>
   local root th tc recs trees run=""
-  root="$(_line_root "$1")" && _line_load_proof || { echo "code -"; return 0; }
+  root="$(_line_root "$1")" && bionic_need proof.sh _proof_records || { echo "code -"; return 0; }
   th="$(git -C "$root" rev-parse -q --verify "${3}^{tree}" 2>/dev/null)"
   tc=""; [ -z "$4" ] || tc="$(git -C "$root" rev-parse -q --verify "${4}^{tree}" 2>/dev/null)"
   recs="$(_proof_records "$root" "$2" | awk -F'\t' -v s="${5##*/}" '$1 == "R" && $5 == "green" && ($4 == s || $4 == "*") { print $3 "\t" $2 "\t" $6 }')"
@@ -2561,12 +2519,8 @@ _line_cause() {  # <plan> <rec> <head> <candidate | empty> <suite>
   fi
   if [ -n "$run" ]; then printf 'environment %s\n' "$run"; else echo "code -"; fi
 }
-_line_load_proof() {
-  declare -F _proof_records >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
-  declare -F _proof_records >/dev/null 2>&1
-}
+# lib/proof.sh loaded, for the poker's parts (hooks/poker/line.sh), which ask for it by this name.
+_line_load_proof() { bionic_need proof.sh _proof_records; }
 # The remembered run of <suite> at <head>: `<green|red><TAB><log>` of its latest such verdict, or nothing.
 _line_head_verdict() {  # <rec> <head> <suite>
   line_lines "$1" | awk -F'|' -v c="$2" -v s="$3" "$_LINE_FIELDS_AWK"'
@@ -2606,8 +2560,12 @@ _line_debt_write() {  # <rec> <row> <row commit> <candidate> <row branch> <at>
   local d
   LINE_DEBT_ID=""; LINE_DEBT_SUITE=""
   d="$(_line_declared "$1" "$2" "$4")" || return 0
-  LINE_DEBT_SUITE="$d"; LINE_DEBT_ID="$$.${RANDOM}${RANDOM}"
-  _wt_debt_write "$1" "$LINE_DEBT_ID" "$2" "$5" "$3" "$d" "${LINE_DEBT_TOKEN:--}" && return 0
+  LINE_DEBT_SUITE="$d"
+  # The id carries this process's own pid (lib/root.sh `bionic_id`), so two landings in sibling subshells owe two debts.
+  if bionic_need root.sh bionic_id && bionic_id; then
+    LINE_DEBT_ID="$BIONIC_ID"
+    _wt_debt_write "$1" "$LINE_DEBT_ID" "$2" "$5" "$3" "$d" "${LINE_DEBT_TOKEN:--}" && return 0
+  fi
   _wt_refuse "debt-unwritten why=proofs-unwritable suite=${d} path=${1} row=${2} — the declared red's debt cannot be written to the landing record (${_WT_PROOFS_SAW:-the append failed}), so nothing is published; make it writable, say ready again"
   LINE_DEBT_ID=""; return 1
 }
@@ -2705,7 +2663,7 @@ _line_prove_start() {  # <rec> <row> <candidate> <tree> <suite> <deadline>
   : > "$LINE_LOG"; LINE_RES="${LINE_LOG%.log}.run"; : > "$LINE_RES"
   # A JOB OF ITS OWN (wave-33 T2; D3, AC-7.1): a plain `&` would start the runner, and so its suite,
   # with INT and QUIT ignored; the runner's own spawn of the suite is one too (`_line_runner`).
-  bionic_job bash -c '. "$1/line.sh" && _line_load_gate && shift && _line_runner "$@"' _ \
+  bionic_job bash -c '. "$1/line.sh" && bionic_need gate.sh gate_ask && shift && _line_runner "$@"' _ \
     "$_LINE_LIB_DIR" "$5" "$within" "$4" "$LINE_LOG" "$LINE_RES" "${LINE_ME%%:*}" "${_LINE_KEY:-}" "$1"
   LINE_RP="$BIONIC_JOB_PID"
 }
@@ -2776,7 +2734,7 @@ _line_prove_kill() {  # <pid> <result file>
 # (`landing_key`, below).
 _line_landing_key() {  # <root> <plan> <row>
   local p w
-  _line_load_gate && _line_load_proof || return 0
+  bionic_need gate.sh gate_ask && bionic_need proof.sh _proof_records || return 0
   p="$(_gate_project "$1")"; w="$(proof_plan_slug "$2")"
   landing_key "$p:$w:$3"
 }
@@ -2809,7 +2767,7 @@ landing_key_ok() {  # <key>
 # cannot answer.
 _line_width_ask() {  # <landing key> -> a whole number
   local n rc
-  _line_load_gate || return 2
+  bionic_need gate.sh gate_ask || return 2
   n="$(gate_width_ask "$1" 2>/dev/null)"; rc=$?
   [ "$rc" -eq 0 ] || { [ "$rc" -eq 1 ] && return 1; return 2; }
   case "$n" in ''|*[!0-9]*) return 2 ;; esac
@@ -3012,15 +2970,11 @@ _line_holds() {  # <root> <commit> <suite> -> 0 when <commit> is a commit holdin
 # the gate's own admission instant for the run (`at=`), which the verdict carries as admitted= (AC-6.4).
 # The ask is made in this shell and its id read back through a file: the gate's baseline (cpu0=) and gate_end both read
 # this shell's `times`, so an ask inside `$( )` would leave out what this shell had reaped and charge the subshell's own
-# polls to the run. Only when no file can be made is it asked in `$( )`.
+# polls to the run. Only when no file can be made is it asked in `$( )` (lib/gate.sh `gate_ask_here`).
 _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> <carrier pid> [<landing key>] [<record>]
-  local id="" rc p c f
-  if f="$(mktemp "${TMPDIR:-/tmp}/line-id.XXXXXX" 2>/dev/null)"; then
-    BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "$(_line_gate_key "$1")" ${2:+--within "$2"} > "$f"; rc=$?
-    { read -r id < "$f"; } 2>/dev/null; rm -f "$f"
-  else
-    id="$(BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "$(_line_gate_key "$1")" ${2:+--within "$2"})"; rc=$?
-  fi
+  local id="" rc p c
+  BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask_here line-id landing "$(_line_gate_key "$1")" ${2:+--within "$2"}; rc=$?
+  id="$GATE_ASK_ID"
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
   printf 'admitted=%s\nat=%s\npromised=%s\n' "$id" "$(_line_admitted_at "$id")" "$(_line_req_seconds "$id" promised)" > "$5"
   # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended

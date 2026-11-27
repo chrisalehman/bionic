@@ -18,8 +18,7 @@
 # cannot be loaded.
 row_writer() {  # <roster> <plan> <row> <agent cell>
   ROW_WRITER=""
-  declare -F line_row_writer >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F line_row_writer >/dev/null 2>&1 || return 1
+  bionic_need line.sh line_row_writer || return 1
   line_row_writer "$@"
   ROW_WRITER="$LINE_WRITER"
   return 0
@@ -44,8 +43,7 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 deliver_check() {
   local row kind files wt status art docs drel abs real rel e n=0 cands="" call fix wb head sid roster rulings live lrc pl
   call="bash $HOOK_DIR/session-poker.sh"
-  if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F proof_branch_head >/dev/null 2>&1; then
+  if ! bionic_need proof.sh proof_branch_head; then
     die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
   fi
@@ -175,8 +173,8 @@ DELIVER_FILES
   # branch, so a part still to render there would never reach it. A part the renderer would change refuses, naming
   # the verb that renders it; nothing to render (no release, entry or registered review) holds nothing back.
   if [ "$kind" = integrate ]; then
-    if ! { declare -F line_reviews_state >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-       || ! declare -F line_reviews_state >/dev/null 2>&1 || ! e="$(mktemp "${TMPDIR:-/tmp}/deliver-reviews.XXXXXX")"; then
+    if ! bionic_need line.sh line_reviews_state \
+       || ! e="$(mktemp "${TMPDIR:-/tmp}/deliver-reviews.XXXXXX")"; then
       die "REFUSED — $PV_ID is the integrate row, and whether the release entry lists the plan's reviews cannot be read (lib/line.sh from $BIONIC_LIB); the plan is unchanged."
       exit 2
     fi
@@ -196,7 +194,7 @@ DELIVER_FILES
   # read with a ruling unread (it holds the row first, stamping nothing); a ruling met here is printed and stamped
   # shown (lib/roster.sh `ruling_take_unread`), and the row lands at the next tick.
   sid="$(session_id)" || sid=""
-  roster="$PV_REPO/.bionic/tmp/roster-${sid}.state"
+  roster="$(roster_path "$PV_REPO" "$sid")"
   if ! row_writer "$roster" "$PV_PLAN" "$PV_ID" "$(units_field "$row" agent)"; then
     die "REFUSED — the row's writer cannot be read: lib/line.sh cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     exit 2
@@ -285,8 +283,7 @@ DELIVER_FILES
 # another kind is not this fold's. A request line the fold does not know (`peak=`, anything newer) is ignored. The
 # gate's lock is not taken: this is a read, and a request the gate is writing reads as it stands.
 _lr_reader() {  # -> 0 once the reader (lib/reader.sh, through lib/proof.sh's loader) is loaded
-  { declare -F _proof_reader_load >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1; } \
-    && _proof_reader_load
+  bionic_need proof.sh _proof_reader_load && _proof_reader_load
 }
 _lr_plan() {  # <plan or landing record> -> the plan; a record is its plan's when the reader joins that plan to its directory
   local dir name docs c
@@ -653,7 +650,7 @@ hand_holds_verb() {
   if [ -n "$s" ] || [ -n "$u" ]; then hand_holds_report "$rec" "$root" "$plan" ${s:+--since "$s"} ${u:+--until "$u"}
   else hand_holds_report "$rec" "$root" "$plan"; fi || { printf '%s\n' "$no"; return 2; }
   if [ -n "$s" ]; then sw="since $s (the last build landing, $row)"; else sw="since the first line (no build row has landed)"; fi
-  if [ "$st" = delivered ]; then uw="until $u (delivered:)"; else uw="until now: the plan names no delivered: time"; fi
+  if [ "$st" = delivered ]; then uw="until $u (delivered:)"; else uw="until now: the run's log holds no delivery yet"; fi
   printf 'hand-holds window: %s · %s\n' "$sw" "$uw"
   return 0
 }
@@ -744,8 +741,8 @@ poker_verb_reviews_part() {
     exit 1
   fi
   plan_verb_open reviews-part
-  if ! { declare -F line_reviews_state >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-     || ! declare -F line_reviews_state >/dev/null 2>&1 || ! declare -F proof_branch_head >/dev/null 2>&1; then
+  if ! bionic_need line.sh line_reviews_state \
+     || ! declare -F proof_branch_head >/dev/null 2>&1; then
     die "REFUSED — the renderer (lib/line.sh) or the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was rendered."
     exit 2
   fi
@@ -808,7 +805,7 @@ poker_verb_reviews_part() {
 # person's to every function that folds the log; only the seal (lib/seal.sh) tells the run the tool wrote from one
 # written around it. The commit gate would catch such a line at the next commit, after the branch is on origin, so the
 # bound run is compared with its seal here, before the approval is read, and judged by the gate's own function
-# (lib/walls.sh `wall_run_seal`): a changed run is refused, exit 1, the catch kept in the seal and the gate's ask
+# (lib/walls.sh `wall_run_seal_kept`): a changed run is refused, exit 1, the catch kept in the seal and the gate's ask
 # `seal:changed` opened on the run's register, as hooks/bash-walls.sh does; a seal held past the wait is refused,
 # exit 2, to be run again. `none` and `nohome` are not compared, as the gate does not compare them. Unlike the gate,
 # which steps aside when the seal cannot be loaded, publish refuses then: no wall sees the push it makes.
@@ -826,10 +823,9 @@ poker_verb_reviews_part() {
 # prompt; it waits on the user (lib/owed.sh `ask_waits_on`'s default arm). A later publish that succeeds closes it.
 # Nothing here forces a push, sets an upstream, or touches the local integration branch.
 PUBLISH_EXIT_OUTWARD=4
-publish_ask_key() { printf 'pr:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }   # <working branch>
 publish_failed() {  # <working branch> <head> <what failed> <cause> -> the ask opened, the failure said, exit 4
   local key cause
-  key="$(publish_ask_key "$1")"
+  key="$(line_ask_key pr "$1")"
   cause="$(printf '%s' "$4" | tr '\n\r\t|' '    ' | sed 's/  */ /g; s/^ //; s/ $//')"
   proof_owed open "$key" "publish: the pull request" "publish of $1 at ${2:0:12} failed: $3: ${cause:-no cause given}"
   die "FAILED — $3: ${cause:-no cause given}. No pull request was recorded; the ask $key waits on the user. Run again once it is mended: bash $HOOK_DIR/session-poker.sh publish"
@@ -843,9 +839,9 @@ publish_seal_words() {
       # shellcheck source=/dev/null
       . "$BIONIC_LIB/$_ps_l" >/dev/null 2>&1 || exit 1
     done
-    declare -F wall_run_seal >/dev/null 2>&1 || exit 1
+    declare -F wall_run_seal_kept >/dev/null 2>&1 || exit 1
     BIONIC_SEAL_LINE="$1" BIONIC_SEAL_PLAN="$2" BIONIC_SEAL_LOG="$3" BIONIC_WALL_OWED=""
-    wall_run_seal publish >/dev/null 2>&1
+    wall_run_seal_kept publish >/dev/null 2>&1
     [ "$?" -eq 2 ] || exit 1
     printf '%s\n%s\n%s\n' "$_BF_PEND_FACT" "$BIONIC_WALL_OWED" "$_BF_PEND_DETAIL" )
 }
@@ -875,11 +871,9 @@ poker_verb_publish() {
         die "$detail"
         exit 2
       fi
-      # The catch is kept in the seal before the ask is written, as the gate keeps it.
-      seal_write "$PV_PLAN" "$SEAL_LOG" >/dev/null 2>&1
       IFS=$'\t' read -r key title reply <<< "$ask"
       [ -z "$key" ] || proof_owed open "$key" "$title" "$reply"
-      die "REFUSED — $fact; publish leaves the machine only for a run that matches its seal. Nothing was pushed and no pull request was opened; needs: the person — their ruling on the change, by bash $HOOK_DIR/session-poker.sh accept '<their words>' or bash $HOOK_DIR/session-poker.sh abandon '<their words>'."
+      die "REFUSED — $fact; publish leaves the machine only for a run that matches its seal. Nothing was pushed and no pull request was opened; needs: the person — their ruling on the change, as a plain message in the chat; you then run bash $HOOK_DIR/session-poker.sh accept '<their words>' or bash $HOOK_DIR/session-poker.sh abandon '<their words>' with those words, the person never."
       die "$detail"
       exit 1 ;;
   esac
@@ -950,7 +944,7 @@ poker_verb_publish() {
     die "REFUSED — $wb at ${head:0:12} is on origin and its pull request is $url, and the run's log could not be written: append ev=published|part=pr|url=$url|branch=$wb|commit=$head|base=$base|by=publish to $(line_log "$PV_PLAN" 2>/dev/null || printf 'the log'). Fix: once the log takes a line, append it, or run again: bash $HOOK_DIR/session-poker.sh publish."
     exit 1
   fi
-  proof_owed close "$(publish_ask_key "$wb")" publish
+  proof_owed close "$(line_ask_key pr "$wb")" publish
   if [ -n "$pr_url" ]; then
     say "publish — $wb at ${head:0:12} pushed to origin; the pull request $url carries it against $base."
   else
@@ -965,7 +959,7 @@ poker_verb_publish() {
 # notes are the orchestrator's words, written in `pr-summary.md` beside the run's log; Testing, Review, Known limits and
 # Decision records are the run's facts, printed by `pr-facts` from the reader and never typed:
 #   Testing           the newest whole regression's suites green of those it ran, each suite by its last verdict, and
-#                     the Eval design's criteria discharged of all (lib/reader.sh `reader_cells`)
+#                     the Test design's criteria discharged of all (lib/reader.sh `reader_cells`)
 #   Review            each question's newest review proof or waiver
 #   Known limits      each open deferral's stated sentence, the release entry's own reading (`known_limits_part`)
 #   Decision records  each ADR whose `wave:` is the run's, the register's own reading (sitrep.sh `decisions_all`)
@@ -1076,8 +1070,8 @@ poker_verb_known_limits_part() {
     exit 1
   fi
   plan_verb_open known-limits-part
-  if ! { declare -F line_reviews_commit >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-     || ! declare -F line_reviews_commit >/dev/null 2>&1 || ! _line_load_proof || ! declare -F proof_findings_owed >/dev/null 2>&1; then
+  if ! bionic_need line.sh line_reviews_commit \
+     || ! _line_load_proof || ! declare -F proof_findings_owed >/dev/null 2>&1; then
     die "REFUSED — the renderer (lib/line.sh) or the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was rendered."
     exit 2
   fi
@@ -1164,12 +1158,7 @@ poker_verb_known_limits_part() {
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
       *) usage "$use" ;;
     esac
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     if [ -n "$arg" ]; then
       plan="$(docs_path "$REPO_REAL" "$arg")"
       if [ ! -f "$plan" ] || [ -L "$plan" ]; then

@@ -12,7 +12,7 @@ A plan holds only what a person wrote: its header, `## Goal`, `## Tasks`, and on
 
 `## Assumptions` points to `record/<wave>/assumptions.md` — seeded from Step 1's "Not Doing" plus spec ambiguities; Step 4 appends there before each commit.
 
-Tag every Step-4 task `complexity: standard | complex`; when uncertain, `complex`. The card's agent column takes its role from that tag for a build or a test row, `complex` as senior-implementor and `standard` as implementor, and prints a dash for every other kind and for a row with no tag.
+Tag every Step-4 task `complexity: standard | complex`; when uncertain, `complex`. On a build or test row the card's agent column reads it: `complex` is senior-implementor, `standard` implementor; other rows get a dash.
 
 **Plan for width.** Split a task on the longest chain wherever it can be split. Where two tasks
 write one file, let them run side by side and reconcile on landing; a file that cannot be merged
@@ -56,10 +56,10 @@ Step 3 · Plan
     spec  <docs-root>/specs/epic-NN-<slug>/wave-NN-<slug>.spec.md
 
 Do you approve this plan? Reply "approved" to approve it.
-show evals <req> · show task <n> · explain <decision>
+show task <n> · explain <decision>
 ```
 
 Card: `bash <plugin-root>/scripts/card.sh step3 <plan.md>` renders it whole; no stdin.
 
-**Wave shape locks at approval, and changes only by re-plan**, on a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work. A row is changed by an edit, and added by one: every cell its header carries, a review row's task cell ending ` · questions: <q>[,<q>]` when it owes fewer than its rigor deals, a born row's ` · born: review` or ` · born: regression`; then `session-poker.sh task-add <id>` records its birth (`--born <record>#<n>`, `--born regression:<suite>`), the plan unwritten. A pending row no longer owed is dropped by `session-poker.sh task-add <id> --drop '<the person's words>'`, the plan unwritten. A short row is refused with the lines to paste; a refused birth leaves the row unborn, the person's to remove. Any other discovery is a W+1 candidate; one that makes the wave impossible surfaces a Wake Note and halts.
+**Wave shape locks at approval, and changes only by re-plan**, on a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work. A row is changed by an edit, and added by one: every cell its header carries, a review row's task cell ending ` · questions: <q>[,<q>]` when it owes fewer than its rigor deals, a whole-run point's test row ` · point`, its deps the rows it follows, a born row's ` · born: review` or ` · born: regression`; then `session-poker.sh task-add <id>` records its birth (`--born <record>#<n>`, `--born regression:<suite>`), the plan unwritten. A pending row no longer owed is dropped by `session-poker.sh task-add <id> --drop '<the person's words>'`, the plan unwritten. A short row is refused with the lines to paste; a refused birth leaves the row unborn, the person's to remove. Any other discovery is a W+1 candidate; one that makes the wave impossible surfaces a Wake Note and halts.
 

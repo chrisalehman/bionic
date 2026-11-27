@@ -60,7 +60,7 @@ plan_fixture() {  # [--current <step>] <path> <task|wave> [<row>...]
     fi
     printf '## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
     _plan_fixture_rows "$(plan_fixture_log "$path")" "$cur" "$@" || return 1
-    printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+    printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n'
     printf '| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |\n'
   } > "$path" || return 1
   seal_fixture "$path" "$(plan_fixture_log "$path")"
@@ -104,8 +104,8 @@ plan_fixture_themes() {  # <plan> [<status>...]
   { printf -- '---\nscale: wave\n---\n# requirements\n\n## The card reads true\n\nThe card says what was authored.\n\n### REQ-1 — goals\n\n'
     printf -- '- %s read. Fails when: not.\n' $r1
     printf '\n## The gate admits the work\n\nThe gate honours the word.\n\n### REQ-2 — the word\n\n- %s honoured. Fails when: not.\n' "$r2"; } > "$q"
-  { awk '/^## / { s = ($0 ~ /^## Eval design/) } !s' "$plan"
-    printf '## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+  { awk '/^## / { s = ($0 ~ /^## Test design/) } !s' "$plan"
+    printf '## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n'
     for a in $r1; do printf '| REQ-1 | x | %s | hermetic | `tests/a.test.sh` | %s is wrong |\n' "$a" "$a"; done
     printf '| REQ-2 | x | %s | hermetic | `tests/a.test.sh` | %s is wrong |\n' "$r2" "$r2"; } > "$plan.pft" && mv -f "$plan.pft" "$plan"
   log="$(plan_fixture_log "$plan")"; mkdir -p "${log%/*}"
@@ -115,6 +115,46 @@ plan_fixture_themes() {  # <plan> [<status>...]
       waived) printf 'run/v1|ev=waiver|ac=%s|head=%040d|by=fixture|said=waive it|at=2026-10-06T10:00:00Z\n' "$a" 1 >> "$log" ;;
     esac; done
   seal_fixture "$plan" "$log"
+}
+
+# sp_at15 <plan> -> the page a fixture wrote at 14, rewritten as a run at 15 holds it, and that run's log written
+#   whole beside it (<docs>/record/<stem>/run.log). The header gains the version and the branches the state section named;
+#   the state section, the dispatch ledger and the matrix go; each Tasks row keeps its nine authored cells, read by the
+#   table's own header names (an escaped bar a cell's own), its artifact cell when the template has one; and the log holds a step event for each step to current:, the plan's approval when the
+#   section carried approved-by:, then per row its dispatch (an agent cell on a row not pending), its tree (a worktree
+#   cell) and its landing (status landed). The matrix's criterion is an Eval design row. Instants are fixed and
+#   increasing, so the fold reads the lines in the order written.
+sp_at15() {
+  local p="$1" d n
+  d="${p%/*}"; case "$d" in */plans/*) d="${d%/plans/*}" ;; *) d="${d%/plans}" ;; esac
+  n="$(basename "$p" .plan.md)"; mkdir -p "$d/record/$n" || return 1
+  awk -v lf="$d/record/$n/run.log" '
+    function none(s) { gsub(/—|-/, "", s); return s == "" }
+    function ev(s) { printf "run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n", s, ++t > lf }
+    function cell(r, k) { return (k in col) ? r[col[k]] : "—" }
+    NR == FNR { if (/^current: /) cur = $2; if (/^approved-by: /) ok = 1
+      if (/^  base-sha: /) base = $2; if (/^  branch: /) br = $2; if (/^working-branch: /) br = $2
+      if (/^integration-branch: /) ib = $2; next }
+    FNR == 1 && /^---$/ { fm = 1; print; next }
+    fm && /^canonical_sdlc_version:/ { next }
+    fm && /^---$/ { fm = 0; print "canonical_sdlc_version: 15"; if (br != "") print "working-branch: " br
+      if (base != "") print "base-sha: " base; if (ib != "") print "integration-branch: " ib; print
+      for (i = 1; i <= cur; i++) ev("step|n=" i); if (ok) ev("approval|key=step3|by=fixture|said=approved"); next }
+    /^## / { skip = ($0 ~ /^## (SDLC State|Dispatch ledger|Verification Matrix)/); tab = ($0 ~ /^## Tasks/); hd = 0
+      if ($0 ~ /^## Verification Matrix/) eval = 1 }
+    skip { next }
+    tab && /^\| *id *\|/ { m = split($0, h, "|"); for (i = 2; i < m; i++) { k = tolower(h[i]); gsub(/^ +| +$/, "", k); col[k] = i }
+      print "| id | step | kind | task | deps | size | serves | Files | artifact |"; print "|---|---|---|---|---|---|---|---|---|"; hd = 1; next }
+    tab && hd && /^\|---/ { next }
+    tab && hd && /^\|/ { l = $0; gsub(/\\\|/, "\001", l); split(l, r, "|"); for (i in r) { gsub(/^[ \t]+|[ \t]+$/, "", r[i]); gsub(/\001/, "\\|", r[i]) }
+      printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", cell(r, "id"), cell(r, "step"), cell(r, "kind"), cell(r, "task"), cell(r, "deps"), cell(r, "size"), cell(r, "serves"), cell(r, "files"), cell(r, "artifact")
+      if (!none(cell(r, "agent")) && cell(r, "status") != "pending") ev("dispatch|row=" cell(r, "id") "|name=" cell(r, "agent"))
+      if (!none(cell(r, "worktree"))) ev("tree|row=" cell(r, "id") "|path=.worktrees/" cell(r, "worktree"))
+      if (cell(r, "status") == "landed") ev("published|row=" cell(r, "id")); next }
+    { print }
+    END { if (eval) { print "\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|"
+      print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p" || return
+  seal_fixture "$p" "$d/record/$n/run.log"
 }
 
 declare -F seal_fixture >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/seal-fixture.sh"

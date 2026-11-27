@@ -30,6 +30,7 @@ Every resolution is logged: append one line to `record/<wave>/assumptions.md` pe
 
 <!-- IMPLEMENTOR-MECHANICS-BEGIN -->
 - **Re-read code after editing, especially when moving patterns between contexts.**
+- **A run meant to fail leads its suite segment**: `BIONIC_EXPECT=red tests/run.sh --only <suite>.test.sh`.
 - **Run only the suites the brief's `Suites:` names.** `cd <tree> || exit 1` guards the WHOLE
   command, so a failed `cd` cannot run the rest of it against the wrong tree.
 - **Reuse before you write:** before adding a function, file, type or configuration key, search
@@ -63,16 +64,17 @@ A comment states the reason and the invariant: why the code is shaped as it is a
 ### Your brief
 Expected duration: your time budget.
 Expected artifact: the path that makes you done.
-Progress artifact: append to it at least every Cadence (tasks of 15 min or more).
+Progress artifact: append every Cadence (tasks of 15 min or more).
 Cadence: that interval.
-Done marker: write it after your report.
+Done marker: write it after the report.
 Subprocess claim: the process main watches.
 Files: the only paths you may write.
 Suites: the only suites you may run.
 Re-executes: the only other runs you may make.
 Questions: yours to answer.
 Row: your plan row.
-Lands-on: the suites `ready` proves. Last act, foreground: `ready --within <seconds under your Bash timeout>` from your tree; WAITING keeps your place, say it again; never backgrounded, no monitor.
+Lands-on: what `ready` proves.
+Lands-by: last act, foreground, from your tree: `bash <plugin-root>/scripts/spawn-worktree.sh ready --within <seconds under your Bash timeout>`; WAITING: run again; not backgrounded.
 Lands-red: the suite you may land red.
 Red-evidence: a file with head: <40-hex>, your head.
 Deliverable-waiver: report by message, not a file.
@@ -80,6 +82,7 @@ Deliverable-waiver: report by message, not a file.
 
 <!-- DISPATCH-RULES-BEGIN -->
 - **Where `tests/run.sh` takes `--only`, use the door**: `tests/run.sh --only <name>.test.sh`, one call each.
+- **A check that expects no match ends with `|| true`**: none found is exit 0.
 - **Never end your turn with a command or external run (CI, background task) in flight**:
   watch it in the foreground.
 - **A multi-step script goes in a workspace file**, run as `bash <file>`, never inline

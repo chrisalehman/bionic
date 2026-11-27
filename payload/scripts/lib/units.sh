@@ -12,6 +12,8 @@
 #                              carries no `## Tasks` table.
 #   units_questions <record>   the questions a review row declares, comma-joined, off its task cell's
 #                              ` · questions:` tag; nothing when it declares none.
+#   units_kinds [<col> <word>] the kinds of row (UNITS_KINDS), and those a writer's slot or a role column names;
+#                              units_kind_role and units_kind_offer, the role a kind draws from its tag or is offered.
 #   units_ready <plan> <step> [<roster> [<ack ledger> [<session id>]]]
 #                              the ids of rows whose status is `pending` and whose every read
 #                              is satisfied, whatever their step (wave-26 T2, D1: what a row
@@ -140,15 +142,9 @@
 # of two columns of one name answering. Where the table is (fences, the heading, the header line, the
 # separator, a lone CR) and how a cell reads (`\|` a bar, a tab a space) are that parser's rules, so the
 # reader and the fill cannot read one table two ways. A raw `|` that widens a row is its `over` mark.
-_units_plan_read() {
-  local d
-  declare -F plan_read_table >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  # shellcheck source=/dev/null
-  [ -n "$d" ] && [ -f "$d/plan-read.sh" ] && . "$d/plan-read.sh" >/dev/null 2>&1
-  return 0
-}
-_units_plan_read
+# shellcheck source=/dev/null
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need plan-read.sh plan_read_table || :
 _UNITS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
 
 # ONE READ A COMMAND (lib/proof.sh `_proof_held_dir`). Inside a held command an answer this library computes from the
@@ -259,7 +255,7 @@ _units_live() {
     printf '%s' "$_UNITS_MEMO_LIVE"; return "$_UNITS_MEMO_LIVE_RC"
   fi
   plan="$(_units_origin "$plan")"
-  _units_lib proof.sh _proof_facts && _units_lib reader.sh reader_log || return 0
+  bionic_need proof.sh _proof_facts && bionic_need reader.sh reader_log || return 0
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
   _units_facts_at "$plan" || return 2
@@ -280,7 +276,7 @@ _units_proofs() {
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ] && [ -n "${_UNITS_MEMO_PROOFS_RC:-}" ]; then
     printf '%s' "$_UNITS_MEMO_PROOFS"; return "$_UNITS_MEMO_PROOFS_RC"
   fi
-  _units_lib proof.sh proof_fact_lines || return 0
+  bionic_need proof.sh proof_fact_lines || return 0
   local o
   o="$(_units_origin "${1:-}")"
   _units_facts_at "$o" || return 2
@@ -293,7 +289,7 @@ _units_proofs() {
 _units_fold() {
   local o
   _UNITS_FACTS_PLAN=""; _UNITS_FACTS=""; _UNITS_FACTS_FILE=""; _UNITS_FACTS_KEY=""
-  _units_lib proof.sh _proof_facts || return 0
+  bionic_need proof.sh _proof_facts || return 0
   o="$(_units_origin "${1:-}")"
   _proof_held_facts_at "$o" || proof_facts_at "$o" || return 2
   _UNITS_FACTS_FILE="$_PROOF_FACTS_FILE"; _UNITS_FACTS="$_PROOF_FACTS_TEXT"; _UNITS_FACTS_KEY="$_PROOF_FACTS_KEY"
@@ -345,21 +341,11 @@ _units_overlay() {
     { print }'
 }
 
-# _units_lib <file> <function> -> 0 once <function> is defined, sourcing <file> from this library's directory if not
-_units_lib() {
-  local d
-  declare -F "$2" >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || return 1
-  # shellcheck source=/dev/null
-  [ -f "$d/$1" ] && . "$d/$1" >/dev/null 2>&1
-  declare -F "$2" >/dev/null 2>&1
-}
-
 # units_dispatch_back <plan> <row> <name> -> the launch of <row> under <name> taken back: one `cancel` of that dispatch in
 # the run's log, which is what returns a row launched by the log to pending (a cell write cannot). 2 no log to write.
 units_dispatch_back() {
   local log
-  _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
+  bionic_need reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && bionic_need log.sh log_append || return 2
   RUN_LOG="$log" log_append cancel of=dispatch "row=${2:-}" "name=${3:-}"
 }
 
@@ -373,14 +359,35 @@ units_row_back() {
   [ -z "$nm" ] || units_dispatch_back "$plan" "$row" "$nm" || return 2
 }
 
-# units_born_event <plan> <row> [<reason>] [<finding>] [promoted] -> the row's birth appended to its run's log: one
-# `born` event, the reason the words a born marker carried (`review S<n> <reach>`, `regression <suite>`), the finding its
-# `of=` list, and `promoted=yes` for a finding the person moved to fix from outside the policy, which the fix-cap counts.
+# units_record_stands <plan> <row> <Files cell> <root> <docs root> -> whether a record the row's Files or its artifact
+# cell (the plan-read library's cell of the row) names stands as a file: a path from the docs root (`record/…`) or from
+# the root, a leading `./` or `!` not part of it. The root is the repository, or a row's tree when the record is the one
+# its writer holds; with no docs root no `record/…` path stands. The tick and the close ask it, so a row's record stands
+# on one answer. 0 one stands; 1 the row names a path and none stands; 2 it names none (each entry empty, a dash or none).
+units_record_stands() {
+  local e art root="${4:-}" docs="${5:-}" named=""
+  art="$(plan_read_row "${1:-}" Tasks id "${2:-}" 2>/dev/null | sed -n 's/^artifact=//p')"
+  while IFS= read -r e; do
+    e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
+    case "$e" in
+      none) ;;
+      record/*) named=1; [ -n "$docs" ] && [ -f "$docs/$e" ] && return 0 ;;
+      *[A-Za-z0-9]*) named=1; [ -f "$root/$e" ] && return 0 ;;
+    esac
+  done <<< "$(printf '%s,%s\n' "${3:-}" "$art" | tr ',' '\n')"
+  [ -z "$named" ] && return 2
+  return 1
+}
+
+# units_born_event <plan> <row> [<reason>] [<finding>] [promoted] [<point>] [<rows>] -> the row's birth appended to its run's
+# log: one `born` event, the reason the words a born marker carried (`review S<n> <reach>`, `regression <suite>`), the finding
+# its `of=` list, `promoted=yes` for a finding the person moved to fix from outside the policy, which the fix-cap counts, and
+# for a red of a whole-run point's run, `point=` the point and `rows=` the rows it follows, comma-joined.
 # THE ONE WRITER OF A BORN ROW: the plan carries the row and nothing of how it was born. 2 no log to write.
 units_born_event() {
   local log
-  _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
-  RUN_LOG="$log" log_append born "row=${2:-}" ${3:+"reason=$3"} ${4:+"finding=$4"} ${5:+promoted=yes}
+  bionic_need reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && bionic_need log.sh log_append || return 2
+  RUN_LOG="$log" log_append born "row=${2:-}" ${3:+"reason=$3"} ${4:+"finding=$4"} ${5:+promoted=yes} ${6:+"point=$6"} ${7:+"rows=$7"}
 }
 
 # units_drop_event <plan> <row> <the person's words> -> the row's work no longer owed: one `drop` event in its run's log,
@@ -389,7 +396,7 @@ units_born_event() {
 units_drop_event() {
   local log
   [ -n "${2:-}" ] && [ -n "${3:-}" ] || return 2
-  _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
+  bionic_need reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && bionic_need log.sh log_append || return 2
   RUN_LOG="$log" log_append drop "row=$2" "why=$3"
 }
 
@@ -399,7 +406,7 @@ units_drop_event() {
 _units_born_facts() {
   local plan
   plan="$(_units_origin "${1:-}")"
-  [ -f "$plan" ] && _units_lib proof.sh _proof_facts || return 0
+  [ -f "$plan" ] && bionic_need proof.sh _proof_facts || return 0
   _proof_fields && _units_facts_at "$plan" || return 2
   _proof_derive _units_born_facts "$plan" _units_born_made
 }
@@ -422,7 +429,7 @@ units_born_logged() {
 # of the command, subshells included, as the regression state is kept; read now outside a memo.
 _units_waits() {
   local plan="${1:-}" f="${_UNITS_MEMO_WAITS:-}" out
-  if [ -n "$f" ] && [ -f "$f" ] && awk -v p="$plan" 'NR == 1 { if ($0 != p) exit 1; next } { print }' "$f" 2>/dev/null; then
+  if [ -n "$f" ] && [ -s "$f" ] && awk -v p="$plan" 'NR == 1 { if ($0 != p) exit 1; next } { print }' "$f" 2>/dev/null; then
     return 0
   fi
   declare -F plan_read_waits >/dev/null 2>&1 || return 1
@@ -462,20 +469,23 @@ units_memoised() {  # <plan> <command> [args...]
     return
   fi
   local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
-  local _UNITS_MEMO_WAITS="${TMPDIR:-/tmp}/bionic-units-waits-$$-${RANDOM}${RANDOM}"
+  # The memo files are made empty by the exclusive create (lib/root.sh `bionic_new`), so two commands in sibling
+  # subshells never share one; an empty file is read as nothing kept, and a name not made leaves that memo off.
+  local _UNITS_MEMO_WAITS=""
+  ! bionic_need root.sh bionic_new || ! bionic_new "${TMPDIR:-/tmp}/bionic-units-waits" || _UNITS_MEMO_WAITS="$BIONIC_NEW"
   local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC="" _UNITS_MEMO_PROOFS="" _UNITS_MEMO_PROOFS_RC="" _UNITS_FACTS_PLAN="" _UNITS_FACTS="" _UNITS_FACTS_FILE="" _UNITS_FACTS_KEY=""
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _units_fold "${1:-}"
   _UNITS_MEMO_LIVE="$(_units_live "${1:-}")"; _UNITS_MEMO_LIVE_RC=$?
   _UNITS_MEMO_PROOFS="$(_units_proofs "${1:-}")"; _UNITS_MEMO_PROOFS_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
-  if [ -z "$_UNITS_MEMO_FLOOR" ]; then
-    _UNITS_MEMO_FLOOR="${TMPDIR:-/tmp}/bionic-units-floor-$$-${RANDOM}${RANDOM}"; own=1
+  if [ -z "$_UNITS_MEMO_FLOOR" ] && bionic_need root.sh bionic_new && bionic_new "${TMPDIR:-/tmp}/bionic-units-floor"; then
+    _UNITS_MEMO_FLOOR="$BIONIC_NEW"; own=1
   fi
   shift
   "$@"; rc=$?
-  [ -z "$own" ] || [ ! -e "$_UNITS_MEMO_FLOOR" ] || rm -f "$_UNITS_MEMO_FLOOR"
-  [ ! -e "$_UNITS_MEMO_WAITS" ] || rm -f "$_UNITS_MEMO_WAITS"
+  set -- ${own:+"$_UNITS_MEMO_FLOOR"} ${_UNITS_MEMO_WAITS:+"$_UNITS_MEMO_WAITS"}
+  [ "$#" -eq 0 ] || rm -f "$@"
   return "$rc"
 }
 
@@ -574,6 +584,52 @@ units_questions() {  # <units_rows record> -> the declared questions, or nothing
   esac
   return 0
 }
+
+# THE KINDS OF ROW, AND THE ROLE EACH TAKES: one line a kind, `<kind> <slot> <role>`, in the order the validator's
+# refusal names them. This is the one home of the kind words and of the two questions asked of a kind:
+# - <slot> is who takes a writer's place in the fill. A `readonly` kind runs a read-only role and takes none while its
+#   Files write no head (fill.sh `fill_readonly_ids`); every `writer` kind edits a tree.
+# - <role> is the role a row of the kind is run by when its agent cell names none. `tag` is the role its task cell's
+#   complexity tag names, which the Step-3 card prints and the start verb takes, and the implementor when no tag
+#   names one; `questions` is the role the plan's rigor deals the row's questions; any other word is that role,
+#   which start offers and never takes unasked. The card prints a role for a `tag` kind alone.
+# The two columns answer different questions, so a doc row takes a writer's place and still draws no role on the card.
+UNITS_KINDS='build writer tag
+test writer tag
+verify readonly implementor
+review readonly questions
+doc writer senior-implementor
+integrate writer implementor
+close writer implementor
+prototype writer implementor'
+
+# units_kinds [<slot|role> <word>] -> the kinds, space-joined, in the list's order; given a column and a word, only
+# the kinds whose column holds that word.
+units_kinds() {
+  printf '%s\n' "$UNITS_KINDS" | awk -v c="${1:-}" -v w="${2:-}" '
+    c == "" || (c == "slot" && $2 == w) || (c == "role" && $3 == w) { printf "%s%s", (n++ ? " " : ""), $1 }'
+}
+
+# units_kind_role <kind> <task cell> -> the role the row's complexity tag draws, `senior-implementor` for complex and
+# `implementor` for standard, on a kind whose role is `tag`; nothing for any other kind, for a cell with no tag, or a
+# word the plan step does not define: no role is guessed.
+units_kind_role() {
+  local re='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
+  [ "$(_units_kind_word "${1:-}")" = tag ] || return 0
+  [[ "${2:-}" =~ $re ]] || return 0
+  case "${BASH_REMATCH[2]}" in complex) printf 'senior-implementor' ;; standard) printf 'implementor' ;; esac
+}
+
+# units_kind_offer <kind> -> the role offered a row of the kind that names none: its <role> word, `implementor` for
+# a `tag` kind or a kind the list does not hold, and `questions` for a kind whose role is dealt by its questions.
+units_kind_offer() {
+  local o
+  o="$(_units_kind_word "${1:-}")"
+  case "$o" in ''|tag) printf 'implementor' ;; *) printf '%s' "$o" ;; esac
+}
+
+# _units_kind_word <kind> -> the kind's <role> word in the list, or nothing for a word the list does not hold.
+_units_kind_word() { printf '%s\n' "$UNITS_KINDS" | awk -v k="${1:-}" '$1 == k { print $3; exit }'; }
 
 # units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base·reads,
 #                      tab-separated, one line per row, in TABLE order. Exit 1 when there is
@@ -722,22 +778,9 @@ UNITS_READY
 }
 
 # _units_roster_libs -> 0 once `roster_open_names` and `fill_row_launched` are defined, sourcing
-# roster.sh and fill.sh from this file's own directory when they are not. fill.sh sources this
+# roster.sh and fill.sh through the loader when they are not (lib/patrol.sh asks by this name). fill.sh sources this
 # file only when `units_ready` is undefined, so the pair cannot loop.
-_units_roster_libs() {
-  local d
-  declare -F roster_open_names >/dev/null 2>&1 && declare -F fill_row_launched >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || return 1
-  if ! declare -F roster_open_names >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$d/roster.sh" >/dev/null 2>&1 || return 1
-  fi
-  if ! declare -F fill_row_launched >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$d/fill.sh" >/dev/null 2>&1 || return 1
-  fi
-  declare -F roster_open_names >/dev/null 2>&1 && declare -F fill_row_launched >/dev/null 2>&1
-}
+_units_roster_libs() { bionic_need roster.sh roster_open_names && bionic_need fill.sh fill_row_launched; }
 
 # units_held <plan> <step> -> one line per row HELD FOR ITS STEP or BY THE WORLD, table order
 # (wave-20 T10b; wave-21 T4): `<id>: step <n> <kind> row waits for current: <n>` for a gate act
@@ -962,7 +1005,7 @@ units_record_landings() {
 # _units_criteria <plan> -> the criteria the reader lists (lib/reader.sh `reader_criteria`), one id per line; nothing
 # when the reader cannot be loaded or the plan names none.
 _units_criteria() {
-  declare -F reader_criteria >/dev/null 2>&1 || . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/reader.sh" >/dev/null 2>&1 || return 0
+  bionic_need reader.sh reader_criteria || return 0
   reader_criteria "$1" 2>/dev/null || return 0
 }
 
@@ -1038,6 +1081,21 @@ _units_landed() {
 # full run: a run now proves a head these rows are about to move.
 units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 
+# units_points <plan> [<id>] -> `<id><TAB><status>` for each whole-run point of the plan, a test row its task cell marks
+# (`marked`, the mark's one spelling), table order; with <id>, that row alone, and rc 1 when it is no point.
+units_points() {
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' -v want="${2:-}" "$(_units_cell_awk)"'
+    $3 == "test" && marked($4) && (want == "" || $1 == want) { printf "%s\t%s\n", $1, $10; f = 1 }
+    END { exit (want != "" && !f) }'
+}
+
+# units_point_rows <plan> <id> -> the rows the point <id> follows, comma-joined, in the order its waits name them: the rows
+# its deps cell names (lib/plan-read.sh `plan_read_waits`), since a point waits on nothing by its kind but the approval.
+units_point_rows() {
+  bionic_need plan-read.sh plan_read_waits || return 2
+  plan_read_waits "${1:-}" "${2:-}" 2>/dev/null | awk -F'\t' '$2 == "row" { printf "%s%s", (n++ ? "," : ""), $3 }'
+}
+
 # units_approval_names <plan> [<id>] -> each approval an OPEN row waits on, `approval:<name>` among its waits, once, sorted.
 # With <id>, row <id>'s alone, the reader asked for that row only, and a failure of the table's read or of the reader is
 # returned with its exit, so an asker that must not take a failure for "none" hears it; with none, a failure answers
@@ -1060,10 +1118,10 @@ units_approval_names() {
   else
     rows="$(units_rows "${1:-}" 2>/dev/null)" && waits="$(_units_waits "${1:-}" 2>/dev/null)" || return 0
   fi
-  { printf '%s\n\034\n' "$rows"; printf '%s\n' "$waits"; } | awk -F'\t' -v all="${2:+0}" '
+  { printf '%s\n\034\n' "$rows"; printf '%s\n' "$waits"; } | awk -F'\t' -v all="${2:+0}" "$_PLAN_READ_RELEASE_AWK"'
     $0 == "\034" { w = 1; next }
     !w { s = tolower($10)
-      if ($3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && s != "dropped") hasrel = 1
+      if (release_row($3, $2, s, "standing")) hasrel = 1
       if (s == "pending" || s == "active") { open[$1] = $3; if ($3 == "integrate" && all != "0") print "release" }
       next }
     $2 == "wait" && ($1 in open) && $3 ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ {
@@ -1074,12 +1132,13 @@ units_approval_names() {
 # units_order <plan> -> the id of the regression row when the plan is in the order build, regression, review, release,
 # exit 0: a test row at Step 5 or earlier and a doc row at Step 7 or later (the release), neither dropped. Nothing, exit 1,
 # otherwise. THE ONE READING of the order: `current 8` (hooks/poker/judge.sh) and the commit wall ask it, and
-# `units_validate` holds an open plan to the order itself.
+# `units_validate` holds an open plan to the order itself. A test row marked as a whole-run point (`marked`) is a run
+# among the build, never the regression row, so the order skips it.
 units_order() {
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$_PLAN_READ_RELEASE_AWK$(_units_cell_awk)"'
     tolower($10) == "dropped" || $2 !~ /^[0-9]+$/ { next }
-    $3 == "test" && $2 + 0 <= 5 && reg == "" { reg = $1 }
-    $3 == "doc" && $2 + 0 >= 7 { rel = 1 }
+    $3 == "test" && $2 + 0 <= 5 && reg == "" && !marked($4) { reg = $1 }
+    release_row($3, $2) { rel = 1 }
     END { if (reg == "" || !rel) exit 1; print reg }'
 }
 
@@ -1101,18 +1160,11 @@ units_release_asked() {
 _units_ext_re() { printf '%s' '^ext:[A-Za-z0-9][A-Za-z0-9._-]*$'; }
 
 # _units_proof_awk -> proof.sh's `proof_awk`, the one reading of a proof line (wave-26 T14;
-# review 7 F6). proof.sh is sourced from this file's own directory once, when this file is
+# review 7 F6). proof.sh is sourced through the loader once, when this file is
 # loaded (below), not per question: readiness is asked inside command substitutions, where a
 # lazy source would be paid again on every call. If it cannot be loaded, a function that reads
 # no line as a proof: no proof is the cautious answer for a settled read.
-_units_proof_lib() {
-  local d
-  declare -F proof_awk >/dev/null 2>&1 && return 0
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  [ -n "$d" ] && [ -f "$d/proof.sh" ] && . "$d/proof.sh" >/dev/null 2>&1
-  return 0
-}
-_units_proof_lib
+bionic_need proof.sh proof_awk || :
 # THE READS TOKEN'S OLD SPELLING (wave-38 T8; REQ-9, D6): lib/alias.sh `alias_awk_norm reads`, through proof.sh, written
 # once at load into the two awk readers of a reads token, the readiness tokenizer (`addtok`) and the validator. A plan
 # 1.20.0 wrote reads `proof:floor` as `proof:regression`; with no map loaded the statements are a blank.
@@ -1274,7 +1326,7 @@ _units_floor_kept() {
 # Prepended to each program; NO APOSTROPHE inside it (it is single-quoted).
 _units_files_awk() {
   local h
-  declare -F docs_heads >/dev/null 2>&1 || . "${BASH_SOURCE[0]%/*}/root.sh"
+  bionic_need root.sh docs_heads
   h="$(docs_heads)"
   printf 'function in_docs(e) { return (index(e, ".bionic/") == 1 || e ~ /^(%s)\//) }\n' "${h//$'\n'/|}"
   printf '%s' '
@@ -1336,7 +1388,7 @@ _units_files_awk() {
 '
 }
 
-# _units_cell_awk -> the awk functions `kdef(kind, step)`, the reads a row of that kind takes when its cell is
+# _units_cell_awk -> the awk functions `kdef(kind, step[, task])`, the reads a row of that kind takes when its cell is
 # empty (units_ready above), and `cellq(v)`, a cell value as the suspect test prints it: `—` for
 # nothing, else the value in single quotes. ONE DEFAULT, TWO READERS: the scheduler
 # reads an empty cell through it, and the suspect test prints a cell back
@@ -1348,9 +1400,16 @@ _units_files_awk() {
 # THE FLOOR ROW READS THE READINGS (wave-35 T9; D8, AC-1.1; ADR-054): a test row at Step 6 or later is the
 # floor, Step 6's last act, and takes `approval:plan, proof:review, head`, so it waits for every owed reading
 # and every fix row born of one; a test row before Step 6 keeps `approval:plan, head`.
+# A WHOLE-RUN POINT IS A MARKED TEST ROW: `marked(t)` is 1 when the task cell t carries the tag ` · point`, ending the
+# cell or followed by the next ` · ` tag, so `· points` or `· point: …` is no mark. `kdef` given the cell answers a
+# marked test row `approval:plan` alone: a point runs after the rows its deps name, and waiting on `head` would hold it
+# behind every code row, the ones that wait on the point among them. A plan with no mark reads the default it read before.
+# `index`, never `==`, because the tag holds a multibyte glyph.
 _units_cell_awk() {
   printf '%s' '
-    function kdef(k, s) {
+    function marked(t) { return index(t " · ", " · point · ") > 0 }
+    function kdef(k, s, t) {
+      if (k == "test" && marked(t)) return "approval:plan"
       if (k == "test" && s ~ /^[0-9]+$/ && s + 0 >= 6) return "approval:plan, proof:review, head"
       if (k == "verify" || k == "test" || k == "doc") return "approval:plan, head"
       if (k == "review") return "approval:plan, live:head"
@@ -1399,7 +1458,7 @@ _units_questions_awk() {
 # read, so a caller judging a copy of a plan hands the plan it was copied from: a copy's own name names no record.
 _units_publish_order() {
   local plan="${1:-}" rec
-  printf '%s\n' "${2:-}" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }' || return 0
+  printf '%s\n' "${2:-}" | awk -F'\t' "$_PLAN_READ_RELEASE_AWK"'release_row($3, $2, $10, "landed") { f = 1 } END { exit !f }' || return 0
   declare -F proof_debt_record >/dev/null 2>&1 || return 0
   rec="$(proof_debt_record "$plan" 2>/dev/null)" && _proof_fields && line_held "$rec" || return 0
   units_record_landings "$rec" | awk -F'\t' '
@@ -1484,14 +1543,14 @@ units_post_readers() {
   # The registered reviews are the run's proofs (`_units_proofs`), read from the origin a copy was made from.
   proofs="$(_units_proofs "${origin:-$plan}")" || return 1
   { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; [ -z "$waits" ] || printf '\035\n%s\n' "$waits"; } \
-    | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+    | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$_PLAN_READ_RELEASE_AWK$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
     $0 == "\034" { p = 1; next }
     $0 == "\035" { p = 2; next }
     p == 2 { post_wait(); next }
     !p { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10 }; next }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
     END {
-      for (r = 1; r <= n; r++) if (knd[r] == "doc" && stp[r] ~ /^[0-9]+$/ && stp[r] + 0 >= 7 && sta[r] == "landed") rel[r] = 1
+      for (r = 1; r <= n; r++) if (release_row(knd[r], stp[r], sta[r], "landed")) rel[r] = 1
       for (j = 1; j <= n; j++) {
         if (knd[j] != "review" || sta[j] == "dropped" || stp[j] !~ /^[0-9]+$/) continue
         ok = 0
@@ -1515,6 +1574,7 @@ units_post_readers() {
 # the question test it shares with the validator.
 _units_sched_awk() {
   _units_questions_awk
+  printf '%s' "$_PLAN_READ_RELEASE_AWK"
   printf '%s' '
     $0 == SUBSEP "rows" { part = 1; next }
     $0 == SUBSEP "facts" { part = 2; next }
@@ -1522,7 +1582,7 @@ _units_sched_awk() {
     $0 == SUBSEP "proofs" { part = 4; next }
     part == 1 {
       if ($1 == "") next
-      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10
+      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; tsk[n] = $4; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10
       at[$1] = n
       next
     }
@@ -1946,7 +2006,7 @@ _units_sched_awk() {
       readst = ENVIRON["_UNITS_READ_ST"]
       # A PLAN CARRIES A RELEASE when a doc row at Step 7 or later is not dropped (wave-35 T5; A-T5-1).
       hasrel = 0
-      for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && st[i] != "dropped") hasrel = 1
+      for (i = 1; i <= n; i++) if (release_row(knd[i], stp[i], st[i], "standing")) hasrel = 1
       for (i = 1; i <= n; i++) {
         # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
         # taken off and remembered for the unmergeable hold; code[] says the row writes the tracked tree.
@@ -2035,10 +2095,12 @@ _units_sched_awk() {
       # THE REGRESSION HOLDS (T52; review 14 B1, R1): every writer the regression row (want, or each open
       # verify or test row when want is empty) waits on through judge, kept when it has not
       # landed and writes the tracked tree. judge never names a row downstream of the regression.
+      # A POINT IS ASKED BY ITS ID ALONE: its run is held by the rows it follows, and the whole run is never held by an
+      # open point, whose rows are earlier ones.
       if (mode == "holds") {
         for (i = 1; i <= n; i++) {
           if (want != "") { if (id[i] != want) continue }
-          else if (!(isopen(i) && (knd[i] == "verify" || knd[i] == "test"))) continue
+          else if (!(isopen(i) && (knd[i] == "verify" || knd[i] == "test") && !(knd[i] == "test" && marked(tsk[i])))) continue
           for (k = 1; k <= ntk[i]; k++) {
             if (judge(i, tk[i, k])) continue
             for (w = 1; w <= nw; w++) {
@@ -2206,17 +2268,17 @@ units_validate() {
     live="$(_units_live "${origin:-$plan}")" || lrc=1
     st15="$(printf '%s\n' "$live" | awk -F'\t' '$2 != "" { printf "%s=%s ", $1, $2 }')"
     rows15="$(_units_overlay "$live" "$rows")"
-    if printf '%s\n' "$rows15" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }'; then
+    if printf '%s\n' "$rows15" | awk -F'\t' "$_PLAN_READ_RELEASE_AWK"'release_row($3, $2, $10, "landed") { f = 1 } END { exit !f }'; then
       waits="$(_units_waits "$plan")" || waits=""
     fi
   fi
   # THE QUESTIONS A ROW AT 15 MAY DECLARE are lib/proof.sh PROOF_QUESTIONS, loaded when a task cell carries the tag.
   if [ -n "$v15" ] && [ -z "${PROOF_QUESTIONS:-}" ]; then
-    case "$rows" in *" · questions:"*) _units_lib proof.sh proof_question_ok ;; esac
+    case "$rows" in *" · questions:"*) bionic_need proof.sh proof_question_ok ;; esac
   fi
   if [ -n "$rows" ]; then
-    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" \
-      -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
+    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" -v kindw="$(units_kinds)" \
+      -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$_PLAN_READ_RELEASE_AWK$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -2224,7 +2286,7 @@ units_validate() {
         # one cell a raw pipe cannot move.
         m0 = split(over, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { sub(/=.*$/, "", o0[i0]); if (o0[i0] != "") skip[o0[i0]] = 1 }
-        split("build test verify review doc integrate close prototype", kk, " ")
+        split(kindw, kk, " ")
         for (i in kk) kinds[kk[i]] = 1
         m0 = split(st15, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { e0 = index(o0[i0], "="); if (e0 > 1) ost[substr(o0[i0], 1, e0 - 1)] = substr(o0[i0], e0 + 1) }
@@ -2248,8 +2310,8 @@ units_validate() {
             printf "%s: step %s is outside 3-9\n", id[i], (stp[i] == "" ? "(empty)" : stp[i])
 
           if (!(knd[i] in kinds))
-            printf "%s: kind %s is not one of build test verify review doc integrate close prototype\n", \
-              id[i], (knd[i] == "" ? "(empty)" : knd[i])
+            printf "%s: kind %s is not one of %s\n", \
+              id[i], (knd[i] == "" ? "(empty)" : knd[i]), kindw
 
           # A ROW AT 15 NAMES ITS QUESTIONS IN ITS TASK CELL, as the task-add verb writes the tag, and is held to the rule
           # the verb holds it to: a review row alone, each question one isq admits, once, comma-separated with no space.
@@ -2265,6 +2327,13 @@ units_validate() {
               if (qbad) printf "%s: task declares questions: %s, which is no list of questions: each one of %s, once, comma-separated with no space\n", \
                 id[i], (q == "" ? "(empty)" : q), pq
             }
+          }
+
+          # A WHOLE-RUN POINT IS A TEST ROW AMONG THE BUILD: the mark drops the wait of its row on every code row, so on any
+          # other kind it would be read as nothing, and on a test row past step 5 it would strip the floor of its readings.
+          if (marked(tsk[i])) {
+            if (knd[i] != "test") printf "%s: task marks a whole-run point; only a test row is a point\n", id[i]
+            else if (stp[i] ~ /^[0-9]+$/ && stp[i] + 0 > 5) printf "%s: task marks a whole-run point at step %s; a point stands among the build, at step 5 or earlier\n", id[i], stp[i]
           }
 
           # THE ORIGIN IS DECLARED BESIDE THE IDENTITY (wave-17 REQ-2, AC-2.1, D3, ADR-032).
@@ -2337,7 +2406,7 @@ units_validate() {
             if ((id[i] in skip) || stp[i] !~ /^[0-9]+$/ || sta[i] == "dropped") continue
             if (knd[i] == "test") ord[i] = 1
             else if (knd[i] == "review") ord[i] = 2
-            else if (knd[i] == "doc" && stp[i] + 0 >= 7) ord[i] = 3
+            else if (release_row(knd[i], stp[i])) ord[i] = 3
           }
           for (i = 1; i <= n; i++) {
             if (!(i in ord) || ord[i] == 2) continue
@@ -2549,7 +2618,7 @@ UNITS_RUN
     }')"
   case "$out" in
     'ask '*|*$'\n''ask '*)
-      if _units_lib reader.sh reader_q_statuses; then sts="$(_units_statuses "$(_units_origin "$plan")" 2>/dev/null)" || sts=""; fi
+      if bionic_need reader.sh reader_q_statuses; then sts="$(_units_statuses "$(_units_origin "$plan")" 2>/dev/null)" || sts=""; fi
       # The join: each row's first line is its state, and a dispatch is under a name when a `name=` line is not empty.
       out="$({ printf '%s\n' "$sts"; printf '\034\n'; printf '%s\n' "$out"; } | awk '
         $0 == "\034" { part = 1; next }
@@ -2773,7 +2842,7 @@ units_born_class() {
   if ! declare -F fix_policy_covers >/dev/null 2>&1 || ! fix_policy_covers "$pol" "${rating% *}" "${rating#* }"; then
     echo counted; return 0
   fi
-  _units_lib reader.sh reader_slug && own="record/$(reader_slug "$plan")/" || { echo counted; return 0; }
+  bionic_need reader.sh reader_slug && own="record/$(reader_slug "$plan")/" || { echo counted; return 0; }
   ids=""
   case "$words" in *" of="*) ids="${words#* of=}"; ids="${ids%% *}" ;; esac
   for id in $(printf '%s' "$ids" | tr ',' ' '); do

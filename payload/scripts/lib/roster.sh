@@ -554,13 +554,12 @@ roster_row_for_id() {  # <roster> <id> -> the last roster-state/ row whose agent
 # backslashes in a path as escapes. Local arrays (`ACK`, `seen`, …) are fresh per call — that is
 # how a function resets its sets without `delete arr`, which the one-true-awk this machine runs
 # as `/usr/bin/awk` does not promise.
+# This text carries lib/fields.sh's, so a caller never prefixes both; `_roster_kv` is its callers' name for `line_kv_of`.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need fields.sh line_field_v
 # shellcheck disable=SC2016  # awk source, expanded by awk and never by the shell
-_ROSTER_OPEN_AWK='
-  function _roster_kv(line, key,   i, n, parts) {
-    n = split(line, parts, "|")
-    for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-    return ""
-  }
+_ROSTER_OPEN_AWK="$_LINE_FIELDS_AWK"'
+  function _roster_kv(line, key) { return line_kv_of(line, key) }
   function _roster_live(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
   # The one stamp shape both writers produce, spelled without an interval expression:
   # /usr/bin/awk here is the one-true-awk, and `{4}` is not a repetition count there.
@@ -816,12 +815,11 @@ roster_landed() {  # <roster> <name> -> commit<TAB>at; 1 when the current work c
   local f="${1:-}" name="${2:-}"
   [ -n "$name" ] || return 1
   { [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ]; } || return 1
-  awk -F'|' -v k="|name=${name}|" '
-    function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+  awk -F'|' -v k="|name=${name}|" "$_LINE_FIELDS_AWK"'
     index($0, "roster-state/") != 1 || !index($0 "|", k) { next }
-    { c = kv("landed") }
-    c != "" && !index($0, "|extended=") { m = c "\t" kv("landed_at"); seen[c] = 1; next }
-    c != "" && !(c in seen) { m = c "\t" kv("landed_at"); seen[c] = 1; next }
+    { c = line_kv("landed") }
+    c != "" && !index($0, "|extended=") { m = c "\t" line_kv("landed_at"); seen[c] = 1; next }
+    c != "" && !(c in seen) { m = c "\t" line_kv("landed_at"); seen[c] = 1; next }
     c != "" { seen[c] = 1 }
     index($0, "|extended=") || (index($0, "|status=intended|") && !index($0, "|amended=") && !index($0, "|held=") && !index($0, "|adopted_from=")) { m = "" }
     END { if (m == "") exit 1; print m }' "$f" 2>/dev/null
@@ -858,6 +856,13 @@ roster_sessions_with_name() {  # <state dir> <name> -> "<session-id>|<status>" p
   done
   return 0
 }
+
+# ---------- WHERE A SESSION'S ROSTER LIVES -------------------------------------------------------
+#
+# One spelling of the file, so a move of the roster is one edit and a reader can never be left
+# reading an empty roster at the old address without complaint. The project root is the caller's,
+# already resolved (`project_root_or_refuse`); nothing here checks that the file exists.
+roster_path() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "$2"; }   # <project root> <session id>
 
 # ---------- THE ACK LEDGER OF A ROSTER (epic-23 wave-33 T10) --------------------------------------
 #
@@ -952,7 +957,10 @@ ruling_record() {  # <roster> <writer> <text> [<key=value>...: what it grants] -
   case "$w" in ''|*'|'*|*[[:space:]]*) return 1 ;; esac
   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 1
   now="$(date +%s)"
-  id="r${now}-$$"
+  # The id carries the asking process's own pid (lib/root.sh `bionic_id`), so two rulings in sibling subshells within
+  # one second are two ids.
+  bionic_need root.sh bionic_id && bionic_id || return 1
+  id="r${now}-${BIONIC_ID//./-}"
   _ruling_put "$f" "$w" "id=$id" "recorded=$now" "${@:4}" "text=$t" || return 1
   for r in "${f%/*}"/roster-*.state; do
     [ "$r" = "$f" ] || /usr/bin/grep '^roster-state/' "$r" 2>/dev/null | /usr/bin/grep -F "|name=${w}|" >/dev/null || continue
@@ -976,7 +984,7 @@ $(awk -v w="$2" -v us="$RULING_US" "$_ROSTER_OPEN_AWK"'
 RULING_RUN
   [ -z "$_RULING_PLAN" ] || return 0
   sid="${f##*/roster-}"; sid="${sid%.state}"
-  declare -F session_plan >/dev/null 2>&1 || . "$_RULING_LIB_DIR/run.sh" >/dev/null 2>&1
+  bionic_need run.sh session_plan
   case "$f" in */.bionic/tmp/roster-?*.state) _RULING_PLAN="$(session_plan "${f%/.bionic/tmp/*}" "$sid" 2>/dev/null)" ;; esac
 }
 
@@ -987,8 +995,8 @@ _ruling_put() {  # <roster> <writer> id=<id> <key=value>...
   shift 2
   _ruling_run "$f" "$w"
   [ -n "$_RULING_PLAN" ] || return 1
-  declare -F log_append >/dev/null 2>&1 || . "$_RULING_LIB_DIR/log.sh" >/dev/null 2>&1 || return 1
-  declare -F reader_log >/dev/null 2>&1 || . "$_RULING_LIB_DIR/reader.sh" >/dev/null 2>&1 || return 1
+  bionic_need log.sh log_append || return 1
+  bionic_need reader.sh reader_log || return 1
   RUN_LOG="$(reader_log "$_RULING_PLAN" 2>/dev/null)" || return 1
   RUN_LOG="$RUN_LOG" log_append ruling "$1" "row=$_RULING_ROW" "writer=$w" "${@:2}"
 }
@@ -1019,8 +1027,7 @@ ruling_page_close() {  # <roster> <id>
   local f="${1:-}" base sid root
   case "$f" in */.bionic/tmp/roster-?*.state) ;; *) return 0 ;; esac
   base="${f##*/}"; sid="${base#roster-}"; sid="${sid%.state}"; root="${f%/.bionic/tmp/*}"
-  declare -F owed_close >/dev/null 2>&1 || { [ -r "$_RULING_LIB_DIR/owed.sh" ] && . "$_RULING_LIB_DIR/owed.sh"; } 2>/dev/null
-  declare -F owed_close >/dev/null 2>&1 || return 0
+  bionic_need owed.sh owed_close || return 0
   [ -n "$(OWED_ROOT="$root" OWED_SID="$sid" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep -xF "ruling:${2:-}")" ] || return 0
   OWED_ROOT="$root" OWED_SID="$sid" owed_close "ruling:$2" "ruling read" >/dev/null 2>&1
   return 0
@@ -1053,17 +1060,16 @@ ruling_fold() {  # <roster> [<writer>]
     { awk -v us="$RULING_US" "$_ROSTER_OPEN_AWK"'
         index($0, "roster-state/") == 1 { p = _roster_kv($0, "plan"); if (p != "" && p != "none") print p }' "$f"
       printf '%s\n' "$_RULING_PLAN"; } | awk 'NF && !seen[$0]++' | while IFS= read -r p; do
-      declare -F reader_facts >/dev/null 2>&1 || . "$_RULING_LIB_DIR/reader.sh" >/dev/null 2>&1 || break
+      bionic_need reader.sh reader_facts || break
       facts="$(reader_facts "$p" 2>/dev/null)" || continue
       printf '%s\n' "$facts" | /usr/bin/grep '^run/v1|ev=ruling|'
     done
-  } | awk -F'|' -v want="${2:-}" -v us="$RULING_US" '
-    function kv(key,   i) { for (i = 2; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+  } | awk -F'|' -v want="${2:-}" -v us="$RULING_US" "$_LINE_FIELDS_AWK"'
     index($0, "ruling/v1|") != 1 && index($0, "run/v1|ev=ruling|") != 1 { next }
-    { id = kv("id"); if (id == "") next }
-    kv("recorded") != "" { if (!(id in W)) { W[id] = kv("writer"); R[id] = kv("recorded"); T[id] = kv("text"); order[++n] = id }; next }
-    { p = kv("pushed"); if (p != "" && !(id in P)) { P[id] = p; C[id] = kv("call") }
-      s = kv("shown");  if (s != "" && !(id in S)) { S[id] = s; B[id] = kv("by") } }
+    { id = line_kv("id"); if (id == "") next }
+    line_kv("recorded") != "" { if (!(id in W)) { W[id] = line_kv("writer"); R[id] = line_kv("recorded"); T[id] = line_kv("text"); order[++n] = id }; next }
+    { p = line_kv("pushed"); if (p != "" && !(id in P)) { P[id] = p; C[id] = line_kv("call") }
+      s = line_kv("shown");  if (s != "" && !(id in S)) { S[id] = s; B[id] = line_kv("by") } }
     END {
       for (i = 1; i <= n; i++) {
         id = order[i]
@@ -1149,7 +1155,7 @@ RULING_FOLD
 
 # THE WALL'S TWO REFUSALS OF A RULING, words and decision, over facts the Bash wall gathers itself: the
 # writer's commit with a ruling unread, and an acknowledgement from anyone but the ruling's writer or
-# not alone in its call. Each stages its refusal with `fold_block` and returns 2, or returns 0 and
+# in a call holding two. Each stages its refusal with `fold_block` and returns 2, or returns 0 and
 # says nothing, so its caller has loaded lib/fold.sh and folds the call; nothing here reads a payload.
 
 # The commit carries the unread rulings, already shown by `ruling_take_unread`: the refusal is the
@@ -1164,15 +1170,15 @@ $2"
 
 # An acknowledgement is the writer's receipt that it read the ruling, so one from the main thread or
 # another writer would mark it shown while its writer never saw it. <caller> is the calling agent's
-# roster name and <agent> its id, both empty for the main thread; <alone> is 1 when the ack is the
-# call's one segment. No writer is an id no ruling carries, which the verb itself refuses.
-ruling_ack_refusal() {  # <id> <writer> <caller> <agent> <alone> -> 0 nothing · 2 block
+# roster name and <agent> its id, both empty for the main thread; <acks> is how many acknowledgements the
+# call runs: one is admitted, whatever else the call holds. No writer is an id no ruling carries, which the verb itself refuses.
+ruling_ack_refusal() {  # <id> <writer> <caller> <agent> <acks> -> 0 nothing · 2 block
   local id="${1:-}" w="${2:-}" who="the main thread"
   [ -n "$w" ] || return 0
   if [ "${3:-}" = "$w" ]; then
     [ "${5:-}" = 1 ] && return 0
-    fold_block exit2 ruling-ack "an acknowledgement goes alone in its call" "run the ack by itself" \
-      "ruling $id is yours, $w, and the wall reads one acknowledgement per call. Run it alone:
+    fold_block exit2 ruling-ack "one acknowledgement a call" "run each ack alone" \
+      "ruling $id is yours, $w, and this call runs ${5:-more than one} acknowledgements; the wall reads one a call. Run each by itself:
     bash <plugin>/hooks/session-poker.sh ruling-ack $id"
     return 2
   fi

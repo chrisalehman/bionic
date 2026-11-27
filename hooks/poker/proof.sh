@@ -16,11 +16,40 @@
 # of the debt is the changelog: `release-check` prints each deferral stated (the sentence is in `CHANGELOG.md`) or
 # unstated.
 deferral_fold() {  # <text> -> its white space and control characters folded to single spaces, trimmed: lib/said.sh's one fold
-  declare -F said_fold >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/said.sh" ] && . "$BIONIC_LIB/said.sh"; }
+  bionic_need said.sh said_fold
   said_fold "$1"
+}
+# A PERSON'S MESSAGE QUOTED WHOLE is one field of the run's log only once its line breaks are gone, and lib/said.sh
+# matches it through that same fold, so a verb taking the person's words folds a quote that carries a CR or LF before
+# its shape check, which still refuses a `|`. A text with neither is printed as given; when the fold cannot be made (no
+# jq) or leaves nothing, the text is printed as given, so the caller's line-break refusal still stands.
+poker_one_line() {  # <text> -> the text, its line breaks folded by lib/said.sh's one fold
+  local f
+  case "${1:-}" in *$'\n'*|*$'\r'*) ;; *) printf '%s' "${1:-}"; return 0 ;; esac
+  f="$(deferral_fold "$1")" && [ -n "$f" ] || f="$1"
+  printf '%s' "$f"
 }
 deferral_escape() {  # <folded sentence> -> as the plan holds it: \ for a backslash, \" for a quote
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# THE NOTE OF A RUN THE GATE DID NOT ADMIT. Not admitted is an ordinary answer: tests/run.sh, booked.sh and
+# regression-run exit 0 having run nothing, and tell a caller that named a file in BIONIC_NOT_ADMITTED by one line
+# appended to it. A verb that runs one of them and branches on whether it ran makes a note of its own and reads it,
+# never the exit, or a door that exits 0 when it ran nothing would read as green. A runner older than the note exits
+# 75 itself, which reads the same.
+poker_note_make() {  # -> a fresh empty note's path; rc 1 when none can be made
+  mktemp "${TMPDIR:-/tmp}/bionic-note.XXXXXX" 2>/dev/null
+}
+poker_note_said() {  # <note> <rc> -> 75 when the note holds a line (the run never ran), else <rc>; the note is removed
+  local r="$2"
+  if [ -n "$1" ] && [ -s "$1" ]; then r=75; fi
+  [ -z "$1" ] || rm -f "$1"
+  printf '%s' "$r"
+}
+poker_note_tell() {  # <line> -> the caller's note gets it, when the caller named one; always 0
+  [ -z "${BIONIC_NOT_ADMITTED:-}" ] || printf '%s\n' "$1" >> "$BIONIC_NOT_ADMITTED" 2>/dev/null
+  return 0
 }
 # review_readings <plan> -> `<record><TAB><question><TAB><head>` per record a standing review proof names as its
 # evidence, in the order the run first registered it, the question and head of its newest proof: the reader's
@@ -30,7 +59,7 @@ deferral_escape() {  # <folded sentence> -> as the plan holds it: \ for a backsl
 # reading is no answer, so a waiver or a ruling over them is refused, never applied to none.
 review_readings() {
   local r
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } || return 0
+  [ -n "${_LINE_FIELDS_AWK:-}" ] || bionic_need line.sh line_event || return 0
   r="$( { . "$BIONIC_LIB/reader.sh" >/dev/null 2>&1 && reader_main "$1" reviews; } 2>/dev/null )" || return 2
   printf '%s\n' "$r" | awk -F'|' "$_LINE_FIELDS_AWK"'
     line_kv("ev") == "proof" && line_kv("question") != "" && (e = line_kv("evidence")) != "" {
@@ -242,7 +271,7 @@ walk_append() {
 # discharged, appended once the proofs are in. The hand-holds fold reads this line as nothing: the walk's verdicts are
 # a reader's, registered as the critic's are.
 walk_recorded() {  # <plan> <record docs-relative>
-  { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+  bionic_need line.sh line_event \
     && line_event "$1" walk "record=$2" "discharged=${WALK_N:-0}" >/dev/null 2>&1 \
     || say "the walk is registered, but the ev=walk line could not be appended to the landing record."
 }
@@ -273,8 +302,8 @@ whole_run_at_head() {
   #
   #   approval  key=<name> by=<who> [head=<40-hex>] said=<the reply> [why=<why>]
   #
-  # <who> is the project's git user name, the reply the user's own words; each is one field of the log, so a line break
-  # or a `|` is refused. Four kinds of name:
+  # <who> is the project's git user name, the reply the user's own words; each is one field of the log, so a `|` is
+  # refused and the reply's line breaks are folded away (`poker_one_line`). Four kinds of name:
   #   plan         the plan's approval at Step 3, keyed step3; given once, a
   #                placeholder refused. Its instant is the one the plan's and the step cards' asks close at: a step card
   #                left open until a later card or the Stop closed it would read as a stop the run made after its approval.
@@ -295,6 +324,7 @@ whole_run_at_head() {
   poker_verb_approve() {
     # Whether an approval already stands is read from the run's log, never the kept facts (lib/proof.sh `_PROOF_FRESH`).
     local _PROOF_FRESH=1
+    AP_REPLY="$(poker_one_line "$AP_REPLY")"
     case "$AP_REPLY$AP_WHY" in
       *$'\n'*|*$'\r'*|*'|'*)
         die "REFUSED — an approval is one field of the run's log, and the reply carries a line break or a '|'; give it without one. Nothing was appended."
@@ -315,7 +345,7 @@ whole_run_at_head() {
     AP_TIER="$(printf '%s\n' "$AP_CELLS" | awk -F'\037' -v c="$AP_NAME" '$1 == c { print ($4 == "" ? "-" : $4); exit }')"
     case "$AP_NAME" in plan|step0|step1|step2)
       # The gate's own placeholder test, asked of its library in a subshell as close-out asks it.
-      ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F is_placeholder_value >/dev/null 2>&1 || exit 9
+      ( bionic_need walls.sh is_placeholder_value || exit 9
         is_placeholder_value "$AP_REPLY" ); AP_RC=$?
       case "$AP_RC" in
         0) die "REFUSED — '$AP_REPLY' is a placeholder, not the user's reply; nothing was appended. Give their words verbatim: session-poker.sh approve $AP_NAME '<the user's reply>'"; exit 1 ;;
@@ -362,12 +392,24 @@ whole_run_at_head() {
     # EVERY APPROVAL IS THE PERSON'S TYPED WORD, whatever it names: held to lib/said.sh `user_said` as a reply to the release
     # card, a waiver and a move are, so an agent cannot record one alone and a prompt a program sent (no human origin) is
     # none. Asked last, so a reply refused for its shape or its name is refused for that.
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    bionic_need said.sh user_said
     if ! declare -F user_said >/dev/null 2>&1; then
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended."
       exit 2
     fi
+    # A SHORT WORD AFTER ITS ASK. The person often answers an ask with one word and goes on ("approved — and …"). Too
+    # short as the rule with no instant reads it (rc 3), it is asked again with the instant the ask's open round names
+    # in the run's log (lib/owed.sh `owed_rounds`): typed after the ask was opened, the word is theirs on it. A whole
+    # prompt stays their word as it was, and a name with no open ask keeps the rule with none.
     user_said "$AP_REPLY" "$PV_PLAN"; AP_SAID=$?
+    AP_AFTER=""
+    if [ "$AP_SAID" -eq 3 ] && declare -F owed_rounds >/dev/null 2>&1 && declare -F owed_key >/dev/null 2>&1; then
+      AP_OK="$(owed_key "approve:$AP_NAME" 2>/dev/null)" || AP_OK=""
+      [ -z "$AP_OK" ] || AP_AFTER="$(owed_rounds "${AP_OK//./\\.}" "$PV_PLAN" "$PV_REPO" 2>/dev/null \
+        | awk -F'\t' '$3 == "open" { a = $4 } END { print a }')"
+    fi
+    case "$AP_AFTER" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;; *) AP_AFTER="" ;; esac
+    [ -z "$AP_AFTER" ] || { user_said "$AP_REPLY" "$PV_PLAN" "$AP_AFTER"; AP_SAID=$?; }
     AP_ACT="an approval"; [ -z "$AP_TIER" ] || AP_ACT="a confirmation"
     [ "$AP_SAID" -eq 0 ] || { said_refuse "$AP_SAID" "$(said_fold "$AP_REPLY")" "$AP_ACT"; exit 1; }
     if ! LOG_AT="$AP_AT" proof_approval_event "$PV_PLAN" "$AP_KEY" "by=$AP_WHO" ${AP_HEAD:+"head=$AP_HEAD"} "said=$AP_REPLY" ${AP_WHY:+"why=$AP_WHY"}; then
@@ -436,8 +478,7 @@ whole_run_at_head() {
       die "REFUSED — this session (${sid:-no session key}) is bound to no run, so there is none to $1; nothing was written. Fix: run it in the session bound to the run."
       exit 1
     fi
-    if ! { declare -F seal_vouched >/dev/null 2>&1 || . "$BIONIC_LIB/seal.sh"; } 2>/dev/null || ! _proof_event_load \
-       || ! { declare -F user_said >/dev/null 2>&1 || . "$BIONIC_LIB/said.sh"; } 2>/dev/null; then
+    if ! bionic_need seal.sh seal_vouched || ! _proof_event_load || ! bionic_need said.sh user_said; then
       die "REFUSED — the seal, lib/reader.sh, the appender or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written. Fix: reinstall the plugin."
       exit 2
     fi
@@ -464,7 +505,7 @@ whole_run_at_head() {
       ans=""
       rec="$(reader_log "$stub" 2>/dev/null)" && mkdir -p "${rec%/*}" && seal_vouched "$SW_PLAN" > "$rec" \
         && { ans="$(reader_main "$stub" sessions 2>/dev/null)" || ans=""; }
-      SAID_BOUND="$(printf '%s\n' "$ans" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) printf "%s ", substr($i, 9) }')"
+      SAID_BOUND="$(printf '%s\n' "$ans" | awk -F'|' "$_LINE_FIELDS_AWK"'{ s = line_kv("session") } s != "" { printf "%s ", s }')"
       rm -rf "$tmp"
     fi
     user_said "$SW_WORDS" "$SW_PLAN"; rc=$?
@@ -539,7 +580,7 @@ whole_run_at_head() {
     proof_pending
   }
   poker_verb_proof_add() {
-    if ! { declare -F proof_last >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_last \
        || ! declare -F proof_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
@@ -587,10 +628,13 @@ whole_run_at_head() {
       PF_LOG="$PF_RECD/inherited-$PF_SUITE-${PF_BASEH:0:12}.log"; PF_REL="${PF_LOG#"$PF_DOCS"/}"
       PF_SW="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
       PF_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/bionic-inherited.XXXXXX" 2>/dev/null)" || PF_PARENT=""
-      PF_BR="bionic-inherited/${PF_SUITE%.sh}-${PF_BASEH:0:12}-$$"
+      if ! { bionic_need root.sh bionic_id && bionic_id; }; then
+        die "REFUSED — no id can be made for the inherited run's branch (lib/root.sh bionic_id); the plan is unchanged. Fix: reinstall the plugin (claude plugin install bionic@bionic)."; exit 2
+      fi
+      PF_BR="bionic-inherited/${PF_SUITE%.sh}-${PF_BASEH:0:12}-${BIONIC_ID//./-}"
       PF_OK=""; [ -z "$PF_PARENT" ] || PF_OK="$(cd "$PV_REPO" && bash "$PF_SW" create "$PF_BASEH" "$PF_BR" "$PF_PARENT" 2>&1)"
       PF_WT="$(printf '%s
-' "$PF_OK" | awk '/^spawn-worktree: OK / { for (i = 3; i <= NF; i++) if (index($i, "path=") == 1) { print substr($i, 6); exit } }')"
+' "$PF_OK" | awk "$_LINE_FIELDS_AWK"'/^spawn-worktree: OK / && (p = line_kv("path")) != "" { print p; exit }')"
       _pf_drop() {
         [ -z "$PF_WT" ] || ( cd "$PV_REPO" && bash "$PF_SW" remove "$PF_WT" ) >/dev/null 2>&1
         git -C "$PV_REPO" branch -q -D "$PF_BR" >/dev/null 2>&1
@@ -607,7 +651,9 @@ whole_run_at_head() {
         exit 1
       fi
       if [ -f "$PF_WT/tests/run.sh" ]; then PF_CMD="bash tests/run.sh --only $PF_SUITE"; else PF_CMD="bash tests/$PF_SUITE"; fi
-      ( cd "$PF_WT" && bash -c "$PF_CMD" ) > "$PF_LOG.out" 2>&1; PF_RC=$?
+      PF_NOTE="$(poker_note_make)" || PF_NOTE=""
+      ( cd "$PF_WT" && BIONIC_NOT_ADMITTED="$PF_NOTE" bash -c "$PF_CMD" ) > "$PF_LOG.out" 2>&1; PF_RC=$?
+      PF_RC="$(poker_note_said "$PF_NOTE" "$PF_RC")"
       { printf 'head=%s suite=%s rc=%s
 command: %s
 ' "$PF_BASEH" "$PF_SUITE" "$PF_RC" "$PF_CMD"; cat "$PF_LOG.out" 2>/dev/null; } > "$PF_LOG"
@@ -628,7 +674,7 @@ command: %s
       exit 0
     fi
     if ! proof_kind_ok "$PF_KIND"; then
-      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name regression, review, task or walk (or proof-add inherited <suite>). The plan is unchanged."
+      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name regression, point, review, task or walk (or proof-add inherited <suite>). The plan is unchanged."
       exit 1
     fi
     # A CHECK FACT IS WRITTEN BY THE VERB THAT RAN THE CHECK (wave-27 T16; D12): a log handed in
@@ -873,7 +919,21 @@ PF_OTHER_LIST
     # grammar (lib/proof.sh `_proof_floor_log`), the first refusal is the verb's, and logs that read different heads
     # are refused naming each, for a floor is the runs of one head. The owed reds are the union of each log's.
     PF_OWED=""
-    if [ "$PF_KIND" = regression ]; then
+    # A POINT'S RUN IS READ BY THE SAME GRAMMAR, ONE LOG, its row the one the log's name carries
+    # (`point-run-<row>-<head>[-<n>].log`, regression-run --point's), which must be an open point of the plan.
+    PF_POINT=""
+    case "$PF_KIND/$PF_EVIDS" in regression/point-run-*|regression/*/point-run-*|regression/*$'\n'point-run-*)
+      die "REFUSED — a point's run is never the head's whole run, so its log is recorded with proof-add point <log>, not as a regression. The plan is unchanged."
+      exit 1 ;;
+    esac
+    if [ "$PF_KIND" = point ]; then
+      PF_POINT="$(printf '%s' "${PF_REL##*/}" | sed -nE 's/^point-run-([A-Za-z0-9._]+)-[0-9a-f]{40}(-[0-9]+)?\.log$/\1/p')"
+      if [ -z "$PF_POINT" ] || ! plan_verb_id_ok "$PF_POINT" || ! units_points "$PV_PLAN" "$PF_POINT" >/dev/null 2>&1; then
+        die "REFUSED — $(clean "$PF_REL") is no point's run of $PV_PLAN: a point's proof cites the log regression-run --point <row> wrote, record/<wave>/point-run-<row>-<head>.log, for a test row whose task cell carries ' · point'. The plan is unchanged."
+        exit 1
+      fi
+    fi
+    if [ "$PF_KIND" = regression ] || [ "$PF_KIND" = point ]; then
       PF_FH=""; PF_FHEADS=""; PF_FRELS=""; PF_SPLIT=""; PF_RUNAT=""; PF_RUNRC=""
       while IFS='	' read -r _pf_real _pf_rel; do
         [ -n "$_pf_real" ] || continue
@@ -953,10 +1013,11 @@ PF_PAIRS_LIST
     # A RED WHOLE RUN'S REDS RIDE ON ITS PROOF: proof_attested took each log and every red
     # named; the proof lists them as owed, and the judge reads them there. Its evidence= is the logs, comma-joined (T35),
     # and it names the recorded run it read.
-    if [ "$PF_KIND" = regression ]; then
+    if [ "$PF_KIND" = regression ] || [ "$PF_KIND" = point ]; then
       [ -z "$PF_OWED" ] || PF_EV+=("owed=$PF_OWED")
       [ -z "$PF_RUNAT" ] || PF_EV+=("run=$PF_RUNAT")
       [ -z "$PF_RUNRC" ] || PF_EV+=("rc=$PF_RUNRC")
+      [ -z "$PF_POINT" ] || PF_EV+=("point=$PF_POINT")
     fi
     # THE PROOF IS READ AS STANDING BY EVERY READ BELOW, and appended only once nothing is left to refuse.
     if ! proof_pending "${PF_EV[@]}"; then
@@ -1035,6 +1096,16 @@ PF_PAIRS_LIST
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to the run's log${PF_BACK:+; $PF_BACK back to pending, its launch taken back there}."
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l (in the run's log)"; done
+    # A DEFERRAL ASKS FOR ITS SENTENCE WHERE IT IS BORN. The release entry's Known limits carry each open deferral's
+    # sentence, so one deferred with none is named here with the command that states it, never first at a later,
+    # unrelated landing. The registration stands: the sentence is the orchestrator's to give, and nothing waits on it.
+    # Read at the effective priority and the newest sentence, so a finding already stated or moved off defer is not named.
+    [ -z "$PF_PLANL" ] || proof_findings_owed "$PV_PLAN" 2>/dev/null | while read -r _pf_fid _ _ _pf_p _; do
+      [ "$_pf_p" = defer ] && [ "${_pf_fid%#*}" = "$PF_REL" ] || continue
+      _pf_st="$(proof_finding_stated "$PV_PLAN" "$_pf_fid" 2>/dev/null)"
+      [ -z "$_pf_st" ] || [ "$_pf_st" = - ] || continue
+      say "proof-add — $(clean "$_pf_fid") is deferred with no Known-limits sentence: bash ${HOOK_DIR}/session-poker.sh finding-move $(clean "$_pf_fid") stated '<its sentence>'"
+    done
     [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that review."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
@@ -1044,7 +1115,7 @@ PF_PAIRS_LIST
   # when the libraries or the run's log cannot be reached.
   waive_criterion() {
     local who head why known ac="$WV_Q"
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    bionic_need said.sh user_said
     _proof_reader_load
     if ! declare -F user_said >/dev/null 2>&1 || ! declare -F reader_criteria >/dev/null 2>&1; then
       die "REFUSED — a criterion's waiver needs lib/said.sh and lib/reader.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
@@ -1063,6 +1134,7 @@ PF_PAIRS_LIST
       return 1
     fi
     why="$(deferral_fold "$WV_WHY_RAW")"
+    WV_REPLY="$(poker_one_line "$WV_REPLY")"
     case "$WV_REPLY$why" in
       *'|'*|*$'\n'*|*$'\r'*)
         die "REFUSED — a waiver's words and why are fields of the run's log, which a '|' or a line break would split; give them without one. Nothing is written."
@@ -1099,7 +1171,7 @@ PF_PAIRS_LIST
   # a criterion go; the head is written when the working branch names one and is not required, for a criterion is not
   # judged at a head. Its ask, `waive:<criterion>`, the gate's matrix arm opens, closes as a question's does.
   poker_verb_waive() {
-    if ! { declare -F proof_waiver_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_waiver_event \
        || ! declare -F proof_waiver_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
@@ -1109,6 +1181,7 @@ PF_PAIRS_LIST
       exit $?
     fi
     WV_QS="$WV_Q"; [ "$WV_Q" != all ] || WV_QS="$PROOF_QUESTIONS"
+    WV_REPLY="$(poker_one_line "$WV_REPLY")"
     case "$WV_REPLY" in
       *$'\n'*|*$'\r'*)
         die "REFUSED — a waiver is one line, and the reply carries a line break; nothing is written."
@@ -1136,7 +1209,7 @@ PF_PAIRS_LIST
         exit 1 ;;
     esac
     # A QUESTION'S WAIVER LETS A FAILED REVIEW THROUGH ON THE PERSON'S WORD, held to lib/said.sh `user_said` as a criterion's is.
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    bionic_need said.sh user_said
     if ! declare -F user_said >/dev/null 2>&1; then
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written. run again: session-poker.sh waive $WV_Q '<the user's words>'"
       exit 2
@@ -1188,14 +1261,12 @@ PF_PAIRS_LIST
   # owed item closes, as `task-add --born` closes it. Its event is `finding ref=<record>#<n> to=fixed row=<T> by=<who>`.
   # Main thread only, by the existing arm's list (lib/walls.sh `_wall_poker_contract_verb`).
   poker_verb_finding_move() {
-    if ! { declare -F proof_finding_rating >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_finding_rating \
        || ! declare -F _proof_moved_to >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
-      . "$BIONIC_LIB/said.sh"
-    fi
+    bionic_need said.sh user_said
     if [ -z "$FM_ROW" ] && ! declare -F user_said >/dev/null 2>&1; then
       die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
@@ -1241,9 +1312,9 @@ FM_FINDING
       exit 1
     fi
     # A FINDING A LANDING SETTLED IS THE LANDING'S (lib/line.sh `line_settle`): the move is a correction of a cell the
-    # landing wrote, and is refused naming that landing.
-    { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-    if declare -F line_settled_by >/dev/null 2>&1 && FM_BY_LANDING="$(line_settled_by "$PV_PLAN" findings "$FM_ID")"; then
+    # landing wrote, and is refused naming that landing. The landing library is asked for by the function read here:
+    # the fields library loaded through another library holds the reader's text and not this function.
+    if bionic_need line.sh line_settled_by && FM_BY_LANDING="$(line_settled_by "$PV_PLAN" findings "$FM_ID")"; then
       die "REFUSED — $(clean "$FM_ID") was settled by the landing of ${FM_BY_LANDING% *} at ${FM_BY_LANDING#* }: that landing wrote it fixed and closed its ask, so no move corrects it; the plan is unchanged."
       exit 1
     fi
@@ -1334,8 +1405,7 @@ FM_FINDING
   # through `debt add`, run as a child. Nothing in the plan is written. The plan and the checkout are the caller's
   # (PV_PLAN, PV_REPO, from plan_verb_open). Facts that cannot be read are said on stderr, and the return is 2.
   finding_disposition() {
-    { declare -F proof_fixed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-      && declare -F proof_fixed >/dev/null 2>&1 \
+    bionic_need proof.sh proof_fixed \
       || { die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; no finding is read."; return 2; }
     DSP_DOCS="$(docs_root "$PV_REPO")"
     _proof_findings_load "$PV_PLAN" && DSP_FEV="$_PROOF_FINDINGS" && DSP_FIXED="$(proof_fixed "$PV_PLAN" "$PV_REPO")" \
@@ -1452,7 +1522,7 @@ DSP_READINGS
   poker_verb_release_check() {
     RC_CMD="$(config_value "$(project_root "$PWD")" release-check "" 2>/dev/null)"
     [ -n "$RC_CMD" ] || exit 0
-    if ! { declare -F proof_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_event \
        || ! declare -F proof_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run and the plan is unchanged."
       exit 2
@@ -1586,7 +1656,7 @@ DSP_READINGS
   # asks the machine's gate itself, kind whole (tests/run.sh THE ONE ADMISSION; ADR-051). Its log is the evidence
   # `proof-add floor` judges by the runner's own report (lib/proof.sh `proof_attested`): a red whole run is the
   # floor's candidate, its reds owed (wave-35 T9), so the record line is printed red or green. A run the gate never
-  # admitted (exit 75, no verdict) ran nothing and writes no log. With neither key nor runner it refuses, naming the
+  # admitted (its note written, no verdict) ran nothing, writes no log and exits 0, an ordinary answer. With neither key nor runner it refuses, naming the
   # other way: run the regression and cite its log. A config carrying `floor-attestation:`, a key removed in wave-36
   # (T35), is refused first, naming it (lib/proof.sh `proof_floor_retired`).
   # THE ONE PATH A RUNNER IS GIVEN THE WHOLE RUN BY, asked before anything runs, and three rules refuse it:
@@ -1597,15 +1667,23 @@ DSP_READINGS
   # WHO STARTED IT is written on the run line as `starter=`: the tick or the orchestrator (the default) is the machine,
   # and a person is a hand-hold, so `--starter person` carries the person's `--reason`, kept on the same line; the
   # hand-holds count reads it (hooks/poker/line.sh `hand_holds_report`).
+  # A WHOLE-RUN POINT'S RUN (`--point <row>`): the same run at the same head, asked by a point's row, a test row its task
+  # cell marks (lib/units.sh `units_points`). Rule 2 asks the point's own rows alone, so a later row still open is no
+  # reason; rule 3 asks only that no whole run is running and no run of this point has its log at this head; the full
+  # pass is not asked, for the point's row lands on its own run. Its log is `record/<wave>/point-run-<row>-<head>.log`,
+  # never a whole run's, its run line names the point, and it folds no verdict: `proof-add point` records it as a proof
+  # of its own kind, which never proves the head.
   poker_verb_regression_run() {
-    FR_STARTER=orchestrator; FR_REASON="";
+    FR_STARTER=orchestrator; FR_REASON=""; FR_POINT=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --starter) [ $# -ge 2 ] || usage "regression-run --starter takes one of tick, orchestrator or person."
           FR_STARTER="$2"; shift 2 ;;
         --reason) [ $# -ge 2 ] || usage "regression-run --reason takes the person's reason, in quotes."
           FR_REASON="$2"; shift 2 ;;
-        *) usage "regression-run takes only --starter <tick|orchestrator|person> and, with person, --reason '<why>': it runs .bionic/config.yaml's regression-command: command, else tests/run.sh, at the working branch's head." ;;
+        --point) [ $# -ge 2 ] && plan_verb_id_ok "$2" || usage "regression-run --point takes one row id, the point's."
+          FR_POINT="$2"; shift 2 ;;
+        *) usage "regression-run takes only --starter <tick|orchestrator|person>, with person --reason '<why>', and --point <row>: it runs .bionic/config.yaml's regression-command: command, else tests/run.sh, at the working branch's head." ;;
       esac
     done
     case "$FR_STARTER" in
@@ -1631,7 +1709,7 @@ DSP_READINGS
       exit 1
     fi
     FR_CMD="$(config_value "$FR_ROOT" regression-command "" 2>/dev/null)"
-    if ! { declare -F proof_state >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+    if ! bionic_need proof.sh proof_state \
        || ! declare -F proof_state >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run."
       exit 2
@@ -1653,7 +1731,28 @@ DSP_READINGS
     FR_WAVE="$(proof_plan_slug "$PV_PLAN")"
     FR_DOCS="$(docs_root "$PV_REPO")"
     FR_WHOLE=""
-    FR_RUNNING="REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and its log is this head's whole run once it ends. Nothing was run; if it ends 75, the gate never admitted it: run regression-run again then."
+    if [ -n "$FR_POINT" ]; then
+      FR_PST="$(units_points "$PV_PLAN" "$FR_POINT" 2>/dev/null | cut -f2)"
+      if [ -z "$FR_PST" ]; then
+        die "REFUSED — $FR_POINT is no whole-run point of $PV_PLAN: a point is a test row whose task cell carries ' · point'; name one: regression-run --point <row>. Nothing was run."
+        exit 1
+      fi
+      case "$FR_PST" in pending|active) : ;; *)
+        die "REFUSED — the point $FR_POINT reads $(clean "$FR_PST"), and only an open point is run; the whole run after the last build row is regression-run with no --point. Nothing was run."
+        exit 1 ;;
+      esac
+      FR_OPEN="$(units_floor_holds "$PV_PLAN" "$FR_POINT" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s (step %s, %s)", (n++ ? ", " : ""), $1, $2, $3 }')"
+      if [ -n "$FR_OPEN" ]; then
+        die "REFUSED — rows the point $FR_POINT follows still write tracked files: $FR_OPEN; its run comes once they have landed: regression-run --point $FR_POINT then. Nothing was run."
+        exit 1
+      fi
+      for _fr_l in "$FR_DOCS/record/$FR_WAVE/point-run-$FR_POINT-$FR_HEAD"*.log; do
+        [ -f "$_fr_l" ] || continue
+        die "REFUSED — the point $FR_POINT has its run at ${FR_HEAD:0:12}: ${_fr_l#"$FR_DOCS"/}; record it with proof-add point. Nothing was run."
+        exit 1
+      done
+    fi
+    FR_RUNNING="REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and its log is this head's whole run once it ends. Nothing was run; if it ends saying the gate did not admit it, run regression-run again then."
     if [ -z "$FR_CMD" ]; then
       if [ ! -f "$FR_CO/tests/run.sh" ]; then
         die "REFUSED — this project declares no regression-command: in .bionic/config.yaml, and the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) holds no tests/run.sh to run as its regression; declare regression-command: <command> there, or run the regression yourself and cite its log (its first head= line head=<40-hex> dirty=0, its last line rc=0) with proof-add regression <log> [<log>…]. Nothing was run."
@@ -1665,8 +1764,8 @@ DSP_READINGS
         die "REFUSED — the plan declares regression: no (Step 0), so it owes no whole run, and no approval overrides the setting; put it to the user and change it with: bash ${HOOK_DIR}/session-poker.sh regression yes '<the user's reply>'. Nothing was run."
         exit 1
       fi
-      # RULE 2. A row the regression waits on still writes the head.
-      FR_OPEN="$(units_floor_holds "$PV_PLAN" "" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s (step %s, %s)", (n++ ? ", " : ""), $1, $2, $3 }')"
+      # RULE 2. A row the regression waits on still writes the head (a point's, asked above).
+      FR_OPEN=""; [ -n "$FR_POINT" ] || FR_OPEN="$(units_floor_holds "$PV_PLAN" "" 2>/dev/null | awk -F'\t' 'NF { printf "%s%s (step %s, %s)", (n++ ? ", " : ""), $1, $2, $3 }')"
       if [ -n "$FR_OPEN" ]; then
         die "REFUSED — rows the regression waits on still write tracked files: $FR_OPEN; the whole run comes once, after the last of them lands, or it proves a head that does not survive their landing. Nothing was run."
         exit 1
@@ -1674,7 +1773,9 @@ DSP_READINGS
       # RULE 3. ONE WHOLE RUN AT A HEAD. A log of tests/run.sh at this head refuses another: a red is a fix row's, its
       # own suites plus the red one, and the next whole run is at the head its landing makes. A whole run still running
       # in the checkout refuses one too: a second would wait behind it at the gate to prove the same head.
-      if whole_run_at_head "$FR_DOCS" "$FR_WAVE" "$FR_HEAD" "$FR_CO" tests/run.sh; then
+      if [ -n "$FR_POINT" ]; then
+        if declare -F gate_whole_open >/dev/null 2>&1 && gate_whole_open "$FR_CO"; then die "$FR_RUNNING"; exit 1; fi
+      elif whole_run_at_head "$FR_DOCS" "$FR_WAVE" "$FR_HEAD" "$FR_CO" tests/run.sh; then
         if [ -n "$WRA_LOG" ]; then
           die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: $WRA_LOG. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
         else
@@ -1684,7 +1785,7 @@ DSP_READINGS
       fi
       # A head the last full pass still proves is not run again: nothing a suite runs differs from the pass, so a run here
       # proves what is proved, and the next whole run is at the head a landing of code makes. The printer is the one reader.
-      FR_GREEN="$(proof_whole_text "$PV_PLAN" "$FR_CO" "$FR_HEAD" 2>/dev/null)"
+      FR_GREEN=""; [ -n "$FR_POINT" ] || FR_GREEN="$(proof_whole_text "$PV_PLAN" "$FR_CO" "$FR_HEAD" 2>/dev/null)"
       case "$FR_GREEN" in
         "green at "*", "*)
           FR_PASS="record/$FR_WAVE/regression-run-$(proof_last "$PV_PLAN" regression 2>/dev/null).log"
@@ -1721,20 +1822,23 @@ DSP_READINGS
     # machine is unfinished. Asked in this shell, the id read back through a file, since the gate's holder and the
     # `times` gate_end reads are this shell's.
     FR_GATE=""; FR_GATE_OWN=0
-    if declare -F gate_ask >/dev/null 2>&1 && FR_IDF="$(mktemp "${TMPDIR:-/tmp}/bionic-regression-gate.XXXXXX")"; then
+    if declare -F gate_ask_into >/dev/null 2>&1 && FR_IDF="$(mktemp "${TMPDIR:-/tmp}/bionic-regression-gate.XXXXXX")"; then
       FR_HERE="$PWD"; FR_ASK=2
       if cd "$FR_CO" 2>/dev/null; then
-        gate_ask whole "${FR_CMD:0:60}" > "$FR_IDF"; FR_ASK=$?
+        gate_ask_into "$FR_IDF" whole "${FR_CMD:0:60}"; FR_ASK=$?
+        FR_GATE="$GATE_ASK_ID"
         cd "$FR_HERE" 2>/dev/null || :
+      else
+        rm -f "$FR_IDF"
       fi
-      { read -r FR_GATE < "$FR_IDF"; } 2>/dev/null; rm -f "$FR_IDF"
       case "$FR_ASK" in
         0)
           case "$(sed -n 's/^holder=//p' "$(gate_dir)/requests/$FR_GATE" 2>/dev/null | tail -n 1)" in "$$:"*) FR_GATE_OWN=1 ;; esac
           export BIONIC_GATE_ADMIT="$FR_GATE" ;;
         75)
-          die "regression-run — the gate did not admit the whole run (exit 75), so nothing ran and no log was written; run regression-run again."
-          exit 75 ;;
+          die "regression-run — the gate did not admit the whole run, so nothing ran and no log was written; run regression-run again."
+          poker_note_tell "regression-run: not admitted"
+          exit 0 ;;
         *)
           FR_GATE=""
           say "regression-run — the gate's store $(gate_dir) cannot be written, so this whole run runs unbooked, and neither the tick nor a second regression-run can see it running." ;;
@@ -1752,23 +1856,27 @@ DSP_READINGS
     # own exec ends). No perl on PATH: the command is launched as it was.
     FR_SIGDFL=()
     command -v perl >/dev/null 2>&1 && FR_SIGDFL=(perl -e '$SIG{$_} = "DEFAULT" for qw(HUP INT QUIT); exec { $ARGV[0] } @ARGV; exit($!{ENOENT} ? 127 : 126)' --)
+    # The command is handed a note of its own (THE NOTE, above): the runner that ran nothing writes it and exits 0.
+    FR_NOTE="$(poker_note_make)" || FR_NOTE=""
     if [ -n "$FR_WHOLE" ]; then
       ( cd "$FR_CO" 2>/dev/null || exit 1
-        exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} bash tests/run.sh ) </dev/null > "$FR_TMP" 2>&1
+        BIONIC_NOT_ADMITTED="$FR_NOTE" exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} bash tests/run.sh ) </dev/null > "$FR_TMP" 2>&1
     else
       ( cd "$FR_CO" 2>/dev/null || exit 1
         set -f
         # shellcheck disable=SC2086  # the configured command splits on blanks, as release-check's does
-        exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
+        BIONIC_NOT_ADMITTED="$FR_NOTE" exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
     fi
     FR_RC=$?
+    FR_RC="$(poker_note_said "$FR_NOTE" "$FR_RC")"
     if [ "$FR_GATE_OWN" -eq 1 ]; then gate_end "$FR_GATE" "$FR_RC" >/dev/null 2>&1 || :; unset BIONIC_GATE_ADMIT; fi
-    # A WHOLE RUN THE GATE NEVER ADMITTED RAN NOTHING (tests/run.sh: exit 75 before any suite, no verdict), so
-    # there is no run of the head to log.
+    # A WHOLE RUN THE GATE NEVER ADMITTED RAN NOTHING (tests/run.sh: its note written before any suite, no verdict,
+    # read as 75 above), so there is no run of the head to log, and the answer is an ordinary one.
     if [ -n "$FR_WHOLE" ] && [ "$FR_RC" -eq 75 ] && ! /usr/bin/grep -q '^Gating: ' "$FR_TMP" 2>/dev/null; then
       cat "$FR_TMP"; rm -f "$FR_TMP"
-      die "regression-run — the gate did not admit the whole run (exit 75), so nothing ran and no log was written; run regression-run again."
-      exit 75
+      die "regression-run — the gate did not admit the whole run, so nothing ran and no log was written; run regression-run again."
+      poker_note_tell "regression-run: not admitted"
+      exit 0
     fi
     FR_NOW="$(git -C "$FR_CO" rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"
     FR_DIRTY2="$(_wt_piece_dirt "$FR_CO" | awk 'END { print NR + 0 }')"
@@ -1780,8 +1888,9 @@ DSP_READINGS
       die "REFUSED — the regression ($(clean "$FR_CMD")) moved the working checkout $FR_CO while it ran ($FR_MOVED); no log was written. Put back what it changed and run regression-run again."
       exit 1
     fi
-    FR_REL="record/$FR_WAVE/regression-run-$FR_HEAD.log"; FR_NTH=1
-    while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/regression-run-$FR_HEAD-$FR_NTH.log"; done
+    FR_STEM="regression-run"; [ -z "$FR_POINT" ] || FR_STEM="point-run-$FR_POINT"
+    FR_REL="record/$FR_WAVE/$FR_STEM-$FR_HEAD.log"; FR_NTH=1
+    while [ -e "$FR_DOCS/$FR_REL" ]; do FR_NTH=$((FR_NTH + 1)); FR_REL="record/$FR_WAVE/$FR_STEM-$FR_HEAD-$FR_NTH.log"; done
     FR_LOG="$FR_DOCS/$FR_REL"
     if ! mkdir -p "${FR_LOG%/*}" 2>/dev/null \
        || ! { printf 'head=%s dirty=%s\ncommand: %s\n' "$FR_HEAD" "$FR_DIRTY" "$FR_CMD"; awk '{ print }' "$FR_TMP"; printf 'rc=%s\n' "$FR_RC"; } > "$FR_LOG" 2>/dev/null; then
@@ -1794,16 +1903,16 @@ DSP_READINGS
     # dirty count read before the run, its exit, and the log's sha256 (lib/proof.sh `_proof_sha256`), so `proof-add
     # floor` accepts this log, and this log as it is now, and no hand-written one.
     FR_SHA="$(_proof_sha256 "$FR_LOG")" || FR_SHA=""
-    declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+    bionic_need line.sh line_event
     if [ -z "$FR_SHA" ] || ! declare -F line_event >/dev/null 2>&1 \
        || ! line_run_event "$(line_log "$PV_PLAN")" "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" \
-              "starter=$FR_STARTER" ${FR_REASON:+"reason=$FR_REASON"} 2>/dev/null; then
+              "starter=$FR_STARTER" ${FR_REASON:+"reason=$FR_REASON"} ${FR_POINT:+"point=$FR_POINT"} 2>/dev/null; then
       die "regression-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add regression will refuse this log as no recorded run."
     fi
     # THE REGRESSION'S FACTS (wave-39 T24; D9; ADR-061): a clean whole run folds into one verdict per suite at its head,
     # each keyed by the commit it ran at (lib/proof.sh `proof_regression_fold`). A run the gate never admitted returned
     # above; a dirty run proves no commit and folds nothing.
-    if [ -n "$FR_WHOLE" ] && [ "$FR_DIRTY" -eq 0 ] && ! proof_regression_fold "$PV_PLAN" "$FR_CO" "$FR_HEAD" "$FR_LOG" "$FR_REL" 2>/dev/null; then
+    if [ -n "$FR_WHOLE" ] && [ -z "$FR_POINT" ] && [ "$FR_DIRTY" -eq 0 ] && ! proof_regression_fold "$PV_PLAN" "$FR_CO" "$FR_HEAD" "$FR_LOG" "$FR_REL" 2>/dev/null; then
       say "regression-run — this run's per-suite facts could not be written to the plan's landing record; the judge reads the run's proof line at ${FR_HEAD:0:12} alone."
     fi
     if [ -n "$FR_WHOLE" ]; then
@@ -1813,8 +1922,13 @@ DSP_READINGS
       if [ "$FR_DIRTY" -ne 0 ]; then
         say "regression-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add regression refuses this log; commit and run regression-run again."
       else
-        [ "$FR_RC" -eq 0 ] || say "regression-run — a red whole run is the regression's candidate: proof-add regression records it with its red suites owed, each closed by a later landing that runs it green (a fix row)."
-        say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add regression $FR_REL"
+        if [ -n "$FR_POINT" ]; then
+          [ "$FR_RC" -eq 0 ] || say "regression-run — a red run of the point $FR_POINT: proof-add point records it with its red suites owed, each a fix row's (task-add <id> --born regression:<suite>)."
+          say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add point $FR_REL"
+        else
+          [ "$FR_RC" -eq 0 ] || say "regression-run — a red whole run is the regression's candidate: proof-add regression records it with its red suites owed, each closed by a later landing that runs it green (a fix row)."
+          say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add regression $FR_REL"
+        fi
       fi
       exit "$FR_RC"
     fi
@@ -1828,7 +1942,7 @@ DSP_READINGS
     if [ "$FR_DIRTY" -ne 0 ]; then
       say "regression-run — the tree was dirty (dirty=$FR_DIRTY), so proof-add regression refuses this log; commit and run regression-run again."
     else
-      say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add regression $FR_REL"
+      say "regression-run — record it: bash ${HOOK_DIR}/session-poker.sh proof-add ${FR_POINT:+point}${FR_POINT:-regression} $FR_REL"
     fi
     exit 0
   }
@@ -1850,12 +1964,7 @@ DSP_READINGS
   # file under the project's root. Whether that line holds the concept is the reader's to judge, not the verb's.
   # Exit 0 done; 1 refused, nothing written; 2 the run, the record or its log cannot be found or written.
   poker_verb_debt() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     DEBT_PLAN=""
     if [ -n "$DEBT_PLAN_ARG" ]; then
       DEBT_PLAN="$(docs_path "$REPO_REAL" "$DEBT_PLAN_ARG")"
@@ -1881,14 +1990,12 @@ DSP_READINGS
         exit 2
       fi
     fi
-    if ! { declare -F proof_debt_items >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null; }; } \
-       || ! declare -F proof_debt_items >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_debt_items; then
       die "REFUSED — lib/proof.sh cannot be loaded, so the debt ledger cannot be read; reinstall the plugin."
       exit 2
     fi
     # THE ONE DEBT-LINE GRAMMAR (wave-36 T13; D13, AC-7.8): lib/debt.sh, which close-out and card.sh source too.
-    if ! { declare -F debt_line_ok >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/debt.sh" ] && . "$BIONIC_LIB/debt.sh" 2>/dev/null; }; } \
-       || ! declare -F debt_line_ok >/dev/null 2>&1; then
+    if ! bionic_need debt.sh debt_line_ok; then
       die "REFUSED — lib/debt.sh cannot be loaded, so no debt line can be held to its grammar; reinstall the plugin."
       exit 2
     fi

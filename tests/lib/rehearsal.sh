@@ -151,6 +151,17 @@ _rh_do() {
   printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
   return 1
 }
+# _rh_ready <label> -> the row's ready, run from RH_CWD by _rh_do: 0 only when it printed LANDED. WAITING and BUSY exit
+# 0 as ordinary answers, so the landing is read from the line ready printed, never from its exit.
+_rh_ready() {
+  local why
+  _rh_do "$1" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
+  printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q '^LANDED ' && return 0
+  why="$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -m 1 -E '^(WAITING|BUSY) ')" || why="$(printf '%s\n' "$DOOR_OUT" | tail -n 1)"
+  printf 'rehearse %s: %s did not land: %s\n' "$RH_STATE" "$1" "$why" >&2
+  printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
+  return 1
+}
 _rh_poker() { local l="$1"; shift; _rh_do "$l" bash "$RH_ROOT/hooks/session-poker.sh" "$@"; }   # <label> <verb> [args]
 # _rh_refused <label> <cmd> [args] -> _rh_do's run of a command the state needs refused: 0 when it exits non-zero
 _rh_refused() {
@@ -258,7 +269,7 @@ _rh_build_ready() {
     > "$t/tests/rehearsal-row.test.sh"
   _rh_commit "$t" "a library change and its suite" || { echo "rehearse $RH_STATE: the build's commit in .worktrees/T1 failed" >&2; return 1; }
   _rh_hand code "T1's code and its suite, committed in .worktrees/T1"
-  RH_CWD="$t" _rh_do "the build row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
+  RH_CWD="$t" _rh_ready "the build row says ready" || return 1
   printf '# T1: the build\n\nThe library change and its suite.\n' > "$RH_REC/T1.md" || return 1
   _rh_hand record "T1's report record/wave-x/T1.md"
   _rh_stopped dw-T1
@@ -281,7 +292,7 @@ _rh_review() {
       "$(git -C "$RH_ROOT" show "$5:payload/scripts/lib/said.sh" 2>/dev/null | /usr/bin/grep -n '^rehearsal_landed()' | cut -d: -f1)"
     printf '\nThe review read the rows and found %s.\n' "$([ "$n" = 0 ] && echo nothing || echo one finding)"; } > "$RH_REC/$nm.md"
   printf '%s|questions=%s\n' "$(roster_row_fixture session="$WORLD_SID" name="$nm" agent_id="a-$nm" subagent_type="$t" \
-    launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$nm.md")" "$q" >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state"
+    launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$nm.md")" "$q" >> "$(roster_path "$RH_ROOT" "$WORLD_SID")"
   _rh_hand record "the review record record/wave-x/$nm.md"; _rh_hand launch "$nm's roster row (roster_row)"
   _rh_poker "proof-add $nm" proof-add review "record/wave-x/$nm.md" --question "$q" --reader "$nm"
 }
@@ -357,7 +368,7 @@ _rh_launch() {
   local u="toolu-$1"
   roster_row_fixture status=intended session="$WORLD_SID" name="$1" agent_id= subagent_type=bionic:senior-implementor \
     launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$2.md" plan="$RH_PLAN" row="$2" lands_on="$3" tool_use_id="$u" \
-    brief=".bionic/docs/record/wave-x/briefs/$1.md" brief_sum=- >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state" || return 1
+    brief=".bionic/docs/record/wave-x/briefs/$1.md" brief_sum=- >> "$(roster_path "$RH_ROOT" "$WORLD_SID")" || return 1
   _rh_hand launch "$1's roster row on $2, landing on $3 (roster_row)"
   _rh_do "$1's launch confirmed: its dispatch event" bash -c 'printf %s "$1" | bash "$2"' _ \
     "$(jq -nc --arg s "$WORLD_SID" --arg c "$RH_ROOT" --arg n "$1" --arg u "$u" '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse",
@@ -516,7 +527,7 @@ _rh_replay() {
     && _rh_commit "$t" "a caller reaches the library change" \
     || { echo "rehearse $RH_STATE: the fix's commit in .worktrees/T5 failed" >&2; return 1; }
   _rh_hand code "T5's suite, a caller of the library change, committed in .worktrees/T5"
-  RH_CWD="$t" _rh_do "the fix row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
+  RH_CWD="$t" _rh_ready "the fix row says ready" || return 1
   printf '# T5: the fix\n\nThe suite calls rehearsal_landed, so the library change has a caller.\n' > "$RH_REC/T5.md" || return 1
   _rh_hand record "T5's report record/wave-x/T5.md"
   _rh_stopped w-T5 || return 1
@@ -680,9 +691,9 @@ Answer the requirements with one function.
 
 - **D1 — one function** (D1; REQ-1)
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |$le
 SPEC
@@ -697,9 +708,9 @@ SPEC
 | T1 | 4 | build | a library change. One function and its suite. | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — |
 | T2 | 4 | doc | the release $DOOR_VERSION. Its changelog entry and version. | — | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | — |$lr
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |$th
+| Requirement | Approach | Criterion | Test type | Test | Fails when |$th
 |---|---|---|---|---|---|$ts
 | REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |$t1${le:+$le$lt}
 PLAN

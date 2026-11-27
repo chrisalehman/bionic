@@ -72,6 +72,11 @@
 # [WALL: tests/farm-out-reminder.test.sh]
 # [WALL: tests/background-suite-guard.test.sh]
 
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
+
 # ─── THE PER-WALL LIBRARY DECLARATION (A-56.1, A-56.2) ───────────────────────
 #
 # ONE TABLE, TWO READERS, AND IT IS WHY THE COMPOUND DOES NOT FAIL CLOSED ON A
@@ -863,27 +868,23 @@ _eg_path_fold() {
 # COMMAND that only the caller can act on, and a command substitution would leave it in a subshell.
 _EG_MOVING=""
 _eg_commit_cwd() {
-  local _line _oldifs _hadf _p _c _gc
+  local _line _p _c _gc
   _EG_CWD=""; _EG_CWD_SRC=""; _EG_MOVING=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   # `env` in any letter case: the argv reader folds the prefix word (wave-25 T12), so
   # `ENV -C <dir> git commit` is placed by its directory exactly as `env -C <dir>` is.
   case " $COMMAND " in
     *" -C "*|*" -C"[\"\']*|*env*|*[Ee][Nn][Vv]*)
-      _oldifs="$IFS"; _hadf=0
       while IFS= read -r _line; do
         [ -n "$_line" ] || continue
         git_argv_parse "$_line" || continue
         [ "$GIT_SUB" = commit ] || continue
         _git_argv_skip "$_line"
         [ -n "$GIT_ARGV_REST" ] || break
-        case "$-" in *f*) _hadf=1 ;; esac
-        set -f
-        IFS="$GIT_ARGV_US"
+        git_argv_split_on
         # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
         set -- $GIT_ARGV_REST
-        IFS="$_oldifs"
-        [ "$_hadf" -eq 1 ] || set +f
+        git_argv_split_off
         shift   # argv[0], the git binary
         _gc=""
         while [ $# -gt 0 ]; do
@@ -930,19 +931,15 @@ _eg_commit_cwd() {
 # for every failure (no git, no repository, an unreadable root) — the caller judges those.
 _EG_JUR_TOP=""
 _eg_outside_root() {
-  local _d="${1:-}" _both _common _main
+  local _d="${1:-}" _common _main
   _EG_JUR_TOP=""
   case "$_d" in /*) : ;; *) return 1 ;; esac
-  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --show-toplevel 2>/dev/null)" || return 1
-  _common="${_both%%$'\n'*}"
-  [ "$_common" != "$_both" ] || return 1
-  _EG_JUR_TOP="${_both#*$'\n'}"
-  [ -n "$_common" ] && [ -n "$_EG_JUR_TOP" ] || { _EG_JUR_TOP=""; return 1; }
+  git_common_dir_and "$_d" --show-toplevel || return 1
+  _common="$BIONIC_GIT_COMMON"; _EG_JUR_TOP="$BIONIC_GIT_ALSO"
   if [ -d "$BIONIC_ROOT/.git" ]; then
     _main="$BIONIC_ROOT/.git"
   else
-    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { _EG_JUR_TOP=""; return 1; }
-    _main="${_main%%$'\n'*}"
+    _main="$(git_common_dir "$BIONIC_ROOT")" || { _EG_JUR_TOP=""; return 1; }
   fi
   if [ -z "$_main" ] || [ "$_common" = "$_main" ] || [ "$_common" -ef "$_main" ]; then
     _EG_JUR_TOP=""
@@ -961,7 +958,7 @@ _eg_outside_root() {
 _EG_COMMITS=0
 _EG_COMMIT_NC=0
 _eg_commit_count() {
-  local _line _oldifs="$IFS" _hadf
+  local _line
   _EG_COMMITS=0; _EG_COMMIT_NC=0
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
@@ -973,14 +970,10 @@ _eg_commit_count() {
     [ -n "$GIT_ARGV_REST" ] || continue
     # env's `-C`/`--chdir` is a directory override too (wave-20 T3, D3).
     [ -z "$GIT_ARGV_ENV_CHDIR" ] || _EG_COMMIT_NC=$((_EG_COMMIT_NC + 1))
-    _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     shift   # argv[0], the git binary
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -1493,7 +1486,7 @@ wall_gate_judge_steps() {
 # Per-tier required evidence keys — ONE POINTER PER MATRIX ROW (wave-31 T6; REQ-5, D5). Every tier owes
 # `evidence:`, the AC block's proof path under record/; a T4 row owes `user-confirmed:` as well, the one thing
 # only a user can write. The per-tier readings that used to ride beside the pointer were written by the agent that
-# ran the eval, copied from the record file the pointer already names, and read by nothing but this loop: a key
+# ran the test, copied from the record file the pointer already names, and read by nothing but this loop: a key
 # read by nothing is ceremony. The record file is where the run is shown, and the pointer is checked to name one.
 #
 # AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT. Its name collides with nothing the
@@ -1601,13 +1594,13 @@ _matrix_urows() {
 }
 
 # matrix_fails_when_missing <plan> -> the first criterion, in the reader's order (lib/reader.sh `reader_criteria`, no
-# fold), whose fails-when is empty: the criterion question's answer, its Eval design row's Fails when cell. A criterion
-# the Eval design holds no row for is no finding: there is no row to lack the cell, and the per-tier evidence loop at
+# fold), whose fails-when is empty: the criterion question's answer, its Test design row's Fails when cell. A criterion
+# the Test design holds no row for is no finding: there is no row to lack the cell, and the per-tier evidence loop at
 # the Verify gate owns that gap. Nothing when every criterion names one, or the reader cannot be loaded.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_fails_when_missing() {
   declare -F reader_criteria >/dev/null 2>&1 || _proof_reader_load >/dev/null 2>&1 || return 0
-  { reader_criteria "$1" 2>/dev/null; printf '\034\n'; plan_read_rows "$1" 'Eval design' criterion 2>/dev/null; } | awk -F'\t' '
+  { reader_criteria "$1" 2>/dev/null; printf '\034\n'; plan_read_rows "$1" "$PLAN_READ_CRITERIA" criterion 2>/dev/null; } | awk -F'\t' '
     $0 == "\034" { part++; next }
     !part { if ($0 != "") ord[++n] = $0; next }
     { c = ""; f = ""; for (i = 1; i <= NF; i++) { if (index($i, "criterion=") == 1) c = substr($i, 11); if (index($i, "fails-when=") == 1) f = substr($i, 12) }
@@ -1771,12 +1764,12 @@ matrix_row_deferred() {
 
 # THE LIVE ROW'S EXITS. A pending or blocked row the owing-step rule no longer defers meets the evidence
 # refusals below for the key it lacks, and those refusals say which of three acts settles it: a row the walk
-# proved is discharged by registering the walk's record, a row whose eval cannot fire its fails-when has its
-# Eval design row changed by the person, and any other row is the user's to waive. The first is a verb an agent
+# proved is discharged by registering the walk's record, a row whose test cannot fire its fails-when has its
+# Test design row changed by the person, and any other row is the user's to waive. The first is a verb an agent
 # runs; the other two are a person's, said as such, so the refusal never leaves its reader to guess whose move it is.
 # [WALL: tests/shell-lint.test.sh]
 matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence refusal
-  printf '%s' "the row is live past the step that owes it: if the walk proved it, register its record: session-poker.sh proof-add walk <its record>; if its eval cannot fire, needs: the user — its ## Eval design row changed; otherwise needs: the user — a waiver, in their words: session-poker.sh waive $1 '<their words>' '<why>'."
+  printf '%s' "the row is live past the step that owes it: if the walk proved it, register its record: session-poker.sh proof-add walk <its record>; if its test cannot fire, needs: the user — its ## Test design row changed; otherwise needs: the user — a waiver, in their words: session-poker.sh waive $1 '<their words>' '<why>'."
 }
 
 # matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>\037<confirmed>\037<waiver 1|0>` per
@@ -1792,13 +1785,13 @@ matrix_table_rows() {
   done <<< "$MATRIX_CELLS"
 }
 
-# matrix_close_eval <eval text> -> 0 when the eval names `landing-report --hand-holds`, the measure
+# matrix_close_test <test text> -> 0 when the test names `landing-report --hand-holds`, the measure
 # close-out reads last. The one test of which criterion the close proves: matrix_close_rows and the
-# proof close-out writes both ask it, so no eval reads as the close's to one and not the other.
-matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
+# proof close-out writes both ask it, so no test reads as the close's to one and not the other.
+matrix_close_test() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
 
 # matrix_close_rows <plan> -> the AC id of each pending criterion the close settles, the reader's
-# order: owed at Step 9, and its Eval design row's eval is the close's measure (matrix_close_eval).
+# order: owed at Step 9, and its Test design row's test is the close's measure (matrix_close_test).
 # close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
   local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF MATRIX_UROWS MATRIX_UROWS_OF MATRIX_UROWS_RC MATRIX_OWING MATRIX_OWING_OF _MO_STEP _MO_OPEN ac tier status ev aud conf w
@@ -1807,7 +1800,7 @@ matrix_close_rows() {
     [ -n "$ac" ] && [ "$status" = pending ] || continue
     _matrix_owing "$PLAN" "$ac"
     [ "$_MO_STEP" = 9 ] || continue
-    matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
+    matrix_close_test "$(plan_read_row "$PLAN" "$PLAN_READ_CRITERIA" Criterion "$ac" 2>/dev/null | grep '^test=')" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
@@ -2098,13 +2091,11 @@ bionic_context 2>/dev/null || exit 0
 # foreign or unshaped session key, no key at all. The marker is the one artifact whose
 # PRESENCE opens a wall, so the fail direction is inverted here on purpose, and it is
 # inverted against this file's own fail-CLOSED posture on the library: a wall that binds a
-# session which never consented is the defect this guard exists to remove. Consent is the
-# binding, though, not the marker (D3): hooks/bash-walls.sh hands this gate the plan the
-# session's binding record holds it to (BIONIC_BOUND_PLAN), and a session holding one is
-# judged whatever became of its marker, which any tool can remove or replace with a link.
-# The context resolved again above reads the marker alone, so the handed plan is asked too.
+# session which never consented is the defect this guard exists to remove. The context
+# resolved again above reads the marker alone, so the plan hooks/bash-walls.sh hands this gate
+# from the session's binding is asked too (lib/context.sh `bionic_judged`).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-[ "$BIONIC_ENGAGED" = 1 ] || [ -n "${BIONIC_BOUND_PLAN:-}" ] || exit 0
+bionic_judged || exit 0
 
 # ---------- JURISDICTION (wave-19 REQ-9, D10; ADR-031 amended): whose repository is this? ----------
 #
@@ -2457,21 +2448,10 @@ if [ ! -f "$PLAN" ]; then
   exit 0
 fi
 
-# Extract YAML frontmatter (between first two `---` lines at column 0)
-# if the plan has any. Used to read the version marker, the triple, and the
-# discriminator flags the checks below key off.
-#
-# CRLF/CR-only plans would otherwise defeat the exact-match `$0=="---"`
-# comparison ("---\r" != "---"), so line endings are normalized to \n before
-# every awk pass (normalize_newlines) — meaning every downstream parse
-# (frontmatter values, SECTION lines, CURRENT, evidence blocks) sees plain
-# \n text regardless of the file's original line-ending style.
-FRONTMATTER=$(normalize_newlines "$PLAN" | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f')
-
-frontmatter_get() {  # one reading of the grammar: lib/run.sh's `frontmatter_value_v` (wave-34 T11)
-  local v
-  if frontmatter_value_v v "$FRONTMATTER" "$1"; then printf '%s\n' "$v"; fi
-}
+# The plan's header, read once by its one parser (`plan_read_header`, line ends translated) and asked for each key
+# from that reading: the version marker, the triple and the flags the checks below key off.
+_EG_HEADER="$(plan_read_header "$PLAN")" || _EG_HEADER=""
+frontmatter_get() { plan_header_value "$_EG_HEADER" "$1" || :; }
 
 DEPLOY_TARGET=$(frontmatter_get deploy_target)
 SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
@@ -2483,7 +2463,7 @@ MULTI_AGENT=$(frontmatter_get multi_agent)
 
 _EG_V15=0
 case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
-_EG_MARKED=0; grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:' <<< "$FRONTMATTER" && _EG_MARKED=1
+_EG_MARKED=0; plan_header_value "$_EG_HEADER" canonical_sdlc_version >/dev/null && _EG_MARKED=1
 
 _eg_plan_named() {  # -> the path the plan takes when named for its directory: an incident's for it, any other for its stem
   local d="${PLAN%/*}"
@@ -2520,7 +2500,9 @@ _eg_refuse_lowered() {
   s="$(_run_place "$PLAN")" || _eg_v15_unreadable
   case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
   [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
-  [ -n "$FRONTMATTER" ] || found="has no header on its first line"
+  # The parser answers nothing both for a page with no header and for a header that holds no key, so the reader is
+  # asked apart whether the page opens with one.
+  plan_read_headed "$PLAN" || found="has no header on its first line"
   refuse exit2 commit "this run's plan is lowered below 15" "put its version back to 15" \
 "canonical-sdlc plan: this plan $found, and the run's log beside it holds a step, so it is a run's plan at 15 with its version line lowered or lost, and nothing of it is judged without it.
 Plan: $PLAN
@@ -2871,16 +2853,16 @@ Fix: on the user's literal 'approved', record that approval of step3 — never o
 
 # ---------- the fails-when arm (AC-K2.3, AC-K2.5) ----------
 #
-# AN EVAL WITH NO NAMEABLE FAILURE IS NOT AN EVAL. A matrix row that cannot say what
+# A TEST WITH NO NAMEABLE FAILURE IS NOT A TEST. A matrix row that cannot say what
 # planted defect it must go red on is a row that will be green whatever the code does,
 # and the gate cannot tell the two apart at discharge time — which is the whole reason
-# the column is authored at Step 2, in the spec's `## Eval design`, and merely RENDERED
+# the column is authored at Step 2, in the spec's `## Test design`, and merely RENDERED
 # into the plan's matrix at Step 3. By Step 4 every AC block has one, or a step was
 # skipped; so this arm is the receipt for that authoring order rather than a new demand.
 #
-# IT JUDGES EVAL DESIGN ROWS. A criterion with no `## Eval design` row is not a
+# IT JUDGES TEST DESIGN ROWS. A criterion with no `## Test design` row is not a
 # fails-when finding: there is no row to lack the cell, and the per-tier evidence loop
-# at the Verify gate is what owns that gap. Nor does a plan with no `## Eval design`
+# at the Verify gate is what owns that gap. Nor does a plan with no `## Test design`
 # at all become one — a Step-4 plan may not have written the section yet, and
 # demanding it here would be the Verify gate's demand moved four steps early.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -2891,9 +2873,9 @@ validate_fails_when() {
   [ "$step" -ge 4 ] || return 0
   ac="$(matrix_fails_when_missing "$PLAN")"
   [ -n "$ac" ] || return 0
-  _eg_detail="canonical-sdlc step ${CURRENT} — criterion '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
+  _eg_detail="canonical-sdlc step ${CURRENT} — criterion '${ac}' names no 'fails-when:'; a test with no nameable failure is not a test.
 Plan: $PLAN
-Fix: write the planted defect this eval must go red on in the criterion's '## Eval design' Fails when cell."
+Fix: write the planted defect this test must go red on in the criterion's '## Test design' Fails when cell."
   refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
   return 0
 }
@@ -2902,7 +2884,7 @@ Fix: write the planted defect this eval must go red on in the criterion's '## Ev
 #
 # A PROTOTYPE NEVER DISCHARGES A MATRIX ROW (design decision D7). Its output is a
 # design ruling written back to the spec, not a shipped behavior — nothing about a
-# throwaway is provable by an eval, so a `kind: prototype` task that also owns a
+# throwaway is provable by a test, so a `kind: prototype` task that also owns a
 # Verification Matrix AC block is a category error the gate can catch structurally:
 # the `## Tasks` table names which tasks are prototypes, and each AC block's own
 # `task:` field names which task discharges it. Reads the matrix the same way
@@ -2945,7 +2927,7 @@ validate_prototype_no_matrix_row() {
     [ -n "$ac" ] && [ -n "$ac_task" ] || continue
     for n in $proto_ids; do
       [ "$ac_task" = "$n" ] || continue
-      fix="repoint the Task cell of '${ac}' in '## Eval design'"
+      fix="repoint the Task cell of '${ac}' in '## Test design'"
       _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names 'task: ${ac_task}', a 'kind: prototype' row in '## Tasks'; a prototype ships nothing and never discharges a matrix row.
 Plan: $PLAN
 Fix: ${fix} to the build task that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
@@ -3295,21 +3277,17 @@ _eg_wt_name() {
 _EG_GITWT=""
 _EG_GITWT_FOREIGN=""
 _eg_git_wt_name() {
-  local _d="${1:-}" _both _common _gitdir _main
+  local _d="${1:-}" _common _gitdir _main
   _EG_GITWT=""; _EG_GITWT_FOREIGN=""
   case "$_d" in /*) : ;; *) return 0 ;; esac
-  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 0
-  _common="${_both%%$'\n'*}"
-  _gitdir="${_both#*$'\n'}"
-  [ "$_common" != "$_both" ] || return 0
-  [ -n "$_common" ] && [ -n "$_gitdir" ] || return 0
+  git_common_dir_and "$_d" --git-dir || return 0
+  _common="$BIONIC_GIT_COMMON"; _gitdir="$BIONIC_GIT_ALSO"
   [ "$_common" != "$_gitdir" ] || return 0
   case "$_gitdir" in */worktrees/*) : ;; *) return 0 ;; esac
   if [ -d "$BIONIC_ROOT/.git" ]; then
     _main="$BIONIC_ROOT/.git"
   else
-    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-    _main="${_main%%$'\n'*}"
+    _main="$(git_common_dir "$BIONIC_ROOT")" || return 0
   fi
   [ -n "$_main" ] || return 0
   if [ "$_common" != "$_main" ] && ! [ "$_common" -ef "$_main" ]; then
@@ -3673,7 +3651,7 @@ POINTER_STEPS="1 2 3 4"  # Step 6 must reach dispatch for the matrix prefix chec
 # function definitions and nothing else, so no other behaviour moved with it.
 
 # ---------- pre-registered Verification Matrix ----------
-# The Verify gate discharges the run's criteria, each criterion's cells being `matrix_load`'s (the Eval design's rows
+# The Verify gate discharges the run's criteria, each criterion's cells being `matrix_load`'s (the Test design's rows
 # and the run's events); a plan holds no matrix section.
 # validate_matrix walks them, and fires at current: 5 (via the Step-5 validator) and as a
 # prefix check for current: 6..9 (via the dispatcher).
@@ -3774,19 +3752,19 @@ validate_matrix() {
   fi
   if [ -z "$MATRIX_CELLS" ]; then
     block_matrix "this plan has no verification matrix yet" "add one row per criterion" \
-      "the Verify gate requires the plan's criteria: an '## Eval design' row, or a '## Verification Matrix' row, per criterion." \
-      "add the '## Eval design' table, one row per criterion. See canonical-sdlc/SKILL.md Step 5."
+      "the Verify gate requires the plan's criteria: a '## Test design' row, or a '## Verification Matrix' row, per criterion." \
+      "add the '## Test design' table, one row per criterion. See canonical-sdlc/SKILL.md Step 5."
   fi
 
   rows="$(matrix_table_rows)"
   while IFS=$'\037' read -r ac tier status ev aud ucv row_is_waived; do
     [ -n "$ac" ] || continue
     aud="$(placeholder_cell "$aud")"
-    # tier enum: the Eval design's type through the scale profile
+    # tier enum: the Test design's test type through the scale profile
     if ! grep -qE '^T[0-4]$' <<< "$tier"; then
       block_matrix "${ac}'s tier is unknown" "use T0 through T4" \
-        "criterion '${ac}' has an invalid tier '${tier}' (want T0..T4: an Eval design type of static, unit, hermetic, live or human)." \
-        "set the criterion's Eval design type to one of static, unit, hermetic, live, human."
+        "criterion '${ac}' has an invalid tier '${tier}' (want T0..T4: a test type of static, unit, hermetic, live or human)." \
+        "set the criterion's test type to one of static, unit, hermetic, live, human."
     fi
     # A CRITERION HAS NO BLOCK: its evidence is the discharging proof's and its confirmation the approval naming it, so
     # the per-tier keys below are asked of those two facts, written as the keys they stand for.
@@ -4107,15 +4085,15 @@ env_split_entries() {  # $1 = raw `environments:` value -> "name<TAB>descriptor"
 log_finding_quiet() {  # $1=check-id  $2=detail
   local f
   if f=$(audit_path "$(audit_root)"); then
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
+    local line="- $(iso_now) evidence-gate $1: $2 ($PLAN)"
     mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
   fi
   return 0
 }
 
-_eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field; asked through _proof_ask
+_eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field, the proof read by lib/proof.sh `proof_fact`; asked through _proof_ask
   local f; f="$(reader_facts "$1")" || return 2
-  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "proof" && line_kv("kind") == "walk" { e = line_kv("environments") } END { print e }'
+  printf '%s\n' "$f" | awk -F'|' "$(proof_fact_awk)"'proof_fact() && PROOF_KIND == "walk" { e = line_kv("environments") } END { print e }'
 }
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
@@ -4454,7 +4432,7 @@ log_event() {  # $1=event $2=class
   # through the former `cut -c1-120` excerpt of the raw command.
   local f
   if f=$(audit_path "$BIONIC_ROOT"); then
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE"
+    local line="- $(iso_now) farm-out $1: class=$2 mode=$MODE"
     mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
   fi
   echo "farm-out [$1] class=$2" >&2
@@ -4825,20 +4803,16 @@ return 0
 # values; hooks/bash-walls.sh reads the acknowledgement's operand this way.
 _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
 _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <verb> (sets _WALL_POKER_VERB) · 1 not
-  local _line _oldifs _hadf _w _i _script _next _want="${2:-}"
+  local _line _oldifs _w _i _script _next _want="${2:-}"
   _WALL_POKER_VERB=""; _WALL_POKER_SHOWN=""; _WALL_POKER_CALL=""; _WALL_POKER_ARGS=""
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _git_argv_skip "$_line"
     [ -n "$GIT_ARGV_REST" ] || continue
-    _oldifs="$IFS"; _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     [ $# -gt 0 ] || continue
     _script=""
     # The runner word is a NAME, read through git-argv.sh's fold (wave-25 T12): `BASH x.sh`
@@ -4890,7 +4864,8 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 # rewritten through `fold_update_input` into the shim the plugin ships:
 #
 #     bash <plugin-root>/scripts/booked.sh [--shell <s>] [--kill-after <s> | --detach]
-#                                          [--stamp-dir <dir> | --unplaced] [--suites <names>] -- '<the command>'
+#                                          [--stamp-dir <dir> | --unplaced] [--suites <names>]
+#                                          [--expect red] -- '<the command>'
 #
 # The shim books one of the machine's places, stamps the run and runs the command
 # (payload/scripts/booked.sh). This is the one site that sees every runner in every project
@@ -5178,6 +5153,17 @@ _bsg_wrap_text() {
   [ "$_BSG_UNPLACED" != 1 ] || set -- "$@" --unplaced
   set -- "$@" ${_BSG_CLASS_ARGS[@]+"${_BSG_CLASS_ARGS[@]}"} --suites "$_BSG_SUITES"
   [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
+  # A RUN MEANT TO FAIL: every suite segment opening on `BIONIC_EXPECT=red` hands the shim
+  # `--expect red`, which inverts only the code the console gets; the stamp keeps the suite's own.
+  # Never across a split reading: when one exit code cannot speak for each suite, it cannot be
+  # inverted for each either, and the run keeps its own code.
+  case "$COMMAND" in
+    *BIONIC_EXPECT=red*)
+      case $'\n'"$_BSG_TARGETS"$'\n' in
+        *$'\n'split$'\n'*) : ;;
+        *) [ "$(cmd_expect "$COMMAND")" != red ] || set -- "$@" --expect red ;;
+      esac ;;
+  esac
   wall_booked_argv "$COMMAND" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
     _wall_sh_word "$_w"
@@ -5218,7 +5204,7 @@ _bsg_wrap_only() {
 # is exactly `<verb> <own row>`.
 _BSG_DL_OWN=""; _BSG_DL_TARGET=""
 _bsg_own_row() {
-  local _pick _seg _segs _l _n=0 _oldifs _hadf
+  local _pick _seg _segs _l _n=0
   _BSG_DL_OWN=""; _BSG_DL_TARGET=""
   wall_libs background-suite-guard roster.sh || return 1
   if _pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
@@ -5227,14 +5213,10 @@ _bsg_own_row() {
       case "$_seg" in row=*) _BSG_DL_OWN="${_seg#row=}"; break ;; esac
     done
   fi
-  _oldifs="$IFS"; _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_ARGS
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   _BSG_DL_TARGET="${1:-}"
   [ $# -eq 1 ] && [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_TARGET" = "$_BSG_DL_OWN" ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
@@ -5321,7 +5303,7 @@ _bsg_under() {
 # repository or directory, so cmd_place's answer is not where git commits; 1 otherwise. The verbs
 # and the option walk are `_eg_commit_count`'s reading of git's global options.
 _bsg_git_relocates() {
-  local _line _oldifs="$IFS" _hadf
+  local _line
   case "$COMMAND" in
     *GIT_DIR*|*GIT_WORK_TREE*|*GIT_COMMON_DIR*)
       _BSG_JUR_WHY="the command names GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR, which send a commit to a repository the placement check does not read"
@@ -5337,14 +5319,10 @@ _bsg_git_relocates() {
       return 0
     fi
     [ -n "$GIT_ARGV_REST" ] || continue
-    _hadf=0
-    case "$-" in *f*) _hadf=1 ;; esac
-    set -f
-    IFS="$GIT_ARGV_US"
+    git_argv_split_on
     # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
     set -- $GIT_ARGV_REST
-    IFS="$_oldifs"
-    [ "$_hadf" -eq 1 ] || set +f
+    git_argv_split_off
     shift   # argv[0], the git binary
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -5428,7 +5406,7 @@ _bsg_commit_outside() {
 # environment), so the staged flag is how the row says a writer widened it.
 _BSG_AM_OWN=""; _BSG_AM_TARGET=""; _BSG_AM_UPD=""
 _bsg_own_amend() {
-  local _pick _seg _segs _l _n=0 _oldifs _hadf _files=0 _reason=0 _cmd="" _w
+  local _pick _seg _segs _l _n=0 _files=0 _reason=0 _cmd="" _w
   _BSG_AM_UPD=""
   wall_libs background-suite-guard roster.sh || return 1
   if _pick="$(roster_row_for_id "$_bsg_roster" "$ACTOR")"; then
@@ -5437,14 +5415,10 @@ _bsg_own_amend() {
       case "$_seg" in name=*) _BSG_AM_OWN="${_seg#name=}"; break ;; esac
     done
   fi
-  _oldifs="$IFS"; _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_ARGS
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   _BSG_AM_TARGET="${1:-}"
   [ -n "$_BSG_AM_OWN" ] && [ "$_BSG_AM_TARGET" = "$_BSG_AM_OWN" ] || return 1
   shift
@@ -5461,14 +5435,10 @@ _bsg_own_amend() {
   [ "$_files" -ge 1 ] && [ "$_reason" -eq 1 ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
   [ "$_n" -eq 1 ] || return 1
-  _hadf=0
-  case "$-" in *f*) _hadf=1 ;; esac
-  set -f
-  IFS="$GIT_ARGV_US"
+  git_argv_split_on
   # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
   set -- $_WALL_POKER_CALL
-  IFS="$_oldifs"
-  [ "$_hadf" -eq 1 ] || set +f
+  git_argv_split_off
   for _w in "$@"; do
     _wall_sh_word "$_w"
     _cmd="${_cmd:+$_cmd }$_WALL_WORD"
@@ -6658,7 +6628,7 @@ Plan:  ${BIONIC_SEAL_PLAN:-}"
     *)     _fact="the run's $_w was $_h outside the tool" ;;
   esac
   _r="session-poker.sh accept '<their words>' or session-poker.sh abandon '<their words>'"
-  BIONIC_WALL_OWED="seal:changed"$'\t'"changed run: $_w $_h"$'\t'"$_fact: the person rules, by $_r"
+  BIONIC_WALL_OWED="seal:changed"$'\t'"changed run: $_w $_h"$'\t'"$_fact: the person rules by a plain message, and the orchestrator then runs $_r"
   fold_block exit2 commit "$_fact" "only the person can rule" \
 "The run this session is bound to no longer matches its seal: $_fact.
 Plan:  ${BIONIC_SEAL_PLAN:-}
@@ -6666,9 +6636,21 @@ Log:   ${BIONIC_SEAL_LOG:-}
 Seal:  $BIONIC_SEAL_LINE
 Its plan and its log hold only what the tool wrote; a line written by hand, or a file moved, cut
 or removed, is not the run's own work, so no commit of this run is admitted until the person
-rules on the change. Tell them what changed and wait for their word, one of two replies:
+rules on the change. Tell them what changed and ask for their word as a plain message in the
+chat, for instance \"I accept the run as it now stands\" or \"abandon the run\". A verb takes only
+words the person typed at the prompt, so what they type is the ruling. Then
+you run the verb, never the person, with their words quoted as they wrote them:
   session-poker.sh accept '<their words>'    the run as it now stands is theirs, sealed again
   session-poker.sh abandon '<their words>'   the run ends here
 Until then the change is the ask seal:changed on the run's register, in the log above."
   return 2
+}
+
+# wall_run_seal_kept <event> -> wall_run_seal's verdict, a changed run's catch kept in its seal before its caller opens
+# the ask, so the ask's own line never reads as the log added to and a plan put back reads changed.
+wall_run_seal_kept() {
+  local _rc
+  wall_run_seal "$1"; _rc=$?
+  case "${BIONIC_SEAL_LINE:-}" in changed*) seal_write "$BIONIC_SEAL_PLAN" "$BIONIC_SEAL_LOG" >/dev/null 2>&1 ;; esac
+  return "$_rc"
 }

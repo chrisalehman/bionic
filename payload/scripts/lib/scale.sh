@@ -44,8 +44,13 @@
 #
 # BASH 3.2. Functions and constants only; nothing runs or prints at source time.
 
+# THE SCALES ARE lib/write-gate.sh's list, which the plan-write hook loads fail-closed; a caller that cannot
+# load it reads no rows and scale_cell refuses every scale.
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need write-gate.sh write_gate_say || :
+
 SCALE_COLUMNS="patrol rigor writers regression branch integrate dealing"
-SCALE_ROWS="task wave epic"
+SCALE_ROWS="${WRITE_GATE_SCALES:-}"
 SCALE_TABLE="task|no|single|3|no|any|pr|piece
 wave|yes|double|uncapped|yes|wave/<NN>-<slug>|pr|piece+whole
 epic|yes|double|uncapped|no|epic/<NN>-<slug>|pr|piece"
@@ -62,7 +67,7 @@ scale_cell() {
     *" $scale "*) [ -n "$scale" ] ;;
     *) false ;;
   esac || {
-    printf "scale.sh: '%s' is no scale — use task, wave or epic\n" "$scale" >&2
+    printf "scale.sh: '%s' is no scale — use %s\n" "$scale" "$(write_gate_or "$SCALE_ROWS")" >&2
     return 1
   }
   if [ -z "$n" ]; then
@@ -85,28 +90,28 @@ scale_patrol() {  # <plan>
   return 0
 }
 
-# THE EVAL TYPE'S TIER. The Eval design names each criterion's eval type in words; the matrix table names its
+# THE TEST TYPE'S TIER. The Test design names each criterion's test type in words; the matrix table names its
 # tier, and the tier decides the keys its block owes (walls.sh `keys_for_tier`). This is the one map between the
 # two, so the render that writes a missing table row and any reader that asks agree on the tier a type owes.
-# A bare tier (`T2`, any case) is itself: a plan that names the tier in the Eval type cell already said it.
-SCALE_EVAL_TIERS="static=T0 unit=T1 hermetic=T2 live=T3 human=T4"
+# A bare tier (`T2`, any case) is itself: a plan that names the tier in the Test type cell already said it.
+SCALE_TEST_TIERS="static=T0 unit=T1 hermetic=T2 live=T3 human=T4"
 
-# scale_tier_awk -> the awk text of `tier_of(type)`: the tier SCALE_EVAL_TIERS gives a type (any case, blanks
+# scale_tier_awk -> the awk text of `tier_of(type)`: the tier SCALE_TEST_TIERS gives a type (any case, blanks
 # trimmed), a bare T<n> as itself, else "". Built from the table, so an awk pass reads the map without a copy.
 scale_tier_awk() {
   local c
   printf '%s\n' 'function tier_of(t) {' \
     '  t = tolower(t); gsub(/^[ \t]+|[ \t]+$/, "", t)' \
     '  if (t ~ /^t[0-9]+$/) return "T" substr(t, 2)'
-  for c in $SCALE_EVAL_TIERS; do
+  for c in $SCALE_TEST_TIERS; do
     printf '  if (t == "%s") return "%s"\n' "${c%%=*}" "${c#*=}"
   done
   printf '%s\n' '  return ""' '}'
 }
 
-# tier_of_eval_type <type> -> its tier on stdout, exit 0; nothing and exit 1 for a type the map does not hold.
+# tier_of_test_type <type> -> its tier on stdout, exit 0; nothing and exit 1 for a type the map does not hold.
 # It asks `tier_of`, so the shell's answer and the awk pass's are one rule.
-tier_of_eval_type() {
+tier_of_test_type() {
   local t
   t="$(SCALE_TYPE="${1:-}" awk "$(scale_tier_awk)"'BEGIN { print tier_of(ENVIRON["SCALE_TYPE"]) }' </dev/null 2>/dev/null)" || return 1
   [ -n "$t" ] || return 1

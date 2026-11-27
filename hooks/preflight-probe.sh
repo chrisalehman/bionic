@@ -238,6 +238,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "preflight-probe"; fi
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# The clock's one home, asked by name: no hook lists it among the libraries it wants.
+bionic_need time.sh _time_epoch
 # Whether another session is alive is lib/alive.sh's one rule. Soft: a library directory without it
 # (an older checkout) prunes nothing and reports no other session, the direction that loses nothing.
 # shellcheck source=/dev/null
@@ -271,13 +273,7 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 # byte-identical private copy — one of eight — held together by an agreement suite;
 # there is one answer now, and it maps a worktree onto its main repository before it
 # walks for the nearest real `.bionic`.
-REPO="$(project_root "$PWD")"
-[ -n "$REPO" ] || REPO="$PWD"
-REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-if [ -z "$REPO_REAL" ]; then
-  die "REFUSED — cannot resolve the working directory."
-  exit 2
-fi
+REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
 
 BIONIC_DIR="$REPO_REAL/.bionic"
 STATE_DIR="$BIONIC_DIR/tmp"
@@ -307,11 +303,13 @@ fail_probe() {  # <message>
 }
 pass_probe() { printf 'preflight: ok    %s\n' "$1"; }
 
-# 1. credential present (presence only). Three sources, cheapest first. Nothing here ever
+# 1. credential present (presence only). Four sources, cheapest first. Nothing here ever
 #    reads or prints credential material — only its existence.
 CRED_SOURCE=""
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   CRED_SOURCE="environment"
+elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  CRED_SOURCE="environment token"
 elif [ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]; then
   CRED_SOURCE="credentials file"
 elif command -v security >/dev/null 2>&1 &&
@@ -321,7 +319,7 @@ fi
 if [ -n "$CRED_SOURCE" ]; then
   pass_probe "credential present ($CRED_SOURCE)"
 else
-  fail_probe "credential absent — no ANTHROPIC_API_KEY, no credentials file, no keychain entry"
+  fail_probe "credential absent — no ANTHROPIC_API_KEY, no CLAUDE_CODE_OAUTH_TOKEN, no credentials file, no keychain entry"
 fi
 
 # 2. repo writable — proven by writing, not by mode bits
@@ -606,7 +604,7 @@ fi
   printf 'kind=%s\n'         "preflight-attestation"
   printf 'session_id=%s\n'   "$SESSION_ID"
   printf 'written_at=%s\n'   "$(date -u +%s)"
-  printf 'written_at_iso=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'written_at_iso=%s\n' "$(iso_now)"
   printf 'repo=%s\n'         "$REPO_REAL"
   printf 'git_branch=%s\n'   "$GIT_BRANCH"
   printf 'git_head=%s\n'     "$GIT_HEAD"

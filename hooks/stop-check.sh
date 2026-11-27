@@ -282,7 +282,7 @@ OBSERVE_TRANSCRIPT="$OWN_TRANSCRIPT"
 OBSERVE_DOCS_ROOT="$DOCS_ROOT"
 OBSERVE_ROSTER=""
 if [ -n "$REPO_ROOT" ] && [ -n "$OWN_SESSION_ID" ]; then
-  OBSERVE_ROSTER="$REPO_ROOT/.bionic/tmp/roster-${OWN_SESSION_ID}.state"
+  OBSERVE_ROSTER="$(roster_path "$REPO_ROOT" "$OWN_SESSION_ID")"
 fi
 # The two flags, in the variable form the library takes. Empty is "not named", which is a
 # different fact from "named and absent" — the D-6 distinction a blank would erase.
@@ -380,7 +380,7 @@ else
     dp="$(observe_abs_path "$d")"
     case "$dstate" in
       present)
-        echo "  ${d} — PRESENT, $(file_size "$dp") bytes, last write $(fmt_epoch "$(file_mtime "$dp")") (age $(fmt_age $((OBS_NOW - $(file_mtime "$dp")))))" ;;
+        echo "  ${d} — PRESENT, $(file_size "$dp") bytes, last write $(fmt_epoch "$(file_mtime "$dp" || echo 0)") (age $(fmt_age $((OBS_NOW - $(file_mtime "$dp" || echo 0)))))" ;;
       empty)
         echo "  ${d} — PRESENT but EMPTY, 0 bytes" ;;
       dir)

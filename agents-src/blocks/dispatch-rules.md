@@ -1,4 +1,5 @@
 - **Where `tests/run.sh` takes `--only`, use the door**: `tests/run.sh --only <name>.test.sh`, one call each.
+- **A check that expects no match ends with `|| true`**: none found is exit 0.
 - **Never end your turn with a command or external run (CI, background task) in flight**:
   watch it in the foreground.
 - **A multi-step script goes in a workspace file**, run as `bash <file>`, never inline

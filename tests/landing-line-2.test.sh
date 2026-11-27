@@ -428,7 +428,7 @@ FKR='tests/x.test.sh: fork: Resource temporarily unavailable'; lf_v() { printf '
 expect_eq "(fk1) refused, rc 1: none · rc 1 without it: red · refused, rc 0: green · quoted: red · bash 5's retry: none" "none red green red none" "$(lf_v 1 "$FKR") $(lf_v 1 'FAIL: x') $(lf_v 0 "$FKR") $(lf_v 1 "missing 'y' in: $FKR") $(lf_v 1 "${FKR/fork:/fork: retry:}")"
 FK="$(ll_world)"; ll_launch "$FK" T1 x; ll_commit_suite "$FK" T1 x "echo run >> \"\$LL_SIG/fk.runs\"; echo '$FKR' >&2; echo 'x.test.sh: 0/1 passed, 1 failed  sections=1 setup=0'; exit 1"
 ll_verb "$FK" T1; KFK="$(ll_last_cand "$FK" T1)"; LFK="$FK/.bionic/docs/record/wave-x/line/T1-x-${KFK:0:12}"
-expect_eq "(fk2) refused on every run: run twice, none and none, then STALLED naming both logs (exit 70), never RED" "70 2 none none STALLED T1 $LFK.log,$LFK-2.log" "$LL_RC $(ll_lines "$LL_SIG/fk.runs") $(ll_results "$FK" T1 "$KFK") $(printf '%s\n' "$LL_OUT" | grep '^STALLED ')"
+expect_eq "(fk2) refused on every run: run twice, none and none, then STALLED naming both logs (exit 70), never RED" "70 2 none none STALLED T1 $LFK.log,$LFK-2.log — neither log holds the end line ready reads: \"x.test.sh: <p>/<t> passed, <f> failed\"" "$LL_RC $(ll_lines "$LL_SIG/fk.runs") $(ll_results "$FK" T1 "$KFK") $(printf '%s\n' "$LL_OUT" | grep '^STALLED ')"
 # ---------------------------------------------------------------------------
 section "§DRAIN: a landing drains its suites at most J at once, J the gate's answer; one tree per candidate, the red judge in another (wave-37 T1; D3, REQ-1 AC-1.1; wave-38 T6, D21)"
 #
@@ -637,12 +637,21 @@ expect_true "(k2-pre) a fifth run started once p1 ended" ll_wait_started k 5
 expect_false "(k2) no sixth ask is filed in the 2 s after" wait_for 2 ll_filed_over 5
 expect_eq "(k2) asked again as p1 ended, half a minute on, the gate answered 2 and the drain started two: five filed, four admitted, none waiting" "5 4 0" "$(ll_reqs)"
 expect_eq "(k2) …p5 started, p6 not" "1 0" "$(ll_lines "$LL_SIG/k-p5.runs") $(ll_lines "$LL_SIG/k-p6.runs")"
-touch "$LL_SIG/k-p2.go" "$LL_SIG/k-p3.go" "$LL_SIG/k-p4.go" "$LL_SIG/k-p5.go" "$LL_SIG/k-p6.go"
+# p6's width is the runs live plus the gate's answer at the ask that starts it, so which runs have ended by then
+# decides it. Released together, the runs end in an order the machine's speed picks, and the drain asks again on
+# every poll while the answer is 0, so a run caught between its gate end and its rc line is live to the drain
+# and ended to the gate. p5 is released alone, and p6 waits on its end: the drain asks once, on that end, with
+# p2 p3 p4 running in both sources (p2 and p3 half faded, half a minute on), and the gate answers 1.
+touch "$LL_SIG/k-p5.go"
+expect_true "(k3-pre) p6 started once p5 ended" ll_wait_started k 6
+expect_eq "(k3-pre) …p5 ended, p2 p3 p4 still running: six filed, four admitted (p2 p3 p4 p6), none waiting" \
+  "1 0 6 4 0" "$(grep -c '^end ' "$LL_SIG/k-p5.runs") $(cat "$LL_SIG"/k-p[234].runs | grep -c '^end ') $(ll_reqs)"
+touch "$LL_SIG/k-p2.go" "$LL_SIG/k-p3.go" "$LL_SIG/k-p4.go" "$LL_SIG/k-p6.go"
 ll_wait_file "$WORLD_ROOT/k.out.rc" 600 || ll_kill_bg "$K_BG"
 KK="$(ll_last_cand "$RK" T1)"
 expect_eq "(k3) the row lands: exit 0, the branch at its candidate" "0 $KK" "$(cat "$WORLD_ROOT/k.out.rc" 2>/dev/null) $(ll_head "$RK")"
-expect_eq "(k3) …six verdicts, each with the width its pass was given (runs live plus the answer): 3, then 4 as p1 ended, then 3" \
-  "p1.test.sh:green:3 p2.test.sh:green:3 p3.test.sh:green:3 p4.test.sh:green:4 p5.test.sh:green:4 p6.test.sh:green:3" "$(ll_widths "$RK" "$KK")"
+expect_eq "(k3) …six verdicts, each with the width its pass was given (runs live plus the answer): 3, then 4 as p1 ended, then 4 as p5 ended beside three" \
+  "p1.test.sh:green:3 p2.test.sh:green:3 p3.test.sh:green:3 p4.test.sh:green:4 p5.test.sh:green:4 p6.test.sh:green:4" "$(ll_widths "$RK" "$KK")"
 expect_eq "(k3) …and six landing requests in all, one per run: the drain never filed an ask past the answer" "6 0 0" "$(ll_reqs)"
 world_machine 8 8192 30 5.0
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k6"
@@ -723,10 +732,10 @@ ll_verb "$RS" T1 --within 900; ST2="$LL_RC"
 ll_verb "$RS" T1 --within 900; ST3="$LL_RC"; ST3_OUT="$LL_OUT"
 KS="$(ll_last_cand "$RS" T1)"
 LS1="$RS/.bionic/docs/record/wave-x/line/T1-c-${KS:0:12}.log"; LS2="$RS/.bionic/docs/record/wave-x/line/T1-c-${KS:0:12}-2.log"
-expect_eq "(st1) three bounded readies with no progress: WAITING, WAITING, then STALLED on the third" "75 75 70" "$ST1 $ST2 $ST3"
+expect_eq "(st1) three bounded readies with no progress: WAITING, WAITING (each exit 0), then STALLED on the third" "0 0 70" "$ST1 $ST2 $ST3"
 expect_eq "(st1) …the first started nothing (600 s promised, 500 left); the second and third ran once each, both none" "2 none none" \
   "$(ll_lines "$LL_SIG/st.runs") $(ll_results "$RS" T1 "$KS")"
-expect_eq "(st1) …the stall names the two runs' logs, one from each call" "STALLED T1 ${LS1},${LS2}" "$(printf '%s\n' "$ST3_OUT" | grep '^STALLED ')"
+expect_eq "(st1) …the stall names the two runs' logs, one from each call" "STALLED T1 ${LS1},${LS2} — neither log holds the end line ready reads: \"c.test.sh: <p>/<t> passed, <f> failed\"" "$(printf '%s\n' "$ST3_OUT" | grep '^STALLED ')"
 # MUTANT: the count reset at every ready, as before. Each call starts from nothing, and the stall never fires.
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-stm"
 RSM="$(ll_stall_world stm)"
@@ -767,7 +776,7 @@ GP_FIRST="$(ll_lease_field "$GP_KEY" first)"
 expect_regex "(g1) …T1's lease holds its first-ask instant" '^[0-9]+$' "$GP_FIRST"
 world_tick 60
 ll_wait_file "$WORLD_ROOT/g1.out.rc" 300 || ll_kill_bg "$G1_BG"
-expect_eq "(g2) T1's ready returns WAITING once its time is up, having run nothing" "75 0" \
+expect_eq "(g2) T1's ready returns WAITING (exit 0) once its time is up, having run nothing" "0 0" \
   "$(cat "$WORLD_ROOT/g1.out.rc" 2>/dev/null) $(ll_lines "$LL_SIG/g-T1.runs")"
 expect_eq "(g2) …its lease kept, nobody's (carrier -), at the same first-ask instant" "-|$GP_FIRST" \
   "$(ll_lease_field "$GP_KEY" carrier)|$(ll_lease_field "$GP_KEY" first)"
@@ -778,7 +787,7 @@ expect_eq "(g3) …at the first ready's instant, not this one's" "$GP_FIRST" "$(
 expect_false "(g3) …and T1 is still held: no run in the 2 s while the older lease is open" wait_for 2 ll_has_lines "$LL_SIG/g-T1.runs" 1
 world_tick 60
 ll_wait_file "$WORLD_ROOT/g3.out.rc" 300 || ll_kill_bg "$G3_BG"
-expect_eq "(g3) WAITING again, nothing run" "75 0" "$(cat "$WORLD_ROOT/g3.out.rc" 2>/dev/null) $(ll_lines "$LL_SIG/g-T1.runs")"
+expect_eq "(g3) WAITING again (exit 0), nothing run" "0 0" "$(cat "$WORLD_ROOT/g3.out.rc" 2>/dev/null) $(ll_lines "$LL_SIG/g-T1.runs")"
 expect_eq "(g4-pre) the older landing's carrier closes its lease" "0" "$(ll_lease_gate gate_landing_close "$GP_OLD" "$GP_CAR")"
 expect_true "(g4) …and the gate now answers T1 at least 1" test "$(ll_width_ask "$GP_KEY")" -ge 1
 ll_verb_bg "$RG" T1 "$WORLD_ROOT/g4.out" --within 300; G4_BG=$!
@@ -941,7 +950,7 @@ ll_settle_world() {  # -> root, the world above, T1 not yet landed
   ll_settle_rev "$rd" recA "$b" "$h1" s.txt:1; ll_settle_rev "$rd" recB "$b" "$h2" s.txt:3
   ll_settle_rev "$rd" recC "$b" "$h2" s.txt:1; ll_settle_rev "$rd" recE "$b" "$h1" s.txt:3
   printf 'reviewed: %s..%s\nquestion: evidence\nresult: flag\nscope: piece\n\nAn evidence read that names no finding.\n' "$b" "$h1" > "$rd/recZ.md"
-  printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n%s\n%s\n' \
+  printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n%s\n%s\n' \
     '| REQ-1 | the row | AC-1.1 | hermetic | `tests/a.test.sh` | a is red |' '| REQ-1 | the row | AC-1.2 | hermetic | `tests/a.test.sh` | a is red |' >> "$p"
   # each review as `proof-add review` registers it, in order, Z last; T1's birth as task-add --born writes it
   printf 'run/v1|ev=%s|at=2026-10-20T00:00:0%s\n' \
@@ -991,6 +1000,23 @@ expect_eq "(ss3b) …and its ask stays open" "open" "$(ll_ask "$ST" record/wave-
 ST_FM="$(ll_poker "$ST" finding-move record/wave-x/recB.md#1 fixed T2)"; ST_FMRC=$?
 expect_eq "(ss4) finding-move on a finding the landing settled is refused (exit 1)" "1" "$ST_FMRC"
 expect_contains "(ss4b) …naming the landing" "settled by the landing of T1 at ${ST_C}" "$ST_FM"
+# The refusal asks for the landing library by the function it reads. Loading the fields library, as the roster library
+# does, sets the reader's text and not that function, so the verb is run here in a shell holding fields.sh and the proof
+# library, and not line.sh, its other readers stubbed: it must load line.sh itself and refuse, never skip the check.
+ST_FV="$(sed -n '/^  poker_verb_finding_move() {$/,/^  }$/p' "$REPO/hooks/poker/proof.sh")"
+expect_contains "(ss4c) the finding-move verb is read out of the poker's proof part" "line_settled_by" "$ST_FV"
+ST_FL="$(bash -c 'BIONIC_LIB="$1"; . "$1/loader.sh" && . "$1/fields.sh" && bionic_need proof.sh proof_finding_rating || exit 3
+  die() { printf "%s\n" "$*"; }; clean() { printf "%s" "$1"; }; deferral_fold() { printf "%s" "$1"; }
+  proof_finding_rating() { printf "S2 high\n"; }; user_said() { :; }; plan_verb_open() { :; }
+  review_readings() { printf "%s\tq\th\n" "${FM_ID%#*}"; }; docs_root() { printf "%s" "$PV_REPO"; }
+  proof_findings() { printf "1\tS2\thigh\tx\tx\tx\tt\n"; }; units_rows() { printf "T2\n"; }
+  proof_finding_event() { printf "WRITTEN\n"; }
+  eval "$2"; declare -F line_settled_by >/dev/null && echo "line.sh preloaded"
+  FM_ID="$3" FM_TO=fixed FM_ROW=T2 PV_PLAN="$4" PV_REPO="$5" HOOK_DIR=x
+  poker_verb_finding_move' _ "$REPO/payload/scripts/lib" "$ST_FV" record/wave-x/recB.md#1 "$STP" "$ST" 2>&1)"; ST_FLRC=$?
+expect_eq "(ss4d) …with the fields library loaded and the landing library not, the move is still refused (exit 1)" "1" "$ST_FLRC"
+expect_contains "(ss4e) …naming the landing" "settled by the landing of T1 at ${ST_C}" "$ST_FL"
+expect_absent "(ss4f) …and the landing library was not loaded before the verb ran" "line.sh preloaded" "$ST_FL"
 
 section "§CARRIED: a carried finding reads fixed when its row lands; a carry to a landed row closes at once (AC-4.2)"
 # fails-when: the carried finding stays open past the row's landing, or a carry to a landed row never closes.
@@ -1101,13 +1127,13 @@ printf '# §RUN: one case\n' >> "$SL/tests/a.test.sh"; printf 'echo "the gone wo
 git -C "$SL" add -A && git -C "$SL" commit -qm "a section and the words"
 git -C "$SL/.worktrees/T1" merge -q --no-edit wave/x && sed -i '' '/§RUN/d' "$SL/.worktrees/T1/tests/a.test.sh" \
   && printf 'echo\n' > "$SL/.worktrees/T1/p.sh" && git -C "$SL/.worktrees/T1" commit -qam "T1: both gone"
-{ printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|---|\n'; printf '%s\n' \
+{ printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when | Task |\n|---|---|---|---|---|---|---|\n'; printf '%s\n' \
   '| REQ-1 | r | AC-9.1 | hermetic | `tests/run.sh --only a.test.sh` §RUN → one case | x | T1 |' \
   '| REQ-1 | r | AC-9.2 | hermetic | `tests/run.sh --only b.test.sh` → prints `the gone words` | x | T1 |' \
   '| REQ-1 | r | AC-9.3 | hermetic | `tests/run.sh --only b.test.sh` → it says "the gone words" | x | T1 |' \
   '| REQ-1 | r | AC-9.4 | hermetic | `tests/run.sh --only b.test.sh` → it says the gone words | x | T1 |' \
   '| REQ-1 | r | AC-9.5 | hermetic | `tests/run.sh --only a.test.sh` §RU, a prefix of the name the row deletes | x | T1 |'; } >> "$SLP"
-( eval "$(sed -n '/^line_field() {/,/^}/p; /^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
+( . "$REPO/payload/scripts/lib/fields.sh"; eval "$(sed -n '/^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
   BIONIC_LIB="$REPO/payload/scripts/lib" BIONIC_ROOT="$SL" BIONIC_SID="$WORLD_SID"
   dispatch_event "status=confirmed|row=T1|name=wx-T1|brief=.bionic/docs/record/wave-x/briefs/T1.md|brief_sum=s|plan=$SLP" )
 SL_REC="$(ll_field "$(ll_ev "$SL" dispatch | tail -1)" criteria)"

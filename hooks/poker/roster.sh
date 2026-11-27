@@ -161,8 +161,9 @@ poker_hand() {
   [ -n "$sid" ] || return 1
   resolve_run "${REPO_REAL:-$(project_root "$PWD")}" "$sid" 2>/dev/null
   [ "${POKER_RUN_OPEN:-}" = yes ] && [ -n "$POKER_RUN_PLAN" ] && [ -f "$POKER_RUN_PLAN" ] || return 1
-  declare -F line_hand_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F line_hand_event >/dev/null 2>&1 || return 1
+  # This part is also sourced alone, beside libraries loaded without the loader (tests/reader.test.sh drives
+  # stop_run_gate so), so a writer already loaded is taken before the loader is asked.
+  declare -F line_hand_event >/dev/null 2>&1 || bionic_need line.sh line_hand_event || return 1
   line_hand_event "$POKER_RUN_PLAN" "$@" "by=$sid"
 }
 
@@ -311,32 +312,22 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
   # stands — no session filter, because every row on it carries the predecessor's own id.
   # Handed to awk through the environment rather than `-v`, which would read a backslash in
   # a name as an escape.
-  AF_OPEN="$(roster_open_names "$1" "$2")" AF_LISTS="$ROSTER_LIST_FIELDS" AF_SCHEMA="roster-state/${ROSTER_SCHEMA_VERSION}" awk '
-    function kv(line, key,   n, a, i, eq, k) {
-      n = split(line, a, "|")
-      for (i = 1; i <= n; i++) {
-        eq = index(a[i], "=")
-        if (eq == 0) continue
-        k = substr(a[i], 1, eq - 1)
-        if (k == key) return substr(a[i], eq + 1)
-      }
-      return ""
-    }
+  AF_OPEN="$(roster_open_names "$1" "$2")" AF_LISTS="$ROSTER_LIST_FIELDS" AF_SCHEMA="roster-state/${ROSTER_SCHEMA_VERSION}" awk "$_LINE_FIELDS_AWK"'
     BEGIN {
       no = split(ENVIRON["AF_OPEN"], ol, "\n")
       for (i = 1; i <= no; i++) if (ol[i] != "") isopen[ol[i]] = 1
       nl = split(ENVIRON["AF_LISTS"], lf, " ")
     }
     /^roster-state\/v1\|/ {
-      n = kv($0, "name"); if (n == "") next
+      n = line_kv_of($0, "name"); if (n == "") next
       if (!(n in seen)) { seen[n] = 1; order[++cnt] = n }
-      v = kv($0, "subagent_type"); if (v != "") stype[n] = v
-      v = kv($0, "deliverable");   if (v != "") deliv[n] = v
-      v = kv($0, "progress");      if (v != "") prog[n]  = v
-      v = kv($0, "cadence");       if (v != "") cad[n]   = v
-      v = kv($0, "launched_at");   if (v != "") launch[n] = v
-      v = kv($0, "session");       if (v != "") sess[n]   = v
-      v = kv($0, "adopted_from");  if (v != "") afrom[n]  = v
+      v = line_kv_of($0, "subagent_type"); if (v != "") stype[n] = v
+      v = line_kv_of($0, "deliverable");   if (v != "") deliv[n] = v
+      v = line_kv_of($0, "progress");      if (v != "") prog[n]  = v
+      v = line_kv_of($0, "cadence");       if (v != "") cad[n]   = v
+      v = line_kv_of($0, "launched_at");   if (v != "") launch[n] = v
+      v = line_kv_of($0, "session");       if (v != "") sess[n]   = v
+      v = line_kv_of($0, "adopted_from");  if (v != "") afrom[n]  = v
       # THE WAIVER, carried forward the same way the contract fields are (S17, AC-12 attempt
       # 2). Before this fix it was the one field this fold read off the source row and then
       # dropped: `adopt_write_row` hard-coded `waiver=` empty on every adopted row, so a
@@ -345,7 +336,7 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       # `waiver=` straight off the row (no marker involved) and calls a non-empty one WAIVED
       # before it ever asks about a deliverable, so an empty copy verdicted as an unmet
       # SILENT row instead.
-      v = kv($0, "waiver");        if (v != "") waiv[n]   = v
+      v = line_kv_of($0, "waiver");        if (v != "") waiv[n]   = v
       # THE LIST FIELDS (wave-37 T7, D11; was the three instrument fields wave-01 S13 named, then the
       # declared runs and the landing set one at a time), carried forward as the contract fields above
       # are: the merged value of each field of the set the roster library names once, in
@@ -355,26 +346,26 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       # an off-budget suite would go quiet for exactly the agents a clear leaves running longest;
       # one that lost `questions=` is no longer a reader of anything. `suites_source` is the one
       # scalar that travels beside them.
-      for (li = 1; li <= nl; li++) { v = kv($0, lf[li]); if (v != "") lv[n, lf[li]] = v }
-      v = kv($0, "suites_source");  if (v != "") ssrc[n]   = v
+      for (li = 1; li <= nl; li++) { v = line_kv_of($0, lf[li]); if (v != "") lv[n, lf[li]] = v }
+      v = line_kv_of($0, "suites_source");  if (v != "") ssrc[n]   = v
       # THE DONE MARKER (wave-24 T9, D3): the same contract, so its completion signal too.
-      v = kv($0, "done");           if (v != "") dmark[n]  = v
+      v = line_kv_of($0, "done");           if (v != "") dmark[n]  = v
       # THE LANDING KEYS (wave-28 T68; A-orch-216): `lands_on=` (a list field, above), `lands_red=`, `red_evidence=` and `row=` are what the
       # dispatch wall wrote from the brief, and what `ready` reads the suites and the declared debt from. Carried
       # forward as the instrument fields are, or an adopted row would be proved on its budget with its debt dropped.
-      v = kv($0, "lands_red");      if (v != "") lred[n]   = v
-      v = kv($0, "red_evidence");   if (v != "") revid[n]  = v
-      v = kv($0, "row");            if (v != "") lrow[n]   = v
+      v = line_kv_of($0, "lands_red");      if (v != "") lred[n]   = v
+      v = line_kv_of($0, "red_evidence");   if (v != "") revid[n]  = v
+      v = line_kv_of($0, "row");            if (v != "") lrow[n]   = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
       # field at all — a THIRD state, not an empty plan, and the caller partitions on the
       # difference (spec AC-2, A2). An apostrophe cannot appear in this comment: the awk
       # program is one single-quoted argument.
-      if (index($0, "|plan=") > 0) { plan[n] = kv($0, "plan"); hasplan[n] = 1 }
-      st = kv($0, "status")
+      if (index($0, "|plan=") > 0) { plan[n] = line_kv_of($0, "plan"); hasplan[n] = 1 }
+      st = line_kv_of($0, "status")
       if (st == "identified" || st == "confirmed") {
-        v = kv($0, "agent_id"); if (v != "") id[n] = v
+        v = line_kv_of($0, "agent_id"); if (v != "") id[n] = v
       }
       next
     }
@@ -408,14 +399,9 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
 # Set in hooks/session-poker.sh, before any part loads: ADOPT_READS_SCHEMA.
 adopt_read_baseline() {  # <reads> <id> <oldest epoch allowed> -> "<size> <epoch>" of the newest read at or before it
   [ -n "$1" ] || return 0
-  printf '%s\n' "$1" | awk -v id="$2" -v lim="$3" '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
-    index($0, "adopt-read/v1|") == 1 && kv($0, "id") == id {
-      e = kv($0, "epoch"); z = kv($0, "size")
+  printf '%s\n' "$1" | awk -v id="$2" -v lim="$3" "$_LINE_FIELDS_AWK"'
+    index($0, "adopt-read/v1|") == 1 && line_kv_of($0, "id") == id {
+      e = line_kv_of($0, "epoch"); z = line_kv_of($0, "size")
       if (e ~ /^[0-9]+$/ && z ~ /^[0-9]+$/ && e + 0 <= lim + 0 && e + 0 >= best + 0) { best = e; bz = z; got = 1 }
     }
     END { if (got) print bz " " best }'
@@ -426,20 +412,16 @@ adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
   [ -n "$2" ] || return 0
   tmp_dir_ok "${f%/*}" || return 1
   [ -L "$f" ] && return 1
-  tmp="$f.$$"
-  { [ -f "$f" ] && cat "$f"; printf '%s\n' "$2"; } 2>/dev/null | awk -v now="$3" '
-    function kv(line, key,   i, n, p) {
-      n = split(line, p, "|")
-      for (i = 1; i <= n; i++) if (index(p[i], key "=") == 1) return substr(p[i], length(key) + 2)
-      return ""
-    }
+  bionic_need root.sh bionic_new && bionic_new "$f" || return 1
+  tmp="$BIONIC_NEW"
+  { [ -f "$f" ] && cat "$f"; printf '%s\n' "$2"; } 2>/dev/null | awk -v now="$3" "$_LINE_FIELDS_AWK"'
     index($0, "adopt-read/v1|") == 1 {
-      id = kv($0, "id"); e = kv($0, "epoch")
+      id = line_kv_of($0, "id"); e = line_kv_of($0, "epoch")
       if (id == "" || e !~ /^[0-9]+$/ || e + 0 < now - 604800) next
       k = ++c[id]; r[id, k] = $0; if (!(id in seen)) { seen[id] = 1; ids[++n] = id }
     }
     END { for (i = 1; i <= n; i++) { id = ids[i]; for (k = (c[id] > 8 ? c[id] - 7 : 1); k <= c[id]; k++) print r[id, k] } }' \
-    > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null && return 0
+    >| "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null && return 0
   rm -f "$tmp" 2>/dev/null
   return 1
 }
@@ -805,16 +787,11 @@ adopt_copy_marker() {  # <source roster> <own roster> <name> -> 0 copied/already
       exit 0
     fi
 
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     ADOPT_DIR="$REPO_REAL/.bionic/tmp"
     # The ONE file this verb writes: this session's own roster. Named here, once, so the
     # loop below cannot be read as writing anything it iterates over.
-    ADOPT_OWN_ROSTER="$ADOPT_DIR/roster-${SESSION_ID}.state"
+    ADOPT_OWN_ROSTER="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     ADOPT_ROWS=0
     ADOPT_SESSIONS=0
     ADOPT_NOW="$(now_epoch)"
@@ -1041,7 +1018,7 @@ ADOPT_READERS
         PROG_AGE=""
         PROG_MTIME=0
         if [ -n "$RPROG_ABS" ] && [ -f "$RPROG_ABS" ]; then
-          PROG_MTIME="$(file_mtime "$RPROG_ABS")"
+          PROG_MTIME="$(file_mtime "$RPROG_ABS" || echo 0)"
           PROG_AGE=$(( ADOPT_NOW - PROG_MTIME ))
         fi
         CAD_S="$(parse_seconds "$RCAD")" || CAD_S=""
@@ -1075,7 +1052,7 @@ ADOPT_READERS
             # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
             # the agent takes, so its mtime is a fact about the agent rather than a
             # promise the agent has to remember to keep.
-            TX_MTIME="$(file_mtime "$TX")"
+            TX_MTIME="$(file_mtime "$TX" || echo 0)"
             TX_AGE=$(( ADOPT_NOW - TX_MTIME ))
           elif [ -n "$OSUB" ]; then
             # NEITHER SESSION HAS SPOKEN TO THE AGENT YET — still name the launcher's path
@@ -1543,12 +1520,7 @@ ADOPT_WALK
     # state out from under itself.
     SESSION_ID="$(session_id)" || SESSION_ID=""
 
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     SWEEP_DIR="$REPO_REAL/.bionic/tmp"
 
     # THE SAME GUARD THE WRITERS TAKE, because a delete is a write. `tmp_dir_ok` is this
@@ -1873,11 +1845,7 @@ EOF
     fi
 
     REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
 
     # ABSOLUTE, BECAUSE THE MARKER IS READ FROM EVERY CWD IN THE FLEET. A relative operand is
     # taken against the PROJECT ROOT rather than `$PWD`: the plan path an operator has to
@@ -2025,13 +1993,8 @@ EOF
       exit 0
     fi
 
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
       die "REFUSED — no row named $EXTEND_NAME: this session has no roster at $ROSTER_FILE."
       exit 1
@@ -2097,13 +2060,8 @@ EOF
       say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
       exit 0
     fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
       die "REFUSED — no row named $HOLD_NAME: this session has no roster at $ROSTER_FILE."
       exit 1
@@ -2165,13 +2123,8 @@ EOF
       die "A ruling lives on ONE session's roster, so without the key there is nothing to read or write."
       exit 3
     fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
       die_run "REFUSED — this session has no roster at $ROSTER_FILE, so it has no writer to rule for." "bash ${HOOK_DIR}/session-poker.sh adopt"
       exit 2
@@ -2189,10 +2142,7 @@ EOF
         if [ -n "$RULE_WORDS" ]; then
           # THE USER'S WORDS, AS finding-move HOLDS THEM (wave-36 T9; D10): looked for in every session the
           # bound plan records, then this one; refused in said_refuse's voice, exit 2 as this arm refuses.
-          if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
-            . "$BIONIC_LIB/said.sh"
-          fi
-          if ! declare -F user_said >/dev/null 2>&1; then
+          if ! bionic_need said.sh user_said; then
             die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing written."
             exit 2
           fi
@@ -2271,8 +2221,7 @@ EOF
   # `roster_mark_run`, so the run reads FINISHED rc=137, a stop, and not LOST. A run already ended or
   # LOST is reported and left alone. `--report-only` sends nothing.
   poker_verb_stop_run() {
-    REPO_REAL="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-    [ -n "$REPO_REAL" ] || { die "REFUSED — cannot resolve the working directory."; exit 2; }
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     SR_FOUND=no
     if run_find "$REPO_REAL" "$SR_ARG"; then run_read; SR_FOUND=yes; fi
     # A GATE REQUEST, when the operand names no detached run that still runs (wave-36 T11; D8): a request id,
@@ -2303,9 +2252,9 @@ EOF
     SR_GROUPS="$(run_groups "$RUN_PID")"
     kill -TERM -- "-$RUN_PID" 2>/dev/null || kill -TERM "$RUN_PID" 2>/dev/null
     _sr_i=0
-    while [ "$_sr_i" -lt 50 ] && run_live "$RUN_PID" "$RUN_OUT"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
+    while [ "$_sr_i" -lt 50 ] && alive_shim "$RUN_PID" "$RUN_OUT"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
     SR_HOW="TERM"
-    if run_live "$RUN_PID" "$RUN_OUT"; then
+    if alive_shim "$RUN_PID" "$RUN_OUT"; then
       SR_GROUPS="$SR_GROUPS
 $(run_groups "$RUN_PID")"
       for _sr_g in $(printf '%s\n' "$SR_GROUPS" | sort -u); do

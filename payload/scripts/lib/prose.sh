@@ -29,18 +29,16 @@
 # reads the list before its loop and asks the predicate per path.
 #
 # Its one dependency is lib/roots.sh's `config_value`, sourced beside this file when a caller has not loaded it,
-# so the file loads on its own. FUNCTIONS ONLY — nothing runs at source time and nothing here prints on load.
+# so the file loads on its own. FUNCTIONS ONLY but the loader's bootstrap below — nothing else runs at source time
+# and nothing here prints on load.
 #
 # [WALL: tests/bash-walls-egd.test.sh]
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 prose_list() {
-  local tree="${1:-.}" raw e d top h p
+  local tree="${1:-.}" raw e top h p
   printf '%s\n' CHANGELOG.md README.md CLAUDE.md '.bionic/*' '.claude/rules/*' tests/timing.tsv
-  if ! declare -F config_value >/dev/null 2>&1; then
-    d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-    # shellcheck source=/dev/null
-    . "$d/roots.sh" >/dev/null 2>&1
-  fi
+  bionic_need roots.sh config_value
   top="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)" || top="$tree"
   if declare -F docs_root >/dev/null 2>&1; then
     h="$(docs_root "$tree" 2>/dev/null)"

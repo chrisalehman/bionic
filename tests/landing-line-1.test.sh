@@ -30,6 +30,20 @@ expect_regex "(e2) …as one line in the interface's shape, at= ISO-UTC last" \
 line_event "$PE" verdict row=T1 "commit=$(ll_head "$RE")" "suite=a|b" result=green log=- >/dev/null 2>&1; RCB=$?
 expect_ne "(e4) a value holding | is refused" "0" "$RCB"
 expect_eq "(e5) line_head prints the working branch's head" "$(ll_head "$RE")" "$(line_head "$PE")"
+# THE LANDING LIBRARIES LOAD THROUGH THE LOADER. Each, sourced by itself in a clean shell, brings lib/loader.sh's
+# `bionic_need` and its own entry point, and none keeps a private loader or a function that only names its own folder:
+# a second copy of the loading rule is a second home for it. One extractor, the shell's list of defined functions.
+ll_alone() {  # <lib file> <names, a grep -x alternation> -> those of the names the library defines alone, sorted
+  bash -c '. "$1" >/dev/null 2>&1; declare -F | awk "{ print \$3 }"' _ "$REPO/payload/scripts/lib/$1" \
+    | /usr/bin/grep -xE "$2" | LC_ALL=C sort | paste -sd' ' -
+}
+expect_eq "(e6) line.sh alone: bionic_need and line_head, and of its loaders only _line_load_proof, the poker's" \
+  "_line_load_proof bionic_need line_head" \
+  "$(ll_alone line.sh 'bionic_need|line_head|_line_self_dir|_line_load_[a-z_]+|_line_log_load')"
+expect_eq "(e7) worktree.sh alone: bionic_need and worktree_root, and no private loader" "bionic_need worktree_root" \
+  "$(ll_alone worktree.sh 'bionic_need|worktree_root|_wt_self_dir|_wt_[a-z]+_load|_wt_liveness')"
+expect_eq "(e8) gate.sh alone: bionic_need and gate_ask, and no private loader" "bionic_need gate_ask" \
+  "$(ll_alone gate.sh 'bionic_need|gate_ask|_gate_self_dir|_gate_load_line')"
 
 # ---------------------------------------------------------------------------
 section "§FOLD: line_state prints each open entry in record order, and the base rule"
@@ -638,7 +652,7 @@ section "§HOLDER: the landing runner asks the gate in its own shell, so the run
 # subshell's own scans are charged to the run. Another process holds the gate until the runner's request is filed.
 HD="$WORLD_ROOT/holder"; mkdir -p "$HD"
 (
-  export BIONIC_GATE_DIR="$HD/gate" BIONIC_GATE_POLL=0.3; _line_load_gate || exit 1
+  export BIONIC_GATE_DIR="$HD/gate" BIONIC_GATE_POLL=0.3; bionic_need gate.sh gate_ask || exit 1
   bash -c '. "$1/payload/scripts/lib/gate.sh"; id="$(gate_ask whole blocker)"; i=0
     while [ ! -e "$BIONIC_GATE_DIR/requests/$((id + 1))" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
     sleep 0.5; gate_end "$id" 0' _ "$REPO" >/dev/null 2>&1 &
@@ -825,7 +839,7 @@ RN="$(ll_world)"; ll_launch "$RN" T1 c
 ( cd "$RN" && world_suite c green >/dev/null ) && git -C "$RN" add tests/c.test.sh && git -C "$RN" commit -qm "suite c"
 REQN="$(ls "$BIONIC_GATE_DIR/requests" 2>/dev/null | wc -l | tr -d ' ')"
 ll_verb "$RN" T1 --within 60
-expect_eq "(n1) a suite promising 600 s with 60 s left: exit 75" "75" "$LL_RC"
+expect_eq "(n1) a suite promising 600 s with 60 s left: exit 0, an ordinary answer" "0" "$LL_RC"
 expect_eq "(n1) …printing WAITING and the same command (§WHY reads the reason after it)" "WAITING T1 — run again: bash ${SPAWN} ready --within 60" "$(printf '%s\n' "$LL_OUT" | grep '^WAITING ' | head -n 1)"
 expect_eq "(n1) …nothing run: no verdict, no log, no gate request" "0 0 $REQN" \
   "$(ll_ev "$RN" verdict | awk 'END { print NR }') $(ls "$RN/.bionic/docs/record/wave-x/line" 2>/dev/null | wc -l | tr -d ' ') $(ls "$BIONIC_GATE_DIR/requests" | wc -l | tr -d ' ')"
@@ -840,14 +854,14 @@ expect_eq "(n2f) AC-4.2 the verdict carries promised=600 and actual= the gate's 
   "600 $(ll_req_last c.test.sh actual) yes" \
   "$(ll_field "$N2V" promised) $(ll_field "$N2V" actual) $(printf '%s\n' "$N2V" | grep -qE '\|width=[^|]+\|promised=600\|actual=[0-9]+\|at=' && echo yes)"
 # AC-4.3 WITH TWO SUITES: a (5 s) fits in 60 s, c (600 s) does not. ready prints the total, runs a, and waits c:
-# WAITING exit 75, a's verdict written, nothing started for c.
+# WAITING exit 0, a's verdict written, nothing started for c.
 RN5="$(ll_world)"; ll_launch "$RN5" T1 a,c
 ( cd "$RN5" && world_cost a.test.sh 5 && world_cost c.test.sh 600 )
 ( cd "$RN5" && world_suite a green >/dev/null && world_suite c green >/dev/null ) && git -C "$RN5" add tests/a.test.sh tests/c.test.sh \
   && git -C "$RN5" commit -qm "suites a and c"
 N5_C="$(grep -l '^key=c.test.sh$' "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | awk 'END { print NR }')"
 ll_verb "$RN5" T1 --within 60
-expect_eq "(n5) AC-4.3 a,c with 60 s: promised 605s of 60s first, then WAITING, exit 75" "75|promised 605s of 60s|WAITING T1 — run again: bash ${SPAWN} ready --within 60" \
+expect_eq "(n5) a,c with 60 s: promised 605s of 60s first, then WAITING, exit 0" "0|promised 605s of 60s|WAITING T1 — run again: bash ${SPAWN} ready --within 60" \
   "$LL_RC|$(printf '%s\n' "$LL_OUT" | head -n 1)|$(printf '%s\n' "$LL_OUT" | grep '^WAITING ' | head -n 1)"
 expect_eq "(n5) …waiting on c, whose promise the time left cannot hold" "waiting: suite c.test.sh promises 600s and" \
   "$(printf '%s\n' "$LL_OUT" | grep '^waiting: ' | head -n 1 | cut -d' ' -f1-6)"
@@ -878,6 +892,33 @@ expect_eq "(n3m) MUTANT the time check removed: the suite starts past its time (
 section "§TOO-LONG: a Lands-on command is held to the suite bar as a suite is"
 RL="$(ll_world)"; ll_launch "$RL" T1 '`bash%20c.test.sh`'; ( cd "$RL" && world_cost "bash c.test.sh" 700 ); ll_verb "$RL" T1
 expect_eq "(tl1) a command promising 700 s: refused, exit 1, nothing entered the line" "1 too-long 0" "$LL_RC $(printf '%s\n' "$LL_OUT" | awk '/^too-long /{ print $1 }') $(ll_ev "$RL" ready | awk 'END { print NR }')"
+
+# ---------------------------------------------------------------------------
+section "§BAR-LOAD: the bar is judged at a quiet load, so the verdict is the same at any load now"
+#
+# The promise is scaled by the load at the moment of asking; the bar's verdict is not. Three kept lines, `<seconds>:<epoch>:<load>`.
+# 400, 400 and 700 under load 1, 1 and 4 promise 400 at a quiet load and 700 (the largest kept) at load 5, so a bar read
+# at the load now would refuse it only on a busy machine. 1000 under load 1 three times is over the bar at every load.
+bl_cost() {  # <key> <seconds:load>... -> the key's cost file, three loaded lines
+  local k="$1" f pk; shift
+  pk="$( cd "$RL" && . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null && _gate_project )"; f="$BIONIC_GATE_DIR/cost/${pk}%${k}"; : > "$f"
+  for s in "$@"; do printf '%s:%s:%s\n' "${s%%:*}" "$(date +%s)" "${s##*:}" >> "$f"; done
+}
+bl_ask() {  # <busy now> <entry> -> what `_line_too_long` and `_line_bar_seconds` print, one line each
+  ( cd "$WORLD_ROOT" && export BIONIC_PROBE_BUSY_CORES="$1" && . "$REPO/payload/scripts/lib/gate.sh" 2>/dev/null \
+      && . "$REPO/payload/scripts/lib/line.sh" 2>/dev/null && _gate_store >/dev/null 2>&1 \
+      && { _line_too_long "$2" "$RL" "$RL" "" ""; echo "bar=$(_line_bar_seconds "$(_line_gate_key "$2")" "$RL")"; } )
+}
+bl_cost "bash c.test.sh" 400:1 400:1 700:4
+expect_eq "(bl1) a promise of 700 s at load 5 is not over the bar: judged quiet, it is 400 s" "bar=400" "$(bl_ask 5 '`bash%20c.test.sh`')"
+expect_eq "(bl2) …and at load 0 the same, nothing refused" "bar=400" "$(bl_ask 0 '`bash%20c.test.sh`')"
+bl_cost "bash c.test.sh" 1000:1 1000:1 1000:1
+expect_eq "(bl3) a suite over the bar at a quiet load is refused at load 5" "too-long \`bash%20c.test.sh\` 1000s — split it|bar=1000" \
+  "$(bl_ask 5 '`bash%20c.test.sh`' | paste -sd'|' -)"
+expect_eq "(bl4) …and at load 0, the same line" "too-long \`bash%20c.test.sh\` 1000s — split it|bar=1000" \
+  "$(bl_ask 0 '`bash%20c.test.sh`' | paste -sd'|' -)"
+expect_contains "(bl5) the brief's bar reads the same quiet seconds, not the gate's promise at the load now" \
+  '_line_bar_seconds "$(_line_gate_key "$e")"' "$(cat "$REPO/hooks/poker/plan.sh")"
 
 # ---------------------------------------------------------------------------
 section "§GUARD (ready half): a row that commits .bionic is refused before any landing tree (AC-14.1)"
@@ -978,7 +1019,8 @@ ll_verb "$RT" T1
 KT="$(ll_last_cand "$RT" T1)"
 LT1="$RT/.bionic/docs/record/wave-x/line/T1-a-${KT:0:12}.log"; LT2="$RT/.bionic/docs/record/wave-x/line/T1-a-${KT:0:12}-2.log"
 expect_eq "(t1) two runs with no end line: ready exits 70" "70" "$LL_RC"
-expect_eq "(t1) …printing STALLED and both logs" "STALLED T1 ${LT1},${LT2}" "$LL_OUT"
+expect_eq "(t1) …printing STALLED, both logs and the end line it read for" \
+  "STALLED T1 ${LT1},${LT2} — neither log holds the end line ready reads: \"a.test.sh: <p>/<t> passed, <f> failed\"" "$LL_OUT"
 expect_regex "(t1) …one stalled event naming both logs" "^run/v1\\|ev=stalled\\|row=T1\\|logs=${LT1},${LT2}\\|at=[0-9T:-]+Z$" "$(ll_ev "$RT" stalled)"
 expect_eq "(t1) …two runs, no third" "none none" "$(ll_results "$RT" T1 "$KT")"
 expect_eq "(t1) …the entry kept on the line, stalled, nothing returned or published" "T1 stalled||$HT" \
@@ -1017,6 +1059,22 @@ LL_MUTANT='s/-ge 2 \]/-ge 99 ]/' LL_MUTANT_FN=_line_carry ll_drive "$RT6" T1 "$W
 i=0; while [ "$i" -lt 300 ] && [ "$(ll_ev "$RT6" verdict | grep -c 'result=none')" -lt 3 ]; do sleep 0.1; i=$((i + 1)); done
 ll_kill_bg "$T6_BG"
 expect_eq "(t6m) …and no stalled event" "" "$(ll_ev "$RT6" stalled)"
+
+# ---------------------------------------------------------------------------
+section "§STALL-LINE: a stall says which end line the suite's log lacks (AC-25.1)"
+# A suite that exits 0 and prints no end line is no verdict, so the entry stalls on its second run. The stall used to
+# name the two logs and no more, and a writer could not tell a suite that died from one that never printed its summary.
+# The line names the end line `ready` reads, `<suite>: <p>/<t> passed, <f> failed`, and the suite it read it for.
+RSL="$(ll_rworld)"
+( cd "$RSL/.worktrees/T1" && world_suite a none >/dev/null ) && git -C "$RSL/.worktrees/T1" commit -qam "T1: a prints no end line"
+ll_verb "$RSL" T1
+KSL="$(ll_last_cand "$RSL" T1)"
+LSL1="$RSL/.bionic/docs/record/wave-x/line/T1-a-${KSL:0:12}.log"; LSL2="$RSL/.bionic/docs/record/wave-x/line/T1-a-${KSL:0:12}-2.log"
+expect_eq "(sl0) precondition: the suite exited 0, both logs hold its output and neither holds an end line" "70|PASS: a ran|PASS: a ran|0" \
+  "$LL_RC|$(head -n1 "$LSL1")|$(head -n1 "$LSL2")|$(cat "$LSL1" "$LSL2" | grep -Ec '^[^ ]+: [0-9]+/[0-9]+ passed, [0-9]+ failed' || true)"
+expect_contains "(sl1) the stall names the end line ready reads" "neither log holds the end line ready reads" "$LL_OUT"
+expect_contains "(sl2) …in the shape the harness prints it, for the suite that lacks it" "\"a.test.sh: <p>/<t> passed, <f> failed\"" "$LL_OUT"
+expect_contains "(sl3) …and still names both logs, as a writer reads them first" "${LSL1},${LSL2}" "$LL_OUT"
 
 # ---------------------------------------------------------------------------
 section "§WINDOW: the hand-holds count is read over a window, every source by its own time"
@@ -1111,7 +1169,7 @@ RW4="$(ll_world)"; WW_RD4="$(dirname "$(ll_log "$RW4")")"
 ww_dec 2026-10-20T10:00:00Z decline >> "$WW_RD4/run.log"
 ww_times() { printf '%s\n' "$1" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{5,8}Z' | paste -sd' ' -; }   # <ends line> -> its times
 WW_E4="$(ww_ends "$RW4")"
-expect_contains "WINDOW-3 with no delivered: time the ends line runs the window to now" "until now: the plan names no delivered: time" "$WW_E4"
+expect_contains "WINDOW-3 with no delivered: time the ends line runs the window to now" "until now: the run's log holds no delivery yet" "$WW_E4"
 expect_eq "WINDOW-3a …and prints one time, the start: the last build row's landing, never an end" \
   "2026-10-20T11:00:00Z" "$(ww_times "$WW_E4")"
 expect_contains "WINDOW-3b …and the counts read from that landing to now: the later hand landing of a row that is no build row counts, the earlier decline does not" \
@@ -1172,13 +1230,13 @@ RW8="$(ll_world)"; WW_P8="$(ll_plan "$RW8")"
 awk '{ print } /^\| T2 \| 4 \| build / { print "| D7 | 7 | doc | the release | — | 10 | REQ-1 | CHANGELOG.md | — |" }' \
   "$WW_P8" > "$WW_P8.o" && mv "$WW_P8.o" "$WW_P8"
 ww_order() {  # <root> -> `<units' order, sorted>|<line's landed release row>`
-  ( _wt_units_load || exit 9
+  ( bionic_need units.sh units_rows || exit 9
     printf '%s|%s' "$(_units_publish_order "$(ll_plan "$1")" "$(units_rows "$(ll_plan "$1")")" | tr ' ' '\n' | LC_ALL=C sort | paste -sd' ' -)" \
       "$(_line_release_landed "$(ll_plan "$1")" "$(ll_log "$1")" 2>/dev/null)" )
 }
 { ww_pub D7 queue 2026-10-20T10:00:00Z; ww_pub T2 queue 2026-10-20T11:00:00Z; } > "$(ll_log "$RW8")"
 expect_eq "ORDER-0 precondition: the plan holds the release row D7, a doc row at step 7, landed" "D7	7	doc" \
-  "$( ( _wt_units_load && units_rows "$WW_P8" ) | awk -F'\t' '$1 == "D7" { print $1 "\t" $2 "\t" $3 }')"
+  "$( ( bionic_need units.sh units_rows && units_rows "$WW_P8" ) | awk -F'\t' '$1 == "D7" { print $1 "\t" $2 "\t" $3 }')"
 expect_eq "ORDER-1 both readers read the release row's event as its landing, and units places it before T2's" \
   "D7=1 T2=2|D7" "$(ww_order "$RW8")"
 { ww_pub T2 queue 2026-10-20T09:00:00Z; ww_pub D7 queue 2026-10-20T10:00:00Z; } > "$(ll_log "$RW8")"
@@ -1289,7 +1347,7 @@ ll_verb "$RB" T3
 expect_match "(in1) ready refuses the integrate row (exit 2) by its route: a record row, landed by the tick with no tree" \
   "2 *REFUSED reason=integrate-row row=T3 kind=integrate *" "$LL_RC $LL_OUT"
 expect_absent "(in2) …never told to set the step back" "set the step back" "$LL_OUT"
-in_cell() { ( _wt_units_load && units_rows "$PB" ) | awk -F'\t' '$1 == "T3" { print $3 "|" $11 }'; }
+in_cell() { ( bionic_need units.sh units_rows && units_rows "$PB" ) | awk -F'\t' '$1 == "T3" { print $3 "|" $11 }'; }
 expect_eq "(in3) the fill reads T3's tree while it stands" "integrate|.worktrees/T3" "$(in_cell)"
 ( cd "$RB" && bash "$SPAWN" remove "$RB/.worktrees/T3" >/dev/null 2>&1 )
 expect_eq "(in4) …and none once it is removed, so the tick lands the row's record" "integrate|" "$(in_cell)"
@@ -1412,6 +1470,27 @@ printf 'run/v1|ev=published|row=T3|commit=c3|kind=queue|by=-|why=-|at=2026-11-03
 printf 'run/v1|ev=published|part=reviews|commit=%s|branch=wave/x|tree=-|by=T3|at=2026-11-03T00:00:05Z\n' "$TWC" >> "$TWL"
 expect_eq "(lg3) a part is no landing: the record's landings and the reader's landed rows are T3 alone, the part still read" "T3|T3|1" \
   "$(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWL" | grep -c '|part=reviews|')"
+
+section "§ONE-REASON: a tree whose plan names no working branch is refused with the run library's reason; both request keys have one maker"
+# fails-when: the landing spells its own no-working-branch reason, so its words and the run verb's can part: a tree with
+# its own record (the plan read from the record) or with none (the plan read through the binding) refused in words
+# other than lib/run.sh `run_no_branch_why` prints, or in other bytes than the refusal has always carried; or either
+# request key not `<prefix>:` and the branch with every character outside [A-Za-z0-9._-] written `:`.
+NB="$(ll_world)"; NBP="$(ll_plan "$NB")"
+awk '!/^working-branch: /' "$NBP" > "$NBP.n" && mv "$NBP.n" "$NBP"
+printf 'tree/v1|path=%s|plan=%s|row=T1|worker=wx-T1|spawned-by=%s|at=2026-10-04T00:06:00Z\n' "$NB/.worktrees/T1" "$NBP" "$WORLD_SID" \
+  > "$(git -C "$NB/.worktrees/T1" rev-parse --absolute-git-dir)/bionic-tree"
+nb_run() { ( bionic_need run.sh plan_working_branch || exit 9; line_tree_run "$NB/.worktrees/$1" "$NB" "$WORLD_SID"
+  printf '%s|%s|%s' "$?" "$LINE_RUN_WHY" "$(run_no_branch_why "$NBP")" ) 2>&1; }   # <row> -> rc|the landing's words|run.sh's
+expect_eq "(nb0) precondition: the plan names no working branch and T1's tree has its own record naming the plan" "0|$NBP" \
+  "$(/usr/bin/grep -c '^working-branch: ' "$NBP")|$(line_field "$(worktree_tree_record "$NB/.worktrees/T1")" plan)"
+expect_eq "(nb1) a tree with its own record is refused in the run library's words, the bytes the refusal has carried" \
+  "1|no-working-branch plan=$NBP|no-working-branch plan=$NBP" "$(nb_run T1)"
+expect_eq "(nb2) …and a tree with none, through the binding, in the same words" \
+  "1|no-working-branch plan=$NBP|no-working-branch plan=$NBP" "$(nb_run T2)"
+expect_eq "(nb3) the publish ask and the closed-unmerged ask are made by one maker, the branch escaped alike" \
+  "pr:wave:x-1.a_b:c|pr-closed:wave:x-1.a_b:c|pr-closed:wave:x-1.a_b:c" \
+  "$(line_ask_key pr 'wave/x-1.a_b c')|$(line_ask_key pr-closed 'wave/x-1.a_b c')|$(line_merge_ask_key 'wave/x-1.a_b c')"
 
 # ---------------------------------------------------------------------------
 section "§WORLD: a world that lies inside a checkout ends the suite that sourced it"

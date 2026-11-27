@@ -49,24 +49,15 @@
 #
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/env.sh"
 
-_env_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
 
 # The same softly-conditional source detect.sh and jit.sh use: a caller that
 # already loaded deps.sh does not load it twice, and one that did not gets it.
-if ! declare -F _dep_settings_write_jq >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_env_self_dir)" && pwd -P)/deps.sh"
-fi
+bionic_need deps.sh _dep_settings_write_jq
 
 # markers.sh, the same soft source: the marker-block walk both of this file's
 # block items (the shell rc, the working principles) write and strip through.
-if ! declare -F markers_set >/dev/null 2>&1; then
-  # shellcheck source=/dev/null
-  . "$(cd "$(_env_self_dir)" && pwd -P)/markers.sh"
-fi
+bionic_need markers.sh markers_set
 
 # ─── The names bionic owns ───────────────────────────────────────────────────
 #

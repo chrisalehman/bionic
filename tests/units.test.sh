@@ -35,7 +35,17 @@
 #   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
 #   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
 #   §DEPS-15   a row at 15 waits by its deps and kind alone: no step hold; a questions tag judged
+#   §POINT-NONE  a plan with no point, or a task cell that only resembles the mark, reads the order, the waits and the
+#              whole run's open-row refusal as before
+#   §POINT-MARK  a test row marked ` · point` waits on its deps alone and is never the regression row; the validator
+#              admits the mark on a test row at step 5 or earlier only
+#   §POINT-RUN   a point's run is held by its own rows; an open point holds no whole run and writes no regression proof
+#   §POINT-RED   a suite red in a point's run is born as a fix row whose birth names the point and the rows it follows
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
+#   §RELEASE   whether a row is the plan's release is lib/plan-read.sh's one `release_row`, in each state its askers pass
+#   §KINDS     one list holds the kinds of row, the read-only kinds, and the role each kind draws or is offered; the tag's
+#              rule and the kind words are spelt in that library alone
+#   §LISTS     the measured keys and the debt kinds follow their sources
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -269,6 +279,14 @@ expect_eq "rows come out in TABLE order — T22 is 21st and T21 is 22nd" "T22 T2
 # The separator row and the trailing prose are not rows.
 expect_eq "no separator or prose line is emitted as a row" "" \
   "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' '$1 ~ /^[-: ]*$/ || $1 ~ /Parallel/')"
+
+# THE LIBRARY ALONE LOADS THROUGH THE LOADER. Sourced by itself in a clean shell, units.sh brings lib/loader.sh's
+# `bionic_need` with it and carries no loader of its own: a private copy beside the shared one is a second home for the
+# same rule. One extractor, the shell's own list of defined functions, answers both halves.
+UL_FNS="$(bash -c '. "$1" >/dev/null 2>&1; declare -F | awk "{ print \$3 }"' _ "$LIB" \
+  | /usr/bin/grep -xE 'bionic_need|units_rows|_units_lib|_units_proof_lib|_units_plan_read' | LC_ALL=C sort | paste -sd' ' -)"
+expect_eq "units.sh sourced alone defines the loader's bionic_need and units_rows, and no private loader" \
+  "bionic_need units_rows" "$UL_FNS"
 
 section "2 — units_rows is keyed on header NAMES: reversed columns, identical output (AC-1e.2)"
 
@@ -1063,6 +1081,89 @@ cv() { ( export UNITS_READINGS_STATE="$1"; call units_waiting "$CV" 7 | awk -F'\
 CV_A="$(cv covered)"; printf 'run/v1|ev=proof|kind=review|head=%s|question=adversarial|result=pass|scope=piece|at=2026-10-20T00:00:05Z\n' "$(printf 'a%.0s' {1..40})" >> "$SANDBOX/cover/record/cv/run.log"
 expect_eq "COVER-1 a dep on a review row is met by cover: unregistered it waits though the judge reads covered; registered it waits while a question is uncovered and no longer once covered" \
   "1|1|0" "$CV_A|$(cv 'review adversarial critic piece uncovered')|$(cv covered)"
+
+# Both point sections share one page at 15 and its run's log, the plan's approval and T1's landing in it. pt writes the
+# nine cells from <id step kind task deps files>…; pw prints one row's waits as `<kind line's reads>|<rows it waits on>`.
+PT="$SANDBOX/docs/plans/e/pt.plan.md"; PT_LOG="$SANDBOX/docs/record/pt/run.log"; mkdir -p "${PT%/*}" "${PT_LOG%/*}"
+pt() { printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' > "$PT"; printf '| %s | %s | %s | %s | %s | 30m | R | %s | — |\n' "$@" >> "$PT"; }
+pw() { call plan_read_waits "$PT" "$1" | awk -F'\t' '$2 == "kind" { k = $4 } $2 == "row" { r = r (r == "" ? "" : " ") $3 } END { printf "%s|%s", k, r }'; }
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$PT_LOG"
+PT_TAIL=(T4 6 review rev — record/pt/T4.md T5 7 doc rel — CHANGELOG.md T6 8 integrate merge — record/pt/T6.md)
+
+section "§POINT-NONE — a plan with no point reads the order and the waits it read at 2.2.0, and the whole run's open-row refusal holds until its last build row lands"
+# fails-when: a task cell that only resembles the mark is read as one, so the regression row stops waiting on a code row,
+# the order names another row, or the refusal of regression-run (rule 2, `units_floor_holds`) clears while a build row is
+# open. The plain page and the lookalike page differ only in their task cells; every reader must answer them alike.
+pt T1 4 build b1 — a.sh T2 4 build b2 — b.sh T3 5 test reg — record/pt/T3.md "${PT_TAIL[@]}"
+PN_W="$(call plan_read_waits "$PT")"; PN_A="$(pw T3)|$(call units_order "$PT")|$(call units_floor_holds "$PT" "" | cut -f1 | paste -sd' ' -)|$(call units_validate "$PT"; printf '%s' "$CALL_RC")"
+pt T1 4 build 'b1 · pointer' — a.sh T2 4 build 'b2 · point: none' — b.sh T3 5 test 'reg · points · born: regression' — record/pt/T3.md "${PT_TAIL[@]}"
+expect_true "PN-0 precondition: the reader reads the plain page (a T3 kind line and its rows)" test -n "$PN_W"
+expect_eq "PN-1 no point: the regression row T3 waits on both build rows by head; the order names it; rule 2 holds T2, the open build row; the page validates" \
+  "approval:plan,head|T1 T2|T3|T2|0" "$PN_A"
+expect_eq "PN-2 a task cell that only resembles the mark (· pointer, · point: none, · points) is no mark: every reader answers as on the plain page" \
+  "$PN_W|$PN_A" "$(call plan_read_waits "$PT")|$(pw T3)|$(call units_order "$PT")|$(call units_floor_holds "$PT" "" | cut -f1 | paste -sd' ' -)|$(call units_validate "$PT"; printf '%s' "$CALL_RC")"
+printf 'run/v1|ev=published|row=T2|commit=c2|by=w|at=2026-11-01T00:00:04Z\n' >> "$PT_LOG"
+expect_eq "PN-3 …and once the last build row T2 lands, rule 2 holds nothing, so the whole run is no longer refused for an open row" \
+  "|0" "$(call units_floor_holds "$PT" "")|$(call_rc units_floor_holds "$PT" "")"
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$PT_LOG"
+
+section "§POINT-MARK — a test row whose task cell carries \` · point\` is a whole-run point: it waits on its deps alone, is never the regression row, and is admitted on a test row at step 5 or earlier only"
+# fails-when: the point still waits on every code row (so a row that names it in its deps closes a cycle), the release
+# order takes it for the regression row, or the validator admits the mark where no point can stand.
+pt T1 4 build b1 — a.sh T2 4 build b2 — b.sh T3 4 test 'the whole run after T1 · point' T1 record/pt/T3.md T7 4 build b3 T3 c.sh T8 5 test reg — record/pt/T8.md "${PT_TAIL[@]}"
+expect_eq "PM-1 the point T3 waits on the plan's approval and T1, the row its deps name, and on no other code row" \
+  "approval:plan,T1|T1" "$(pw T3)"
+expect_eq "PM-2 the regression row T8 still waits on every code row by head, the point not among them (its Files are its record)" \
+  "approval:plan,head|T1 T2 T7" "$(pw T8)"
+expect_eq "PM-3 the order's regression row is T8, never the point ahead of it; the page validates though T7 waits on the point" \
+  "T8||0" "$(call units_order "$PT")|$(call units_validate "$PT"; printf '|%s' "$CALL_RC")"
+pt T1 4 build b1 — a.sh T3 4 test 'the whole run after T1 · point · born: regression' T1 record/pt/T3.md "${PT_TAIL[@]}"
+expect_eq "PM-4 a mark followed by another tag is still the mark; with the point the only test row there is no regression row (rc 1)" \
+  "approval:plan,T1|T1||1" "$(pw T3)|$(call units_order "$PT")|$(call_rc units_order "$PT")"
+pt T1 4 build 'b1 · point' — a.sh T3 6 test 'the floor · point' T1 record/pt/T3.md "${PT_TAIL[@]}"
+expect_eq "PM-5 the mark on a build row, or on a test row past step 5, is refused naming the row (rc 1)" \
+  "T1: task marks a whole-run point; only a test row is a point T3: task marks a whole-run point at step 6; a point stands among the build, at step 5 or earlier|1" \
+  "$(call units_validate "$PT" | paste -sd' ' -)|$(call_rc units_validate "$PT")"
+
+section "§POINT-RUN — a point's run is held by the point's own rows; an open point holds no whole run and writes no regression proof"
+# fails-when: the one reader of the mark answers a row that is no point; rule 2 of a point's run asks rows the point does not
+# follow; the whole run's refusal asks an open point's rows; the integrate row's regression wait counts the point a writer.
+# T1 has landed (the page's log); T2 is open, T3 is the point after T2, T7 a later build waiting on it, T8 the regression row.
+pt T1 4 build b1 — a.sh T2 4 build b2 — b.sh T3 4 test 'the whole run after T2 · point' T2 record/pt/T3.md T7 4 build b3 T3 c.sh T8 5 test reg — record/pt/T8.md "${PT_TAIL[@]}"
+expect_eq "PR-1 the reader of the mark names the point T3 with its status, and only it (T8, a plain test row, is none: rc 1)" \
+  "$(printf 'T3\tpending')|$(printf 'T3\tpending')|1" "$(call units_points "$PT")|$(call units_points "$PT" T3)|$(call_rc units_points "$PT" T8)"
+expect_eq "PR-2 the point's run is held by T2 alone, the row it follows, while the later build T7 is open too" \
+  "T2" "$(call units_floor_holds "$PT" T3 | cut -f1 | paste -sd' ' -)"
+pr_regw() { call plan_read_waits "$PT" "$1" | awk -F'\t' '$2 == "row" && index("," $4 ",", ",proof:regression,") { printf "%s%s", (n++ ? " " : ""), $3 }'; }
+expect_eq "PR-3 the integrate row's regression wait names the regression row T8 as its writer, never the point T3" "T8" "$(pr_regw T6)"
+pt T1 4 build b1 — a.sh T2 4 build b2 — b.sh T3 4 test 'the whole run after T2 · point' T2 record/pt/T3.md "${PT_TAIL[@]}"
+expect_eq "PR-4 a page whose only test row is an open point: its run is held by T2, and the whole run's refusal holds nothing for it" \
+  "T2|" "$(call units_floor_holds "$PT" T3 | cut -f1 | paste -sd' ' -)|$(call units_floor_holds "$PT" "" | cut -f1 | paste -sd' ' -)"
+
+section "§POINT-RED — a suite red in a point's run is born as a fix row whose birth names the point and the rows it follows"
+# fails-when: a red the point's proof owes backs no born row; the birth names no point, or not the rows the point follows; a
+# suite the point's proof does not owe is admitted.
+# FIXTURE FIDELITY: §DEBT's planted plan at 15 with a point row T3 after T1 and T2, its proof in the run's log as proof-add
+# point writes it (kind=point, the point's row, the red suite owed); task-add is the real verb, as this session.
+PRD_R="$(db_repo point-red)"; PRD_H="$(git -C "$PRD_R" rev-parse HEAD)"
+PRD_P="$(db_plan "$PRD_R" 4 '| T3 | 4 | test | the whole run after T1 and T2 · point | T1, T2 | 30 | REQ-1 | .bionic/docs/record/wave-01-debt/T3.md | — |' \
+  "proof|kind=point|head=$PRD_H|evidence=$DB_OWN/point-run-T3-$PRD_H.log|owed=b.test.sh|point=T3")"
+prd_poke() {  # <id> <suite> -> DB_OUT, DB_RC: a step-4 build row an edit adds, then task-add of it born of <suite>'s red
+  awk -v r="| $1 | 4 | build | Fix $2. It is green again. · born: regression | — | 30 | REQ-1 | lib/$1.sh | — |" '{ print } /^\| T3 \|/ { print r }' "$PRD_P" > "$PRD_P.t" && mv "$PRD_P.t" "$PRD_P"
+  DB_RC=0; DB_OUT="$(cd "$PRD_R" && env CLAUDE_CODE_SESSION_ID="$DB_SID" HOME="$DB_ROOT/home" CLAUDE_CONFIG_DIR="$DB_ROOT/config" \
+    BIONIC_GATE_DIR="$DB_ROOT/gate" BIONIC_PLUGINS_DIR="$DB_ROOT/no-plugins" bash "$DB_POKER" task-add "$1" --born "regression:$2" 2>&1)" || DB_RC=$?
+}
+prd_born() { { /usr/bin/grep -F "|ev=born|row=$1|" "$PRD_R/.bionic/docs/$DB_OWN/run.log" || :; } | sed -e 's/^run\/v1//' -e 's/|at=.*//'; }   # <id> -> its born event
+prd_poke T6 b.test.sh
+expect_eq "PRD-1 task-add born of b.test.sh, which the point's proof owes, exits 0" "0" "$DB_RC"
+[ "$DB_RC" = 0 ] || printf '      the verb said: %s\n' "$DB_OUT"
+expect_eq "PRD-2 …and its birth names the point's red, the point and the rows it follows" \
+  "|ev=born|row=T6|reason=regression b.test.sh|finding=point@${PRD_H:0:12}|point=T3|rows=T1,T2" "$(prd_born T6)"
+expect_contains "PRD-3 …and the verb says which point's run it fixes" "a red of the run of point T3, after T1, T2" "$DB_OUT"
+prd_poke T7 a.test.sh
+expect_eq "PRD-4 a suite the point's proof does not owe backs no birth: refused (exit 1), and no born event for T7 (PRD-2 read it for T6)" \
+  "1|" "$DB_RC|$(prd_born T7)"
+
 section "§HELD — inside a held command the table's answer and the status pass are kept for the command, keyed by what they read"
 # fails-when: a read inside a held command is not served the command's one read (the count grows), or a plan edited or a
 # fact of a row set during the command is served the answer kept before it (a stale read), or anything is kept outside a
@@ -1076,7 +1177,7 @@ HD_F2='run/v1|ev=published|row=T1|commit=c1|by=w-T1|at=2026-11-01T00:00:02Z'
 hd_run() {  # <script> -> the child's print; the counters in $HD_C, made empty first
   : > "$HD_C"
   BIONIC_COUNT="$HD_C" HD_P="$HD_P" HD_F1="$HD_F1" HD_F2="$HD_F2" TMPDIR="$SANDBOX" bash -c '. "$1/proof.sh" && . "$1/units.sh" || exit 127
-    _units_lib reader.sh reader_q_statuses || exit 127
+    bionic_need reader.sh reader_q_statuses || exit 127
     hd_st() { _UNITS_FACTS_PLAN="$HD_P" _UNITS_FACTS="$1" _units_statuses "$HD_P" | paste -sd" " -; }
     '"$1" _ "${LIB%/*}" 2>&1
 }
@@ -1098,5 +1199,78 @@ expect_eq "HELD-4 the status pass: asked twice, and with a pending step that nam
   "$(printf '%s\n' "$HD_OUT" | head -3 | sort -u | wc -l | tr -d ' ')|$(printf '%s\n' "$HD_OUT" | sed -n 1p)|$(printf '%s\n' "$HD_OUT" | head -3 | grep -c 'state=dispatched')"
 expect_eq "HELD-5 a fact of a row set since is passed again and read: a second status pass, T1 landed" \
   "2|row=T1 state=landed name=w-T1 brief=b sum=s commit=c1" "$(hd_n status)|$(printf '%s\n' "$HD_OUT" | sed -n 4p)"
+
+section "§RELEASE — whether a row is the plan's release is one function, and each asker's rule of which states count is its argument"
+# fails-when: the function admits a row that is not a doc row at a numeric step of 7 or more, or reads the state against
+# the rule its asker passes (a pending row counted where only a landed one does, a dropped one where it stands dropped,
+# or a state read at all where the asker passes no rule); or the release readers no longer load it, so it is undefined.
+# One child shell sources the units library, as every asker's process does, and the cases run through one awk program.
+# Each row is `<kind> <step> <state> <rule> <answer>`, `-` for an empty field: the rules are `landed` (the publish order,
+# the validator's landed release, the post-release readers), `standing` (the approval names, the scheduler) and empty
+# (the waits' reader, the order, the validator's order, whose callers skip a dropped row and a word step themselves).
+RL_CASES='doc 7 landed landed 1
+doc 7 pending landed 0
+doc 7 active landed 0
+doc 7 dropped landed 0
+doc 7 pending standing 1
+doc 7 active standing 1
+doc 7 landed standing 1
+doc 7 dropped standing 0
+doc 7 - standing 1
+doc 7 dropped - 1
+doc 9 pending - 1
+doc 6 landed landed 0
+doc 6 pending - 0
+test 7 landed landed 0
+integrate 8 pending standing 0
+doc 7a pending - 0
+doc x landed landed 0
+doc - pending standing 0'
+RL_OUT="$(printf '%s\n' "$RL_CASES" | bash -c '. "$1" >/dev/null 2>&1 || exit 127
+  awk "$_PLAN_READ_RELEASE_AWK"'"'"'{ for (k = 1; k <= 4; k++) if ($k == "-") $k = ""
+    if (release_row($1, $2, $3, $4) != $5) printf "%s %s %s %s: %s\n", $1, $2, $3, $4, release_row($1, $2, $3, $4); n++ }
+    END { print "cases=" n }'"'"'' _ "$LIB" 2>&1)"
+expect_eq "RL-1 every case answers as its row says, each state under each rule an asker passes (the cases read)" \
+  "cases=18" "$RL_OUT"
+
+section "§KINDS — one list holds the kinds of row, which of them take a read-only slot, and the role each kind is run by"
+# fails-when: a kind reads a slot or a role other than the one its copies answered before the list, the validator's
+# refusal names other kinds, or the tag's rule or the kind words are spelt again outside the list's library.
+expect_eq "KD-1 the kinds, in the order the validator's refusal names them; the read-only kinds are verify and review" \
+  "build test verify review doc integrate close prototype|verify review|build test|review" \
+  "$(call units_kinds)|$(call units_kinds slot readonly)|$(call units_kinds role tag)|$(call units_kinds role questions)"
+KD_GOT=""
+for KD_K in build test verify review doc integrate close prototype '' nope 'build test'; do
+  for KD_T in 'a · complexity: complex' 'a · complexity: standard' 'a · complexity: huge' 'a' 'xcomplexity: complex'; do
+    KD_GOT="$KD_GOT${KD_K:-(none)}/${KD_T##* }=$(call units_kind_role "$KD_K" "$KD_T");"
+  done
+done
+expect_eq "KD-2 a build or a test row draws its role from the tag, complex the senior implementor and standard the implementor; no other kind, no tag, an undefined word or a word joined to the tag draws one" \
+  "build/complex=senior-implementor;build/standard=implementor;build/huge=;build/a=;build/complex=;test/complex=senior-implementor;test/standard=implementor;test/huge=;test/a=;test/complex=;verify/complex=;verify/standard=;verify/huge=;verify/a=;verify/complex=;review/complex=;review/standard=;review/huge=;review/a=;review/complex=;doc/complex=;doc/standard=;doc/huge=;doc/a=;doc/complex=;integrate/complex=;integrate/standard=;integrate/huge=;integrate/a=;integrate/complex=;close/complex=;close/standard=;close/huge=;close/a=;close/complex=;prototype/complex=;prototype/standard=;prototype/huge=;prototype/a=;prototype/complex=;(none)/complex=;(none)/standard=;(none)/huge=;(none)/a=;(none)/complex=;nope/complex=;nope/standard=;nope/huge=;nope/a=;nope/complex=;build test/complex=;build test/standard=;build test/huge=;build test/a=;build test/complex=;" \
+  "$KD_GOT"
+expect_eq "KD-3 the role offered a row that names none: the role its questions are dealt for a review row, the senior implementor for a doc row, the implementor for the rest and for a word the list does not hold" \
+  "implementor implementor implementor questions senior-implementor implementor implementor implementor implementor" \
+  "$(for KD_K in build test verify review doc integrate close prototype nope; do call units_kind_offer "$KD_K"; printf ' '; done | sed 's/ $//')"
+pt T1 4 nope b1 — a.sh T2 4 build b2 — b.sh
+expect_eq "KD-4 the validator refuses a kind the list does not hold, naming the list's kinds" \
+  "T1: kind nope is not one of build test verify review doc integrate close prototype" \
+  "$(call units_validate "$PT" | grep -F 'kind nope')"
+kd_spelt() {  # <fixed string> -> the code files under payload/scripts and hooks that spell it, paths from the tree
+  (cd "$REPO_ROOT" && /usr/bin/grep -rlF -- "$1" payload/scripts hooks 2>/dev/null | sort | paste -sd' ' -)
+}
+expect_eq "KD-5 the tag's rule is spelt in one file, the list's library" \
+  "payload/scripts/lib/units.sh" "$(kd_spelt 'complexity:[[:space:]]*([[:alpha:]]+)')"
+expect_eq "KD-5b …and the kinds in one line nowhere, so the validator's words are the list's" \
+  "" "$(kd_spelt 'build test verify review doc integrate close prototype')"
+
+section "§LISTS — the measured keys and the debt kinds follow their sources"
+LS_S="$BIONIC_HOOKS_DIR/poker/sitrep.sh"; LS_D="${LIB%/*}"; LS_K="duplicate unpinned-pair one-case-abstraction"
+ls_k() { (. "$REPO_ROOT/tests/lib/rehearsal-read.sh"; rt_measured_keys "$1"); }
+awk '1; /^  sitrep_m waste.waiting-on-you /{print "  sitrep_m zz.planted x"}' "$LS_S" > "$SANDBOX/ls.sh"
+expect_eq "LISTS-1 the keys hold tests.cap, and a measure planted in the sheet's calls ends them" "yes|$(ls_k "$LS_S") zz.planted" \
+  "$([[ " $(ls_k "$LS_S") " == *" tests.cap "* ]] && echo yes)|$(ls_k "$SANDBOX/ls.sh")"
+mkdir "$SANDBOX/ls"; sed 's/^\(DEBT_TABLE_KINDS=".*\)"$/\1 planted"/' "$LS_D/debt.sh" > "$SANDBOX/ls/debt.sh"
+expect_eq "LISTS-2 a kind planted in the debt table reaches both lists, hole last" "$LS_K planted|$LS_K planted hole" \
+  "$(BIONIC_LIB="$SANDBOX/ls"; . "$LS_D/proof.sh"; printf '%s|%s' "$PROOF_DEBT_KINDS" "$DEBT_KINDS")"
 
 finish

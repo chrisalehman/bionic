@@ -10,7 +10,8 @@
 #
 #   §DETACH  AC-3.1, AC-3.6, AC-3.8 — the run survives its caller's group and ends `rc=<n>`; its
 #            place is held by the detached pid until the end; the stamp, the end and the roster
-#            record are written with nobody waiting; the progress file is exported.
+#            record are written with nobody waiting; the progress file is exported; the caller's hold
+#            (BIONIC_HELD) is not handed to the run.
 #   §LOG2    AC-3.4 — a second attempt writes `…-2.log` and never truncates the first.
 #   §WAIT-CALLER  (T12; A-orch-7) the caller waits on its run: the log's lines on stdout, the progress
 #            line on stderr, the run's own code; a re-run of a live run attaches; LOST exits 70.
@@ -21,6 +22,8 @@
 #   §SIGNALS  a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their
 #            defaults.
 #   §CLASS  a browser or compile run is asked as work with its class on the request; a bad class asks nothing.
+#   §EXPECT-RED  a run declared meant to fail exits 0 when its suite fails and 1 when it passes, while the
+#            stamp, the run log and the proof reader keep the suite's own code.
 #
 # The gate (gate.test.sh, slots.test.sh) owns the foreground shim; nothing here re-proves it.
 #
@@ -33,8 +36,8 @@
 #
 # ANTI-VACUITY ("Anti-vacuity"). DT.0 is the control the whole section stands on: the same kill
 # over a command left in the caller's group takes the command with it, so a later rc line is a
-# run that escaped, not a kill that missed. Every empty readback (DT.9, DT.23) sits beside a
-# positive on the same file (DT.9b, DT.18).
+# run that escaped, not a kill that missed. Every empty readback (DT.0, DT.9, DT.23) sits beside
+# a positive on the same file (DT.0a, DT.9b, DT.18).
 #
 # HERMETIC. Every run happens in the model world (tests/lib/world.sh): its own gate store, its own
 # fixture repository with row trees T1 and T2 and a roster naming wx-T1 and wx-T2 under WORLD_SID.
@@ -96,19 +99,23 @@ expect_true "(fixture) the world repository and its row tree T1 exist" test -d "
 ROSTER="$WR/.bionic/tmp/roster-$WORLD_SID.state"
 expect_true "(fixture) the world's roster exists and names wx-T1" grep -q '|name=wx-T1|' "$ROSTER"
 
-# =====================================================================================
 section "§DETACH — the run outlives its caller's process group and ends rc=<n> (AC-3.1, AC-3.6, AC-3.8)"
-# =====================================================================================
 #
 # THE CONTROL FIRST: the same SIGKILL of the same kind of group, over a command that is NOT
 # detached, takes the command with it. So "the detached run wrote its rc" below is a run that
 # escaped the kill, not a kill that missed.
+# The command waits on a go-file the test makes only after the kill, never on a clock: a mark
+# left on a timer races the kill, and a loaded machine delivers the kill after the timer. So
+# the mark can appear only when the command outlived the kill, whenever the kill lands. Its
+# wait is bounded so an escaped command cannot linger; at the bound it leaves no mark.
 set -m
-( cd "$T1" && bash -c "sleep 1.5; : > '$D/ctl.ran'"; sleep 60 ) >/dev/null 2>&1 &
+( cd "$T1" && bash -c ": > '$D/ctl.up'; i=0; while [ ! -f '$D/ctl.go' ] && [ \$i -lt 600 ]; do i=\$((i+1)); sleep 0.05; done; [ -f '$D/ctl.go' ] && : > '$D/ctl.ran'"; sleep 60 ) >/dev/null 2>&1 &
 CTL_PG=$!
 set +m
-sleep 0.3
+expect_true "DT.0a control: the command is running in the caller's group before the kill" \
+  bk_wait 10 test -e "$D/ctl.up"
 bk_kill_group "$CTL_PG"
+touch "$D/ctl.go"
 sleep 2
 expect_false "DT.0 control: a command in the caller's group dies with the group (no mark after the kill)" \
   test -e "$D/ctl.ran"
@@ -181,9 +188,20 @@ bk_kill_group "$BK_PG"
 expect_true "DT.24 a command that exits 3 still ends its log with an rc line" bk_wait 20 bk_last_rc "$DX_LOG"
 expect_eq "DT.25 …and that line is rc=3" "rc=3" "$(tail -n 1 "$DX_LOG" 2>/dev/null)"
 
-# =====================================================================================
+# A detached run outlives the command that started it, and that command removes its hold (lib/proof.sh
+# `proof_hold_end`) when it ends, so the run never shares it: a hold the caller names in BIONIC_HELD is not in the
+# run's environment, while a variable exported beside it is.
+export BIONIC_HELD="$D/bionic-held-$$.fixture" BK_KEPT=kept
+bk_caller hd "$T1" --detach --agent wx-T2 --suites probe-h.test.sh -- "printf '%s|%s' \"\${BK_KEPT-unset}\" \"\${BIONIC_HELD-unset}\" > '$D/hd.saw'"
+unset BIONIC_HELD BK_KEPT
+bk_wait 10 bk_grep '^booked: started ' "$D/hd.out"
+HD_LOG="$(bk_started hd log)"
+bk_kill_group "$BK_PG"
+expect_true "DT.26 a detached run started from inside a held command ends its log with an rc line" bk_wait 20 bk_last_rc "$HD_LOG"
+expect_contains "DT.26b …its command saw the variable the caller exported beside the hold" "kept|" "$(cat "$D/hd.saw" 2>/dev/null)"
+expect_eq "DT.27 …and did not see the caller's hold" "kept|unset" "$(cat "$D/hd.saw" 2>/dev/null)"
+
 section "§LOG2 — a second attempt writes …-2.log and never truncates the first (AC-3.4)"
-# =====================================================================================
 L1_BYTES="$(wc -c < "$DT_LOG" | tr -d ' ')"
 bk_caller l2 "$T1" --detach --agent wx-T1 --suites probe.test.sh -- "echo second-attempt"
 bk_wait 10 bk_grep '^booked: started ' "$D/l2.out"
@@ -204,9 +222,7 @@ expect_eq "L2.6 a third attempt writes …-3.log" "${DT_LOG%.log}-3.log" "$L3_LO
 expect_eq "L2.7 …and the roster's latest wx-T1 row names that third run" "${L3_LOG:-<none>}" \
   "$(grep '|name=wx-T1|' "$ROSTER" | tail -n 1 | tr '|' '\n' | sed -n 's/^run_log=//p')"
 
-# =====================================================================================
 section "§WAIT-CALLER — the caller waits on its run, streams it, and a re-run attaches (T12; A-orch-7; AC-3.2, AC-3.3, AC-3.8)"
-# =====================================================================================
 #
 # DETACH AND WAIT. The caller of --detach polls the run's log every BIONIC_RUN_POLL seconds until
 # its last line is `rc=<n>`, copies each new whole line of the log to its stdout, prints the run's
@@ -278,15 +294,14 @@ expect_regex "LS.2 …with one LOST line naming the run and when its log was las
 expect_eq "LS.3 …and never the word timeout (beside LS.2 on the same output)" "0" \
   "$(grep -ci 'timeout' "$D/ls.out" 2>/dev/null)"
 
-# =====================================================================================
 section "§DETACH-CEILING — a detached run the gate has not admitted within the bound ends 75 with one line (T12; D10; AC-9.4)"
-# =====================================================================================
 #
 # A detached run's wait is inside no call, so with nothing else to bound it the wait had no end. The
 # detached side now asks the gate with --within BIONIC_SETTLE_MAX_WAIT (1200 s by default; 3 here), and
 # a run not admitted inside it ends through the shim's one not-admitted path: exit 75, the line in the
 # log (stderr is the log in the detached side), `rc=75` on the log's last line, `75` in `<log>.rc`,
-# `run_rc=75` on the roster row. The caller follows the log, copies the line and exits 75.
+# `run_rc=75` on the roster row. The caller follows the log, copies the line and exits 0: not admitted is an
+# ordinary answer at the console, and the records alone say the run never ran.
 #
 # FIXTURE FIDELITY. gate.test.sh's held gate (B.7): the share is 80 on 8 cores (6.4, less the reserve
 # of 1: 5.4), the machine reads 3.0 busy cores, a REAL background process holds an admission of one suite's
@@ -330,7 +345,7 @@ expect_false "DC.3 at 1000 of a 3-second bound the run has not ended (beside DC.
   test -e "${CE_LOG:-$D/none}.rc"
 world_tick 3
 bk_wait 20 bk_has "$D/ce.rc"
-expect_eq "DC.4 at 1003 the caller exits 75, the run's own code" "75" "$(cat "$D/ce.rc" 2>/dev/null)"
+expect_eq "DC.4 at 1003 the caller exits 0, an ordinary answer, while the records below keep 75" "0" "$(cat "$D/ce.rc" 2>/dev/null)"
 expect_eq "DC.6 …<log>.rc holds 75" "75" "$(cat "${CE_LOG:-$D/none}.rc" 2>/dev/null)"
 expect_eq "DC.7 …the log's last line is rc=75" "rc=75" "$(tail -n 1 "${CE_LOG:-$D/none}" 2>/dev/null)"
 expect_eq "DC.8 …the roster row carries run_rc=75" "75" \
@@ -343,9 +358,7 @@ if [ -n "$CE_CFG_WAS" ]; then export CLAUDE_CONFIG_DIR="$CE_CFG_WAS"; else unset
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate"
 world_machine 8 8192 10 0.5
 
-# =====================================================================================
 section "§RUNLINE — the run close writes the run's line to the bound plan's landing record, and the floor's one reader reads it (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
-# =====================================================================================
 #
 # THE OTHER WRITER. floor-run is one (session-poker-4 §RUNLINE); booked.sh's run close is the other: a detached run
 # whose session is bound to a plan appends, after the log's rc line and before `<log>.rc`,
@@ -430,9 +443,7 @@ expect_eq "BR-6b …--starter person names the person" "person" \
 expect_eq "BR-6c …a word that is none of the three reads as the orchestrator" "orchestrator" \
   "$(rl_starter rlx "echo a stray word; : regression-run --starter someone; exit 0")"
 
-# =====================================================================================
 section "§SIGNALS — a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their defaults (wave-39 T14; D17; AC-10.1)"
-# =====================================================================================
 #
 # A shell that starts with a signal ignored cannot trap it and cannot be ended by it, and the ignored
 # state is inherited by everything below: the whole run at d3c4ed2e started with HUP, INT and QUIT
@@ -519,9 +530,7 @@ expect_true "(fixture) the scratch runner is a byte copy of the shipped one and 
 sg_drive run bash -c "cd '$SGR' && exec env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT BIONIC_GATE_DIR='$D/sg-gate' BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PRESSURE_RING='$D/sg-ring' BIONIC_TEST_JOBS_CEILING=2 bash tests/run.sh"
 expect_eq "SG-2 AC-10.1 tests/run.sh started with the three ignored: the suite it runs sees HUP, INT and QUIT" "$SG_ALL" "$SG_SAW"
 
-# =====================================================================================
 section "§CLASS — a browser or compile run is asked as work with its class on the request, and a bad class asks nothing"
-# =====================================================================================
 # The wall wraps such a run as `booked.sh --class <c> --suites <key> -- <cmd>`; the request carries class=<c> and the room
 # free as its promise. A store per case; the machine reads no busy cores, so the room is the whole width.
 cl_run() { CL_GD="$D/cl-$1"; rm -rf "$CL_GD"; shift; ( cd "$T1" && BIONIC_GATE_DIR="$CL_GD" bash "$BOOKED" --agent wx-T1 --suites cl.test.sh "$@" -- true ) > "$CL_GD.out" 2>&1; CL_RC=$?; }
@@ -535,5 +544,61 @@ cl_run bad --class build
 expect_eq "CL.3 --class build exits 2 and asks nothing: no request in the store" "2 0" "$CL_RC $(ls "$CL_GD"/requests 2>/dev/null | wc -l | tr -d ' ')"
 expect_true "CL.3b …and its usage line names the option" grep -q 'usage:.*--class' "$CL_GD.out"
 world_machine 8 8192 10 0.5
+
+section "§EXPECT-RED — a run declared meant to fail: the console's code inverts, the record keeps the suite's own"
+# The wall reads `BIONIC_EXPECT=red` on a suite segment and hands the shim `--expect red`. The console then exits 0
+# when the suite failed and non-zero when it passed, while the stamp, the run log and the proof reader keep the
+# suite's own code, so a meant-to-fail run is never read as a green run of that suite. The suite is a stand-in
+# that prints the door's failing count and exits 1, run in the doctrine's shape: tee to a log, `rc=` appended, `exit $rc`.
+ER_STAMPS="$(git -C "$T1" rev-parse --absolute-git-dir 2>/dev/null)/bionic-stamps"
+printf '#!/bin/bash\necho "Gating: 0 passed, 1 failed"\necho "Failed: er-red.test.sh"\nexit 1\n' > "$D/er-red.sh"
+printf '#!/bin/bash\necho "Gating: 1 passed, 0 failed"\nexit 0\n' > "$D/er-green.sh"
+er_cmd() {  # <stand-in> <log> -> the doctrine-shaped line over it
+  printf "set -o pipefail; bash '%s' 2>&1 | tee '%s'; rc=\$?; echo \"rc=\$rc\" >> '%s'; exit \$rc" "$1" "$2" "$2"
+}
+er_stamp_rc() {  # <suite> -> the rc= of the newest stamp naming it
+  grep "|suites=$1|" "$ER_STAMPS" 2>/dev/null | tail -n 1 | sed -n 's/.*|rc=\([0-9]*\)|.*/\1/p'
+}
+er_proof() {  # <suite> -> the verdicts the proof reader takes from the tree's stamps for it, one per line
+  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_records "$T1" ) 2>/dev/null \
+    | awk -F'\t' -v s="$1" '$1 == "R" && $4 == s && $6 == "stamp" { print $5 }' | sort -u
+}
+
+( cd "$T1" && bash "$BOOKED" --agent wx-T1 --suites er-red.test.sh --expect red -- "$(er_cmd "$D/er-red.sh" "$D/er-red.log")" ) \
+  > "$D/er-red.out" 2> "$D/er-red.err"; ER_RC=$?
+expect_eq "ER.1 a run declared meant to fail whose suite fails exits 0" "0" "$ER_RC"
+expect_contains "ER.1b …and says on stderr that it failed as declared, with the suite's own code" "failed as declared (rc=1" \
+  "$(cat "$D/er-red.err" 2>/dev/null)"
+expect_eq "ER.2 the stamp holds the suite's own failure, rc=1" "1" "$(er_stamp_rc er-red.test.sh)"
+expect_contains "ER.3 the log holds the suite's failing count" "Gating: 0 passed, 1 failed" "$(cat "$D/er-red.log" 2>/dev/null)"
+expect_eq "ER.3b …and the suite's own rc line" "rc=1" "$(tail -n 1 "$D/er-red.log" 2>/dev/null)"
+expect_eq "ER.4 the proof reader reads that suite red at the head, from its stamp" "red" "$(er_proof er-red.test.sh)"
+
+( cd "$T1" && bash "$BOOKED" --agent wx-T1 --suites er-green.test.sh --expect red -- "$(er_cmd "$D/er-green.sh" "$D/er-green.log")" ) \
+  > "$D/er-green.out" 2> "$D/er-green.err"; ER_RC=$?
+expect_eq "ER.5 the same declaration over a suite that passes exits non-zero (1)" "1" "$ER_RC"
+expect_contains "ER.5b …and says the suite passed though it was declared meant to fail" "declared meant to fail, and it passed" \
+  "$(cat "$D/er-green.err" 2>/dev/null)"
+expect_eq "ER.6 the stamp keeps the pass, rc=0" "0" "$(er_stamp_rc er-green.test.sh)"
+expect_eq "ER.6b …which the proof reader reads green, the suite's own result" "green" "$(er_proof er-green.test.sh)"
+
+( cd "$T1" && bash "$BOOKED" --agent wx-T1 --suites er-plain.test.sh -- "$(er_cmd "$D/er-red.sh" "$D/er-plain.log")" ) \
+  > /dev/null 2>&1; ER_RC=$?
+expect_eq "ER.7 control: the same failing suite with no declaration exits its own 1" "1" "$ER_RC"
+
+( cd "$T1" && bash "$BOOKED" --agent wx-T1 --suites er-none.test.sh --expect red -- 'no-such-command-er' ) \
+  > /dev/null 2> "$D/er-none.err"; ER_RC=$?
+expect_eq "ER.8 a declared run whose command never ran (127) keeps its code: not run is never failed as declared" "127" "$ER_RC"
+expect_eq "ER.8b …and its stamp keeps 127" "127" "$(er_stamp_rc er-none.test.sh)"
+
+ER_OUT="$(cd "$T1" && bash "$BOOKED" --detach --agent wx-T2 --suites er-det.test.sh --expect red -- "$(er_cmd "$D/er-red.sh" "$D/er-det.log")" 2>"$D/er-det.err")"; ER_RC=$?
+ER_LOG="$(printf '%s\n' "$ER_OUT" | sed -n 's/^booked: started .*log=\([^ ]*\).*/\1/p' | head -n 1)"
+expect_eq "ER.9 detached and waited on: the caller of a declared run whose suite fails exits 0" "0" "$ER_RC"
+expect_true "ER.9a …the run's own log was named on its started line" test -f "$ER_LOG"
+expect_eq "ER.9b …while the run's end keeps the suite's own code, 1" "1" "$(cat "$ER_LOG.rc" 2>/dev/null)"
+expect_eq "ER.9c …and so does the log's last line" "rc=1" "$(tail -n 1 "$ER_LOG" 2>/dev/null)"
+
+( cd "$T1" && bash "$BOOKED" --suites er-bad.test.sh --expect green -- true ) > /dev/null 2>&1; ER_RC=$?
+expect_eq "ER.10 --expect with any word but red is usage, 2" "2" "$ER_RC"
 
 finish

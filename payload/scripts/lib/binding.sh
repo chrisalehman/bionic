@@ -105,9 +105,13 @@
 #
 # BASH 3.2. No associative arrays, no `${var^^}`, no `mapfile`.
 #
-# FUNCTIONS ONLY — sourcing this file executes no top-level command and prints nothing.
+# FUNCTIONS ONLY — sourcing this file runs one top-level command, the loader's bootstrap below, and prints nothing.
 #
 # [WALL: tests/engage.test.sh]
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# time.sh, THE SOFT SOURCE for the instant, the clock and the modified time: each has one reader there. A copy of
+# this file read away from its directory finds no time.sh and still loads.
+bionic_need time.sh _time_epoch || :
 
 # _bind_resolve <abs-path> -> the path with its DIRECTORY resolved (symlinks and `..`
 # collapsed by `pwd -P`) and its final component left alone; exit 1 on a relative path or a
@@ -224,7 +228,7 @@ bind_plan() {
     stamp=$(grep -m1 -E '^engaged_at=' <<< "$lines" | sed -E 's/^engaged_at=//')
   fi
   if [ -z "$stamp" ]; then
-    stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || stamp=""
+    stamp=$(iso_now 2>/dev/null) || stamp=""
     [ -n "$stamp" ] || { BIND_REFUSAL="write-failed"; return 2; }
   fi
 
@@ -259,12 +263,8 @@ bind_plan() {
 # so the marker just written answers). lib/seal.sh is loaded, beside this file, the first time.
 _bind_record() {
   local rc=0
-  if ! declare -F seal_binding_put >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/seal.sh" >/dev/null 2>&1
-    # No library to record with is no record for the reader to believe either: the marker answers.
-    declare -F seal_binding_put >/dev/null 2>&1 || return 0
-  fi
+  # No library to record with is no record for the reader to believe either: the marker answers.
+  bionic_need seal.sh seal_binding_put || return 0
   seal_binding_put "$1" "$2" "$3" || rc=$?
   case "$rc" in
     0|2) return 0 ;;
@@ -315,13 +315,9 @@ bind_sessions() {  # <plan> [<root>]
 # with the run's place (lib/proof.sh `proof_sessions_held`, beside this file), since every engagement asks it; nothing
 # when it cannot be loaded or cannot answer.
 _bind_session_ids() {
-  if ! declare -F proof_sessions_held >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/proof.sh" >/dev/null 2>&1
-    declare -F proof_sessions_held >/dev/null 2>&1 || return 0
-  fi
-  proof_sessions_held "$1" 2>/dev/null | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) {
-    s = substr($i, 9); if (s ~ /^[A-Za-z0-9_-]+$/ && s != "unknown" && !(s in got)) { got[s] = 1; print s } } }'
+  bionic_need proof.sh proof_sessions_held && bionic_need fields.sh line_field_v || return 0
+  proof_sessions_held "$1" 2>/dev/null | awk -F'|' "$_LINE_FIELDS_AWK"'
+    { s = line_kv("session") } s ~ /^[A-Za-z0-9_-]+$/ && s != "unknown" && !(s in got) { got[s] = 1; print s }'
 }
 
 # bind_record_session <plan> <sid> <act> -> the session's bind event appended to the run's log, once.
@@ -342,11 +338,7 @@ bind_record_session() {  # <plan> <sid> <act>
   [ -f "$plan" ] || { BIND_SESSION="failed"; return 3; }
   ids=$(bind_sessions "$plan") || ids=""
   case "$nl$ids$nl" in *"$nl$sid$nl"*) BIND_SESSION="present"; return 1 ;; esac
-  if ! declare -F proof_bind_event >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/proof.sh" >/dev/null 2>&1
-  fi
-  declare -F proof_bind_event >/dev/null 2>&1 && proof_bind_event "$plan" "$sid" "$act" || { BIND_SESSION="failed"; return 3; }
+  bionic_need proof.sh proof_bind_event && proof_bind_event "$plan" "$sid" "$act" || { BIND_SESSION="failed"; return 3; }
   BIND_SESSION="recorded"
   return 0
 }

@@ -28,24 +28,31 @@
 #   alive_agent <sid> <transcript> <name>   rc 1 when <sid> is dead, else `live_row_open`'s code
 #   alive_holder <sid>                      -> the pid of the CLI process whose file names <sid> now
 #   alive_current <pid>                     -> the conversation the CLI process <pid> holds now
+#   alive_shim <pid> <log>                  rc 0 while <pid> is still <log>'s detached booked.sh shim
 #
 # BASH 3.2, jq for the CLI's files: without jq no session file is read, and only the caller's own
 # session reads alive.
 
-_alive_dir() { local s="${BASH_SOURCE[0]:-$0}"; case "$s" in */*) echo "${s%/*}" ;; *) echo . ;; esac; }
-_ALIVE_LIB_DIR="$(cd "$(_alive_dir)" 2>/dev/null && pwd -P)"
-for _alive_dep in slots:_slots_live roots:claude_home; do
-  if ! declare -F "${_alive_dep#*:}" >/dev/null 2>&1 && [ -r "$_ALIVE_LIB_DIR/${_alive_dep%%:*}.sh" ]; then
-    # shellcheck disable=SC1090
-    . "$_ALIVE_LIB_DIR/${_alive_dep%%:*}.sh"
-  fi
-done
-unset _alive_dep
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+# Each sibling is loaded softly: one that will not load leaves its functions undefined, and sourcing this file still
+# succeeds.
+bionic_need slots.sh _slots_live || :
+bionic_need roots.sh claude_home || :
 
 alive_run() { _slots_live "${1:-}" "${2:-}"; }
 
 # The writer's half of the rule: a record that names a process stores this, and alive_run compares against it.
 alive_since() { _slots_since "${1:-}"; }
+
+# A run's pid file keeps no start, so its shim is known by `ps` naming booked.sh with that --run-log.
+alive_shim() {
+  local c
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null || return 1
+  c="$(ps -ww -o command= -p "$1" 2>/dev/null)" || return 1
+  case "$c" in *booked.sh*"--run-log $2"*) return 0 ;; esac
+  return 1
+}
 
 _alive_records() { printf '%s/bionic/alive' "$(claude_home)"; }
 
@@ -147,8 +154,9 @@ alive_note() {
   _alive_find "$sid" && [ -n "$_A_START" ] || return 1
   d="$(_alive_records)"
   mkdir -p "$d" 2>/dev/null || return 1
-  tmp="$d/.$sid.$$"
-  printf 'pid=%s\nstart=%s\ncwd=%s\n' "$_A_PID" "$_A_START" "${_A_CWD//$'\n'/ }" > "$tmp" 2>/dev/null \
+  bionic_need root.sh bionic_new && bionic_new "$d/.$sid" || return 1
+  tmp="$BIONIC_NEW"
+  printf 'pid=%s\nstart=%s\ncwd=%s\n' "$_A_PID" "$_A_START" "${_A_CWD//$'\n'/ }" >| "$tmp" 2>/dev/null \
     && mv -f "$tmp" "$d/$sid" 2>/dev/null || { rm -f "$tmp"; return 1; }
   for rec in "$d"/*; do
     [ -f "$rec" ] && [ ! -L "$rec" ] || continue
@@ -160,7 +168,6 @@ alive_note() {
 # The transcript reader is loaded when an agent is first asked about: most callers ask about sessions.
 alive_agent() {  # <sid> <transcript> <name>
   alive_session "${1:-}" || return 1
-  # shellcheck disable=SC1091
-  declare -F live_row_open >/dev/null 2>&1 || . "$_ALIVE_LIB_DIR/agents.sh" 2>/dev/null || return 4
+  bionic_need agents.sh live_row_open || return 4
   live_row_open "${2:-}" "${3:-}"
 }

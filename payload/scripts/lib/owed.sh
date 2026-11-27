@@ -64,27 +64,12 @@
 #
 # BASH 3.2. No associative arrays.
 
-_owed_self_dir() {
-  local self="${BASH_SOURCE[0]}"
-  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
-}
-_OWED_LIB_DIR="$(cd "$(_owed_self_dir)" && pwd -P)"
-if ! declare -F project_root >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/root.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_OWED_LIB_DIR/root.sh"
-fi
-if ! declare -F session_plan >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/run.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_OWED_LIB_DIR/run.sh"
-fi
-if ! declare -F notify_send >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/notify.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_OWED_LIB_DIR/notify.sh"
-fi
-if ! declare -F reader_ask_rounds >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/reader.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_OWED_LIB_DIR/reader.sh" >/dev/null 2>&1
-fi
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need root.sh project_root || :
+bionic_need run.sh session_plan || :
+bionic_need notify.sh notify_send || :
+bionic_need reader.sh reader_ask_rounds || :
+bionic_need time.sh _time_epoch || :
 
 # owed_register <root> <plan> -> the run's log, `<docs>/record/<run>/run.log`, where its asks are kept, on stdout; rc 1
 # when <plan> names no run: a name that does not end `.plan.md` (a scratch copy's does not), or a plan gone with no
@@ -94,7 +79,7 @@ owed_register() {
   [ -n "$root" ] && [ -n "$plan" ] || return 1
   case "$plan" in *.plan.md) ;; *) return 1 ;; esac
   if [ ! -f "$plan" ]; then
-    { declare -F seal_verify >/dev/null 2>&1 || . "$_OWED_LIB_DIR/seal.sh"; } >/dev/null 2>&1 || return 1
+    bionic_need seal.sh seal_verify || return 1
     seal_verify "$plan" >/dev/null 2>&1
     [ -n "$SEAL_LOG" ] && printf '%s\n' "$SEAL_LOG"; return
   fi
@@ -149,12 +134,9 @@ _owed_key_ok() {  # <key>
   return 1
 }
 
-# owed_key <key> -> the key the store files it under: `approve:D<n>` is `decide:D<n>`, every other key itself.
+# owed_key <key> -> the key the store files it under, by the reader's `ask_key`: `approve:D<n>` is `decide:D<n>`.
 owed_key() {
-  case "${1:-}" in
-    approve:D[0-9]*) case "${1#approve:D}" in *[!0-9]*) printf '%s\n' "$1" ;; *) printf 'decide:%s\n' "${1#approve:}" ;; esac ;;
-    *) printf '%s\n' "${1:-}" ;;
-  esac
+  _OWED_KEY="${1:-}" awk "$_READER_KEY_AWK"'BEGIN { print ask_key(ENVIRON["_OWED_KEY"]) }'
 }
 
 _owed_clean() {  # <value> -> the value with | TAB CR LF folded to a space
@@ -164,12 +146,7 @@ _owed_clean() {  # <value> -> the value with | TAB CR LF folded to a space
 # owed_now -> the instant every line here is stamped with, ISO-UTC: BIONIC_NOW_EPOCH when it is a number (the clock
 # seam the poker's readers honour, so a suite fixes every instant it reads), else the clock. A verb that writes an
 # instant beside the log's own (the plan's approval) takes it from here, so the two agree to the second.
-owed_now() {
-  case "${BIONIC_NOW_EPOCH:-}" in
-    ''|*[!0-9]*) date -u +%Y-%m-%dT%H:%M:%SZ ;;
-    *) date -u -r "$BIONIC_NOW_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$BIONIC_NOW_EPOCH" +%Y-%m-%dT%H:%M:%SZ ;;
-  esac
-}
+owed_now() { epoch_iso "$(time_now)"; }
 
 # _owed_dir_ok <store path> -> 0 when its directory may be written: neither it nor the store is a
 # link. The worktree's `.bionic` link to the main checkout is the one link a tree carries, and it
@@ -206,7 +183,7 @@ _owed_act() {
   local f="$1" at="$2" key="$3" r="$4"
   shift 4
   _owed_dir_ok "$f" || return 1
-  declare -F log_append >/dev/null 2>&1 || . "$_OWED_LIB_DIR/log.sh" >/dev/null 2>&1 || return 1
+  bionic_need log.sh log_append || return 1
   [ "$at" != - ] || at="$(owed_now)"
   [ "$r" -gt 1 ] 2>/dev/null && set -- "round=$r" "$@"
   RUN_LOG="$f" LOG_AT="$at" log_append ask "key=$key" "$@" >/dev/null 2>&1

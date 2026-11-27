@@ -5,6 +5,9 @@
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
 
+# THE ONE ENGLISH PLURAL (lib/english.sh): the release approval counts its commits and criteria with the noun's number.
+bionic_need english.sh english_plural
+
 # ---------------------------------------------------------------- the contract's reader
 #
 # `amend` widens a live contract and `task-add` judges a Files cell a brief is later rendered from; both
@@ -25,14 +28,6 @@ poker_fold_unread() {  # <verb and arguments to run again> -> the refusal, exit 
   exit 2
 }
 poker_fold_all() { reader_facts "$1"; }  # <plan> -> every standing fact, a question for poker_fold_ask
-
-poker_brief_load() {
-  declare -F brief_contract >/dev/null 2>&1 && return 0
-  [ -f "$BIONIC_LIB/brief.sh" ] || return 1
-  # shellcheck source=/dev/null
-  . "$BIONIC_LIB/brief.sh"
-  declare -F brief_contract >/dev/null 2>&1
-}
 
 # poker_additions_judged <files lines> <suites lines> <runs lines> <root> <held suites> <files held> -> rc 0, or
 # rc 1 with POKER_BRIEF_WORDS one line per addition no contract could carry: a Files value the reader reads no
@@ -64,10 +59,12 @@ poker_additions_judged() {
   [ -z "$POKER_BRIEF_WORDS" ]
 }
 
-# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`regression`, `standing@<12-hex>` or `run@<12-hex>`) and rc 0 when a
-# red the machine recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH set for the
-# refusal's words. THE THREE FACTS, asked in this order: (a) the plan's newest regression proof owes the suite (lib/proof.sh
-# `_proof_last_read` regression owed, the reader `proof-add inherited` asks), (b) the run's landing record
+# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`regression`, `point@<12-hex>`, `standing@<12-hex>` or `run@<12-hex>`)
+# and rc 0 when a red the machine recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH
+# set for the refusal's words. THE FACTS, asked in this order: (a) the plan's newest regression proof owes the suite (lib/proof.sh
+# `_proof_last_read` regression owed, the reader `proof-add inherited` asks), (a2) a point's proof owes it, the newest such
+# (lib/proof.sh `proof_points`), which sets BFB_POINT to the point and BFB_ROWS to the rows it follows, so the birth names
+# them, (b) the run's landing record
 # (`proof_debt_record`) holds an `ev=standing` event for the suite whose head is a commit on the working branch's ref
 # (`proof_branch_head`), the newest such event first, or (c) it holds the `ev=verdict row=regression result=red` line a
 # whole run left for the suite at such a commit, which `regression-run` writes before any proof-add: a run the machine
@@ -78,8 +75,15 @@ poker_additions_judged() {
 born_floor_backing() {
   local plan="$1" repo="$2" suite="$3" rec bh h
   BFB_OF=""; BFB_OWED="$(_proof_last_read "$plan" regression owed)"; BFB_BRANCH="$(plan_working_branch "$plan" 2>/dev/null)"
+  BFB_POINT=""; BFB_ROWS=""
   case ",$BFB_OWED," in *",$suite,"*) BFB_OF=regression; return 0 ;; esac
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  h="$(proof_points "$plan" 2>/dev/null | awk -F'\t' -v s="$suite" 'index("," $4 ",", "," s ",") { r = $1; h = $2 } END { if (r != "") print r "\t" h }')"
+  if [ -n "$h" ]; then
+    BFB_POINT="${h%%$'\t'*}"; BFB_OF="point@$(printf '%s' "${h#*$'\t'}" | cut -c1-12)"
+    BFB_ROWS="$(units_point_rows "$plan" "$BFB_POINT")"
+    return 0
+  fi
+  bionic_need line.sh line_held
   rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && line_held "$rec" 2>/dev/null || return 1
   bh="$(proof_branch_head "$plan" "$repo")" || return 1
   h="$(_bfb_newest "$rec" "$repo" "$bh" "$suite" standing head)" && { BFB_OF="standing@${h:0:12}"; return 0; }
@@ -141,10 +145,7 @@ poker_review_records() {
   if [ -n "$decl" ]; then
     qs="${decl//,/ }"
   else
-    if ! declare -F facts_owed >/dev/null 2>&1; then
-      [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1
-    fi
-    declare -F facts_owed >/dev/null 2>&1 || return 1
+    bionic_need proof.sh facts_owed || return 1
     qs="$(facts_owed "$(plan_frontmatter_get "$plan" rigor)" "$(plan_frontmatter_get "$plan" scale)" 2>/dev/null \
       | awk -F'\t' '$1 == "review" && !seen[$2]++ { print $2 }')"
   fi
@@ -158,13 +159,12 @@ poker_review_records() {
 # poker_questions_dealt <plan> <questions> -> rc 0 when the declared questions (comma-joined) are one reader's at the
 # plan's rigor and scale, else rc 1 with PQD_SAID the reason. A review row is one reader's: at double the auditor
 # holds `evidence` and the critic the other two, so a declaration across them has no reader, and the reason names the
-# deal. At single the critic holds all three, so any subset is one reader's. Set: PQD_SAID.
+# deal. At single the critic holds all three, so any subset is one reader's. Set: PQD_SAID, and PQD_ROLE the one
+# role that holds them, unprefixed, when rc is 0.
 poker_questions_dealt() {
   local plan="$1" decl="$2" rigor scale lvl owed role q deal fix="" r qs first="" mixed=""
-  PQD_SAID=""
-  if ! declare -F facts_owed >/dev/null 2>&1; then
-    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1
-  fi
+  PQD_SAID=""; PQD_ROLE=""
+  bionic_need proof.sh facts_owed
   rigor="$(plan_frontmatter_get "$plan" rigor)"; scale="$(plan_frontmatter_get "$plan" scale)"
   lvl="$(rigor_level "$rigor" 2>/dev/null)" || lvl="${rigor:-none}"
   if ! declare -F facts_owed >/dev/null 2>&1 || ! owed="$(facts_owed "$rigor" "$scale" 2>/dev/null)" || [ -z "$owed" ]; then
@@ -197,6 +197,7 @@ EOF
     PQD_SAID="${decl//,/ and } are dealt to different roles at $lvl rigor ($fix), and a review row is one role's"
     return 1
   fi
+  PQD_ROLE="$first"
   return 0
 }
 
@@ -218,7 +219,7 @@ poker_files_cell() {
   case "$PFC_OUT" in
     ''|'—'|'-') return 0 ;;
   esac
-  if ! poker_brief_load; then
+  if ! bionic_need brief.sh brief_contract; then
     die "REFUSED — the brief library (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     return 2
   fi
@@ -339,6 +340,48 @@ poker_brief_suites() {
     print out }'
 }
 
+# poker_row_suites <plan> <row id> <Files cell> <repo> -> the row's suites and what it lands on, in PRS_SUITES, PRS_LANDS,
+# PRS_SLOT, PRS_NAMES and PRS_BAR. THE ONE READER OF A ROW'S SUITES: the brief renders its Suites: and Lands-on: from
+# it and the birth line of a row born of findings names its landing from it, so the two cannot differ. The suites are the
+# task section's `suites:` lines, else the Files cell's *.test.sh entries; a row that writes code and names none gets the
+# slot, since `none` is a waiver nobody chose for it. Lands-on is the section's `lands-on:` line, else the suites. A suite the
+# gate promises over LINE_SUITE_BAR leaves Lands-on, stays in Suites and is named in PRS_BAR; when it would leave the set
+# empty it stays, since `none` is refused for a row that writes code. PRS_LANDS is what the brief prints (the slot, or a
+# sentence saying none, when no suite lands); PRS_NAMES is the suites that land, empty when none does.
+poker_row_suites() {
+  local plan="$1" id="$2" files="$3" repo="$4" kept="" e p
+  PRS_SUITES="$(plan_read_section "$plan" "$id" suites)"
+  PRS_LANDS="$(plan_read_section "$plan" "$id" lands-on)"
+  PRS_SLOT=""; PRS_NAMES=""; PRS_BAR=""
+  poker_brief_none "$PRS_SUITES" && PRS_SUITES="$(poker_brief_suites "$files")"
+  if units_writes_head "$files"; then
+    [ -n "$PRS_SUITES" ] || PRS_SLOT="<ORCHESTRATOR: the row names no suite; write the suites that pin its Files>"
+    case "$PRS_LANDS" in none|none[[:space:]]*) PRS_LANDS="" ;; esac
+  fi
+  if poker_brief_none "$PRS_LANDS"; then
+    PRS_LANDS="$PRS_SUITES"
+    [ -n "$PRS_LANDS" ] || PRS_LANDS="$PRS_SLOT"
+    [ -n "$PRS_LANDS" ] || PRS_LANDS="none the row's Files name no suite"
+  fi
+  [ -n "$PRS_SUITES" ] || PRS_SUITES="${PRS_SLOT:-none}"
+
+  if bionic_need line.sh _line_bar_seconds && _gate_store >/dev/null 2>&1; then
+    while IFS= read -r e; do
+      e="${e#"${e%%[![:space:]]*}"}"; [ -n "$e" ] || continue
+      p="$(_line_bar_seconds "$(_line_gate_key "$e")" "$repo")"
+      case "$p" in ''|*[!0-9]*) p=0 ;; esac
+      if [ "$p" -gt "$LINE_SUITE_BAR" ]; then
+        PRS_BAR="${PRS_BAR:+$PRS_BAR }$e promises ${p}s, over the landing bar of ${LINE_SUITE_BAR}s, so it is left out of Lands-on and stays in Suites to run in your tree."
+      else kept="${kept:+$kept, }$e"; fi
+    done <<PRS_EOF
+$(printf '%s\n' "$PRS_LANDS" | tr ',' '\n')
+PRS_EOF
+    if [ -z "$kept" ]; then PRS_BAR=""; else PRS_LANDS="$kept"; fi
+  fi
+  case "$PRS_LANDS" in none|none[[:space:]]*|"$PRS_SLOT") ;; *) PRS_NAMES="$PRS_LANDS" ;; esac
+  [ -n "$PRS_LANDS" ] || PRS_NAMES=""
+}
+
 # poker_brief_record_entry <Files cell> <artifact|progress|named> <row id> -> an entry under record/ for the row; nothing
 # when none. THE ONE RULE FOR A ROW'S RECORD, read by `brief`: `named` is the entry whose basename is <row>.md or starts <row>- (never a progress file);
 # `artifact` is the named entry, else the first entry that is neither a progress file nor assumptions.md; `progress`
@@ -457,7 +500,7 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
     die "REFUSED — $aid is an agent its start did not place, and a Files: contract belongs to its dispatched row; add suites or runs here, or amend that row by name. Nothing was written."
     return 1
   fi
-  if ! poker_brief_load; then
+  if ! bionic_need brief.sh brief_contract; then
     die "REFUSED — the brief library (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
     return 2
   fi
@@ -573,13 +616,8 @@ pv_header_cells() {
       say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
       exit 0
     fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
+    ROSTER_FILE="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     if [ ! -f "$ROSTER_FILE" ] || [ -L "$ROSTER_FILE" ]; then
       die_run "REFUSED — no row named $AMEND_NAME: this session has no roster at $ROSTER_FILE." "bash ${HOOK_DIR}/session-poker.sh adopt"
       exit 1
@@ -636,7 +674,7 @@ pv_header_cells() {
       die_run "REFUSED — $AMEND_NAME is closed: it was acked after its latest launch, or holds no live row. A closed contract is not amended; its row's Files are the plan's cell: edit the Files cell of $AM_CROW in the plan. Nothing was written." "bash ${HOOK_DIR}/session-poker.sh brief $AM_CROW"
       exit 1
     fi
-    if ! poker_brief_load; then
+    if ! bionic_need brief.sh brief_contract; then
       die "REFUSED — the brief library (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
       exit 2
     fi
@@ -1058,7 +1096,8 @@ EOF
       TA_CELL_TASK="$TA_CELL_TASK · born: review"
     fi
     # A FLOOR-BORN MARKER NAMES ITS RED: the marker is admitted only with a red the machine recorded behind it
-    # (`born_floor_backing`), and it records which, ` of=regression`, ` of=standing@<12-hex>` or ` of=run@<12-hex>`.
+    # (`born_floor_backing`), and it records which, ` of=regression`, ` of=point@<12-hex>`, ` of=standing@<12-hex>` or
+    # ` of=run@<12-hex>`; a point's red also names the point and the rows it follows.
     TA_BORN_OF=""
     if [ -n "$TA_BORN_SUITE" ]; then
       if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_SUITE"; then
@@ -1098,7 +1137,7 @@ EOF
     # its findings, or the regression and its record).
     case "$TA_BORN_MARK" in *" promoted") TA_PROMOTED=1 ;; *) TA_PROMOTED="" ;; esac
     if ! units_born_event "$TA_PLAN" "$TA_ID" "${TA_BORN}${TA_BORN_SUITE:+regression $TA_BORN_SUITE}" \
-         "${TA_BORN_IDS}${TA_BORN_SUITE:+$TA_BORN_OF}" "$TA_PROMOTED"; then
+         "${TA_BORN_IDS}${TA_BORN_SUITE:+$TA_BORN_OF}" "$TA_PROMOTED" "${TA_BORN_SUITE:+$BFB_POINT}" "${TA_BORN_SUITE:+$BFB_ROWS}"; then
       die "task-add — the born event of $TA_ID could not be appended to the run's log; the row reads as born by no review or regression until it is. Run task-add $TA_ID again."
       exit 1
     fi
@@ -1106,20 +1145,23 @@ EOF
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_REV_ART" ] || say "task-add — $TA_ID is a review row: its Files carry one record per question it is dealt${TA_ART_CELL:+, its artifact cell the first, $TA_ART_CELL}."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN); say so in the review findings disposition · $TA_COUNT_SAID"
-    [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF: its landing holds every review's cover (D9), and it counts against no fix-cap."
+    [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF${BFB_POINT:+, a red of the run of point $BFB_POINT, after ${BFB_ROWS//,/, }}: its landing holds every review's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
     for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
       poker_owed_close "$REPO_REAL" "$(finding_owed_key "$TA_BID")" "task-add $TA_ID"
       say "task-add — $TA_ID answers $(clean "$TA_BID")"
     done
-    # A ROW THAT LANDS ON NOTHING IS FIXED BY THE REGRESSION (wave-39 T19; REQ-14 AC-14.2, D9): a row whose lands-on cell is
-    # none or absent writes no verdict at its landing, so lib/proof.sh `proof_fixed` counts its findings fixed only once a
-    # green regression stands at a head past its landing. Said at the row's birth, where the author can still name a suite.
+    # A ROW THAT LANDS ON NOTHING IS FIXED BY THE REGRESSION: a row that lands on no suite
+    # writes no verdict at its landing, so lib/proof.sh `proof_fixed` counts its findings fixed only once a green regression
+    # stands at a head past its landing. Said at the row's birth, where the author can still name a suite. What the row lands
+    # on is the brief's own answer (`poker_row_suites`): the table carries no lands-on column, the section and the Files do.
     if [ -n "$TA_BORN_IDS" ]; then
-      TA_LANDS="$(poker_brief_cell "$TA_PLAN" Tasks "$TA_ID" lands-on)" || TA_LANDS=""
-      case "$TA_LANDS" in none|none[[:space:]]*) TA_LANDS="" ;; esac
-      ! poker_brief_none "$TA_LANDS" \
-        || say "task-add — $TA_ID lands none — counts on the next green regression: no landing verdict will name it, so its findings are fixed once a green regression stands at a head past its landing (D9)."
+      poker_row_suites "$TA_PLAN" "$TA_ID" "$TA_FILES" "$REPO_REAL"
+      if [ -n "$PRS_NAMES" ]; then
+        say "task-add — $TA_ID lands on ${PRS_NAMES}.${PRS_BAR:+ $PRS_BAR}"
+      else
+        say "task-add — $TA_ID lands none — counts on the next green regression: no landing verdict will name it, so its findings are fixed once a green regression stands at a head past its landing (D9)."
+      fi
     fi
     # WHAT THE TURN NOW OWES, SAID AT THE ACT: the harness's task list lacks the row, and it owes that one entry, added
     # at the end, since the list only appends and the entries after it stand as they are. The entry is named as the task
@@ -1146,7 +1188,7 @@ EOF
       die "REFUSED — '$(clean "$BRF_ID")' is not one row id: an id is one token of letters, digits, '.', '_' or '-', beginning with a letter or a digit. Nothing was written."
       exit 1
     fi
-    if ! declare -F plan_read_section >/dev/null 2>&1 && ! . "$BIONIC_LIB/plan-read.sh" 2>/dev/null; then
+    if ! bionic_need plan-read.sh plan_read_section; then
       die "REFUSED — the plan parser (lib/plan-read.sh) cannot be loaded from $BIONIC_LIB. Nothing was written. Fix: reinstall the plugin, then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID"
       exit 2
     fi
@@ -1181,17 +1223,17 @@ EOF
     BRF_DOCS="$(docs_root "$PV_REPO")"
     BRF_RECDIR="$BRF_DOCS/record/$BRF_WAVE"
     case "$BRF_RECDIR" in "$PV_REPO"/*) BRF_RECREL="${BRF_RECDIR#"$PV_REPO"/}" ;; *) BRF_RECREL="$BRF_RECDIR" ;; esac
-    { [ -n "${_LINE_FIELDS_AWK:-}" ] || . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+    bionic_need line.sh line_lines
 
     # THE NAME IS THE DISPATCH'S: a re-dispatch gets its own file beside the first, so the record keeps what each
     # agent was given. It must be a name the dispatch wall binds to this row (the id, or the id behind a prefix).
-    [ -n "${BRF_NAME:-}" ] || BRF_NAME="$(fill_name "$PV_REPO/.bionic/tmp/roster-$(session_id).state" "$BRF_ID")"
+    [ -n "${BRF_NAME:-}" ] || BRF_NAME="$(fill_name "$(roster_path "$PV_REPO" "$(session_id)")" "$BRF_ID")"
     if ! plan_verb_id_ok "$BRF_NAME" || ! fill_row_launched "$BRF_ID" "$BRF_NAME"; then
       die "REFUSED — '$(clean "$BRF_NAME")' is not a name of row $BRF_ID: the dispatch wall binds a name to the row it ends with (the id, or <prefix>-$BRF_ID, with -r<n> for a re-dispatch). Nothing was written. Run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID <prefix>-$BRF_ID"
       exit 1
     fi
     BRF_OUT="$BRF_RECDIR/briefs/$BRF_NAME.md"
-    if ! poker_brief_load || ! declare -F brief_mark >/dev/null 2>&1; then
+    if ! bionic_need brief.sh brief_contract || ! declare -F brief_mark >/dev/null 2>&1; then
       die "REFUSED — the brief's mark (lib/brief.sh) cannot be loaded from $BIONIC_LIB. Nothing was written. Fix: reinstall the plugin, then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
       exit 2
     fi
@@ -1245,43 +1287,9 @@ EOF
       if [ -n "$BRF_SHA" ]; then BRF_HEAD="$BRF_SHA ($(clean "$BRF_WB"))"; else BRF_HEAD="(no branch $(clean "$BRF_WB") in this repository)"; fi
     fi
 
-    # THE SUITES AND WHAT THE ROW LANDS ON: its section's lines, else its Files' *.test.sh entries, in order; else, for
-    # a row that writes code, the slot: `none` is a waiver nobody chose for it.
-    BRF_SUITES="$(plan_read_section "$PV_PLAN" "$BRF_ID" suites)"
-    BRF_LANDS="$(plan_read_section "$PV_PLAN" "$BRF_ID" lands-on)"
-    BRF_SUITE_SLOT=""
-    poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
-    if units_writes_head "$BRF_FILES"; then
-      # A ROW THAT WRITES CODE NAMES ITS SUITES: `none` is a waiver nobody chose, so the slot is the orchestrator's to
-      # fill. A `none` Lands-on cell is the dispatch wall's refusal for such a row, so it is not carried.
-      [ -n "$BRF_SUITES" ] || BRF_SUITE_SLOT="<ORCHESTRATOR: the row names no suite; write the suites that pin its Files>"
-      case "$BRF_LANDS" in none|none[[:space:]]*) BRF_LANDS="" ;; esac
-    fi
-    if poker_brief_none "$BRF_LANDS"; then
-      BRF_LANDS="$BRF_SUITES"
-      [ -n "$BRF_LANDS" ] || BRF_LANDS="$BRF_SUITE_SLOT"
-      [ -n "$BRF_LANDS" ] || BRF_LANDS="none the row's Files name no suite"
-    fi
-    [ -n "$BRF_SUITES" ] || BRF_SUITES="${BRF_SUITE_SLOT:-none}"
-
-    # THE LANDING BAR: a suite the gate promises over LINE_SUITE_BAR is refused by the landing as too long, so it is left
-    # out of Lands-on here, stays in Suites (the writer runs it in the tree) and is named. When it would leave the set
-    # empty it stays: `none` is refused for a row that writes code, and the landing says the rest.
-    BRF_BAR=""
-    if declare -F _gate_promise >/dev/null && _gate_store >/dev/null 2>&1; then
-      BRF_KEPT=""
-      while IFS= read -r BRF_E; do
-        BRF_E="${BRF_E#"${BRF_E%%[![:space:]]*}"}"; [ -n "$BRF_E" ] || continue
-        BRF_P="$(_gate_promise "$(_line_gate_key "$BRF_E")" "$PV_REPO" 2>/dev/null)"; BRF_P="${BRF_P##*:}"
-        case "$BRF_P" in ''|*[!0-9]*) BRF_P=0 ;; esac
-        if [ "$BRF_P" -gt "$LINE_SUITE_BAR" ]; then
-          BRF_BAR="${BRF_BAR:+$BRF_BAR }$BRF_E promises ${BRF_P}s, over the landing bar of ${LINE_SUITE_BAR}s, so it is left out of Lands-on and stays in Suites to run in your tree."
-        else BRF_KEPT="${BRF_KEPT:+$BRF_KEPT, }$BRF_E"; fi
-      done <<BRF_EOF
-$(printf '%s\n' "$BRF_LANDS" | tr ',' '\n')
-BRF_EOF
-      if [ -z "$BRF_KEPT" ]; then BRF_BAR=""; else BRF_LANDS="$BRF_KEPT"; fi
-    fi
+    # THE SUITES AND WHAT THE ROW LANDS ON are the one reader's answer, the one the birth line asks.
+    poker_row_suites "$PV_PLAN" "$BRF_ID" "$BRF_FILES" "$PV_REPO"
+    BRF_SUITES="$PRS_SUITES"; BRF_LANDS="$PRS_LANDS"; BRF_SUITE_SLOT="$PRS_SLOT"; BRF_BAR="$PRS_BAR"
 
     # WHAT A RULING GRANTED THE ROW rides every later brief of it, so a successor is born holding its predecessor's
     # grants; Lands-on stays the row's, as a grant widens a running set and not the landing's.
@@ -1314,14 +1322,20 @@ $BRF_PINNED"; fi
       BRF_QLINE="${BRF_QS//,/, }"
       poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_header base-sha; BRF_BASE="$(printf '%s\n' "$BRF_ANS" | sed -n 's/^base-sha=//p')"
       poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_reviews
+      # THE SCOPE RIDES BESIDE EACH RANGE, so a reviewer copies it rather than choosing it: a record that says whole over a
+      # range starting past the run's base is refused, and one that says piece is not. The start is the base when it is the
+      # base's commit, spelled in full or by the prefix the plan wrote; with no base commit to start at, it is a piece.
+      BRF_BASEF=""
+      case "$BRF_BASE" in ''|*[!0-9a-fA-F]*) : ;; *) BRF_BASEF="$(git -C "$PV_REPO" rev-parse --verify -q "$BRF_BASE^{commit}" 2>/dev/null)" || BRF_BASEF="" ;; esac
       BRF_RANGE="$(printf '%s\n' "$BRF_ANS" | awk -F'|' -v qs=",$BRF_QS," -v base="${BRF_BASE:-(no review proof and no base-sha)}" \
-        -v end="${BRF_SHA:-$BRF_HEAD}" "$_LINE_FIELDS_AWK"'
+        -v bf="$BRF_BASEF" -v end="${BRF_SHA:-$BRF_HEAD}" "$_LINE_FIELDS_AWK"'
+        function scope(a) { return (bf != "" && length(a) >= 7 && index(bf, a) == 1) ? "whole" : "piece" }
         line_kv("ev") == "proof" && index(qs, "," line_kv("question") ",") { last[line_kv("question")] = line_kv("head") }
         END {
           n = split(substr(qs, 2, length(qs) - 2), q, ",")
           for (i = 1; i <= n; i++) { a[i] = (q[i] in last) ? last[q[i]] : base; if (a[i] != a[1]) mixed = 1 }
-          if (!mixed) print "Reviewed range: " a[1] ".." end
-          else for (i = 1; i <= n; i++) print "Reviewed range (" q[i] "): " a[i] ".." end
+          if (!mixed) print "Reviewed range: " a[1] ".." end " (scope: " scope(a[1]) ")"
+          else for (i = 1; i <= n; i++) print "Reviewed range (" q[i] "): " a[i] ".." end " (scope: " scope(a[i]) ")"
         }')"
     fi
     # A RED THE ROW MAY LAND WITH is a red admitted for it that the reader still holds open; the evidence is the
@@ -1332,6 +1346,9 @@ $BRF_PINNED"; fi
 
     # THE SCAFFOLD, in the shipped order. A label with no source on this row is not written.
     poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_status "$BRF_ID"; BRF_STATUS="$(printf '%s\n' "$BRF_ANS" | sed -n 's/^state=//p')"
+    # THE LANDING SCRIPT is named by its path, where this plugin keeps it (spawn-worktree.sh, a sibling of the library's
+    # directory), so the verb a brief gives is a command a writer can run as written.
+    BRF_LANDSH="$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/spawn-worktree.sh"
     BRF_BODY="$(mktemp "${TMPDIR:-/tmp}/brief.XXXXXX")" || { die "REFUSED — no scratch file can be made. Nothing was written."; exit 2; }
     case "$BRF_SIZE" in ''|*[!0-9]*) BRF_BIG=no ;; *) if [ "$BRF_SIZE" -ge 15 ]; then BRF_BIG=yes; else BRF_BIG=no; fi ;; esac
     BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress "$BRF_ID")"
@@ -1353,6 +1370,7 @@ $BRF_PINNED"; fi
           "Questions")         [ "$BRF_KIND" != review ] || printf '%s: %s\n' "$BRF_L" "${BRF_QLINE:-<ORCHESTRATOR: the row declares no questions>}" ;;
           "Row")               printf '%s: %s\n' "$BRF_L" "$BRF_ID" ;;
           "Lands-on")          printf '%s: %s\n' "$BRF_L" "$BRF_LANDS" ;;
+          "Lands-by")          printf '%s: bash %s ready --within <seconds under your Bash timeout>\n' "$BRF_L" "$BRF_LANDSH" ;;
           "Lands-red")         [ -z "$BRF_RED" ] || printf '%s: %s\n' "$BRF_L" "$BRF_RED" ;;
           "Red-evidence")      [ -z "$BRF_RED" ] || printf '%s: %s/%s-red.md\n' "$BRF_L" "$BRF_RECREL" "$BRF_NAME" ;;
         esac
@@ -1421,19 +1439,31 @@ BRF_EOF
     st_cell() { printf '%s\n' "$ST_ROW" | sed -n "s/^$1=//p" | head -1; }
     ST_KIND="$(st_cell kind)"; ST_TASK="$(st_cell task)"; ST_STEP="$(st_cell step)"; ST_FILES="$(st_cell files)"
     ST_TITLE="$(clean_whole "$(plan_task_title "$ST_TASK")")"
-    # THE ROLE: the one --role names, else the row's agent cell, else the one the complexity tag of a build or a test row
-    # names, as the Step-3 card draws it (card.sh `_card_task_role`); a role nothing names is not guessed.
+    # THE ROLE: the one --role names, else the row's agent cell, else the one the row's kind draws from its complexity
+    # tag, as the Step-3 card draws it (units.sh `units_kind_role`); a role nothing names is not guessed. The refusal
+    # offers the role the kind is run by (`units_kind_offer`): for a review row, the role the plan's rigor deals its
+    # declared questions, and the critic when no one role holds them; the implementor where the kind's role is the tag.
     [ -n "$ST_ROLE" ] || { ST_ROLE="$(st_cell agent)"; ! poker_brief_none "$ST_ROLE" || ST_ROLE=""; }
-    ST_RE='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
-    if [ -z "$ST_ROLE" ] && { [ "$ST_KIND" = build ] || [ "$ST_KIND" = test ]; } && [[ "$ST_TASK" =~ $ST_RE ]]; then
-      case "${BASH_REMATCH[2]}" in complex) ST_ROLE=senior-implementor ;; standard) ST_ROLE=implementor ;; esac
-    fi
+    [ -n "$ST_ROLE" ] || ST_ROLE="$(units_kind_role "$ST_KIND" "$ST_TASK")"
     if [ -z "$ST_ROLE" ]; then
-      die_run "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. Name one, bionic:implementor for a standard row or bionic:senior-implementor for a complex one." "$ST_AGAIN --role bionic:implementor"
+      ST_OFFER="$(units_kind_offer "$ST_KIND")"; ST_WHY="the role a $(clean "$ST_KIND") row is run by"
+      if [ "$ST_OFFER" = questions ]; then
+        ST_QS="$(units_questions "$(printf '%s\t%s\t%s\t%s' "$ST_ID" "$ST_STEP" "$ST_KIND" "$ST_TASK")")"
+        ST_OFFER=critic; ST_WHY="the role of a review row whose questions no one role holds"
+        if [ -n "$ST_QS" ] && poker_questions_dealt "$PV_PLAN" "$ST_QS"; then
+          ST_OFFER="$PQD_ROLE"; ST_WHY="the role the plan's rigor deals its questions (${ST_QS//,/, })"
+        fi
+      fi
+      if [ "$ST_OFFER" = implementor ]; then
+        ST_SAY="Name one, bionic:implementor for a standard row or bionic:senior-implementor for a complex one."
+      else
+        ST_SAY="Name one: bionic:$ST_OFFER, $ST_WHY."
+      fi
+      die_run "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. $ST_SAY" "$ST_AGAIN --role bionic:$ST_OFFER"
       exit 1
     fi
     case "$ST_ROLE" in *:*) : ;; *) ST_ROLE="bionic:$ST_ROLE" ;; esac
-    [ -n "$ST_NAME" ] || ST_NAME="$(fill_name "$PV_REPO/.bionic/tmp/roster-$(session_id).state" "$ST_ID")"
+    [ -n "$ST_NAME" ] || ST_NAME="$(fill_name "$(roster_path "$PV_REPO" "$(session_id)")" "$ST_ID")"
     if ! plan_verb_id_ok "$ST_NAME" || ! fill_row_launched "$ST_ID" "$ST_NAME"; then
       die_run "REFUSED — '$(clean "$ST_NAME")' is not a name of row $ST_ID: the dispatch wall binds a name to the row it ends with (the id, or <prefix>-$ST_ID, with -r<n> for a re-dispatch). Nothing was done." "bash ${HOOK_DIR}/session-poker.sh start $ST_ID" 
       exit 1
@@ -1470,7 +1500,7 @@ BRF_EOF
         ST_N="$(proof_plan_slug "$PV_PLAN")"; case "$ST_N" in wave-[0-9]*) ST_N="${ST_N#wave-}"; ST_N="${ST_N%%-*}" ;; esac
         ST_BRANCH="wt/$ST_N-$ST_ID"
         ST_OK="$(cd "$PV_REPO" && bash "$ST_SW" create "$ST_BASE" "$ST_BRANCH" --for "$ST_NAME" 2>&1)"
-        ST_TREE="$(printf '%s\n' "$ST_OK" | awk '/^spawn-worktree: OK / { for (i = 3; i <= NF; i++) if (index($i, "path=") == 1) { print substr($i, 6); exit } }')"
+        ST_TREE="$(printf '%s\n' "$ST_OK" | awk "$_LINE_FIELDS_AWK"'/^spawn-worktree: OK / && (p = line_kv("path")) != "" { print p; exit }')"
       fi
       case "$ST_OK" in
         'spawn-worktree: OK '*) : ;;
@@ -1538,8 +1568,9 @@ BRF_EOF
   #
   # `choices=` holds the word a reply names each choice by, the default's then the other's: the first word of its label.
   #
-  # Early, it prints `CARD-EARLY — <reason>` on stderr, exit 1, and writes nothing. `--preview` renders the page
-  # whatever the facts, the reason first when it is early, and records no page and opens no item. REFUSED (1),
+  # Early, it prints `CARD-EARLY — <reason>` on stderr, exits 0 (an ordinary answer, read by that line), and writes
+  # nothing. `--preview` renders the page whatever the facts, the reason first when it is early, and records no page
+  # and opens no item. REFUSED (1),
   # nothing written: a plan that is not the bound run, a branch naming no commit, an `--against` naming nothing the
   # page holds. A page written under the card's old name (`$RR_OLD_VERB`, set in session-poker.sh) is read all the same, by
   # `reply` and the situation report, and is never written again: only the new stem and tag are written.
@@ -1607,7 +1638,7 @@ RR_MATRIX
     rows="$(git -C "$PV_REPO" rev-list --first-parent "$1..$RR_HEAD" 2>/dev/null \
       | units_rows_in_range "$PV_PLAN" "$1..$RR_HEAD" "$(proof_debt_record "$PV_PLAN" "$PV_REPO" 2>/dev/null)" 2>/dev/null | cut -f1 | paste -sd' ' -)"
     printf 'approved at %s' "${1:0:8}"
-    [ -z "$n" ] || printf ', %s landed since' "$(rr_plural "$n" commit commits)"
+    [ -z "$n" ] || printf ', %s landed since' "$(english_plural "$n" commit commits)"
     [ -z "$rows" ] || printf ' (%s)' "$rows"
   }
 
@@ -1685,10 +1716,6 @@ RR_MATRIX
     printf '%s' "$w" | tr '[:upper:]' '[:lower:]'
   }
 
-  rr_plural() {  # <n> <singular> <plural> -> `<n> <word>`
-    if [ "$1" -eq 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi
-  }
-
   rr_fact() {  # <tag> <field>... -> one fact line, its fields tab-separated; a tab or newline inside a field is a space
     local f out="$1"; shift
     for f in "$@"; do f="${f//$'\t'/ }"; out="$out"$'\t'"${f//$'\n'/ }"; done
@@ -1741,6 +1768,7 @@ RR_MATRIX
     done
     mkdir -p "$RR_DIR" 2>/dev/null || return 0
     [ ! -L "$f" ] || return 0
+    bionic_need root.sh bionic_new && bionic_new "$f.new" || return 0
     {
       printf '%s\n\n## Replay\n\n' "$1"
       printf 'release-approval/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "${RR_AT:-$(iso_now)}" "$RR_N"
@@ -1751,15 +1779,14 @@ RR_MATRIX
       done
       # THE CARRIES THE PAGE PUTS: every finding it shows deferred, so the reply that answers the page rules each.
       printf '%s' "$RR_CARRY" | while IFS= read -r i; do [ -z "$i" ] || printf 'carried: %s\n' "$i"; done
-    } > "$f.new.$$" 2>/dev/null && mv -f "$f.new.$$" "$f" 2>/dev/null
-    rm -f "$f.new.$$" 2>/dev/null
+    } >| "$BIONIC_NEW" 2>/dev/null && mv -f "$BIONIC_NEW" "$f" 2>/dev/null
+    rm -f "$BIONIC_NEW" 2>/dev/null
     return 0
   }
 
   poker_verb_release_approval() {
     local nm line key reply ac tier st au ruled person why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again fo fw fs mk
-    if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_last_line >/dev/null 2>&1 || ! _proof_reader_load; then
+    if ! bionic_need proof.sh proof_last_line || ! _proof_reader_load; then
       die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
       exit 2
     fi
@@ -1781,11 +1808,20 @@ RR_MATRIX
     RR_DIR="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")"
     # THE THREE FACTS ARE card.sh's (`early`), asked as this session in the run's root.
     RR_EOUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" early "$PV_PLAN" 2>&1 )"; RR_ERC=$?
+    # EARLY IS READ FROM THE CARD'S LINE, NOT ITS EXIT: `card.sh early` exits 0 on CARD-EARLY, an ordinary answer, and
+    # non-zero only when it could not ask, whose first line is then the reason.
     RR_EARLY=""
     if [ "$RR_ERC" -ne 0 ]; then
       RR_EARLY="$(printf '%s\n' "$RR_EOUT" | awk '!/^settles: / && NF { print; exit }')"
       RR_EARLY="${RR_EARLY:-card.sh early exited $RR_ERC}"
-      if [ "$RR_PREVIEW" != yes ]; then printf '%s\n' "$RR_EARLY" >&2; exit 1; fi
+    else
+      RR_EARLY="$(printf '%s\n' "$RR_EOUT" | awk 'index($0, "CARD-EARLY — ") == 1 { print; exit }')"
+    fi
+    if [ -n "$RR_EARLY" ] && [ "$RR_PREVIEW" != yes ]; then
+      printf '%s\n' "$RR_EARLY" >&2
+      # The page asked early is an ordinary answer (lib/refuse.sh, the list): exit 0; a card that could not ask refuses.
+      case "$RR_EARLY" in "CARD-EARLY — "*) exit "$(refuse_ordinary_exit release-approval 1)" ;; esac
+      exit 1
     fi
     RR_SETTLE="$(printf '%s\n' "$RR_EOUT" | sed -n 's/^settles: //p')"
     # A CARRY HOLDS ITS SENTENCE: every deferral the release entry's Known limits will list (`known_limits_part`, the
@@ -1799,7 +1835,7 @@ RR_MATRIX
     # THE TITLE'S FACTS: the project, the release, the tasks landed. Every fact of the run is a reader answer over the
     # kept fold (lib/proof.sh `_proof_ask`), so the page says what the log holds at this instant, and the plan's rows
     # are the scheduler's (`units_rows`).
-    RR_PROJ="$(git -C "$PV_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+    RR_PROJ="$(git_common_dir "$PV_REPO")"
     case "$RR_PROJ" in */.git) RR_PROJ="${RR_PROJ%/.git}"; RR_PROJ="${RR_PROJ##*/}" ;; *) RR_PROJ="${PV_REPO##*/}" ;; esac
     RR_AGAIN="release-approval$([ "$RR_PREVIEW" != yes ] || printf ' --preview') $PV_PLAN"
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_header release; RR_REL="$(printf '%s\n' "$RR_ANS" | sed -n 's/^release=//p')"
@@ -1887,7 +1923,7 @@ RR_ROWS_EOF
       [ "$RR_ACC" -eq 0 ] || line="${line:+$line, }$RR_ACC owed by the close"
       [ "$RR_ACL" -eq 0 ] || line="${line:+$line, }$RR_ACL owed at a later step"
       if [ -z "$RR_MISS" ]; then RR_TACC="✅"; else RR_TACC="✖️"; fi
-      RR_TACC="$RR_TACC acceptance — $RR_ACP of $(rr_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
+      RR_TACC="$RR_TACC acceptance — $RR_ACP of $(english_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
     fi
 
     # FINDINGS: the disposition's one reading, one sentence each; a decision only when recommended against. A FINDING'S
@@ -2058,13 +2094,13 @@ RR_AGAINST_EOF
       "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
     # A MATRIX ROW NO THEME CAN READ refuses the page, preview or not, before anything is written: a row with no
     # serves: and no dotted id is in no theme's count, so the Goals block would print a theme short, `0 of N reached`
-    # over criteria discharged. The Requirement cell of the criterion's Eval design row names it, and the page then reads it.
+    # over criteria discharged. The Requirement cell of the criterion's Test design row names it, and the page then reads it.
     RR_UNMAPPED="$(printf '%s\n' "$RR_GOALS" | awk -F'\t' '$1 == "mapping" && index($2, "not mapped: ") == 1 {
       n = split($3, a, " "); s = ""; for (i = 1; i <= n && i <= 5; i++) s = s (i > 1 ? ", " : "") a[i]
       if (n > 5) s = s " and " (n - 5) " more"
       print n "\t" s; exit }')"
     if [ -n "$RR_UNMAPPED" ]; then
-      die "release-approval refused — ${RR_UNMAPPED%%	*} criteria map to no requirement (none named, and no dotted id): write each one's requirement in the Requirement cell of its row under ## Eval design (${RR_UNMAPPED#*	})"
+      die "release-approval refused — ${RR_UNMAPPED%%	*} criteria map to no requirement (none named, and no dotted id): write each one's requirement in the Requirement cell of its row under ## Test design (${RR_UNMAPPED#*	})"
       exit 1
     fi
 
@@ -2094,7 +2130,7 @@ RR_AGAINST_EOF
       h="$(rr_proof_field "$line" head)"; r="$(rr_proof_field "$line" result)"
       behind="$(git -C "$PV_REPO" rev-list --count "$h..$RR_HEAD" 2>/dev/null)" || behind=""
       if [ "$h" = "$RR_HEAD" ] || [ "$behind" = 0 ]; then nm="$role at this head"
-      elif [ -n "$behind" ]; then nm="$role at ${h:0:8}, $(rr_plural "$behind" commit commits) behind"
+      elif [ -n "$behind" ]; then nm="$role at ${h:0:8}, $(english_plural "$behind" commit commits) behind"
       else nm="$role at ${h:0:8}"; fi
       IFS=$'\t' read -r _ _ cst clands <<< "$(printf '%s\n' "$RR_COV" | awk -F'\t' -v q="$q" '$1 == q { print; exit }')"
       case "${clands:--}" in
@@ -2264,12 +2300,11 @@ RR_AGAINST_EOF
   }
 
   poker_verb_reply() {
+    ! declare -F poker_one_line >/dev/null 2>&1 || RP_TEXT="$(poker_one_line "$RP_TEXT")"
     case "$RP_TEXT" in
       *$'\n'*|*$'\r'*) die "REFUSED — a reply is one line, and this one carries a line break; the plan is unchanged."; exit 1 ;;
     esac
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
-    if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F user_said >/dev/null 2>&1; then
+    if ! bionic_need said.sh user_said || ! bionic_need proof.sh proof_branch_head; then
       die "REFUSED — the reply is read through lib/said.sh and lib/proof.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
@@ -2311,7 +2346,14 @@ RR_AGAINST_EOF
         "bash ${HOOK_DIR}/session-poker.sh finding-move $(clean "$RP_X") stated '<its sentence>'"
       exit 1
     done <<< "$RP_TABLE"
+    # A SHORT REPLY AFTER ITS CARD. "all default" is two words, and the person writes around it ("Re: release card: all
+    # default"). Too short as the rule with no instant reads it (rc 3), it is asked again with this card's instant, the
+    # one its header names: typed after the card was drawn, the words are theirs on this card. A whole prompt stays
+    # their word as it was.
     user_said "$RP_TEXT" "$PV_PLAN"; RP_SAID=$?
+    RP_AFTER="${RP_HDR#*|at=}"; RP_AFTER="${RP_AFTER%%|*}"
+    case "$RP_AFTER" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;; *) RP_AFTER="" ;; esac
+    [ "$RP_SAID" -ne 3 ] || [ -z "$RP_AFTER" ] || { user_said "$RP_TEXT" "$PV_PLAN" "$RP_AFTER"; RP_SAID=$?; }
     if [ "$RP_SAID" -ne 0 ]; then
       said_refuse "$RP_SAID" "$(said_fold "$RP_TEXT")" "a reply to the release approval card"
       exit 1
@@ -2411,11 +2453,7 @@ RP_TABLE
         exit 1 ;;
     esac
     sid="$(session_id 2>/dev/null)" || sid=""
-    root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-    if [ -z "$root" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    root="$(project_root_or_refuse "$PWD")" || exit 2
     if [ -n "$sid" ] && engaged_session "$root" "$sid"; then
       run="$(session_run "$root" "$sid")"
       case "$run" in 'bound-open '*) mode=plan; plan="${run#bound-open }" ;; esac
@@ -2454,8 +2492,7 @@ RP_TABLE
       die "REFUSED — an order's words are one field of the run's log, which cannot carry a |; nothing was written. run again: session-poker.sh order '<the words without it>'"
       exit 1 ;;
     esac
-    declare -F proof_order_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1; }
-    if ! declare -F proof_order_event >/dev/null 2>&1 \
+    if ! bionic_need proof.sh proof_order_event \
        || ! proof_order_event "$plan" "$([ -n "$OR_LIFT" ] && echo lifted || echo given)" "$OR_WORDS"; then
       die "REFUSED — the order cannot be appended to the run's log of $plan (lib/proof.sh proof_order_event from $BIONIC_LIB); nothing was written. run again: session-poker.sh order"
       exit 2
@@ -2473,11 +2510,10 @@ RP_TABLE
   # later landing can have written.
   poker_verb_check_from() {
     local head jc who rc
+    ! declare -F poker_one_line >/dev/null 2>&1 || CF_WORDS="$(poker_one_line "$CF_WORDS")"
     plan_verb_value_ok "$CF_WORDS" || { die "REFUSED — the words are one field of the run's log, and they carry a line break, a tab or a '|'; nothing was written. run again: session-poker.sh check-from '<their words, on one line, with no |>'"; exit 1; }
     plan_verb_open check-from
-    declare -F proof_approval_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1; }
-    declare -F user_said >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/said.sh" ] && . "$BIONIC_LIB/said.sh"; }
-    if ! declare -F proof_approval_event >/dev/null 2>&1 || ! declare -F user_said >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_approval_event || ! bionic_need said.sh user_said; then
       die "REFUSED — lib/proof.sh or lib/said.sh cannot be loaded from $BIONIC_LIB; nothing was written. needs: the person — the plugin's lib/ restored; then run again: session-poker.sh check-from '<their words>'"
       exit 2
     fi
@@ -2538,8 +2574,10 @@ RP_TABLE
       say "promote — ${to#"$top"/} already holds ${src#"$root"/}; nothing changed.$([ "$top" = "$root" ] || printf ' The tree is %s.' "$top")"
       exit 0
     fi
-    if ! { mkdir -p "${to%/*}" && cp "$src" "$to.promote.$$" && mv -f "$to.promote.$$" "$to"; }; then
-      rm -f "$to.promote.$$"
+    BIONIC_NEW=""
+    if ! { mkdir -p "${to%/*}" && bionic_need root.sh bionic_new && bionic_new "$to.promote" \
+           && cp "$src" "$BIONIC_NEW" && mv -f "$BIONIC_NEW" "$to"; }; then
+      [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW"
       die "REFUSED — cannot write $to. Nothing was copied."
       exit 2
     fi

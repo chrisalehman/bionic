@@ -5,6 +5,9 @@
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
 
+# THE ONE ENGLISH LIST AND PLURAL (lib/english.sh): the sheet names its words as prose and counts them with the noun's number.
+bionic_need english.sh english_list
+
 # ---------------------------------------------------------------- the blind wall
 #
 # THE WALL THAT ROSTERS A DISPATCH IS REGISTERED ON THE SKILL CHANNEL, not in hooks.json:
@@ -199,13 +202,13 @@ handoff_tree_lines() {  # <root> -> the branch:, head: and uncommitted lines
     print "  - " p " · " w }'
 }
 # THE RUNS IN FLIGHT: every log of the project's runs folder with a pid and no exit code whose pid is still that log's
-# detached shim (`run_live`, the rule adopt and the tick read), with its pid and its log, project-root-relative.
+# detached shim (lib/alive.sh `alive_shim`, the rule adopt and the tick read), with its pid and its log, project-root-relative.
 handoff_running_lines() {  # <root> -> `  - <run id> · pid <pid> · log <path>`, one per live run
   local log pid id
   for log in "$1"/.bionic/tmp/runs/*.log; do
     [ -f "$log" ] && [ ! -L "$log" ] && [ ! -e "$log.rc" ] || continue
     pid=""; { read -r pid < "$log.pid"; } 2>/dev/null
-    run_live "$pid" "$log" || continue
+    alive_shim "$pid" "$log" || continue
     id="${log##*/}"; id="${id%.log}"
     printf '  - %s · pid %s · log %s\n' "$(clean "$id")" "$pid" "$(clean "${log#"$1"/}")"
   done
@@ -257,30 +260,13 @@ handoff_render() {  # <composed> <section>
 # an entry too, `D<n> · put · <who> <date> · <title>`. With `times`, every round is one tab-separated line,
 # `D<n> verb date clock ampm wait title`, the clock and ampm empty when its instant names none and wait a put's line
 # under its heading: what the clock readers (`sitrep_ledger_times`, `pages_open`) read, so the sheet parses no heading.
-_sitrep_lib() {  # -> the library directory: BIONIC_LIB, else the one beside this file in the repository or the payload
-  local d c
-  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  for c in "${BIONIC_LIB:-}" "$d/../../payload/scripts/lib" "$d/../../scripts/lib"; do
-    [ -n "$c" ] && [ -f "$c/reader.sh" ] && { printf '%s\n' "$c"; return 0; }
-  done
-  return 1
-}
 _sitrep_log_in() {  # <record directory> -> the run's log in it, as the reader names it; nothing when the reader cannot be loaded
-  local lib
-  declare -F reader_log_in >/dev/null 2>&1 || {
-    lib="$(_sitrep_lib)" || return 0
-    # shellcheck source=/dev/null
-    . "$lib/reader.sh" >/dev/null 2>&1 || return 0
-  }
+  bionic_need reader.sh reader_log_in || return 0
   reader_log_in "$1"
 }
 _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledger's run, one decision fact per round
-  local led="$1" log lib plan
-  if ! declare -F reader_q_ledger >/dev/null 2>&1; then
-    lib="$(_sitrep_lib)" || return 0
-    # shellcheck source=/dev/null
-    . "$lib/reader.sh" >/dev/null 2>&1 || return 0
-  fi
+  local led="$1" log plan
+  bionic_need reader.sh reader_q_ledger || return 0
   log="$(_sitrep_log_in "${1%/*}")"
   [ -f "$log" ] && [ ! -L "$log" ] || return 0
   # THE LEDGER IS READ FROM THE FOLD ALREADY TAKEN when its run is one whose log is this ledger's: the fold this shell
@@ -467,8 +453,8 @@ decision_wait() {  # <plan> <D<n>> [<root>] [<rows the put names>] -> one senten
   waits="$(decision_waiters "$@")"
   if [ -z "$rows" ] && [ -z "$waits" ]; then printf 'Answered now or in an hour, no task moves: the plan has no task yet.\n'; return 0; fi
   chain="$(sitrep_chain "$1" "$rows")"; cids="${chain%%$'\t'*}"
-  printf '%s\n' "$waits" | awk -v c=",$cids," '
-    function list(a, m,   i, s) { for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m) ? " and " : ", ")) a[i]; return s }
+  printf '%s\n' "$waits" | awk -v c=",$cids," "$_ENGLISH_AWK"'
+    function list(a, m) { return english_join(a, m, m) }
     $0 == "release" || $0 == "merge" { hd[++hn] = "the " $0; next }
     NF { if (index(c, "," $0 ",")) on[++a] = $0; else off[++b] = $0 }
     END {
@@ -485,7 +471,7 @@ decision_wait() {  # <plan> <D<n>> [<root>] [<rows the put names>] -> one senten
 # each once, as the plan's one reader of waits names them (lib/plan-read.sh `plan_read_waits`): a reads cell, a kind's
 # default, or a nine-cell row's deps alike. Every reader here of what waits on an approval or a decision asks this.
 sitrep_approval_waits() {
-  { declare -F plan_read_waits >/dev/null 2>&1 || . "$BIONIC_LIB/plan-read.sh"; } 2>/dev/null
+  bionic_need plan-read.sh plan_read_waits
   plan_read_waits "$1" 2>/dev/null | awk -F'\t' '$2 == "wait" && index($3, "approval:") == 1 && !s[$1, $3]++ { print $1 "\t" substr($3, 10) }'
 }
 
@@ -565,6 +551,97 @@ decisions_all() {
     done
   } | LC_ALL=C sort -t "$tab" -k1,1 -k2,2n -k3,3 | cut -f4-
 }
+# ---------------------------------------------------------------- the failed commands, by kind
+#
+# THE RED TABLE. A failed command is a Bash call of the run's sessions or their agents whose result the CLI marked an
+# error (lib/said.sh `said_failed` over `said_transcripts`), and it counts under the kind of the FIRST row whose test it
+# meets: the classifier walks the rows as they stand, so their order is the rule, each test may take every row above it
+# as not met, and tests/sitrep.test.sh §RED-KINDS reads this same table. A row is `<kind>|<the value its test reads>|<the
+# test>`. A test reads the command's text, its exit, whether it was interrupted and the result's text, nothing else;
+# which segment of a compound set the exit cannot be told without pipefail, so a pipe is read by its last segment.
+SITREP_RED_TABLE='refusal|PreToolUse:Bash hook error;bionic: |the failure came from a hook: the result text starts PreToolUse:Bash hook error, or with the bionic: words a hook denies with
+killed|128|exit 128+n (137, 143, 130), or the call interrupted
+meant-to-fail|red|the text runs the door with a meant-to-fail declaration (BIONIC_EXPECT=red), and the exit says the suite passed (1, through the shim)
+red-suite|suite|the text runs the door or a suite without a declaration, and the exit is 1
+ordinary|BIONIC_ORDINARY_TABLE|the last segment is a bionic verb and the exit is in the ordinary set of that verb, with its word in the output: a row of BIONIC_ORDINARY_TABLE, its command, code and words
+check|grep diff cmp test [ ls find ps pgrep|the last segment of the pipeline or list is a check: grep, diff, cmp, test/[, ls, find, ps, pgrep, and the exit is 1
+not-run|126 127 128|git exit 128, command not found 127, not executable 126
+other|-|anything else'
+
+# _sitrep_red_segs -> SR_FLAST, the last segment of the command in SR_FX, and SR_FCLASS, its class by lib/cmd-class.sh's
+# reading; read once a command, when a test first needs them.
+_sitrep_red_segs() {
+  local l
+  [ "$SR_FSEG" = no ] || return 0
+  l="$(cmd_class_lines "$SR_FX" 2>/dev/null)"
+  cmd_class_pick "$l"; SR_FCLASS="$CMD_CLASS_PICKED"
+  l="${l##*$'\n'}"; SR_FLAST="${l#*	}"; SR_FSEG=yes
+}
+
+# _sitrep_red_runs <the ordinary table's command> <segment> -> 0 when the segment runs it: its fixed words in order, a
+# word met by a token that is it or ends in /<it>; <…>, […] and ... stand for what the caller typed.
+_sitrep_red_runs() {
+  local w t i=0 ws toks
+  [ -n "$2" ] || return 1
+  read -r -a ws <<< "$1"; read -r -a toks <<< "$2"
+  for w in "${ws[@]}"; do
+    case "$w" in '<'*|'['*|'...') continue ;; esac
+    while [ "$i" -lt "${#toks[@]}" ]; do
+      t="${toks[$i]}"; i=$((i + 1))
+      case "$t" in "$w"|*/"$w") continue 2 ;; esac
+    done
+    return 1
+  done
+}
+
+# _sitrep_red_meets <kind> <value> -> 0 when the failed command in SR_FC (exit, or -), SR_FI (interrupted), SR_FX (text)
+# and SR_FT (result) meets that row's test.
+_sitrep_red_meets() {
+  local v c w ws
+  case "$1" in
+    refusal) ws="$2"; while [ -n "$ws" ]; do v="${ws%%;*}"; case "$SR_FT" in "$v"*) return 0 ;; esac
+               [ "$ws" != "$v" ] || break; ws="${ws#*;}"; done ;;
+    killed) [ "$SR_FI" = 1 ] || { [ "$SR_FC" != - ] && [ "$SR_FC" -gt "$2" ]; }; return ;;
+    meant-to-fail) [ "$SR_FC" = 1 ] && [ "$(cmd_expect "$SR_FX")" = "$2" ]; return ;;
+    red-suite) [ "$SR_FC" = 1 ] && _sitrep_red_segs && [ "$SR_FCLASS" = "$2" ]; return ;;
+    ordinary)
+      while IFS='|' read -r _ v c w _; do
+        [ "$c" = "$SR_FC" ] && [ -n "$w" ] && case "$SR_FT" in *"$w"*) _sitrep_red_segs; _sitrep_red_runs "$v" "$SR_FLAST" && return 0 ;; esac
+      done <<< "${!2}" ;;
+    check) [ "$SR_FC" = 1 ] && _sitrep_red_segs && [ -n "$SR_FLAST" ] || return 1
+      read -r -a ws <<< "$SR_FLAST"
+      for v in "${ws[@]}"; do case "$v" in [A-Za-z_]*=*|'!'|'{'|'('|then|do|else) continue ;; esac; break; done
+      case " $2 " in *" ${v##*/} "*) return 0 ;; esac ;;
+    not-run) case " $2 " in *" $SR_FC "*) return 0 ;; esac ;;
+    other) return 0 ;;
+  esac
+  return 1
+}
+
+# sitrep_red_count <plan> -> `<n>: <kind> <n>, …`, every kind of SITREP_RED_TABLE in its order, over the run's failed
+# commands; `not measured: …` when no transcript of the run's sessions can be read. A command no row claims counts in
+# <n> alone, so a table that lost its last row says so in the sum.
+sitrep_red_count() {
+  local rec i m=0 n=0 k v out="" line plan="$1"
+  local -a kinds vals counts
+  if ! bionic_need said.sh said_failed || ! bionic_need cmd-class.sh cmd_expect || ! bionic_need refuse.sh refuse_ordinary; then
+    printf 'not measured: lib/said.sh, lib/cmd-class.sh or lib/refuse.sh cannot be loaded'; return 0
+  fi
+  # the transcripts are the positional parameters: an empty array is unbound under set -u in bash 3.2, "$@" is not
+  set --
+  while IFS= read -r line; do [ -z "$line" ] || set -- "$@" "$line"; done <<< "$(said_transcripts "$plan" 2>/dev/null)"
+  if [ "$#" -eq 0 ]; then printf "not measured: no transcript of the run's sessions can be read"; return 0; fi
+  while IFS='|' read -r k v _; do kinds[$m]="$k"; vals[$m]="$v"; counts[$m]=0; m=$((m + 1)); done <<< "$SITREP_RED_TABLE"
+  while IFS= read -r -d '' rec; do
+    SR_FC="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"; SR_FI="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
+    SR_FX="${rec%%$'\x1f'*}"; SR_FT="${rec#*$'\x1f'}"; SR_FSEG=no; n=$((n + 1))
+    for ((i = 0; i < m; i++)); do
+      if _sitrep_red_meets "${kinds[$i]}" "${vals[$i]}"; then counts[$i]=$((counts[$i] + 1)); break; fi
+    done
+  done < <(said_failed "$@")
+  for ((i = 0; i < m; i++)); do out="${out:+$out, }${kinds[$i]} ${counts[$i]}"; done
+  printf '%s: %s' "$n" "$out"
+}
 # ---------------------------------------------------------------- the run's scorecard
 #
 # THE SCORECARD (wave-38 T15; D26 "a release's efficiency claim is a printed scorecard; human time is always its own
@@ -636,8 +713,8 @@ scorecard_report() {  # <plan> <project root> -> the eight lines; rc 0
       { e = iso2epoch($2); if (e > m && e - m > d) d = e - m }
       END { printf "%d\n", (d % 60 ? int(d / 60) + 1 : d / 60) }')"
   fi
-  widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk '
-    NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1) { m = substr($i, 9); if (m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } } }
+  widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk "$_LINE_FIELDS_AWK"'
+    NR > 1 && $2 == "queue" { m = line_kv("minutes"); if (m != "" && m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } }
     END { if (b != "") print r " " b " min" }')"
   sitrep_gather "$plan" "$root" sheet 2>/dev/null
   printf 'human stops (autonomous half): %s · target 1\n' "${stops:-unverified}"
@@ -663,7 +740,7 @@ scorecard_report() {  # <plan> <project root> -> the eight lines; rc 0
 #   work.planned · work.added · work.dropped · work.landed · work.left · work.width · work.task-time
 #   pace.time-used · pace.work-landed · close.chain · close.predicted · close.unscaled · close.waits-on-you
 #   tests.suites-run · tests.suites-total · tests.whole-run · tests.cap · reviews · findings.open
-#   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
+#   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.failed-commands · waste.waiting-on-you
 #   run.so-far: <n> acts taken by hand · <m> open asks      the release card's line too (`sitrep_so_far`)
 #   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
 #   mapped by id: <n> criteria name no requirement in the Requirement cell, read by their dotted id ·
@@ -758,21 +835,6 @@ sitrep_dur() {
     if (h == 0) printf "%d min\n", r; else if (r == 0) printf "%d h\n", h; else printf "%d h %d min\n", h, r }'
 }
 
-# sitrep_noun <n> <singular> <plural> -> the word that agrees with <n>: one task, two tasks
-sitrep_noun() { if [ "$1" = 1 ]; then printf '%s' "$2"; else printf '%s' "$3"; fi; }
-
-# sitrep_list <cap> <word>… -> the words as prose, `A`, `A and B`, `A, B and C`, the first <cap> named and the rest
-# counted (`A, B, C and 6 more`); nothing for no word
-sitrep_list() {
-  local cap="$1"; shift
-  awk -v cap="$cap" 'BEGIN {
-    n = ARGC - 1; if (n < 1) exit
-    m = (n > cap) ? cap : n
-    for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m && n == m) ? " and " : ", ")) ARGV[i]
-    if (n > m) s = s " and " (n - m) " more"
-    print s }' "$@"
-}
-
 # THE RUN'S FACTS ARE THE READER'S. Every fact of the run the sheet prints, the step, an approval, a landing, a row's
 # joining, a proof, a waiver, a finding, a verdict and a decision, is a standing fact lib/reader.sh holds, read through
 # lib/proof.sh's kept fold (`_proof_facts`), so a fact only the run's log holds is on the sheet. A sheet folds its run
@@ -783,8 +845,7 @@ sitrep_list() {
 # finding's rating or a fixed finding is answered from them (lib/proof.sh `_proof_findings_hold`). The rows, their
 # reads and their states are the scheduler's (`units_rows`), never read again here.
 _sitrep_reader() {  # -> 0 once lib/proof.sh and the reader under it are loaded in this shell
-  { declare -F _proof_facts >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
-  declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load
+  bionic_need proof.sh _proof_facts && _proof_reader_load
 }
 _SITREP_FACTS_PLAN=""; _SITREP_FACTS=""; _SITREP_FACTS_FILE=""
 # A fold that failed (a process refused under memory pressure) is empty or short: held, every fact asked after would
@@ -862,7 +923,7 @@ sitrep_added() {
 sitrep_launches() {
   local key="" p r a c cs seen="" pk=""
   declare -F adopt_plan_key >/dev/null 2>&1 && key="$(adopt_plan_key "$1")"
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  bionic_need line.sh line_lines
   while IFS='	' read -r p r a c; do
     [ -n "$r" ] || continue
     case "$seen" in *"|$p|"*) ;; *) seen="$seen|$p|"; pk="$p"; declare -F adopt_plan_key >/dev/null 2>&1 && pk="$(adopt_plan_key "$p")" ;; esac
@@ -1069,14 +1130,14 @@ $out
 SITREP_WAITING
   m="${m:-0}"; u="${u:-0}"
   if [ "$u" -gt 0 ]; then
-    m="$m min partial, $u $(sitrep_noun "$u" ask asks) not timed"
+    m="$m min partial, $u $(english_noun "$u" ask asks) not timed"
   else
     m="$m min"
   fi
   if [ -z "$k" ]; then printf '%s\n' "$m"
   else
     # shellcheck disable=SC2086
-    printf '%s: %s\n' "$m" "$(sitrep_list 99 $k)"
+    printf '%s: %s\n' "$m" "$(english_list 99 $k)"
   fi
 }
 
@@ -1099,7 +1160,7 @@ sitrep_card_puts() {
 # sitrep_bar -> the landing bar in minutes, lib/line.sh's LINE_LANDING_BAR, the one constant the scorecard's target
 # reads; loaded as the stop-run record loads line.sh; nothing when unread.
 sitrep_bar() {
-  [ -n "${LINE_LANDING_BAR:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  bionic_need line.sh line_lines
   case "${LINE_LANDING_BAR:-}" in ''|*[!0-9]*) return 0 ;; esac
   printf '%s\n' "$LINE_LANDING_BAR"
 }
@@ -1236,7 +1297,7 @@ sitrep_holds() {
   done <<SITREP_HOLDS
 $ids
 SITREP_HOLDS
-  if [ "${#words[@]}" -gt 0 ]; then sitrep_list 5 "${words[@]}"; else printf 'nothing\n'; fi
+  if [ "${#words[@]}" -gt 0 ]; then english_list 5 "${words[@]}"; else printf 'nothing\n'; fi
 }
 
 # sitrep_asks <plan> <root> <units_rows output> <plan_goals_read output> <now epoch> ->
@@ -1303,8 +1364,7 @@ sitrep_gather() {
   cur="$(_sitrep_ask "$plan" reader_q_step "$plan" | sed -n 's/^n=\([0-9][0-9]*\).*/\1/p')"
 
   # ---- the tasks, in execution order (THE TASKS, IN EXECUTION ORDER, above)
-  if { declare -F _line_fold >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-     && declare -F _line_fold >/dev/null 2>&1 && line_held "$rec"; then
+  if bionic_need line.sh _line_fold && line_held "$rec"; then
     lq="$(_line_fold "$rec" | awk -F'\t' 'NF >= 9 { m = 0; if ($9 != "none" && $9 != "") m = split($9, s, ","); printf "Q\t%s\t%s\t%s\t%d\t%d\n", $1, $5, $8, $12 + 0, m }')"
   fi
   # the run's open pull request, asked of the reader and of the tick's one predicate for whether it is still open
@@ -1325,7 +1385,7 @@ sitrep_gather() {
               | while IFS='	' read -r id desc; do printf 'N\t%s\t%s\n' "$id" "$(plan_task_title "$desc")"; done
             sitrep_approval_waits "$plan" | awk -F'\t' '{ print "V\t" $1 "\t" $2 }'
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
-          } | LC_ALL=C awk -F'\t' "$(_sitrep_label_awk)"'
+          } | LC_ALL=C awk -F'\t' "$(_sitrep_label_awk)$_ENGLISH_AWK"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     function words(r,   t) {   # a read, in words: the step, the user'"'"'s approval, the reviews, the build, the merge
       sub(/^live:/, "", r); t = r; sub(/: .*$/, "", t)
@@ -1342,13 +1402,12 @@ sitrep_gather() {
       if ((i, e) in wseen) return
       wseen[i, e] = 1; wn[i]++; we[i, wn[i]] = e
     }
-    function waits(i,   k, e, s) {   # everything task i waits on, joined: "A", "A and B", "A, B and C"
-      s = ""
+    function waits(i,   k, e, t) {   # everything task i waits on, joined: "A", "A and B", "A, B and C"
       for (k = 1; k <= wn[i]; k++) {
         e = we[i, k]; if (substr(e, 1, 1) == "@") e = label(substr(e, 2))
-        s = s ((k == 1) ? "" : (k == wn[i]) ? " and " : ", ") e
+        t[k] = e
       }
-      return "waits on " s
+      return "waits on " english_join(t, wn[i], wn[i])
     }
     function row(i, kind, note,   d) {
       if (id[i] in red && st[i] != "landed") { kind = "s"; note = "red" }
@@ -1443,7 +1502,7 @@ sitrep_gather() {
   done <<SITREP_SIT
 $sit
 SITREP_SIT
-  SG_TASKCOUNT="$landed of $total $(sitrep_noun "$total" task tasks)"
+  SG_TASKCOUNT="$landed of $total $(english_noun "$total" task tasks)"
   SG_LAST="-"; [ -z "$last_id" ] || SG_LAST="$last_id at $(sitrep_clock "$last_at" "$now")"
 
   # ---- the steps: before current: done, current: and any later step a landed or active task stands at running
@@ -1468,7 +1527,7 @@ SITREP_SIT
   SG_RELEASE="$(plan_frontmatter_get "$plan" release 2>/dev/null)"; SG_RELEASE="${SG_RELEASE:--}"
   SG_WAVE="$(printf '%s\n' "$SG_NAME" | awk 'match($0, /(^|-)wave-[0-9]+/) { s = substr($0, RSTART, RLENGTH); sub(/^.*wave-0*/, "", s); print (s == "") ? 0 : s; exit }')"
   SG_WAVE="${SG_WAVE:--}"
-  proj="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  proj="$(git_common_dir "$root")"
   case "$proj" in */.git) proj="${proj%/.git}"; proj="${proj##*/}" ;; *) proj="${root##*/}" ;; esac
   SG_PROJECT="$proj"
   # the run began at its Step 0, else at the plan's approval
@@ -1497,19 +1556,19 @@ SITREP_SIT
   fi
   wk="$(sitrep_work "$plan" "$rec" "$root" "$rows" "$now" "$appr_at")"
   IFS='	' read -r pn pm an am dn dm ln lm live fn fm tn to ts nol wmed wpeak bn bo bs <<< "$wk"
-  SG_W_PLANNED="$pn $(sitrep_noun "$pn" task tasks), $pm min"
-  SG_W_ADDED="$an $(sitrep_noun "$an" task tasks), $am min"
-  SG_W_DROPPED="$dn $(sitrep_noun "$dn" task tasks), $dm min"
+  SG_W_PLANNED="$pn $(english_noun "$pn" task tasks), $pm min"
+  SG_W_ADDED="$an $(english_noun "$an" task tasks), $am min"
+  SG_W_DROPPED="$dn $(english_noun "$dn" task tasks), $dm min"
   SG_W_SHARE="-"; [ "${live:-0}" -le 0 ] || SG_W_SHARE="$(( (lm * 200 + live) / (live * 2) ))%"
-  SG_W_LANDED="$ln $(sitrep_noun "$ln" task tasks), $lm of $live min, $SG_W_SHARE"
-  SG_W_LEFT="$fn $(sitrep_noun "$fn" task tasks), $fm min"
+  SG_W_LANDED="$ln $(english_noun "$ln" task tasks), $lm of $live min, $SG_W_SHARE"
+  SG_W_LEFT="$fn $(english_noun "$fn" task tasks), $fm min"
   if [ "$wmed" = - ]; then SG_W_WIDTH="not measured: no launch of this plan on the rosters"
   else SG_W_WIDTH="median $wmed, peak $wpeak"; fi
   if [ "${ln:-0}" -eq 0 ]; then SG_W_TT="0 tasks: none has landed"
   elif [ "${tn:-0}" -eq 0 ]; then SG_W_TT="0 tasks: none of the $ln landed has both a launch and a landing on record"
   else
-    SG_W_TT="$tn $(sitrep_noun "$tn" task tasks), $to min against $ts sized min"
-    [ "${nol:-0}" -eq 0 ] || SG_W_TT="$SG_W_TT; $nol landed $(sitrep_noun "$nol" task tasks) with no launch or landing on record"
+    SG_W_TT="$tn $(english_noun "$tn" task tasks), $to min against $ts sized min"
+    [ "${nol:-0}" -eq 0 ] || SG_W_TT="$SG_W_TT; $nol landed $(english_noun "$nol" task tasks) with no launch or landing on record"
   fi
   # the chain: the open tasks that must run one after another, by label. Each is weighed by its kind and, running, by what
   # it has left (sitrep_close_weights), and the chain is the heaviest by that weight; its sized minutes are what the
@@ -1560,7 +1619,7 @@ SITREP_SIT
         for (i = 1; i <= m; i++) if ((w[i] in on) || w[i] == "release" || w[i] == "merge") hit = 1
         if (hit) printf "%s%s", (c++ ? " " : ""), $1 }')"
     # shellcheck disable=SC2086
-    [ -z "$k" ] || SG_K_WAITS="yes: $(sitrep_list 99 $k)"
+    [ -z "$k" ] || SG_K_WAITS="yes: $(english_list 99 $k)"
   fi
   SG_LINE_CLOSE="$SG_PREDICTED"; [ "$SG_PREDICTED" != - ] || SG_LINE_CLOSE="not forecast"
   SG_FORECAST="$SG_C_FC"
@@ -1631,7 +1690,7 @@ SITREP_RUNNING
   # draw too (lib/proof.sh `proof_whole_text`); a plan that owes no whole run says so, and no proof is not run yet.
   if [ "$(plan_regression "$plan" 2>/dev/null)" = no ]; then SG_T_WHOLE="not run (regression: no, Step 0)"
   else
-    { declare -F proof_whole_text >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
+    bionic_need proof.sh proof_whole_text
     SG_T_WHOLE="$(proof_whole_text "$plan" "$root" 2>/dev/null)"
     case "$SG_T_WHOLE" in none) SG_T_WHOLE="not run yet" ;; '') SG_T_WHOLE="unverified" ;; esac
   fi
@@ -1652,10 +1711,11 @@ SITREP_RUNNING
   SG_X_RUNS="$((rd + rk)) of $((rg + rr + rn + rd + rk))"
   if [ -n "$idle_min" ]; then SG_X_IDLE="$idle_min min"; else SG_X_IDLE="not measured: the fill record gave no idle minutes"; fi
   SG_X_WAIT="$(sitrep_waiting "$plan" "$root" "$rows" "$now" "$SG_ASKS")"
+  SG_X_FAILED="$(sitrep_red_count "$plan")"
   # the scorecard's three lines at close, each from the measurements above, never a ratio of unlike units
   SG_PACE="$SG_P_WORK of the live work's sized minutes landed, in $SG_P_TIME of the forecast time"
-  SG_CORRECT="suites run $SG_T_RUN; whole run $SG_T_WHOLE; reviews $SG_T_REVIEWS; $SG_T_FINDINGS open $(sitrep_noun "$SG_T_FINDINGS" finding findings)"
-  SG_WASTE="dropped $SG_W_DROPPED; $SG_X_RUNS suite runs discarded; $SG_X_IDLE ready and unstarted; $SG_X_WAIT waiting on you"
+  SG_CORRECT="suites run $SG_T_RUN; whole run $SG_T_WHOLE; reviews $SG_T_REVIEWS; $SG_T_FINDINGS open $(english_noun "$SG_T_FINDINGS" finding findings)"
+  SG_WASTE="dropped $SG_W_DROPPED; $SG_X_RUNS suite runs discarded; $SG_X_IDLE ready and unstarted; $SG_X_WAIT waiting on you; failed commands $SG_X_FAILED"
   # the goals, each status the one function's
   SG_GOAL="$(plan_goal_paragraph "$plan")"
   SG_GOAL_LINES=""; SG_GOAL_MAP=""; g=0; m=0; k=0; u=0
@@ -1703,7 +1763,7 @@ sitrep_so_far() {
   local h a
   h="$(_sitrep_ask "$1" reader_q_hands "$1")" && a="$(_sitrep_ask "$1" reader_q_asks "$1")" || return 2
   h="$(printf '%s' "$h" | grep -c .)"; a="$(printf '%s' "$a" | grep -c .)"
-  printf 'run.so-far: %s %s taken by hand · %s open %s\n' "$h" "$(sitrep_noun "$h" act acts)" "$a" "$(sitrep_noun "$a" ask asks)"
+  printf 'run.so-far: %s %s taken by hand · %s open %s\n' "$h" "$(english_noun "$h" act acts)" "$a" "$(english_noun "$a" ask asks)"
 }
 
 # sitrep_m <key> <value> <what it measures> <unit> <source: … or basis: …> -> one measured line of the sheet
@@ -1744,6 +1804,7 @@ sitrep_sheet() {
   sitrep_m waste.dropped "$SG_W_DROPPED" "the tasks dropped, as work.dropped" "count, sized minutes" "source: the rows with status dropped"
   sitrep_m waste.runs-discarded "$SG_X_RUNS" "the suite runs thrown away" "count of all suite runs" "source: the landing record and the gate"
   sitrep_m waste.ready-unstarted "$SG_X_IDLE" "the minutes a ready task sat while the machine had room" "minutes" "source: the fill record"
+  sitrep_m waste.failed-commands "$SG_X_FAILED" "the run's Bash commands that failed, each under the first test of the red table it meets" "count, then a count per kind in the table's order" "source: the transcripts of the run's sessions and of their agents"
   sitrep_m waste.waiting-on-you "$SG_X_WAIT" "the minutes a task waited on an ask, overlaps counted once" "minutes, and which asks" "source: the register's opened and closed times; a decision with no opened time, its first put in the design ledger"
   [ -z "${SG_SO_FAR:-}" ] || printf '%s\n' "$SG_SO_FAR"
   printf '%s' "$SG_GOAL_LINES"
@@ -1772,12 +1833,14 @@ sitrep_plan_real() { printf '%s/%s\n' "$(cd "${1%/*}" 2>/dev/null && pwd -P)" "$
 sitrep_save() {
   local f
   f="$(sitrep_saved "$1" "$2")"
+  BIONIC_NEW=""
   if tmp_dir_ok "$1/.bionic/tmp" && mkdir -p "${f%/*}" 2>/dev/null && [ ! -L "${f%/*}" ] \
-     && sitrep_sheet > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" \
+     && bionic_need root.sh bionic_new && bionic_new "$f" \
+     && sitrep_sheet >| "$BIONIC_NEW" 2>/dev/null && mv -f "$BIONIC_NEW" "$f" \
      && printf '%s\t%s\n' "$(sitrep_now)" "$(sitrep_plan_real "$2")" > "$f.at" 2>/dev/null; then
     cat "$f"
   else
-    rm -f "$f.$$" 2>/dev/null
+    [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW" 2>/dev/null
     sitrep_sheet
   fi
 }
@@ -1847,8 +1910,7 @@ sitrep_idle_minutes() {
   _lr_reader || return 2
   lines="$(_lr_events "$plan")" || return 2
   run_open "$plan" && FR_OPEN=yes
-  FR_NOW="${BIONIC_NOW_EPOCH:-}"
-  case "$FR_NOW" in ''|*[!0-9]*) FR_NOW="$(date -u +%s)" ;; esac
+  FR_NOW="$(time_now)"
   FR_IDLE_S="$(printf '%s\n' "$lines" | awk -F'|' -v open="$FR_OPEN" -v now="$FR_NOW" "$_PATROL_ISO_AWK$_READER_AWK"'
     ev() == "stop" {
       e = iso2epoch(line_kv("at"))
@@ -1890,8 +1952,7 @@ sitrep_ask_words() {
 sitrep_tick_line() {
   local plan="${1:-}" root
   { [ -n "$plan" ] && [ -f "$plan" ] && [ ! -L "$plan" ]; } || return 0
-  declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
-  declare -F proof_plan_slug >/dev/null 2>&1 || return 0
+  bionic_need proof.sh proof_plan_slug || return 0
   root="$(cd "$(project_root "${plan%/*}")" 2>/dev/null && pwd -P)"
   [ -n "$root" ] || return 0
   sitrep_gather "$plan" "$root" line 2>/dev/null
@@ -1940,7 +2001,7 @@ sitrep_tick_line() {
       HO_ROOT="$PV_REPO"
       trap 'rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"} "$HO_CF"' EXIT
       if [ "$HO_MODE" = open ]; then
-        { declare -F plan_read_heading >/dev/null 2>&1 || . "$BIONIC_LIB/plan-read.sh"; } 2>/dev/null
+        bionic_need plan-read.sh plan_read_heading
         if ! plan_read_heading "$PV_PLAN" Tasks >/dev/null 2>&1; then
           die "REFUSED — the plan has no ## Tasks section, so there are no open tasks to hand off; the plan is unchanged."
           exit 1
@@ -1950,21 +2011,16 @@ sitrep_tick_line() {
           exit 1
         fi
       fi
-      if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-         || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+      if ! bionic_need proof.sh proof_plan_slug; then
         die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
         exit 2
       fi
-      { declare -F _line_entries >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } || :
+      bionic_need line.sh _line_entries || :
       HO_SLUG="$(proof_plan_slug "$PV_PLAN")"
       HO_RUNWORD="$HO_SLUG"
     else
-      HO_ROOT="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-      if [ -z "$HO_ROOT" ]; then
-        die "REFUSED — cannot resolve the working directory."
-        exit 2
-      fi
-      trap 'rm -f "$HO_FILE.tmp.$$" "$HO_CF"' EXIT
+      HO_ROOT="$(project_root_or_refuse "$PWD")" || exit 2
+      HO_TMP=""; trap 'rm -f ${HO_TMP:+"$HO_TMP"} "$HO_CF"' EXIT
       HO_RUNWORD="no run bound"
     fi
     HO_PURPOSE="$(printf '%s' "$HO_ARG_PATH" | tr -d '[:cntrl:]' | handoff_redact /dev/null)"
@@ -2005,7 +2061,7 @@ sitrep_tick_line() {
     if [ -z "$HO_SID" ]; then
       HO_VER="unverified — no session key, so this session's agents cannot be read"
     else
-      HO_RF="$HO_ROOT/.bionic/tmp/roster-$HO_SID.state"
+      HO_RF="$(roster_path "$HO_ROOT" "$HO_SID")"
       HO_TR="$(session_transcript "$HO_SID")" || HO_TR=""
       HO_LRC=4; HO_SET=""; HO_SINCE=""
       if [ -n "$HO_TR" ]; then
@@ -2060,8 +2116,7 @@ sitrep_tick_line() {
         stopped\ *)  HO_PATROL="stopped without a word; this turn's end starts another" ;;
         *)           HO_PATROL="none yet; this turn's end starts it" ;;
       esac
-      { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-      if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$PV_PLAN")" = no ]; then
+      if bionic_need scale.sh scale_patrol && [ "$(scale_patrol "$PV_PLAN")" = no ]; then
         HO_PATROL="none — a task-scale run has no Patrol"
       fi
       HO_LEDGER="$(docs_root "$HO_ROOT")/record/$HO_SLUG/design-ledger.md"
@@ -2090,7 +2145,7 @@ sitrep_tick_line() {
     # open asks, which no plan says anything waits on.
     HO_RUNLINE=""; HO_ASKS=""; HO_BLOCKED=no
     if [ "$HO_MODE" != none ]; then
-      { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
+      bionic_need proof.sh proof_plan_slug
       HO_SRR="$(cd "$(project_root "${PV_PLAN%/*}")" 2>/dev/null && pwd -P)"
       if declare -F proof_plan_slug >/dev/null 2>&1 && [ -n "$HO_SRR" ]; then
         sitrep_gather "$PV_PLAN" "$HO_SRR" line 2>/dev/null
@@ -2113,7 +2168,10 @@ sitrep_tick_line() {
     HO_TITLE="Handoff · $(clean "${HO_ROOT##*/}") · $(sitrep_date "$HO_E" '%A %-I:%M %p') · $HO_RUNWORD"
     [ -z "$HO_PURPOSE" ] || HO_TITLE="$HO_TITLE · for $(clean "$HO_PURPOSE")"
     if [ "$HO_MODE" = none ]; then HO_LAST="Read $HO_REL whole, then do Next 1."; else HO_LAST="/bionic:canonical-sdlc $HO_REL"; fi
-    HO_TMP="$HO_FILE.tmp.$$"; [ "$HO_MODE" = none ] || HO_TMP="$PV_NEW.2"
+    if [ "$HO_MODE" != none ]; then HO_TMP="$PV_NEW.2"
+    elif bionic_need root.sh bionic_new && bionic_new "$HO_FILE.tmp"; then HO_TMP="$BIONIC_NEW"
+    else die "REFUSED — no temporary file can be made beside $HO_FILE; nothing was written. Fix: make ${HO_FILE%/*} writable, then run the handoff again."; exit 2
+    fi
     ho_state() {  # -> the State section's lines, each with its fold indent
       printf '2\twritten: %s\n' "$(sitrep_clock "$HO_E" "$HO_E")"
       printf '2\tinstant: %s\n' "$HO_NOW"
@@ -2164,7 +2222,7 @@ sitrep_tick_line() {
         printf '0\tResume\n'
       } | handoff_redact "$HO_CF" | "${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" fold
       printf '%s\n' "$HO_LAST"
-    } > "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
+    } >| "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
     # WHAT IT SAYS IS HOW THE NEXT SESSION RESUMES, and nothing more: the resume line carries the file's path as its
     # operand, so no second line names it, and the counts, the redactions and the blocks left out are in the file
     # for whoever reads it. On success stdout is that one line and stderr is empty.
@@ -2191,12 +2249,7 @@ sitrep_tick_line() {
   }
 
   poker_verb_landing_report() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     LR_PLAN=""
     if [ -n "$LR_ARG" ]; then
       LR_PLAN="$(docs_path "$REPO_REAL" "$LR_ARG")"
@@ -2222,8 +2275,7 @@ sitrep_tick_line() {
     # THE SCORECARD (wave-38 T15; D26): its reasoning is beside `scorecard_report`. It renders the sitrep's indicators,
     # which read the proof record, loaded as the sitrep verb loads it.
     if [ "$LR_SC" = yes ]; then
-      if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-         || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+      if ! bionic_need proof.sh proof_plan_slug; then
         die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
         exit 2
       fi
@@ -2346,8 +2398,7 @@ sitrep_tick_line() {
         die "REFUSED — $d is already $st: $(decisions_list "$led" | awk -F' · ' -v d="$d" '$1 == d { l = $0 } END { print l }'); put it again to open a new round; nothing is written."
         return 3 ;;
     esac
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
-    if ! declare -F user_said >/dev/null 2>&1; then
+    if ! bionic_need said.sh user_said; then
       die "REFUSED — who said the reply is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
       return 1
     fi
@@ -2357,7 +2408,7 @@ sitrep_tick_line() {
       f["d"] == d && f["verb"] == "put" { for (k in st) if (k != d && st[k] == "put") prev = ""; m = (prev == "") ? f["at"] : prev }
       { st[f["d"]] = f["verb"]; prev = f["at"] }
       END { print m }')"
-    user_said "$raw" "$plan" "${after:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; said=$?
+    user_said "$raw" "$plan" "${after:-$(iso_now)}"; said=$?
     case "$said" in
       0)
         who="$(git -C "$root" config user.name 2>/dev/null)"
@@ -2388,12 +2439,7 @@ sitrep_tick_line() {
   # in one line naming the ledger's path when the run holds no round; 2 when there is no run to read. `decisions put`
   # and `decisions rule` are its writers, each one round (`decisions_append`).
   poker_verb_decisions() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     DC_DOCS="$(docs_root "$REPO_REAL")"
     if [ "$DC_ALL" = yes ]; then
       decisions_all "$DC_DOCS"
@@ -2410,8 +2456,7 @@ sitrep_tick_line() {
       die "REFUSED — this session has no run to read; bind its plan first, or read every run's: decisions --all."
       exit 2
     fi
-    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_plan_slug; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
       exit 2
     fi
@@ -2446,12 +2491,7 @@ sitrep_tick_line() {
   # Refusals name the fix and change nothing: no file or no kind line (2), a plan that is not there or a session that
   # cannot be engaged (1); a sub-verb's refusal stops the ritual with that verb's code.
   poker_verb_resume() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     RS_DOCS="$(docs_root "$REPO_REAL")"
     RS_FILE="$(docs_path "$REPO_REAL" "$RS_ARG")"
     RS_SHOWN="$(printf '%s' "${RS_ARG:0:160}" | tr -d '[:cntrl:]')"
@@ -2459,7 +2499,7 @@ sitrep_tick_line() {
       die "REFUSED — no handoff file at '$RS_SHOWN'; write one with: bash ${HOOK_DIR}/session-poker.sh handoff, and resume from the path its last line names. Nothing was bound."
       exit 2
     fi
-    if [ "$(sed -n 1p "$RS_FILE" 2>/dev/null)" != "bionic-handoff/v1" ]; then
+    if ! handoff_is_one "$RS_FILE" link-ok; then
       die "REFUSED — '$RS_SHOWN' is not a handoff file: its first line is not bionic-handoff/v1. Write one with: bash ${HOOK_DIR}/session-poker.sh handoff. Nothing was bound."
       exit 2
     fi
@@ -2496,8 +2536,7 @@ sitrep_tick_line() {
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty); a resume binds ONE session."
       exit 3
     fi
-    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_plan_slug; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was bound."
       exit 2
     fi
@@ -2539,8 +2578,7 @@ sitrep_tick_line() {
     # THE PATROL IS THE SCALE'S (`scale_patrol`, lib/scale.sh): a scale whose profile has none, the task row, is not ticked
     # here and owes no watch. A plan with no `scale:` is watched.
     RS_PATROL=yes
-    { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-    if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$RS_PLAN")" = no ]; then
+    if bionic_need scale.sh scale_patrol && [ "$(scale_patrol "$RS_PLAN")" = no ]; then
       RS_PATROL=no
     fi
     rs_step 0 bind "$RS_PLAN"
@@ -2621,7 +2659,7 @@ sitrep_tick_line() {
     else say "resume — bound this session to $RS_PLAN_REL"; fi
     printf 'step: %s\n' "$(awk -v cur="$RS_CURN" 'BEGIN { split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " ")
       if (cur == "") print "none named"; else print cur " " nm[cur + 1] }')"
-    RS_RF="$REPO_REAL/.bionic/tmp/roster-$SESSION_ID.state"
+    RS_RF="$(roster_path "$REPO_REAL" "$SESSION_ID")"
     RS_UROWS="$(units_rows "$RS_PLAN" 2>/dev/null)"
     RS_AG=""
     while IFS= read -r RS_NAME; do
@@ -2663,7 +2701,7 @@ sitrep_tick_line() {
   # the person owes it is read there: the sheet is its head, the plan's path and the asks (lib/owed.sh finds the log
   # through the seal). rc 1, nothing printed, when no seal stands, and the verb refuses as for no run.
   sitrep_gone() {  # <plan> <root>
-    { declare -F proof_plan_slug >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } 2>/dev/null || return 1
+    bionic_need proof.sh proof_plan_slug || return 1
     SG_ASKS="$(sitrep_asks "$1" "$2" "" "" "$(sitrep_now)")"
     [ -n "$SG_ASKS" ] || return 1
     printf '%s\nrun.plan-gone: %s\n' "$SITREP_SHEET_HEAD" "$1"
@@ -2678,12 +2716,7 @@ sitrep_tick_line() {
   # ruled there is never shown as owed and never left open for the next reader. The card prints only when card.sh
   # draws it (exit 0); a card it refuses prints nothing, card.sh's reasons reach stderr, and the verb exits 1.
   poker_verb_sitrep() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
+    REPO_REAL="$(project_root_or_refuse "$PWD")" || exit 2
     SR_PLAN=""
     if [ -n "$SR_ARG" ]; then
       SR_PLAN="$(docs_path "$REPO_REAL" "$SR_ARG")"
@@ -2705,8 +2738,7 @@ sitrep_tick_line() {
         exit 2
       fi
     fi
-    if ! { declare -F proof_plan_slug >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_plan_slug >/dev/null 2>&1; then
+    if ! bionic_need proof.sh proof_plan_slug; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB."
       exit 2
     fi

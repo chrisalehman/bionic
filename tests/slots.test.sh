@@ -688,13 +688,13 @@ s11_run() {  # <shim option>... — one booked run in the repo, on a machine the
       bash "$BOOKED" "$@" -- "touch $ROW/s11.ran" ) >"$ROW/out" 2>&1
 }
 s11_run --max-wait 1 --suites b.test.sh; S11_RC=$?
-expect_status "S11.1 not admitted within its limit: the shim exits 75" 75 "$S11_RC"
+expect_status "S11.1 not admitted within its limit: the shim exits 0, an ordinary answer" 0 "$S11_RC"
 expect_false "S11.1 …and its command never ran" test -e "$ROW/s11.ran"
 expect_regex "S11.2 …and it stamped that end: rc=75, with the suite it was handed" \
   "^stamp/v1\\|head=$(git -C "$ROW/repo" rev-parse HEAD)\\|dirty=0\\|rc=75\\|at=[^|]*\\|suites=b\\.test\\.sh\\|cmd=touch " \
   "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
 s11_run --kill-after 1 --suites c.test.sh; S11_RC=$?
-expect_status "S11.3 its short limit spent waiting: 75, not 124 (a wait never ends in a kill)" 75 "$S11_RC"
+expect_status "S11.3 its short limit spent waiting: 0, not 124 (a wait never ends in a kill)" 0 "$S11_RC"
 expect_regex "S11.4 …and it stamped rc=75 with its suite" \
   "\\|rc=75\\|at=[^|]*\\|suites=c\\.test\\.sh\\|cmd=touch " "$(tail -1 "$S11_STAMPS" 2>/dev/null)"
 ( cd "$ROW/repo" && exec env "${GE[@]}" BIONIC_GATE_DIR="$ST" BIONIC_PROBE_USED_PCT=95 \
@@ -718,11 +718,11 @@ expect_eq "N1.1 the command sees BIONIC_GATE_ADMIT naming its own request" "$(ls
 expect_regex "N1.2 …a request id" '^[0-9]+$' "$N1_SEEN"
 
 # N2. BIONIC_SLOT_HELD=1 in the environment skips nothing (wave-28 T12, AC-2.13): on a machine
-# the gate admits nothing on, the shim asks, waits, and ends 75 with nothing run.
+# the gate admits nothing on, the shim asks, waits, and ends 0 with nothing run.
 newrow n2
 N2_OUT="$( cd "$ROW" && env "${GE[@]}" BIONIC_SLOT_HELD=1 BIONIC_GATE_DIR="$ST" BIONIC_PROBE_USED_PCT=95 \
   bash "$BOOKED" --max-wait 1 -- "touch $ROW/n2.ran" 2>&1)"; N2_RC=$?
-expect_status "N2.1 a run marked held still asks, and is not admitted (75)" 75 "$N2_RC"
+expect_status "N2.1 a run marked held still asks, and is not admitted (exit 0, an ordinary answer)" 0 "$N2_RC"
 expect_false "N2.2 …and does not run" test -e "$ROW/n2.ran"
 expect_eq "N2.3 …having taken a number" "1" "$(nreq)"
 

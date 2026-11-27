@@ -190,8 +190,8 @@ OM_TIP="$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
 expect_eq "ORDER-6 close-out published a part: the working branch moved past the tip the person merged" "yes" \
   "$([ -n "$OM_TIP" ] && [ "$OM_TIP" != "$OM_H" ] && fixture_git "$PMO" log -1 --format='%an <%ae>' "$OM_TIP" | /usr/bin/grep -qxF 'fixture <fixture@example.invalid>' && echo yes || echo no)"
 OM_ACT="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^merge: ')"
-expect_eq "ORDER-7 …so the readback, read on that branch, held: the run did not close, and its merge act never ran" "yes|0" \
-  "$([ "$CO_RC" -ne 0 ] && echo yes)|$OM_ACT"
+expect_eq "ORDER-7 …so the readback, read on that branch, held (exit 0): the run did not close, and its merge act never ran" "0|0" \
+  "$CO_RC|$OM_ACT"
 expect_contains "ORDER-7b …saying the working branch is not merged" "is not reachable from" "$CO_OUT"
 expect_contains "ORDER-7c …after the reviews line named the published commit" "reviews: " "$CO_OUT"
 expect_contains "ORDER-7d …which names the commit the branch is at" "$(printf '%.12s' "$OM_TIP")" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ')"
@@ -220,15 +220,10 @@ section "§REG: the continuation's regression line prints the full pass's state 
 # ============================================================
 # fails-when: the continuation reads the proof line alone, so over a whole run red at F whose reds two later landings
 # greened it says the whole run holds, or green, or leaves the landings since it uncounted.
-# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name), laid on
+# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, from tests/lib/proof-at-head-world.sh), laid on
 # this suite's own fixture; the continuation is the one `close-out.sh run` writes.
 # ANTI-VACUITY: REG-1 reads the line before REG-2 reads its state through the extractor REG-1 proved non-empty.
-REG_MISSING=""
-for _f in pah_world pah_cont_state; do
-  _b="$(awk -v n="$_f" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$(dirname "$0")/proof-at-head.test.sh")"
-  if [ -n "$_b" ]; then eval "$_b"; else REG_MISSING="$REG_MISSING $_f"; fi
-done
-expect_eq "REG-0 the builders were read out of tests/proof-at-head.test.sh" "" "$REG_MISSING"
+. "$(dirname "$0")/lib/proof-at-head-world.sh" || { echo "close-out-6.test.sh: cannot load lib/proof-at-head-world.sh"; exit 1; }
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
 pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
 run_close_as reg-close "$PAH_P" run

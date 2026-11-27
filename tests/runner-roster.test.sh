@@ -132,9 +132,7 @@ rr_glob() {
 RR_MARKS="$TMPROOT/marks"
 mkdir -p "$RR_MARKS"
 
-# ============================================================
 section "§2 a suite dropped into tests/ gates on the next invocation (a)"
-# ============================================================
 #
 # THE PAIR IS THE POINT. The same tree, the same runner, driven twice with one
 # new file in between and no edit anywhere: absent in the first run, present and
@@ -171,9 +169,7 @@ expect_eq "2.6 --serial reads the same derived roster" \
 expect_contains "2.7 …and reaches the same tally" "Gating: 4 passed, 0 failed" "$RR_OUT"
 expect_eq "2.8 …and the same exit status" "0" "$RR_RC"
 
-# ============================================================
 section "§3 a file in the glob that is not a suite is REFUSED, by name (b)"
-# ============================================================
 #
 # THE SHAPE ALL FIFTY-FIVE SUITES SHARE, measured 2026-09-06: first line
 # `#!/bin/bash`, and a line sourcing the framework. A file in tests/ that has
@@ -259,9 +255,7 @@ rr_drive "$T3B"
 expect_eq "3.16 …but a wrong shebang is still refused with no framework present" "2" "$RR_RC"
 expect_contains "3.17 …naming that file" "tests/probe2.test.sh" "$RR_OUT"
 
-# ============================================================
 section "§4 an empty tests/ refuses rather than reporting green over nothing (c)"
-# ============================================================
 
 T4="$TMPROOT/t4"
 rr_tree "$T4"
@@ -289,9 +283,7 @@ expect_contains "4.9 …printing the width" "JOBS=" "$RR_OUT"
 expect_eq "4.10 …and running nothing" "0" \
   "$(ls "$RR_MARKS" 2>/dev/null | grep -c '\.ran$')"
 
-# ============================================================
 section "§5 the shipped tree: the roster the real runner reads is the real glob"
-# ============================================================
 #
 # The set-vs-set census (AC-6), taken on this repo without launching it: the
 # runner names no suite by hand any more, so the only thing that can disagree
@@ -334,9 +326,7 @@ expect_eq "5.6 …the reader exam is outside the roster glob" "0" \
 expect_eq "5.7 …and the exam is shipped, to be run by name" "yes" \
   "$([ -f "$REPO/tests/exam/reader-exam.sh" ] && echo yes || echo no)"
 
-# ============================================================
 section "§6 a glob match that is not a plain, plainly-named file is REFUSED"
-# ============================================================
 #
 # THE GLOB MATCHES MORE THAN FILES, and the wall's two shape halves read right
 # through the difference. A symlink is followed by both `read` and `grep`, so the
@@ -439,9 +429,7 @@ expect_eq "6.22 with every plant removed the same tree is green again" "0" "$RR_
 expect_eq "6.23 …and its suite ran" "yes" \
   "$([ -f "$RR_MARKS/keeper.ran" ] && echo yes || echo no)"
 
-# ============================================================
 section "§7 the runner refuses when its own width oracle is absent (walk F-9)"
-# ============================================================
 #
 # THE HARNESS PROVES ITS OWN PRECONDITIONS (design D-3). The width comes from
 # `pressure_level` in payload/scripts/lib/resources.sh, sourced by the runner. A
@@ -477,9 +465,7 @@ expect_absent "7.9 …and prints no width" "JOBS=" "$RR_OUT"
 # §8 (a `# runner: solo` suite held out of the parallel batch, T20) RETIRED BY WAVE-35 T2 (D11, AC-2.1):
 # the marker is read by nobody, and tests/runner-width.test.sh §NO-VOID proves it ignored.
 
-# ============================================================
 section "§9 the progress knob: one line per suite as it lands (T7, REQ-9)"
-# ============================================================
 #
 # WHAT IT COVERS. Nothing in a default run prints a verdict until the whole queue
 # has drained (tests/run.sh's own drain comment), so a floor run that takes an
@@ -731,9 +717,7 @@ expect_eq "9.27 …while the report printed that same suite FIRST" \
   "aaa-slow.test.sh" "$(rr_labels_ordered "$RR9_OUT" | sed -n '1p')"
 
 
-# ============================================================
 section "§PROGRESS a section boundary inside a running suite writes a line (wave-30 T8; Δ5a, AC-3.8)"
-# ============================================================
 #
 # WHAT IT COVERS. The runner captures each suite's output and prints it at the suite's end, so a
 # run's log is silent for the length of its longest suite. The progress file is how a run is seen
@@ -794,9 +778,7 @@ PRU="$TMPROOT/tpr-unset.progress.tsv"; rm -f "$PRU"
 expect_true "PR.8a (control) the probe ran again with the knob unset" test -f "$RR_MARKS/pr-probe.one"
 expect_false "PR.8 …and with the knob unset section() writes no file" test -e "$PRU"
 
-# ============================================================
 section "§10 the header names the head and the dirt of the tree under test (wave-26 T4; D5)"
-# ============================================================
 #
 # A run's verdict is a claim about one state of the code, so the header says which:
 # `head=<40-hex> dirty=<porcelain lines>` for the tree the runner cd's into. The scratch tree
@@ -828,9 +810,7 @@ rr_drive "$T10N"
 expect_eq "10.4 a tree that is no repository names no head" "head=none dirty=none" \
   "$(printf '%s\n' "$RR_OUT" | /usr/bin/grep '^head=')"
 
-# ============================================================
 section "§ASK a whole run asks the gate once; --serial asks per suite (T12; AC-2.12; wave-32 T2, D1, AC-1.1)"
-# ============================================================
 #
 # THE CLAIM. Wave-28 T12 made every `--one` worker ask `gate_ask work <suite>` for itself and the
 # runner hold nothing. WAVE-32 T2 (D1, AC-1.1; A-orch-8) REVERSES THAT FOR A WHOLE RUN BY DESIGN,
@@ -904,9 +884,7 @@ expect_eq "ASK.10 a run wrapped in the shim is green" "0" "$RR_RC"
 expect_eq "ASK.11 …the shim took no number, and the run asked once for itself (T2)" \
   "tests/run.sh whole 0" "$(ra_reqs)"
 
-# ============================================================
 section "§SCRUB a suite never sees the runner's store (wave-30 T9; REQ-4 AC-4.2; D8)"
-# ============================================================
 #
 # THE CLAIM. A runner and its workers keep BIONIC_GATE_DIR for their own ask and end, but the SUITE PROCESS a worker
 # starts loses it, with CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT: through the first a suite read the run's store, through
@@ -964,5 +942,4 @@ BIONIC_GATE_DIR=control-store CLAUDE_PROJECT_DIR=control-proj CLAUDE_PLUGIN_ROOT
 expect_eq "SCRUB.8 the probe run by hand under the three reads each back" "BIONIC_GATE_DIR=control-store CLAUDE_PROJECT_DIR=control-proj CLAUDE_PLUGIN_ROOT=control-plug" \
   "$(cat "$RR_MARKS/probe-a.seen" 2>/dev/null)"
 
-# ============================================================
 finish
