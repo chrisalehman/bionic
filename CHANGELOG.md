@@ -202,10 +202,10 @@ What this release changed in the limits of 2.2.0, which stand as 2.2.0's entry w
 
 ### The landing numbers
 
-`landing-report --rows` at 5074682017bbe69b97785c819052b291633a3060 on 2026-11-27T19:22:43Z:
+`landing-report --rows` at 846abfb0a7fd6153cfa7e106585462e6487de55f on 2026-11-27T19:28:52Z:
 
 ```
-landings: queue=85 hand=0 git=0 · ready-to-landed median=44.9m p75=161.1m max=4545.1m · runs: green=560 red=29 none=2 discarded=91 red-then-green=0 run=1348 reused=0 absent=0 · waited median=1382s · killed=30
+landings: queue=86 hand=0 git=0 · ready-to-landed median=42.7m p75=159.9m max=4545.1m · runs: green=564 red=29 none=2 discarded=95 red-then-green=0 run=1354 reused=0 absent=0 · waited median=1325s · killed=34
 T1 queue ready=2026-11-22T20:09:40Z landed=2026-11-22T20:34:36Z minutes=24.9 runs=6 waited=992s wait=16.5 prove=8.4 rework=0.0 width=1
   units.test.sh green promised=78s actual=81s ratio=1.04
   reader.test.sh green promised=43s actual=47s ratio=1.09
@@ -961,6 +961,9 @@ T56 queue ready=2026-11-27T17:28:23Z landed=2026-11-27T17:30:18Z minutes=1.9 run
   render.test.sh green promised=10s actual=20s ratio=2.00
   doctor-version.test.sh green promised=176s actual=70s ratio=0.40
   commands.test.sh green promised=9s actual=4s ratio=0.44
+T69 queue ready=2026-11-27T19:24:24Z landed=2026-11-27T19:26:38Z minutes=2.2 runs=2 waited=28s wait=0.5 prove=1.8 rework=0.0 width=6
+  release-check.test.sh green promised=133s actual=104s ratio=0.78
+  name-scan.test.sh green promised=71s actual=83s ratio=1.17
 ```
 
 ## 2.2.0 — 2026-11-21
