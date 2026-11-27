@@ -132,7 +132,6 @@ WRITER_FACTS="$ALL_FACTS"
 READER_FACTS="checkout=$WAVE${NL}tree=$T1${NL}scratch=$S${NL}record=$REC${NL}plan=$PLAN${NL}report=$REPORT"
 UNBOUND_FACTS="$ALL_FACTS"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G0 purity: the decision and the reserved table read no file, no environment, no git"
 
 # The same facts under two different homes, two working directories and a scrubbed
@@ -194,7 +193,6 @@ while IFS= read -r fn; do
 done <<< "$G0_FNS"
 expect_eq "G0.11 no function but the resolver reads a file, a home or a directory" "" "$G0_REACH"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G1 a writer inside its recorded tree is allowed; a sibling or the main checkout is not"
 
 expect_eq "G1.1 a write in the writer's own tree allows" "allow" "$(dec writer "$WRITER_FACTS" "$(W "$T1/payload/x.sh")")"
@@ -223,7 +221,6 @@ G1_ONE="$(call grant_decide writer "/x" "/x" "$(W /y/f)${NL}$(W /z/f)")"
 expect_nonempty "G1.21 a two-effect denial prints a verdict" "$G1_ONE"
 expect_eq "G1.22 …exactly one line of it" "1" "$(printf '%s\n' "$G1_ONE" | wc -l | tr -d ' ')"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G2 the lead is allowed inside what the run created, and nowhere else"
 
 expect_eq "G2.1 the wave checkout allows" "allow" "$(dec lead "$LEAD_FACTS" "$(W "$WAVE/payload/x.sh")")"
@@ -242,7 +239,6 @@ expect_eq "G2.12 a fact carrying a newline cannot smuggle a root in" "deny-fix" 
   "$(kind "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; grant_roots writer "own=/x/a
 /etc" ; grant_decide writer "$GRANT_WRITE_ROOTS" "$GRANT_DELETE_ROOTS" "$(printf "W\t/etc/hosts")"' _ "$LIB")")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G3 a read-only agent has the scratch and its declared report"
 
 expect_eq "G3.1 the scratch allows a write" "allow" "$(dec reader "$READER_FACTS" "$(W "$S/notes.md")")"
@@ -255,7 +251,6 @@ expect_eq "G3.7 another file in the record dir is deny-fix" "deny-fix" "$(kind "
 expect_eq "G3.8 deleting its own report is deny-fix (write only)" "deny-fix" "$(kind "$(dec reader "$READER_FACTS" "$(D "$REPORT")")")"
 expect_eq "G3.9 the report path grants only itself, not files beside or under it" "deny-fix" "$(kind "$(dec reader "$READER_FACTS" "$(W "$REPORT.bak")")")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G4 the record is add-only for agents; the lead may delete there"
 
 expect_eq "G4.1 a writer's write under the record dir allows" "allow" "$(dec writer "$WRITER_FACTS" "$(W "$REC/T3-grant.md")")"
@@ -269,7 +264,6 @@ expect_eq "G4.6 a writer's move out of the record (a delete of its source) is de
 expect_eq "G4.7 an unbound session's record write is deny-fix (the scratch only)" "deny-fix" "$(kind "$(dec unbound "$UNBOUND_FACTS" "$(W "$REC/x.md")")")"
 expect_eq "G4.8 an unbound session's scratch write allows" "allow" "$(dec unbound "$UNBOUND_FACTS" "$(W "$S/x.md")")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G5 a path that resolves outside is outside: symlinks and .. are resolved first"
 
 # A real tree. `out` and `abs` point outside it, `dangling` names a file outside that does not
@@ -317,7 +311,6 @@ expect_eq "G5.19 a relative path is deny-fix" "deny-fix" \
 expect_eq "G5.20 the resolver's unresolved mark, passed on as a path, is deny-fix" "deny-fix" \
   "$(kind "$(call grant_decide writer "$G5/tree" "$G5/tree" "W${TAB}$(call grant_resolve "tree/real.txt")")")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G6 bionic's own state files are in no grant, the lead's included"
 
 # Every class is handed a root that CONTAINS .bionic/tmp, so only the state rule can deny:
@@ -345,7 +338,6 @@ G6_MSG="$(dec lead "checkout=$P" "$(W "$G6_TMP/roster-sid-1.state")")"
 expect_contains "G6.msg the denial names the state file" "$G6_TMP/roster-sid-1.state" "$G6_MSG"
 expect_contains "G6.msg2 …and says it is bionic's own state" "bionic's own state" "$G6_MSG"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G7 every deny-fix carries the target or reason, the roots and one next step"
 
 # One row per way to be denied, each through the full driver with the writer's facts. The
@@ -387,7 +379,6 @@ G7_NONE="$(dec reader "" "$(W "$P/x")")"
 expect_contains "G7.none an asker with no roots is told it has none" "no workspace" "$(fld 2 "$G7_NONE")"
 expect_contains "G7.none2 …and its one step is the lead" "lead" "$(fld 3 "$G7_NONE")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G8 a reserved action is never allowed; a table miss is denied with a fix"
 
 # tool | command or path | category. Each is decided with NO effects — the most an allow
@@ -478,7 +469,6 @@ expect_eq "G8.none no reserved row and no table miss was allowed" "" "$G8_ALLOWS
 expect_eq "G8.badcat an unknown category is malformed input, rc 2" "2" \
   "$(dec lead "$LEAD_FACTS" "" "secrets" >/dev/null; printf '%s' "$CALL_RC")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G10 the answer log is in no workspace"
 
 # The log's path is the project's log directory under the user's home (D9). It is read from
@@ -502,7 +492,6 @@ done
 expect_eq "G10.main the lead whose checkout is the main checkout still cannot write the log" "deny-fix" \
   "$(kind "$(dec lead "checkout=$P${NL}scratch=$S" "$(W "$G10_LOG")")")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G11 the project's shared directories are no checkout's, and the main root is no one's to delete"
 
 # A run that works in the main checkout itself hands the lead `checkout=<main>`, and that root
@@ -615,7 +604,6 @@ expect_contains "G11.msg7 …and says it holds the project" "project" "$G11_UP"
 expect_ne "G11.msg8 a shared-directory denial does not read as a plain outside-the-workspace one" \
   "$(fld 2 "$(dec lead "$G11_LEAD" "$(W "/elsewhere/x")")" | sed 's#/elsewhere/x#X#')" "$(printf '%s' "$G11_R" | sed "s#$P/.bionic/docs/x#X#")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G12 a write to a device sink is no effect; a delete of one, or any other device, is judged"
 
 # The reader prints `W<TAB>/dev/null` for every `2>/dev/null`. A write to /dev/null, /dev/stdout,
@@ -655,7 +643,6 @@ G12_MSG="$(dec writer "$WRITER_FACTS" "$(W /dev/null)${NL}$(W /elsewhere/x)${NL}
 expect_contains "G12.19 a denial beside sink writes names the real target" "/elsewhere/x" "$(fld 2 "$G12_MSG")"
 expect_no_regex "G12.20 …and counts no sink among the failing effects" 'more of its effects|/dev/' "$(fld 2 "$G12_MSG")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G13 a delete outside the delete roots: an agent is sent to the lead, the lead to the human"
 
 # Rule 6's delete fix used to tell every class to ask the lead, the lead included (T11's
@@ -680,7 +667,6 @@ for cls in writer reader; do
 done
 # The other rule-6 delete wording is unchanged: an agent deleting in the add-only record.
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G14 which program a word runs is the shared reader's; a match made to refuse stays case-blind"
 
 # Two questions, two rules (wave-25 T13; Chris's Step-4 ruling and A-orch-29). WHICH PROGRAM
@@ -780,7 +766,6 @@ G14_SRC="$(cat "$LIB" 2>/dev/null)"
 expect_regex "G14.src the lib asks the shared reader's fold" 'cmd_word_fold' "$G14_SRC"
 expect_no_regex "G14.src2 …and lower-cases no word itself" "tr '\\[:upper:\\]'|tr A-Z|tr '\\[A-Z\\]'" "$G14_SRC"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G15 every fix line sends the asker to the one above its own class"
 
 # A fix line never tells an asker to ask itself (T4's concern 2, wave-25 T13). A writer or a
@@ -809,7 +794,6 @@ for cls in lead unbound writer reader; do
   g15_check "G15.git.$cls" "$(dec "$cls" "$f${NL}main=$P" "$(D "$P/.git/index")")" "$P/.git" "$up" "$not"
 done
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G16 every common credential store is refused by any spelling of its path"
 
 # The stores a common tool keeps a secret in by default, at home spelled three ways and
@@ -866,7 +850,6 @@ for st in .npmrc .pypirc .git-credentials .kube/config .docker/config.json .gnup
   esac
 done
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G17 a read changes nothing about the roots; a read that reaches a credential store is reserved"
 
 # The reader's read lines (wave-25 T16's frozen interface): `R<TAB>path` for each file or
@@ -920,7 +903,6 @@ grant_reserved_effects /Users/alice "$(printf "R\t/w/a")" >/dev/null
 shopt -q nocasematch && printf on || printf off' _ "$LIB")"
 expect_eq "G17.ncm the caller's nocasematch is left as it was, off and on" "offon" "$G17_NCM"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 section "§G18 a read-only agent's report is a root only inside what the lead holds"
 
 # ADR-042 decision 1: a grant is never wider than its parent. A reader's report counts only
@@ -948,5 +930,4 @@ expect_eq "G18.10 with the main root, a report in the record under .bionic still
 expect_eq "G18.11 a writer is not bounded by this: its record write still allows" "allow" \
   "$(dec writer "own=$T1${NL}scratch=$S${NL}record=$REC" "$(W "$REC/T1.md")")"
 
-# ══════════════════════════════════════════════════════════════════════════════════════
 finish

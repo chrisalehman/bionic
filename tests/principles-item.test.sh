@@ -63,9 +63,7 @@ expect_diff_bytes() {  # <label> <file-a> <file-b>
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-# ---------------------------------------------------------------------------
 # The literals under test — spelled here, pinned to the payload below.
-# ---------------------------------------------------------------------------
 START_LIT='<!-- bionic:principles:start -->'
 END_LIT='<!-- bionic:principles:end -->'
 DOCTOR_ROW_LABEL='working principles'
@@ -101,9 +99,7 @@ new_bare_home() {  # -> a fresh $HOME with an empty ~/.claude and no CLAUDE.md
   printf '%s' "$sb"
 }
 
-# ---------------------------------------------------------------------------
 # Extractors
-# ---------------------------------------------------------------------------
 
 # The lines BETWEEN the principles markers, written to <out>, one per line.
 block_to() {  # <file> <out>
@@ -169,9 +165,7 @@ path_exists() {  # <path> -> yes|no
   if [ -e "$1" ]; then printf 'yes'; else printf 'no'; fi
 }
 
-# ---------------------------------------------------------------------------
 # Drivers
-# ---------------------------------------------------------------------------
 
 # BOTH homes point at the sandbox in every driver: HOME, and CLAUDE_CONFIG_DIR as
 # well as BIONIC_CLAUDE_HOME, so no resolution order can reach a real CLAUDE.md.
@@ -232,9 +226,7 @@ edit_block() {  # <file> <line>
   mv "$file.edit" "$file"
 }
 
-# ---------------------------------------------------------------------------
 section "§OWN: the ownership principle is the approved paragraph, placed after the first, and nothing else changed (AC-29.1)"
-# ---------------------------------------------------------------------------
 # fails-when: a word of the paragraph differs from the approved text, the paragraph is not the one
 # right after "Correctness over expedience", it is absent from the rendered block, or any other line
 # of the template differs from the template before this principle was added.
@@ -284,9 +276,7 @@ expect_eq "OWN: the template differs from the earlier one by that paragraph alon
 expect_eq "OWN: the reduction was read (the earlier template is not empty)" "yes" \
   "$([ -s "$TMP/own-without" ] && printf yes || printf no)"
 
-# ---------------------------------------------------------------------------
 section "§READER: the reader principle is the approved paragraph, between Lead and Decide, on one line (AC-29.1)"
-# ---------------------------------------------------------------------------
 # fails-when: a word of the paragraph differs from the approved text, it is not the line between the
 # "Lead with what the reader needs to decide" paragraph and the "Decide what is yours" paragraph with
 # one blank line each side, it is absent from the rendered block, or it appears twice.
@@ -318,9 +308,7 @@ expect_eq "READER: the rendered file holds it once, in the same place" "1 yes ye
 expect_eq "READER: …and inside the markers (the extractor read the block)" "1" "$(count_lines_equal "$TMP/own-block" "$READER_LIT")"
 expect_eq "READER: the paragraph and its blank line are 386 bytes" "386" "$(printf '%s\n\n' "$READER_LIT" | wc -c | tr -d ' ')"
 
-# ---------------------------------------------------------------------------
 section "§SET: written only on a yes, inside the markers (AC-9.1)"
-# ---------------------------------------------------------------------------
 
 block_to "$SHIPPED" "$TMP/shipped-block"
 
@@ -366,9 +354,7 @@ expect_eq "SET: an accepted offer on the same home creates it" "yes" "$(path_exi
 expect_same_bytes "SET: a created CLAUDE.md holds exactly the block" \
   "$TMP/expected-block" "$SB_BARE/.claude/CLAUDE.md"
 
-# ---------------------------------------------------------------------------
 section "§DOCTOR: three states, each its own line, nothing changed (AC-9.2)"
-# ---------------------------------------------------------------------------
 
 SB_DA="$(new_home)"
 SB_DP="$(new_home)"; setup_run "$SB_DP" $'y\n' >/dev/null 2>&1
@@ -403,9 +389,7 @@ expect_eq "DOCTOR: doctor left the present-state file unchanged" "$SUM_P" "$(sum
 expect_eq "DOCTOR: doctor left the edited-state file unchanged" "$SUM_E" "$(sum_of "$SB_DE/.claude/CLAUDE.md")"
 expect_ne "DOCTOR: the checksum discriminates (the edited file is not the present one)" "$SUM_P" "$SUM_E"
 
-# ---------------------------------------------------------------------------
 section "§REMOVE: the file comes back to its pre-setup bytes (AC-9.3)"
-# ---------------------------------------------------------------------------
 
 ENV_START="$(const_from "$ENV_SH" PRINCIPLES_START)" || ENV_START=""
 ENV_END="$(const_from "$ENV_SH" PRINCIPLES_END)"     || ENV_END=""
@@ -451,9 +435,7 @@ expect_eq "REMOVE: a CLAUDE.md that held only the block is gone after remove" "n
 # unedited, and the deletion rule needs that (wave-27 T40): the file stays, empty.
 expect_eq "REMOVE: the claude home itself survives" "yes" "$(path_exists "$SB_RB/.claude")"
 
-# ---------------------------------------------------------------------------
 section "§EDITED: an edited span is bionic's — setup replaces it and asks nothing (AC-7.2)"
-# ---------------------------------------------------------------------------
 # A replacement is the shipped text and
 # leaves every line outside the markers as it was.
 
@@ -487,9 +469,7 @@ expect_same_bytes "EDITED: a span equal to the shipped text is not rewritten" "$
 expect_contains "EDITED: …and the run says it is already there (the item line is clipped to the page width, so the tail is not asserted)" "already in" "$E_EQ_OUT"
 expect_absent "EDITED: …and does not claim an update" "updated" "$E_EQ_OUT"
 
-# ---------------------------------------------------------------------------
 section "§CUT-SHORT: a write that fails partway changes nothing (wave-27 T40)"
-# ---------------------------------------------------------------------------
 #
 # `ulimit -f` in the child, with SIGXFSZ ignored so the write FAILS rather than
 # killing the process: the shape a full disk takes. The user's file is larger
@@ -533,9 +513,7 @@ WS_OUT="$(trap '' XFSZ; ulimit -f 32; setup_run "$SB_WS" $'y\n')"
 expect_same_bytes "CUT-SHORT: a setup write cut short leaves the file byte-identical" "$TMP/ws-before.md" "$SB_WS/.claude/CLAUDE.md"
 expect_contains "CUT-SHORT: …and setup says it could not write it" "could not write" "$WS_OUT"
 
-# ---------------------------------------------------------------------------
 section "§MALFORMED: markers that do not pair up are refused by every door (wave-27 T40)"
-# ---------------------------------------------------------------------------
 #
 # Each shape is the user's file; each door is answered yes; each must write
 # nothing and name the line it found. Probe shapes from review pass 9 (probe-lib
@@ -608,9 +586,7 @@ printf '%s\n' '```' "$START_LIT" 'an example body' "$END_LIT" '```' > "$SB_F/.cl
 expect_eq "FENCED: a whole pair inside a fence reads as a block (edited)" \
   "env:working-principles state=edited" "$(detect_run "$SB_F")"
 
-# ---------------------------------------------------------------------------
 section "§REMOVE-EDITED: remove shows an edit and deletes it only on a yes (AC-9.4)"
-# ---------------------------------------------------------------------------
 
 SB_RE="$(new_home)"; setup_run "$SB_RE" $'y\n' >/dev/null 2>&1
 edit_block "$SB_RE/.claude/CLAUDE.md" '- my own rule'
@@ -629,9 +605,7 @@ RES_NO="$(remove_run "$SB_RES" n "$TMP/standalone/remove.sh")"
 expect_contains "REMOVE-EDITED: the standalone door shows the block's lines before asking" "my own rule" "$RES_NO"
 expect_same_bytes "REMOVE-EDITED: …and a no keeps them" "$TMP/res-before.md" "$SB_RES/.claude/CLAUDE.md"
 
-# ---------------------------------------------------------------------------
 section "§DELETE: the file goes only when it held the unedited block and nothing else"
-# ---------------------------------------------------------------------------
 #
 # The rule (wave-27 T40, the orchestrator's ruling on A-T40.2): remove deletes
 # CLAUDE.md when, and only when, the strip succeeded, the block was `present`,
@@ -675,9 +649,7 @@ D4_OUT="$(remove_run "$SB_D4" y)"
 expect_absent "DELETE: a file with the user's text besides the block is not announced as a deletion" "delete the file" "$D4_OUT"
 expect_same_bytes "DELETE: …and comes back as the user's bytes" "$TMP/planted.md" "$SB_D4/.claude/CLAUDE.md"
 
-# ---------------------------------------------------------------------------
 section "§READ-ONLY: a file the user made read-only is refused, never overwritten"
-# ---------------------------------------------------------------------------
 
 SB_RO="$(new_home)"; chmod 444 "$SB_RO/.claude/CLAUDE.md"
 RO_OUT="$(setup_run "$SB_RO" $'y\n')"
@@ -691,9 +663,7 @@ expect_same_bytes "READ-ONLY: remove answered yes leaves it byte-identical" "$TM
 expect_contains "READ-ONLY: …and says why" "read-only" "$RO_RM"
 chmod 644 "$SB_RO/.claude/CLAUDE.md"
 
-# ---------------------------------------------------------------------------
 section "§EDITED-STATE: an edited span is a state, not a finding — and the --all page names its update"
-# ---------------------------------------------------------------------------
 # Inverted at wave-31 T10: the --all page used to leave an edited block off ("an edited
 # block is the user's"); bionic's span is now replaced by setup, so the page names it.
 
@@ -706,9 +676,7 @@ PLAN_A="$(setup_plan "$SB_DA")"
 expect_contains "EDITED-STATE: the --all page offers the principles on an absent block" "working principles" "$PLAN_A"
 expect_contains "EDITED-STATE: the --all page names the update of an edited span" "working principles" "$PLAN_E"
 
-# ---------------------------------------------------------------------------
 section "§CONSENT: the path and the full text are on screen before the question"
-# ---------------------------------------------------------------------------
 
 C_OUT="$(setup_run "$(new_home)" $'n\n')"
 # The screen folds the text to the page's width at spaces, keeping each space, so
@@ -721,9 +689,7 @@ expect_contains "CONSENT: the summary names the rule that lets an agent act with
 C_BEFORE_Q="${C_OUT%%\[y/N\]*}"
 expect_contains "CONSENT: the text is printed BEFORE the question, not after" "Decide what is yours" "$C_BEFORE_Q"
 
-# ---------------------------------------------------------------------------
 section "§T46-ALL: under remove --all the item says what goes before and after (review pass 14 F1)"
-# ---------------------------------------------------------------------------
 #
 # `--all` is the consent and no question is added; the item's own line says,
 # BEFORE it acts, that the block and the file will be deleted, and its result
@@ -754,9 +720,7 @@ A2_OUT="$(remove_all "$SB_A2")"
 expect_absent "ALL: …no deletion of the file is announced" "✓ deleted ${A2_PATH}" "$A2_OUT"
 expect_same_bytes "ALL: …and the user's text is byte for byte what it was" "$TMP/planted.md" "$A2_PATH"
 
-# ---------------------------------------------------------------------------
 section "§T46-NOT-A-FILE: a path that is no file is refused, and nothing is made in it (F6)"
-# ---------------------------------------------------------------------------
 
 SB_DIR="$(new_bare_home)"; DIR_PATH="$SB_DIR/.claude/CLAUDE.md"
 mkdir "$DIR_PATH"; printf 'mine\n' > "$DIR_PATH/notes.txt"
@@ -806,9 +770,7 @@ expect_eq "NOT-A-FILE: a link to a regular file is followed and written through 
   "$(count_lines_equal "$SB_LF/real.md" "$START_LIT")"
 expect_true "NOT-A-FILE: …and stays a link" test -L "$SB_LF/.claude/CLAUDE.md"
 
-# ---------------------------------------------------------------------------
 section "§T46-SHOWN: remove writes only the block its question showed (F5)"
-# ---------------------------------------------------------------------------
 #
 # The fixture reads remove's output up to the question's `[y/N]`, copies <next>
 # over the file while the question waits, and only then answers. No sleep: the
@@ -855,9 +817,7 @@ CS_OUT="$(remove_changed_at_question "$SB_CS" "$TMP/cs-b2.md" y "$TMP/standalone
 expect_same_bytes "SHOWN: the standalone door writes nothing over a changed block either" "$TMP/cs-b2.md" "$SB_CS/.claude/CLAUDE.md"
 expect_contains "SHOWN: …and says so" "changed since it was shown" "$CS_OUT"
 
-# ---------------------------------------------------------------------------
 section "§T51-NUL: a file holding a NUL byte is not text, and nothing reads it as the block alone"
-# ---------------------------------------------------------------------------
 #
 # Review pass 21 F5: `/bin/bash` 3.2's `read` cuts a line at a NUL byte, so
 # `<end marker>\0mine` read as the end marker alone, the file as "the unedited
@@ -944,9 +904,7 @@ for T51_SH in $T51_BASHES; do
   done
 done
 
-# ---------------------------------------------------------------------------
 section "§T51-COPIES: the copies kept by name are their originals', body for body"
-# ---------------------------------------------------------------------------
 
 # The body of a top-level function: every line after its `name() {` line up to
 # the first line that is `}` alone. The signature line is left out, because its
@@ -1078,9 +1036,7 @@ expect_true "COPIES: the hooks.sh resolver mutant still parses" bash -n "$TMP/ho
 expect_ne "COPIES: …and its bionic_link_target no longer matches (the pin can go red)" \
   "$LIB_LNK" "$(fn_body "$TMP/hooks-mutant-lnk.sh" bionic_link_target)"
 
-# ---------------------------------------------------------------------------
 section "§T51-UNREADABLE: a regular file the user cannot read is reported as unreadable (F4)"
-# ---------------------------------------------------------------------------
 
 SB_UR="$(new_home)"; setup_run "$SB_UR" $'y\n' >/dev/null 2>&1; UR_F="$SB_UR/.claude/CLAUDE.md"
 cp "$UR_F" "$TMP/ur-before"; chmod 200 "$UR_F"
@@ -1099,9 +1055,7 @@ UR_ROW2="$(report_row "$(doctor_run "$SB_UR")" "$DOCTOR_ROW_LABEL")"
 expect_absent "UNREADABLE: the same file made readable is not unreadable (the twin)" "unreadable" "$UR_ROW2"
 expect_contains "UNREADABLE: …and reads as a working row" "✓" "$UR_ROW2"
 
-# ---------------------------------------------------------------------------
 section "§T51-PAGE: the --all page line says the file will be deleted, when it will be (F6)"
-# ---------------------------------------------------------------------------
 
 remove_page() {  # <home> — the `remove --all` page, answered no: printed, nothing done
   printf 'n\n' | env -i HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/allbin:/usr/bin:/bin" TMPDIR="$TMP" \
@@ -1120,5 +1074,4 @@ P2_LINE="$(report_row "$(remove_page "$SB_P2")" "bionic's working principles")"
 expect_nonempty "PAGE: the user's text beside it — the page carries the line" "$P2_LINE"
 expect_absent "PAGE: …and it announces no deletion of the file (the twin)" "delete the file" "$P2_LINE"
 
-# ---------------------------------------------------------------------------
 finish

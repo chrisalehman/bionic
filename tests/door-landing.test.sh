@@ -130,7 +130,6 @@ dl_seen_judge() {
     END { print n + 0, k + 0 }'
 }
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§LAND: the release row lands by hand with the real changelog, and the check passes at the landed head"
 
 # The list the world's declaration names: dl_check and §COPY run the check with it, as the declaration does.
@@ -208,7 +207,6 @@ expect_eq "(ls2) CONTROL …and the declared check at the landed head is green, 
   "$DOOR_RC"
 expect_contains "(ls2b) CONTROL …its numbers agreeing" "landing-numbers: $DOOR_VERSION agrees" "$DOOR_OUT"
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§JUDGE: the verb and the door judge with the release base's copy, never the target's or the head's"
 
 # The fixture has no tag, so its release base is the plan's `base-sha:`, the copy's first head: that commit's check
@@ -312,7 +310,6 @@ for DL_F in hooks/poker/proof.sh payload/scripts/lib/worktree.sh; do
   expect_true "(c7c) $DL_F calls the runner" /usr/bin/grep -q 'worktree_check_run ' "$BIONIC_SCRIPTS_DIR/$DL_F"
 done
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§DECLARED: the check's files are the declared list; a landing names the ones it changes, and no other"
 
 # The fixture declares `release-check-files:` as bionic does (tests/lib/door.sh). payload/scripts/lib/session.sh is
@@ -360,7 +357,6 @@ for DL_F in payload/scripts/lib/line.sh hooks/poker/plan.sh; do
     /usr/bin/grep -q '_wt_check_judge "' "$BIONIC_SCRIPTS_DIR/$DL_F"
 done
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§COPY-4: a check declared by the main checkout's absolute path is run as the judge holds it"
 
 # The declaration is read from the main checkout, and the door runs it in a landing tree pointed at the judge: an
@@ -384,7 +380,6 @@ expect_eq "(c4-1c) the door's run of the check is the judge's copy in a landing 
   "1 1" "$(dl_seen_judge "$DQ")"
 expect_absent "(c4-1d) …never the main checkout's working copy the word names" " script=$DQ/tests/lib/release-check.sh" "$DQ_SEEN"
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§INFO: a landing that changes the check lands; its line and the release approval card name what it changes"
 
 # dl_named <root> -> DL_NP, the row T1's tree, and DL_NH1, the accepted head. The target's committed check carries a
@@ -425,7 +420,6 @@ DN_CARD="$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -F 'changes the release che
 expect_nonempty "(n4-0) the release approval card has its check line" "$DN_CARD"
 expect_contains "(n4) …naming the check's file the release changes" "tests/lib/release-check.sh" "$DN_CARD"
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§HAND: the hand route meets the check: a planted name is refused, and without the check's call it publishes"
 
 read -r DH DH_H0 <<EOF
@@ -452,7 +446,6 @@ expect_contains "(hm1b) MUTANT …published by hand" "run/v1|ev=published|row=T1
   "$(dl_record "$DH")"
 expect_absent "(hm1c) MUTANT …with no refusal by the door's check" "REFUSED reason=check-failed" "$DH_OUT"
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§COVER: the release row's landing reads the judge's cover over its own candidate and names a path outside the set"
 
 # dl_cover_world <dir> -> DV, the root of a copy whose T2 is the release row (a doc row at step 7, the plan's own
@@ -487,7 +480,6 @@ expect_contains "(v3b) CONTROL …and its landing reads the cover over its candi
   "COVER T2 $(dl_head "$DV") release" "$DOOR_OUT"
 
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§RERENDER: a row landing past the landed release has its release numbers rendered and committed by the line"
 
 # dl_rr_world <dir> -> DR, DR_H0: a copy whose T2 is the release row (a doc row at step 7) and whose plan gains the
@@ -587,7 +579,6 @@ DR_PUB="$(dl_published "$DR" T3)"
 expect_contains "(rr6d) the record publishes the landing at the head" "run/v1|ev=published|row=T3|commit=$DR_H3|" "$DR_PUB"
 expect_absent "(rr6e) …with no numbers commit" "numbers=" "$DR_PUB"
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§RATIO: a landing that pushes tests past code is refused at the door; one under the cap lands beside it"
 
 # dl_counts <check output> -> `<tests> <code>` from the check's one ratio line, a pass's or a refusal's; nothing when it has none.
@@ -637,7 +628,6 @@ expect_eq "(ra2) CONTROL the piece with 1000 test characters lands by hand (exit
 expect_contains "(ra2b) CONTROL …LANDED onto the working branch" "LANDED branch=wt/T1 onto=wave/x" "$DOOR_OUT"
 expect_absent "(ra2c) CONTROL …with no ratio refusal" "tests exceed code" "$DOOR_OUT"
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§RATIO-2: a landing that cuts test characters is admitted, and the ratio prints"
 
 # A fixture whose accepted head is over the cap (the big file committed on the working branch), and a piece that cuts it.
@@ -660,7 +650,6 @@ expect_absent "(rb1c) …with no ratio refusal" "tests exceed code" "$DC_OUT"
 dl_check "$DC" "$DC_H0" "$DC_H2"
 expect_contains "(rb2) the declared check at the landed head prints the ratio, the fixture's own again" "test-ratio: $DA_T/$DA_C" "$DOOR_OUT"
 
-# ---------------------------------------------------------------------------------------------------------------
 section "§DIRTIED: a release check that dirties the tree it is handed, planted at the release base, is refused check-dirtied"
 
 # The check runs as the release base holds it, so the dirtying copy is committed on the working branch and the plan's
