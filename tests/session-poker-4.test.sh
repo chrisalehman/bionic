@@ -33,9 +33,7 @@ POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
-# ============================================================
 section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §CUR8-sev: a reading pushed the severity scale carries each finding's severity and reach, and the tool derives the priority and the verdict (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.5, AC-8.6, AC-8.8; D19)"
-# ============================================================
 #
 # With `severity` in the reader row's `pushed=`, `proof-add review <record> --question <q> --reader <name>` requires
 # `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>` lines, and a `<path>:<line>` with
@@ -411,9 +409,7 @@ expect_eq "RPC-2 …showing the ruling closes it at once: nothing left open for 
 expect_contains "RPC-3 …and the register keeps the item, closed" "|key=ruling:$SEV_RID|state=closed|by=ruling read|" "$(sev_store)"
 POKE_BOUND="$SEV_BOUND_WAS"
 
-# ============================================================
 section "§DEBT-PARSE §DEBT-LEDGER §DEBT-ADVISORY (the verb half): a debt: line is a flag-class finding the reader names by kind and concept, and the run's ledger holds one line per item (wave-30 T22; REQ-11 AC-11.1, AC-11.2, AC-11.3; D2, P2; A-orch-8)"
-# ============================================================
 #
 # severity.md writes `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]` flush left beside the `finding:` lines,
 # uncounted in `findings:`. lib/proof.sh `proof_findings` reads it as `debt<TAB><kind><TAB><concept><TAB><sites>
@@ -637,9 +633,7 @@ poke "$RDU" debt adopt "$DBT_CONT" "$DBU_PLAN"
 expect_eq "DEBT-U2 control: the same adopt naming the plan writes that plan's ledger (exit 0)" \
   "0|poker: debt adopt — 1 adopted, 1 already there: record/wave-00-prior/run.log" "$RC|$OUT"
 
-# ============================================================
 section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"
-# ============================================================
 #
 # `ready` appends `standing` when a red also fails at the accepted head (the branch's, not a row's) and `stalled` when
 # an entry's runs twice gave no verdict. The tick prints each off the bound plan's landing record as a note, once; a
@@ -659,9 +653,7 @@ printf 'run/v1|ev=standing|head=%s|suite=a.test.sh|lines=1|log=/rec/line/T2-a-%s
 s60_tick
 POKE_BOUND="$LT_BOUND_WAS"
 
-# ============================================================
 section "§COPIED-LOG §REVIEW-RANGE §CUR7-COVERED: what a run's close wrote by hand, a verb writes or reads"
-# ============================================================
 # FIXTURE FIDELITY. §SEV's shape, built fresh: a plan bound to this session at Step 5, its working branch in a
 # linked worktree, real commits, a reader row from the production writer, and the run line through the product's
 # writer (regression_fixture). Every write goes through the real verb.
@@ -786,9 +778,7 @@ poke "$RVG" current 8 --check
 POKE_BOUND="$VG_BOUND_WAS"
 
 
-# ============================================================
 section "§REPLY-SEQ: one reply orders the release approval card's decisions in sequence, each applied in order and recorded"
-# ============================================================
 # FIXTURE FIDELITY. §COPIED-LOG's plan at its working head, its reading's record given one S3 finding; the page's
 # record carries the replay table in its writer's row shape (release-approval.test.sh §SHAPE pins that row). Decision
 # 1's default names a row the plan lacks, so taking it refuses; 2 waives the plan's one matrix row; 3 moves the
@@ -886,9 +876,7 @@ expect_eq "RS-9c AC-18.3 the judge moved on words quoted with their line break, 
   "$RC|$(rs_approval judge | /usr/bin/grep -c '|said=judge from this head on. Its copy of the check is the one.|')"
 export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 
-# ============================================================
 section "§BRIEF-PINS: a suite declares the files it pins with one header line, and the brief names them on Files, each marked"
-# ============================================================
 # A row's Suites name the suites a writer runs; each suite's `# pins: <path> [<path>…]` header line names the files
 # whose changes it holds, so a brief carries them on Files and the writer is not left waiting on an amend. The reader
 # is the suite's own header, never a search of its text. Fixture: scratch suites under a scratch repository, one
@@ -972,9 +960,7 @@ expect_nonempty "BP-7 setup: the search finds the pins reader in hooks/" "$(/usr
 expect_eq "BP-7b AC-12.2 /usr/bin/grep -rn 'reads_suites\\|poker_brief_index_suites' hooks/ prints nothing" "" \
   "$(/usr/bin/grep -rn "reads_suites\|poker_brief_index_suites" "$BIONIC_HOOKS_DIR")"
 
-# ============================================================
 section "§AMEND-NARROW: amend --suites= narrows a live contract's suites and its lands_on= with them; the collector hands the wall the suites that exist"
-# ============================================================
 # `amend` was a union, old members first, never a narrowing. `--suites=<a,b>` sets the row's suite set to exactly those,
 # each of which the row already holds (a name it does not hold widens, and `--suites+` is the verb for that), and
 # `lands_on=` keeps only the suites still in the set: a row that lands on a suite it may not run is a contract the
@@ -1026,9 +1012,7 @@ expect_eq "AN-8b --suites+ naming no file under tests/ is refused (exit 1) and w
   "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN3")")"
 expect_contains "AN-8c …naming the entry" "nosuch.test.sh" "$OUT"
 
-# ============================================================
 section "§REVIEW-FILES §FILES-UNHELD: each verb a close meets writes its cell, or names the edit that does"
-# ============================================================
 # A close met verbs that sent it in a circle: a review row's Files held one record for three questions; amend sent a closed
 # contract to a new dispatch. FIXTURE FIDELITY: a task-scale plan at single rigor with a
 # reads table carrying an artifact cell and no ledger, bound to this session, its working branch the repository's
@@ -1173,9 +1157,7 @@ expect_eq "FU-4 amend on a closed contract is refused (exit 1)" "1" "$RC"
 expect_contains "FU-4b …and names the edit of the Files cell of the row its contract held" "edit the Files cell of T3 in the plan" "$VC_AREF"
 expect_absent "FU-4c …not a new dispatch" "dispatch the work again" "$VC_AREF"
 
-# ============================================================
 section "§TICK-LANDS: the tick lands a record row on the registration its kind owes, one published event, no cell"
-# ============================================================
 # A record row has no tree and no ready: the tick lands it (hooks/poker/line.sh `record_row_land`) once its checks
 # pass, and nothing else does. A row nobody launched lands when it is ready; a row that owes a registration lands on it,
 # never on its file: a review on its review registered, a regression row on the whole run's proof at the head, a walk
@@ -1351,9 +1333,7 @@ expect_eq "UL-6 a second tick over the same tree head names it again nowhere" "0
 poke "$UL" tick
 expect_contains "UL-7 a new commit is a new tree head: the writer is told again" "NOT-LANDED T31 — w-T31" "$(ul_said T31)"
 
-# ============================================================
 section "§STACK: the regression's health is the judge's rendering, and no verb writes it into the plan"
-# ============================================================
 # `proof-add regression` registers the whole run's proof and leaves the plan's text as it was; lib/proof.sh
 # `proof_health_line` renders the health the sheet and the card print: green only at a pass that left nothing owed.
 # FIXTURE FIDELITY. §COPIED-LOG's shape at Step 5, a run at 15; run lines from regression_fixture; every later write goes
@@ -1413,9 +1393,7 @@ expect_eq "VT-17b AC-5.2 …and the function still renders red at G, owed= empty
   "$(vt_sh_line red "$VT_G" 2 3 record/wave-01-fixture/whole-red2.log "" c.test.sh)" "$(vt_health)"
 POKE_BOUND="$VT_BOUND_WAS"
 
-# ============================================================
 section "§STARTER: the tick starts the whole run itself when nothing is ready, no writer is open and the head is past the last regression proof"
-# ============================================================
 # The tick starts `regression-run --starter tick` detached through booked.sh as roster object `regression@<h8>`, whose
 # one suite is run.sh, never waiting; the proof lands through proof-add regression. A landing past it moves the head, so
 # the next tick starts again. A live object guards against a second start; a run the gate did not admit (75) is told as
@@ -1602,9 +1580,7 @@ expect_eq "ST-14 AC-10.2 the one open writer is T9's, whose row waits on the reg
 rm -f "$ST_CTL/hold"
 expect_true "ST-14b …and its run ends" st_until 60 st_ended "$(st_log "${ST_H4:0:8}")"
 
-# ============================================================
 section "§POINT-ASKED: a point whose rows have landed is run by the tick while a later build is open, and the tick lands it"
-# ============================================================
 # The point T11 follows T7 and T8, both landed; T10, a later build, is under way with its writer open, which declines a whole
 # run. The tick starts the point's run as `point-T11@<h8>` all the same, its proof lands through proof-add point, and the
 # next tick lands the point's row on that proof.
@@ -1650,9 +1626,7 @@ expect_eq "PA-3b …once: the run's log holds one landing of T11" "1" \
 POKE_BOUND="$ST_BOUND_WAS"
 
 
-# ============================================================
 section "§WALK: a walk's record discharges each criterion it confirms by one proof naming it, the plan unwritten"
-# ============================================================
 # The walk record carries the critic's shape, read by proof_verdicts. `proof-add walk <record>` appends one walk proof
 # and, for each CONFIRMED row, one proof naming the criterion with the record as its evidence; the plan is not written.
 # A run has one walk record and it only grows: a record that leaves out a criterion a standing walk confirms is refused,

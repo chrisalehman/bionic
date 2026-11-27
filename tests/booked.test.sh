@@ -99,9 +99,7 @@ expect_true "(fixture) the world repository and its row tree T1 exist" test -d "
 ROSTER="$WR/.bionic/tmp/roster-$WORLD_SID.state"
 expect_true "(fixture) the world's roster exists and names wx-T1" grep -q '|name=wx-T1|' "$ROSTER"
 
-# =====================================================================================
 section "§DETACH — the run outlives its caller's process group and ends rc=<n> (AC-3.1, AC-3.6, AC-3.8)"
-# =====================================================================================
 #
 # THE CONTROL FIRST: the same SIGKILL of the same kind of group, over a command that is NOT
 # detached, takes the command with it. So "the detached run wrote its rc" below is a run that
@@ -203,9 +201,7 @@ expect_true "DT.26 a detached run started from inside a held command ends its lo
 expect_contains "DT.26b …its command saw the variable the caller exported beside the hold" "kept|" "$(cat "$D/hd.saw" 2>/dev/null)"
 expect_eq "DT.27 …and did not see the caller's hold" "kept|unset" "$(cat "$D/hd.saw" 2>/dev/null)"
 
-# =====================================================================================
 section "§LOG2 — a second attempt writes …-2.log and never truncates the first (AC-3.4)"
-# =====================================================================================
 L1_BYTES="$(wc -c < "$DT_LOG" | tr -d ' ')"
 bk_caller l2 "$T1" --detach --agent wx-T1 --suites probe.test.sh -- "echo second-attempt"
 bk_wait 10 bk_grep '^booked: started ' "$D/l2.out"
@@ -226,9 +222,7 @@ expect_eq "L2.6 a third attempt writes …-3.log" "${DT_LOG%.log}-3.log" "$L3_LO
 expect_eq "L2.7 …and the roster's latest wx-T1 row names that third run" "${L3_LOG:-<none>}" \
   "$(grep '|name=wx-T1|' "$ROSTER" | tail -n 1 | tr '|' '\n' | sed -n 's/^run_log=//p')"
 
-# =====================================================================================
 section "§WAIT-CALLER — the caller waits on its run, streams it, and a re-run attaches (T12; A-orch-7; AC-3.2, AC-3.3, AC-3.8)"
-# =====================================================================================
 #
 # DETACH AND WAIT. The caller of --detach polls the run's log every BIONIC_RUN_POLL seconds until
 # its last line is `rc=<n>`, copies each new whole line of the log to its stdout, prints the run's
@@ -300,9 +294,7 @@ expect_regex "LS.2 …with one LOST line naming the run and when its log was las
 expect_eq "LS.3 …and never the word timeout (beside LS.2 on the same output)" "0" \
   "$(grep -ci 'timeout' "$D/ls.out" 2>/dev/null)"
 
-# =====================================================================================
 section "§DETACH-CEILING — a detached run the gate has not admitted within the bound ends 75 with one line (T12; D10; AC-9.4)"
-# =====================================================================================
 #
 # A detached run's wait is inside no call, so with nothing else to bound it the wait had no end. The
 # detached side now asks the gate with --within BIONIC_SETTLE_MAX_WAIT (1200 s by default; 3 here), and
@@ -366,9 +358,7 @@ if [ -n "$CE_CFG_WAS" ]; then export CLAUDE_CONFIG_DIR="$CE_CFG_WAS"; else unset
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate"
 world_machine 8 8192 10 0.5
 
-# =====================================================================================
 section "§RUNLINE — the run close writes the run's line to the bound plan's landing record, and the floor's one reader reads it (wave-37 T4; D7; REQ-6 AC-6.1, AC-6.2; ADR-057)"
-# =====================================================================================
 #
 # THE OTHER WRITER. floor-run is one (session-poker-4 §RUNLINE); booked.sh's run close is the other: a detached run
 # whose session is bound to a plan appends, after the log's rc line and before `<log>.rc`,
@@ -453,9 +443,7 @@ expect_eq "BR-6b …--starter person names the person" "person" \
 expect_eq "BR-6c …a word that is none of the three reads as the orchestrator" "orchestrator" \
   "$(rl_starter rlx "echo a stray word; : regression-run --starter someone; exit 0")"
 
-# =====================================================================================
 section "§SIGNALS — a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their defaults (wave-39 T14; D17; AC-10.1)"
-# =====================================================================================
 #
 # A shell that starts with a signal ignored cannot trap it and cannot be ended by it, and the ignored
 # state is inherited by everything below: the whole run at d3c4ed2e started with HUP, INT and QUIT
@@ -542,9 +530,7 @@ expect_true "(fixture) the scratch runner is a byte copy of the shipped one and 
 sg_drive run bash -c "cd '$SGR' && exec env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT BIONIC_GATE_DIR='$D/sg-gate' BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PRESSURE_RING='$D/sg-ring' BIONIC_TEST_JOBS_CEILING=2 bash tests/run.sh"
 expect_eq "SG-2 AC-10.1 tests/run.sh started with the three ignored: the suite it runs sees HUP, INT and QUIT" "$SG_ALL" "$SG_SAW"
 
-# =====================================================================================
 section "§CLASS — a browser or compile run is asked as work with its class on the request, and a bad class asks nothing"
-# =====================================================================================
 # The wall wraps such a run as `booked.sh --class <c> --suites <key> -- <cmd>`; the request carries class=<c> and the room
 # free as its promise. A store per case; the machine reads no busy cores, so the room is the whole width.
 cl_run() { CL_GD="$D/cl-$1"; rm -rf "$CL_GD"; shift; ( cd "$T1" && BIONIC_GATE_DIR="$CL_GD" bash "$BOOKED" --agent wx-T1 --suites cl.test.sh "$@" -- true ) > "$CL_GD.out" 2>&1; CL_RC=$?; }
@@ -559,9 +545,7 @@ expect_eq "CL.3 --class build exits 2 and asks nothing: no request in the store"
 expect_true "CL.3b …and its usage line names the option" grep -q 'usage:.*--class' "$CL_GD.out"
 world_machine 8 8192 10 0.5
 
-# =====================================================================================
 section "§EXPECT-RED — a run declared meant to fail: the console's code inverts, the record keeps the suite's own"
-# =====================================================================================
 # The wall reads `BIONIC_EXPECT=red` on a suite segment and hands the shim `--expect red`. The console then exits 0
 # when the suite failed and non-zero when it passed, while the stamp, the run log and the proof reader keep the
 # suite's own code, so a meant-to-fail run is never read as a green run of that suite. The suite is a stand-in

@@ -220,15 +220,10 @@ section "§REG: the continuation's regression line prints the full pass's state 
 # ============================================================
 # fails-when: the continuation reads the proof line alone, so over a whole run red at F whose reds two later landings
 # greened it says the whole run holds, or green, or leaves the landings since it uncounted.
-# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name), laid on
+# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, from tests/lib/proof-at-head-world.sh), laid on
 # this suite's own fixture; the continuation is the one `close-out.sh run` writes.
 # ANTI-VACUITY: REG-1 reads the line before REG-2 reads its state through the extractor REG-1 proved non-empty.
-REG_MISSING=""
-for _f in pah_world pah_cont_state; do
-  _b="$(awk -v n="$_f" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$(dirname "$0")/proof-at-head.test.sh")"
-  if [ -n "$_b" ]; then eval "$_b"; else REG_MISSING="$REG_MISSING $_f"; fi
-done
-expect_eq "REG-0 the builders were read out of tests/proof-at-head.test.sh" "" "$REG_MISSING"
+. "$(dirname "$0")/lib/proof-at-head-world.sh" || { echo "close-out-6.test.sh: cannot load lib/proof-at-head-world.sh"; exit 1; }
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
 pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
 run_close_as reg-close "$PAH_P" run

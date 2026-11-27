@@ -67,9 +67,10 @@ PROOF_CODE_QUESTIONS="adversarial structure"
 PROOF_SEVERITIES="S1 S2 S3 S4"
 PROOF_REACHES="on off"
 PROOF_PRIORITY="S1:on=fix S1:off=fix S2:on=fix S2:off=defer S3:on=defer S3:off=note S4:on=note S4:off=note"
-# THE DEBT TABLE'S KINDS (wave-30 T22; D2, AC-11.1): the kinds a `debt:` line names, in the order the
-# table in payload/context/severity.md lists them. tests/units.test.sh §DEBT holds the two to one list.
-PROOF_DEBT_KINDS="duplicate unpinned-pair one-case-abstraction"
+# THE DEBT TABLE'S KINDS are lib/debt.sh's, read where they are used so the reader's kinds and the debt line's
+# grammar are one list, in the order the table in payload/context/severity.md lists them.
+bionic_need debt.sh debt_line_ok
+PROOF_DEBT_KINDS="${DEBT_TABLE_KINDS-}"
 
 # proof_kind_ok <kind> -> 0 when <kind> is one of PROOF_KINDS.
 proof_kind_ok() {

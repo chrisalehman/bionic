@@ -148,9 +148,7 @@ poke() {  # <repo> <claude-home> <session-key|-> [args...]
 
 expect_true "hooks/session-poker.sh exists" test -f "$POKER"
 
-# =============================================================================
 section "1. --report-only lists exactly the dead sessions' files, and writes nothing"
-# =============================================================================
 #
 # AC-9's first half. The fixture is the defect's own: several sessions' state in one
 # directory, one of them alive, plus the three unkeyed files.
@@ -199,9 +197,7 @@ expect_true "1.22 the second dead session's files survive"   test -f "$(f_of "$R
 expect_true "1.23 the live session's files survive"          test -f "$(f_of "$R1" roster "$SID_LIVE")"
 expect_true "1.24 context-spend.state survives"              test -f "$R1/.bionic/tmp/context-spend.state"
 
-# =============================================================================
 section "2. sweep removes the dead sessions' files and leaves everything else"
-# =============================================================================
 #
 # AC-9's second half, over the identical fixture — so the two modes are compared on the same
 # directory rather than on two that merely look alike.
@@ -252,9 +248,7 @@ expect_eq "2.22 a second sweep finds only live state (exit 1)" "1" "$RC"
 expect_contains "2.23 …and says so" "nothing swept" "$OUT"
 expect_true "2.24 …having removed nothing on the second pass" test -f "$(f_of "$R2" roster "$SID_LIVE")"
 
-# =============================================================================
 section "3. a live session is refused: non-zero, nothing deleted, and it says why"
-# =============================================================================
 #
 # AC-10's first half. The whole directory's state belongs to sessions the kernel says are
 # alive, so there is nothing this verb may remove — the one answer that cannot be read off
@@ -298,9 +292,7 @@ expect_true "3.13 …nor its own patrol stamp"               test -f "$(f_of "$R
 expect_contains "3.14 …and it is named live, kept"         "$SID_SELF — live, kept" "$OUT"
 expect_false "3.15 while the dead session beside it is swept" test -e "$(f_of "$R3B" roster "$SID_DEAD")"
 
-# =============================================================================
 section "4. a symlink at a target path is refused, not followed"
-# =============================================================================
 #
 # AC-10's second half, and the sweeper's own hostile-repo posture: a link is not a file this
 # script wrote, so it is neither followed nor unlinked. The decoy lives OUTSIDE .bionic/tmp,
@@ -354,9 +346,7 @@ expect_eq "4.10 a symlinked .bionic/tmp is refused outright (exit 2)" "2" "$RC"
 expect_true "4.11 …and the aimed-at file is untouched" \
   test -f "$TMPROOT/elsewhere-tmp/roster-$SID_DEAD.state"
 
-# =============================================================================
 section "5. every session-keyed class, and only those"
-# =============================================================================
 #
 # The six classes are the verb's whole reach. A session that left only ONE of them behind
 # is swept for that one — which is the shape the defect's own consumer-project tmp had (six rosters,
@@ -495,9 +485,7 @@ expect_true "5.28 a directory named like a clock file is left alone" test -d "$R
 expect_true "5.29 …and so is a link, not followed" test -L "$R5G/.bionic/tmp/start-clock-$SID_DEAD.alink.state"
 expect_absent "5.30 …and neither is counted a refusal" "refused (symlink" "$OUT"
 
-# =============================================================================
 section "6. the surface: one verb, one flag, no operand, no engagement gate"
-# =============================================================================
 #
 # D-4 approved `sweep` and `--report-only` and nothing else. These cases are what a later
 # hand would have to delete deliberately in order to widen the surface.
@@ -705,7 +693,6 @@ expect_no_match "7f.3 …and nothing about a failure prints" \
   "*automatic dead-session sweep failed*" "$OUT"
 
 section "7g. the age gate's COST: one stat call for the whole gate, not one per file"
-# =============================================================================
 #
 # Step-6 review F-4. The gate above ran `stat` once per state file per dead session,
 # and it ran BEFORE the bounded sweep rather than inside it — so its cost was neither
@@ -830,7 +817,6 @@ expect_true "7h.2 one young file among 60 dead sessions still defers the whole b
   test -f "$(f_of "$R7H" roster "dead-0000-aaaa-bbbb-cccccccccccc")"
 
 section "7i. the gate reads mtimes on a GNU machine too, not only on a BSD one"
-# =============================================================================
 #
 # Step-6 critic, issue 1. The gate's mtime read chose its `stat` flavour by asking
 # whether the BSD form produced any output: `stat -f %m` first, and the GNU
@@ -923,5 +909,4 @@ expect_eq "7i.4 session-start exits 0" "0" "$RC"
 expect_false "7i.5 …and an AGED dead session is still swept under the same GNU stat" \
   test -e "$(f_of "$R7I2" roster "$SID_DEAD")"
 
-# =============================================================================
 finish

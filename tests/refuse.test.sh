@@ -1008,7 +1008,7 @@ expect_contains "(rv23) …after its LINT line" "LINT T1 payload/q.sh:2 wave" "$
 RS="$(ll_world)"; RSP="$(ll_plan "$RS")"; ll_launch "$RS" T1 a.test.sh
 printf '# §RUN: one case\n' >> "$RS/tests/a.test.sh"; git -C "$RS" add -A && git -C "$RS" commit -qm "a section"
 git -C "$RS/.worktrees/T1" merge -q --no-edit wave/x && sed -i '' '/§RUN/d' "$RS/.worktrees/T1/tests/a.test.sh" && git -C "$RS/.worktrees/T1" commit -qam "T1: section gone"
-printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|---|\n| REQ-1 | r | AC-9.1 | hermetic | `tests/run.sh --only a.test.sh` §RUN → one case | x | T1 |\n' >> "$RSP"
+printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when | Task |\n|---|---|---|---|---|---|---|\n| REQ-1 | r | AC-9.1 | hermetic | `tests/run.sh --only a.test.sh` §RUN → one case | x | T1 |\n' >> "$RSP"
 ( . "$REPO/payload/scripts/lib/fields.sh"; eval "$(sed -n '/^dispatch_event() {/,/^}/p' "$REPO/hooks/execution-recorder.sh")"
   BIONIC_LIB="$REPO/payload/scripts/lib" BIONIC_ROOT="$RS" BIONIC_SID="$WORLD_SID"
   dispatch_event "status=confirmed|row=T1|name=wx-T1|brief=.bionic/docs/record/wave-x/briefs/T1.md|brief_sum=s|plan=$RSP" )

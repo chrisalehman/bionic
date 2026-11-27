@@ -445,9 +445,9 @@ Answer the fixture's two requirements with a design small enough to read whole.
 
 - ADR-099 — the fixture ruling: `adrs/epic-99/adr-099-fixture.md` (D1).
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | a source pin and a fixture run | AC-1.1 the first criterion | static | `grep` | the pin is gone |
 | REQ-1 | a source pin and a fixture run | AC-1.2 the second criterion | hermetic | `bash tests/first.test.sh` | it reds |
@@ -481,9 +481,9 @@ fixture branch, with one floor at the integration head.
 | T1 | 4 | build | REQ-1: the first task. The fixture's first task has its own sentence. It also has a detail the card does not show. complexity: standard | — | 30 | REQ-1 | lib/first.sh | — |
 | T2 | 4 | test | REQ-2: the second task. The fixture's second task has one too. complexity: complex | T1 | 45 | REQ-2 | lib/second.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | static | `tests/a.test.sh` | it is wrong |
 | REQ-1 | fixture | AC-1.2 | hermetic | `tests/a.test.sh` | it is wrong |
@@ -954,9 +954,9 @@ Who owns what:
 
 - `adrs/epic-23-bionic-tech-debt/adr-071-code-draws-the-facts-the-model-judges.md` (D6; D7; D8; REQ-1, REQ-3, REQ-4): the card's three owners and the check's rule; written at Step 7.
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | a register with one ask of each kind, one answered | AC-1.1 | hermetic | `asks.test.sh` §WAITS: `ask_waits_on` says user for a decision, an approval and an unanswered waiver, event for a waiver answered no and a finding answered carry; the sheet's `ask:` lines carry `waits=` | the refused waiver reads user, or a line lacks the field |
 | REQ-1 | a register with one ask of each kind, one answered | AC-1.2 | hermetic | `asks.test.sh` §ANSWER: the item stays open with `answer=no`; the finding stays open with `answer=carry event=T9 lands` and closes when T9's landing is recorded | the item closes at the answer, or reads no answer |
@@ -1397,9 +1397,9 @@ Land the flock app's six tasks so the Step-3 card has a ledger to read.
 | T5 | 5 | test | Prove the join. The join is proved after the four. DETAIL-EPSILON runs after the four. complexity: standard | T1, T2, T3, T4 | 45 | REQ-2 | tests/d.test.sh | — |
 | T6 | 4 | build | Prove the pair. The pair is proved after two. DETAIL-ZETA runs after two. complexity: standard | T1, T2 | 45 | REQ-1 | tests/e.test.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | hermetic | \`tests/a.test.sh\` | the fixture is wrong |
 FIXEOF
@@ -1729,9 +1729,9 @@ The sync first, then the view.
 - ${RISK_LONG}
 - A short one.
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture run | AC-1.1 the sync | unit | \`bash tests/sync.test.sh\` | it reds |
 FIXEOF
@@ -1816,9 +1816,9 @@ The flock syncs two phones and draws one list.
 
 - ADR-001 — the sync ruling: \`adrs/epic-99/adr-001-sync.md\` (D1).
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | two phones meet and compare lists | AC-1.1 the sync | unit | \`bash tests/sync.test.sh\` | it reds |
 | REQ-1 | two phones meet and compare lists | AC-1.2 the merge | hermetic | \`bash tests/merge.test.sh\` | it reds |
@@ -1965,9 +1965,9 @@ Land the flock app's three tasks so the Step-3 card has sentences to read.
 | T2 | 4 | build | Join the rows. ${TS_LONG} TS-DETAIL-TWO the join keeps table order. complexity: complex | T1 | 45 | REQ-1, REQ-2 | lib/b.sh | — |
 | T3 | 5 | test | Prove the join. The join is proved on two rows · complexity: standard | T2 | 30 | REQ-2 | tests/b.test.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | hermetic | \`tests/a.test.sh\` | the fixture is wrong |
 FIXEOF
@@ -2155,25 +2155,15 @@ section "§UNPROVED: the release card prints the full pass's state at this head,
 # ============================================================
 # fails-when: the card prints green, or covered, over a whole run behind the head whose reds later landings greened;
 # the landings since the run go uncounted; or a whole run green at the head reads anything but green at it.
-# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name with the
-# close-out fixture's builders it stands on, out of tests/close-out.prelude.sh), so the card is drawn over the plan
-# and record the other surfaces print from; the card is the real `release-approval --preview`.
+# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, from tests/lib/proof-at-head-world.sh, with
+# the close-out fixture it stands on, tests/lib/close-out-fixture.sh), so the card is drawn over the plan and record
+# the other surfaces print from; the card is the real `release-approval --preview`.
 # fails-when, too: the card puts no merge-unproved decision over the red world, or puts one over the green; current 8
 # --check passes over the red world before the person's word is written, or refuses after it.
 # ANTI-VACUITY: UP-1 reads the red world and UP-2 the green one through the same extractor; UP-3 reads the decision
 # through up_ask before UP-3g and UP-4 read its absence through it; UP-3b refuses before UP-3f passes on one world.
-up_import() {  # <name> <file> -> the function, defined here, read out of <file>
-  local body
-  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$2")"
-  [ -n "$body" ] || { echo "up_import: no $1 in $2" >&2; return 1; }
-  eval "$body"
-}
-UP_MISSING=""
-for _f in in_fixture fixture_own fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to; do
-  up_import "$_f" "$(dirname "$0")/close-out.prelude.sh" || UP_MISSING="$UP_MISSING $_f"
-done
-for _f in pah_world pah_poke pah_card_state; do up_import "$_f" "$(dirname "$0")/proof-at-head.test.sh" || UP_MISSING="$UP_MISSING $_f"; done
-expect_eq "UP-0 the builders were all read out of their suites" "" "$UP_MISSING"
+. "$(dirname "$0")/lib/close-out-fixture.sh" || { echo "card.test.sh: cannot load lib/close-out-fixture.sh"; exit 1; }
+. "$(dirname "$0")/lib/proof-at-head-world.sh" || { echo "card.test.sh: cannot load lib/proof-at-head-world.sh"; exit 1; }
 SANDBOX="$CARD_SANDBOX/up"; mkdir -p "$SANDBOX"; SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 REPO_ROOT="$REPO"; UNITS_LIB="$REPO/payload/scripts/lib/units.sh"; PAH_LIB="$REPO/payload/scripts/lib"
 PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"; LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
@@ -2234,7 +2224,7 @@ section "§UNRUN: at 15 a criterion owed now and never run is the release card's
 # early, so no page is written and the person is never asked; or the card settles it by a loosened gate, so the advance
 # to 6 passes over the unrun criterion; or the waiver a reply gives is not the waiver event in the person's words; or
 # the other reply moves the run.
-# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), carried
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, tests/lib/close-out-fixture.sh's, loaded above), carried
 # from step 5 to 8 by the advance itself. The criterion is born late: a row the person adds to the Eval design once the
 # run stands at 8, naming no task, so it is owed now. The advance to 6 refuses a pending criterion owed now, and a proof
 # that discharged a criterion stands at every head, so a criterion born after the advance is how one reaches the card
@@ -2274,7 +2264,7 @@ ur_world() {  # <label> [<edit> [<last step>]] -> UR_P: the fixture at 15, its S
   for n in $(seq 6 "${3:-8}"); do ur_poke "$p" current "$n"; [ "$UR_RC" = 0 ] || { printf '      current %s said: %s\n' "$n" "$UR_OUT"; return 1; }; done
   UR_P="$p"
 }
-ur_born() {  # <root> -> the person's edit: a second criterion joins the Eval design, under the first, naming no task
+ur_born() {  # <root> -> the person's edit: a second criterion joins the Test design, under the first, naming no task
   awk '{ print } /^\| — \| fixture \| AC-1 \|/ { print "| — | fixture | AC-2 | unit | `bash tests/x.test.sh` | a second planted defect |" }' \
     "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
   seal_fixture "$1/$PLAN_REL" "$1/$LOG_REL"
@@ -2348,7 +2338,7 @@ section "§OWNCHECK: at 15 a proved criterion the person confirms, not yet confi
 # confirmation, so it puts a standing auditor's finding to waive or run and counts it the auditor's; the reply that
 # confirms writes no approval naming the criterion in the person's words, or one the advance to 8 does not take; the
 # reply that waives writes no waiver.
-# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), its one
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, tests/lib/close-out-fixture.sh's, loaded above), its one
 # criterion's eval type human, discharged by the fixture's own proof and confirmed by nobody. At double rigor the run
 # is carried from 5 to 7 by the advance itself, the advance to 8 refuses the criterion, and the card is asked there; at
 # single the advance takes it to 8, where the card is asked at the merge. The page is the real acting

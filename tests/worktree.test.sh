@@ -524,23 +524,17 @@ section "§SUCCESSOR: a tree spawned under one session lands by ready from anoth
 # spawning session), and `ready` reads it before the session's binding: a conversation cleared between the spawn
 # and the landing leaves a new session id with no binding and no roster, and the row still lands. The launch row
 # is found on the spawning session's roster when the asking session's holds none.
-# FIXTURE FIDELITY: the landing line's model world (tests/lib/world.sh), built by the landing-line prelude's own
-# `ll_world`, `ll_launch` and `ll_carrier_env`, read by name; every row tree here is made by `spawn-worktree.sh
-# create --for`, the verb whose record it stands for.
+# FIXTURE FIDELITY: the landing line's model world (tests/lib/world.sh), built by the landing-line suites' own
+# `ll_world`, `ll_launch` and `ll_carrier_env` (tests/lib/landing-world.sh); every row tree here is made by
+# `spawn-worktree.sh create --for`, the verb whose record it stands for.
 # fails-when: `ready` from a successor session refuses `no-bound-plan` or `no-launch-row`.
 # This suite's own `bind_plan` (Group 7) writes a bare marker and prints the plan; the world binds through the real
 # one (lib/binding.sh, by tests/lib/bound-marker.sh), so the suite's is put away before the world is built.
 unset -f bind_plan
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/world.sh"
-wt_import_fn() {  # <name> -> the function, defined here, read out of the landing-line prelude
-  local body
-  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$(dirname "$0")/landing-line.prelude.sh")"
-  [ -n "$body" ] || { echo "wt_import_fn: no $1 in landing-line.prelude.sh" >&2; return 1; }
-  eval "$body"
-}
-LL_HERE="$(cd "$(dirname "$0")" && pwd -P)"   # the prelude sets it at its top and its builders read it; the suite reads the builders, not the top
-for f in ll_world ll_launch ll_carrier_env; do wt_import_fn "$f" || no "($f is read out of landing-line.prelude.sh)" "absent"; done
+LL_HERE="$(cd "$(dirname "$0")" && pwd -P)"   # the landing-line prelude sets it at its top and the world's builders read it
+. "$(dirname "$0")/lib/landing-world.sh" || { echo "worktree.test.sh: cannot load lib/landing-world.sh"; exit 1; }
 ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }; ll_log() { printf '%s/.bionic/docs/record/wave-x/run.log' "$1"; }
 ll_carrier_env
 sc_spawn() {  # <root> <row> <sid> -> the tree `create --for wx-<row>` made under <sid>, its plan row, its dispatch and one commit of its own

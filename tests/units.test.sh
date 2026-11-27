@@ -42,8 +42,10 @@
 #   §POINT-RUN   a point's run is held by its own rows; an open point holds no whole run and writes no regression proof
 #   §POINT-RED   a suite red in a point's run is born as a fix row whose birth names the point and the rows it follows
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
+#   §RELEASE   whether a row is the plan's release is lib/plan-read.sh's one `release_row`, in each state its askers pass
 #   §KINDS     one list holds the kinds of row, the read-only kinds, and the role each kind draws or is offered; the tag's
 #              rule and the kind words are spelt in that library alone
+#   §LISTS     the measured keys and the debt kinds follow their sources
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1198,6 +1200,39 @@ expect_eq "HELD-4 the status pass: asked twice, and with a pending step that nam
 expect_eq "HELD-5 a fact of a row set since is passed again and read: a second status pass, T1 landed" \
   "2|row=T1 state=landed name=w-T1 brief=b sum=s commit=c1" "$(hd_n status)|$(printf '%s\n' "$HD_OUT" | sed -n 4p)"
 
+section "§RELEASE — whether a row is the plan's release is one function, and each asker's rule of which states count is its argument"
+# fails-when: the function admits a row that is not a doc row at a numeric step of 7 or more, or reads the state against
+# the rule its asker passes (a pending row counted where only a landed one does, a dropped one where it stands dropped,
+# or a state read at all where the asker passes no rule); or the release readers no longer load it, so it is undefined.
+# One child shell sources the units library, as every asker's process does, and the cases run through one awk program.
+# Each row is `<kind> <step> <state> <rule> <answer>`, `-` for an empty field: the rules are `landed` (the publish order,
+# the validator's landed release, the post-release readers), `standing` (the approval names, the scheduler) and empty
+# (the waits' reader, the order, the validator's order, whose callers skip a dropped row and a word step themselves).
+RL_CASES='doc 7 landed landed 1
+doc 7 pending landed 0
+doc 7 active landed 0
+doc 7 dropped landed 0
+doc 7 pending standing 1
+doc 7 active standing 1
+doc 7 landed standing 1
+doc 7 dropped standing 0
+doc 7 - standing 1
+doc 7 dropped - 1
+doc 9 pending - 1
+doc 6 landed landed 0
+doc 6 pending - 0
+test 7 landed landed 0
+integrate 8 pending standing 0
+doc 7a pending - 0
+doc x landed landed 0
+doc - pending standing 0'
+RL_OUT="$(printf '%s\n' "$RL_CASES" | bash -c '. "$1" >/dev/null 2>&1 || exit 127
+  awk "$_PLAN_READ_RELEASE_AWK"'"'"'{ for (k = 1; k <= 4; k++) if ($k == "-") $k = ""
+    if (release_row($1, $2, $3, $4) != $5) printf "%s %s %s %s: %s\n", $1, $2, $3, $4, release_row($1, $2, $3, $4); n++ }
+    END { print "cases=" n }'"'"'' _ "$LIB" 2>&1)"
+expect_eq "RL-1 every case answers as its row says, each state under each rule an asker passes (the cases read)" \
+  "cases=18" "$RL_OUT"
+
 section "§KINDS — one list holds the kinds of row, which of them take a read-only slot, and the role each kind is run by"
 # fails-when: a kind reads a slot or a role other than the one its copies answered before the list, the validator's
 # refusal names other kinds, or the tag's rule or the kind words are spelt again outside the list's library.
@@ -1227,5 +1262,15 @@ expect_eq "KD-5 the tag's rule is spelt in one file, the list's library" \
   "payload/scripts/lib/units.sh" "$(kd_spelt 'complexity:[[:space:]]*([[:alpha:]]+)')"
 expect_eq "KD-5b …and the kinds in one line nowhere, so the validator's words are the list's" \
   "" "$(kd_spelt 'build test verify review doc integrate close prototype')"
+
+section "§LISTS — the measured keys and the debt kinds follow their sources"
+LS_S="$BIONIC_HOOKS_DIR/poker/sitrep.sh"; LS_D="${LIB%/*}"; LS_K="duplicate unpinned-pair one-case-abstraction"
+ls_k() { (. "$REPO_ROOT/tests/lib/rehearsal-read.sh"; rt_measured_keys "$1"); }
+awk '1; /^  sitrep_m waste.waiting-on-you /{print "  sitrep_m zz.planted x"}' "$LS_S" > "$SANDBOX/ls.sh"
+expect_eq "LISTS-1 the keys hold tests.cap, and a measure planted in the sheet's calls ends them" "yes|$(ls_k "$LS_S") zz.planted" \
+  "$([[ " $(ls_k "$LS_S") " == *" tests.cap "* ]] && echo yes)|$(ls_k "$SANDBOX/ls.sh")"
+mkdir "$SANDBOX/ls"; sed 's/^\(DEBT_TABLE_KINDS=".*\)"$/\1 planted"/' "$LS_D/debt.sh" > "$SANDBOX/ls/debt.sh"
+expect_eq "LISTS-2 a kind planted in the debt table reaches both lists, hole last" "$LS_K planted|$LS_K planted hole" \
+  "$(BIONIC_LIB="$SANDBOX/ls"; . "$LS_D/proof.sh"; printf '%s|%s' "$PROOF_DEBT_KINDS" "$DEBT_KINDS")"
 
 finish

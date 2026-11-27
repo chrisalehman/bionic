@@ -90,9 +90,7 @@ contains() {
   esac
 }
 
-# ============================================================
 section "1a — the project's roots: default, override, absolute override"
-# ============================================================
 
 P="$SANDBOX/p1"; mkdir -p "$P/.bionic"
 
@@ -139,9 +137,7 @@ expect_eq "archive_root: a relative one joins onto the project, docs_root's rule
   "$P/../arch" "$(call archive_root "$P")"
 rm -f "$P/.bionic/config.yaml"
 
-# ============================================================
 section "1b — the machine's roots"
-# ============================================================
 
 expect_eq "claude_home follows CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$(call claude_home)"
 expect_eq "…and BIONIC_CLAUDE_HOME wins over it" "$SANDBOX/override" \
@@ -177,9 +173,7 @@ expect_ne "…which is exactly what --show-toplevel answers differently" \
 expect_eq "worktree_root outside a repository exits non-zero" "1" \
   "$(call worktree_root "$SANDBOX/home" >/dev/null 2>&1; echo $?)"
 
-# ============================================================
 section "1d — the output contract: absolute at source time, one trailing newline"
-# ============================================================
 #
 # TWO STEP-6 REVIEW FINDINGS, both about the SHAPE of an answer rather than its value.
 #
@@ -256,9 +250,7 @@ expect_eq "claude_home's VALUE is untouched by the newline rule" "$CLAUDE_CONFIG
   "$(call claude_home)"
 expect_eq "…and transcripts_dir's" "$CLAUDE_CONFIG_DIR/projects" "$(call transcripts_dir)"
 
-# ============================================================
 section "1c — config_value is the one reader, and docs_root goes through it"
-# ============================================================
 #
 # tests/run-predicate.test.sh §R9 owns config_value's twelve behaviours and still does — it
 # sources lib/run.sh, which soft-sources this file. What is asserted here is the property
@@ -272,9 +264,7 @@ expect_eq "…and docs_root returns exactly that, joined" "$C/dd" "$(call docs_r
 expect_eq "…and another key from the same file" "30d" "$(call config_value "$C" live-window 7d)"
 expect_eq "config_value: a missing key is the default" "7d" "$(call config_value "$C" nope 7d)"
 
-# ============================================================
 section "1e — docs_tracked: the project's tracked home, and where a record is promoted"
-# ============================================================
 #
 # A durable record belongs to the project, so its tracked home is a project folder named by
 # `docs-tracked:`, `docs/` when the key is absent. promote_target answers where a record of a
@@ -315,9 +305,7 @@ expect_eq "promote_target: a tracked home under .bionic/ is refused" "1|" \
   "$(out="$(call promote_target "$T" adr "$TS/adrs/epic-99/adr-007-one-door.md")"; echo "$?|$out")"
 rm -f "$T/.bionic/config.yaml"
 
-# ============================================================
 setup_section "2 — one config change moves EVERY consumer (AC-N1.3)"
-# ============================================================
 #
 # THE PLANTED TREE. hooks/ beside scripts/lib/, holding this checkout's library, because the
 # loader's first candidate is `$(dirname "$0")/../scripts/lib` — see the header.
@@ -373,9 +361,7 @@ expect_eq "fixture: the planted tree carries the library" "yes" \
 expect_eq "fixture: the project's docs root resolves to alt/" "$PROJ/alt" \
   "$(call docs_root "$PROJ")"
 
-# ============================================================
 section "2b — hooks/stop-check.sh resolves a contracted path under docs-root:"
-# ============================================================
 #
 # `record/`-led paths are docs-root-relative — the rule this whole lineage exists for, and
 # the one stop-check got wrong before epic-17 W6 S15: it stat'd a relative path against
@@ -415,9 +401,7 @@ expect_eq "…and a hard-coding stop-check reports the SAME deliverable ABSENT" 
 expect_eq "…so the two rows above do discriminate" "no" \
   "$(contains "$SC_MUT_OUT" "deliverables=present:record/s99.md")"
 
-# ============================================================
 section "2c — the governing-skill hook SCAFFOLDS under docs-root: (the live defect)"
-# ============================================================
 #
 # The hook resolved `docs-root:` at the top and then scaffolded a literal at the bottom, so
 # a project with the key set got the default tree created and its configured tree never
@@ -505,9 +489,7 @@ done
 expect_eq "…and no stray alt/ tree in a project that never named one" "no" \
   "$([ -d "$GS_DEF/alt" ] && echo yes || echo no)"
 
-# ============================================================
 section "2d — doctor's active-run row reads the same root"
-# ============================================================
 #
 # Doctor is the third consumer AC-N1.3 names, and it reaches the docs root transitively:
 # `active_run` -> `active_plan` -> `docs_root`. A doctor that resolved its own way would
@@ -519,9 +501,7 @@ expect_eq "doctor's active-run row names the plan under alt/" "yes" \
   "$(contains "$DOC_OUT" "alt/plans/epic-99/wave-01.plan.md")"
 expect_eq "…and not the decoy under the default root" "no" "$(contains "$DOC_OUT" "decoy.plan.md")"
 
-# ============================================================
 section "3 — the promote verb copies a durable record into the tracked home"
-# ============================================================
 #
 # The verb is driven from the planted tree with its parts beside it, in a project whose
 # records sit in their default places. What is proved is the file on disk: it is in the
@@ -564,9 +544,7 @@ promote plan .bionic/docs/plans/epic-99/wave-03-tidy.plan.md
 expect_status "promote plan: refused, exit 1" 1 "$?"
 expect_eq "…and the tracked home is as it was" "$BEFORE" "$(tracked_list)"
 
-# ============================================================
 section "PROMOTE-TREE — promote writes where it runs"
-# ============================================================
 #
 # The record lives in the state home, which a linked worktree shares through its .bionic link;
 # the copy belongs to the checkout the verb runs in. The source is read against the state home

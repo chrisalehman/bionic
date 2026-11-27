@@ -950,7 +950,7 @@ ll_settle_world() {  # -> root, the world above, T1 not yet landed
   ll_settle_rev "$rd" recA "$b" "$h1" s.txt:1; ll_settle_rev "$rd" recB "$b" "$h2" s.txt:3
   ll_settle_rev "$rd" recC "$b" "$h2" s.txt:1; ll_settle_rev "$rd" recE "$b" "$h1" s.txt:3
   printf 'reviewed: %s..%s\nquestion: evidence\nresult: flag\nscope: piece\n\nAn evidence read that names no finding.\n' "$b" "$h1" > "$rd/recZ.md"
-  printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n%s\n%s\n' \
+  printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n%s\n%s\n' \
     '| REQ-1 | the row | AC-1.1 | hermetic | `tests/a.test.sh` | a is red |' '| REQ-1 | the row | AC-1.2 | hermetic | `tests/a.test.sh` | a is red |' >> "$p"
   # each review as `proof-add review` registers it, in order, Z last; T1's birth as task-add --born writes it
   printf 'run/v1|ev=%s|at=2026-10-20T00:00:0%s\n' \
@@ -1127,7 +1127,7 @@ printf '# §RUN: one case\n' >> "$SL/tests/a.test.sh"; printf 'echo "the gone wo
 git -C "$SL" add -A && git -C "$SL" commit -qm "a section and the words"
 git -C "$SL/.worktrees/T1" merge -q --no-edit wave/x && sed -i '' '/§RUN/d' "$SL/.worktrees/T1/tests/a.test.sh" \
   && printf 'echo\n' > "$SL/.worktrees/T1/p.sh" && git -C "$SL/.worktrees/T1" commit -qam "T1: both gone"
-{ printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|---|\n'; printf '%s\n' \
+{ printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when | Task |\n|---|---|---|---|---|---|---|\n'; printf '%s\n' \
   '| REQ-1 | r | AC-9.1 | hermetic | `tests/run.sh --only a.test.sh` §RUN → one case | x | T1 |' \
   '| REQ-1 | r | AC-9.2 | hermetic | `tests/run.sh --only b.test.sh` → prints `the gone words` | x | T1 |' \
   '| REQ-1 | r | AC-9.3 | hermetic | `tests/run.sh --only b.test.sh` → it says "the gone words" | x | T1 |' \

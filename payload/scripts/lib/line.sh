@@ -320,9 +320,9 @@ line_tag_merge() {
   printf 'tagged\t%s\t%s at the merge commit %s, pushed to origin\n' "$tag" "$tag" "$s"
   return 0
 }
-# line_merge_ask_key <working branch> -> the register's key of a request closed unmerged: each character outside
-# [A-Za-z0-9._-] written `:`, as the publish verb writes its own `pr:` key
-line_merge_ask_key() { printf 'pr-closed:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }
+# line_ask_key <prefix> <branch> -> the one maker of the pr: and pr-closed: keys open asks are found by
+line_ask_key() { printf '%s:%s' "$1" "$(printf '%s' "$2" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }
+line_merge_ask_key() { line_ask_key pr-closed "$1"; }   # <working branch>
 _line_merge_ask() {  # <plan> <root> <mode> <working branch> <open|close> [<address>] -> always 0; acts under --fetch alone
   [ "$3" = --fetch ] && bionic_need owed.sh owed_close || return 0
   local key sid="${CLAUDE_CODE_SESSION_ID:-}"; key="$(line_merge_ask_key "$4")"
@@ -1249,7 +1249,7 @@ line_tree_run() {  # <tree> <root> <sid>
        esac ;;
   esac
   LINE_RUN_ONTO="$(plan_working_branch "$tp")"
-  [ -n "$LINE_RUN_ONTO" ] || { LINE_RUN_WHY="no-working-branch plan=${tp}"; return 1; }
+  [ -n "$LINE_RUN_ONTO" ] || { LINE_RUN_WHY="$(run_no_branch_why "$tp")"; return 1; }
   LINE_RUN_PLAN="$tp"
 }
 # THE SESSION A LANDING RUNS UNDER. The publish writes the plan through a plan verb, which writes only the plan its
