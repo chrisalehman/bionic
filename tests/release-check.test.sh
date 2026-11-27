@@ -905,7 +905,7 @@ OR_L="$(or_plant loader hooks/planted-loader.sh "$(printf '#!/bin/bash\n# --- bi
 git -C "$OR" checkout -q -B main "$OR_B"
 or_check "$OR_B"
 expect_status "(or0) the clean head passes" 0 "$RC"
-expect_regex "(or0) …with one line of its counts" "^one-reader: parsers=0 plan_writers=0 shared_types=0 hook_refusals=0 loader_copies=0 unheard_folds=0 names=0 load_guards=[0-9]+ git_homes=[0-9]+ field_readers=[0-9]+$" \
+expect_regex "(or0) …with one line of its counts, each nought" "^one-reader: parsers=0 ([a-z_]+=0 )+homes=0$" \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep '^one-reader: ')"
 or_check "$OR_P"
 expect_eq "(or1) a second parser at the head fails the release in one line naming it" \

@@ -53,9 +53,8 @@ RP_PAYLOAD
 # The orchestrator's own call carries no agent_id: it is never a ruling's writer.
 [ -n "${_rp_aid:-}" ] || exit 0
 [ -n "$_rp_sid" ] || _rp_sid="${_rp_psid:-}"
-if [ -z "$_rp_root" ] && [ -n "${_rp_cwd:-}" ] && [ -r "$_rp_lib/root.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$_rp_lib/root.sh" 2>/dev/null && _rp_root="$(project_root "$_rp_cwd" 2>/dev/null)"
+if [ -z "$_rp_root" ] && [ -n "${_rp_cwd:-}" ]; then
+  bionic_need root.sh project_root 2>/dev/null && _rp_root="$(project_root "$_rp_cwd" 2>/dev/null)"
 fi
 { [ -n "$_rp_sid" ] && [ -n "$_rp_root" ]; } || exit 0
 _rp_roster="$(roster_path "$_rp_root" "$_rp_sid")"

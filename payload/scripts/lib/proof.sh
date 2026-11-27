@@ -1659,12 +1659,9 @@ proof_awk() {
 #                             else ""
 #     proof_move_row(line)    the <T> of a move to fixed, else ""
 proof_bind_awk() {
-  printf '%s' '
-    function proof_fkv(s, k,   n, w, i) {
-      n = split(s, w, "|")
-      for (i = 2; i <= n; i++) if (index(w[i], k "=") == 1) return substr(w[i], length(k) + 2)
-      return ""
-    }
+  [ -n "${_LINE_FIELDS_AWK:-}" ] || bionic_need fields.sh line_value >/dev/null 2>&1
+  printf '%s%s' "${_LINE_FIELDS_AWK:-}" '
+    function proof_fkv(s, k) { return line_kv_of(s, k) }
     function proof_bound(s) { return (index(s, "run/v1|ev=finding|") == 1) ? proof_fkv(s, "ref") : "" }
     function proof_binding(s) { return proof_bound(s) != "" && proof_fkv(s, "to") != "" }
     function proof_binds(s, rec) { return proof_binding(s) && index(proof_bound(s), rec "#") == 1 }
