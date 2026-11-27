@@ -76,6 +76,8 @@
 #                        line; a setup or a tests/lib file that calls maker_stop with no load of it is refused by line.
 #   §NO-BORROW           a suite that cuts a function by name out of another suite's file, on its line or through a
 #                        variable or a helper's argument, is refused by file and line; a product file's cut is no hit.
+#   §NO-PLANT            a suite that plants a counting line in a copy of a library that already counts its reads
+#                        (a sed or awk program or an appended line) is refused by file and line; the reader's own count is no hit.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
@@ -2083,5 +2085,93 @@ NB_REAL="$(ALL=1 borrow_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.s
 expect_true "the real sweep reads cuts: ${NB_REAL} in the suites, setups and libraries under tests/" [ "${NB_REAL:-0}" -gt 0 ]
 expect_eq "NO-BORROW-2 no suite, setup or library under tests/ cuts a function out of another suite's file" "" \
   "$(borrow_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh)"
+
+# ============================================================
+section "NO-PLANT — a suite that writes a counting line into a copy of a library that already counts its reads is refused"
+# ============================================================
+# A library that counts its reads under BIONIC_COUNT already says how many it made, so a copy with a counting line
+# planted in it makes a second count that drifts from the first, and proves the copy, not the shipped code. A suite
+# reads the library's own count. The shape a suite wrote: a sed or awk program with an `echo … >> "$…MARK"` line, run
+# over a counting library and written out as its copy; or such a line appended to the copy. A counting write is one
+# to a variable named for a mark or a count; a program over a file that does not count (a stub's call marker), and a
+# planted line that writes anything else (an event, a log), are no hit.
+# fails-when: a suite plants a counting line in a copy of a library that counts its reads, and the sweep passes.
+cat > "$TMP/plant.awk" <<'PLANT_AWK_EOF'
+# One file of tests/, heredoc bodies blanked. F is its path, LIBS the counting libraries' file names; ALL=1 also prints
+# each statement that names a counting library and plants nothing ("-"). A statement runs on while a quote is open.
+function names(s,   k, n, a) {
+  n = split(LIBS, a, " ")
+  for (k = 1; k <= n; k++) if (s ~ ("(^|[^A-Za-z0-9_.-])" a[k] "([^A-Za-z0-9_]|$)")) return 1
+  for (k in V) if (index(s, "$" k) || index(s, "${" k)) return 1
+  return 0
+}
+{
+  line = $0; out = ""
+  for (i = 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (st != "s" && c == "\\") { out = out c substr(line, i + 1, 1); i++; continue }
+    if (st == "" && c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) break
+    if (st == "" && c == "'") st = "s"; else if (st == "s" && c == "'") st = ""
+    else if (st != "s" && c == "\"") st = (st == "d") ? "" : "d"
+    out = out c
+  }
+  if (S == "") at = NR
+  S = S (S == "" ? "" : "\n") out
+  if (st == "" && out !~ /\\$/) { n++; T[n] = S; A[n] = at; S = "" }
+}
+END {
+  for (x = 1; x <= n; x++)
+    if (T[x] ~ /^[ \t]*(export[ \t]+|local[ \t]+)?[A-Za-z_][A-Za-z0-9_]*=/ && names(T[x])) {
+      v = T[x]; sub(/^[ \t]*(export[ \t]+|local[ \t]+)?/, "", v); sub(/=.*/, "", v); V[v] = 1
+    }
+  for (x = 1; x <= n; x++) {
+    if (!names(T[x]) || T[x] ~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=[^ \t]*$/) continue
+    edits = T[x] ~ /(^|[^A-Za-z0-9_])(sed|awk)[ \t]/ || T[x] ~ />>[ \t]*"?[^ \t;&|]*\.sh"?[ \t]*$/
+    if (edits && T[x] ~ /(echo|printf)[^\n]*>>[ \t]*\\?"?\$\{?[A-Za-z_]*(MARK|COUNT)/) print F ":" A[x]
+    else if (ALL) print F ":" A[x] "\t-"
+  }
+}
+PLANT_AWK_EOF
+plant_refusals() {  # [ALL=1] <file>... -> `<file>:<line>` per statement that plants a counting line in a copy of a counting library
+  local f libs; libs="$(cd "$LIB_DIR" && LC_ALL=C grep -l 'BIONIC_COUNT' ./*.sh | sed 's|^\./||' | paste -sd' ' -)"
+  for f in "$@"; do awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk -v F="$f" -v LIBS="$libs" -v ALL="${ALL:-}" -f "$TMP/plant.awk"; done
+}
+NP="$TMP/plant"; mkdir -p "$NP"
+# The plants are heredoc bodies, so the sweep of this suite's own file reads them as text.
+cat > "$NP/bad.test.sh" <<'NP_BAD'
+#!/bin/bash
+SR_FA_LIB="$HOOKS/../payload/scripts/lib/proof.sh"
+sed -e '/^  if [ "$K" = "$key" ] then _proof_facts_out; fi$/a\
+  [ -z "${SR_FOLD_MARK:-}" ] || echo fold >> "$SR_FOLD_MARK"
+' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
+sed 's|^reader_facts() {$|reader_facts() { echo hit >> "$SR_MARK";|' "$LIB/reader.sh" > "$SR_FM/lib/reader.sh"
+CP="$SR_FM/payload/scripts/lib/walls.sh"
+awk '{ print } /^wall_evidence_gate\(\) \{/ { print "echo gate >> \"$SR_MARK\"" }' "$CP" > "$CP.new"
+echo 'echo hit >> "$SR_MARK"' >> "$SR_FM/lib/units.sh"
+NP_BAD
+cat > "$NP/good.test.sh" <<'NP_GOOD'
+#!/bin/bash
+SR_FA_LIB="$HOOKS/../payload/scripts/lib/proof.sh"
+sed 's|^sitrep_gather() {$|sitrep_gather() { echo gather >> "$SR_GATHER_MARK";|' "$HOOKS/poker/sitrep.sh" > "$SR_FM/hooks/poker/sitrep.sh"
+sed 's|^a$|b|' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
+cmp -s "$SR_FA_LIB" "$SR_FM/payload/scripts/lib/proof.sh" && echo same
+SR_AT="$AT" BIONIC_COUNT="$COUNTS" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep "$PLAN" > "$OUT" 2>/dev/null
+F1="$(/usr/bin/grep -cx 'fold reader_facts' "$COUNTS")"
+# sed 's|a|echo x >> "$M"|' "$LIB/proof.sh" > "$SR_FM/proof.sh"
+cat > "$p/s.sh" <<'EOF'
+sed 's|a|echo x >> "$M"|' "$LIB/proof.sh" > "$SR_FM/proof.sh"
+EOF
+NP_GOOD
+for f in "$NP"/*.test.sh; do expect_true "the planted ${f##*/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+expect_eq "NO-PLANT-1 each plant is refused by line: the sed program a suite wrote (a library path in a variable, a library named in the command), an awk program over a copy named by a variable, a line appended to a copy" \
+  "$NP/bad.test.sh:3|$NP/bad.test.sh:6|$NP/bad.test.sh:8|$NP/bad.test.sh:9" "$(plant_refusals "$NP/bad.test.sh" | paste -sd'|' -)"
+expect_eq "…and the control's statements that name a counting library are read, with a counting write over a file that does not count and the reader's own count among those not refused" \
+  "$NP/good.test.sh:4|$NP/good.test.sh:5" "$(ALL=1 plant_refusals "$NP/good.test.sh" | cut -f1 | paste -sd'|' -)"
+expect_eq "control: a stub's call marker, a copy edited with no count, a cmp, a run reading BIONIC_COUNT, a comment and a heredoc body are refused for nothing" "" \
+  "$(plant_refusals "$NP/good.test.sh")"
+NP_REAL="$(ALL=1 plant_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh | wc -l | tr -d ' ')"
+expect_true "the real sweep reads statements that name a counting library: ${NP_REAL} in the suites, setups and libraries under tests/" [ "${NP_REAL:-0}" -gt 0 ]
+expect_eq "NO-PLANT-2 no suite, setup or library under tests/ plants a counting line in a copy of a library that counts its reads" "" \
+  "$(plant_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh)"
 
 finish
