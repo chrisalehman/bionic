@@ -293,14 +293,19 @@ refuse_modes() {
 #
 # A command not admitted by the gate ran nothing and keeps 75 in its record (the shim's stamp, the roster's
 # run_rc=75); one that a caller must tell from a green run says so through the note file BIONIC_NOT_ADMITTED names,
-# never through its exit.
+# never through its exit. Every other answer here is told from a success by its words alone: the tick's decision line,
+# the CARD-EARLY line, the close's last line (`bionic: close-out refused — …`), which the tick's merge look reads.
 BIONIC_ORDINARY_TABLE='ready|spawn-worktree.sh ready|75|WAITING|the landing waits its turn behind a row ahead or for room on the machine; run the same command again
 ready|spawn-worktree.sh ready|75|BUSY|another landing holds the publish lock; run the same command again
 door|tests/run.sh|75|refused at the gate|the gate admitted nothing, so no suite ran; the note gets one line
 booked|booked.sh|75|did not admit|the gate did not admit the wrapped command, so it ran nothing; stamped rc=75
 regression-run|session-poker.sh regression-run|75|did not admit the whole run|nothing ran and no log was written; the note gets one line
 check|session-poker.sh current <N> --check|1|would refuse|the step would not advance; the lines under the verdict say why
-judge|session-poker.sh judge <N>...|1|would refuse|a step would not advance; its block closes with judged <N> exit 1'
+judge|session-poker.sh judge <N>...|1|would refuse|a step would not advance; its block closes with judged <N> exit 1
+tick|session-poker.sh tick|1|decision=NOTIFY|a row or a gate request wants the orchestrator; the lines above the decision line say which
+card-early|card.sh early <plan>|1|CARD-EARLY —|the release approval card may not render yet; the line on stderr names the first fact that fails
+release-approval|session-poker.sh release-approval [<plan>]|1|CARD-EARLY —|the page is early: nothing is rendered or written, and the line on stderr says why
+close-out|close-out.sh <plan> run|2|the tail runs once the merge is seen|the working branch is not merged yet; nothing is done, the merge ask stays open, and the close runs again once the merge is seen'
 
 # refuse_ordinary -> the list, one row a line, table order.
 refuse_ordinary() { printf '%s\n' "$BIONIC_ORDINARY_TABLE"; }

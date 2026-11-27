@@ -440,7 +440,8 @@ tick_card_early() {  # <units_rows output> -> always 0; says the card's CARD-EAR
   card="$(cd "$BIONIC_LIB" 2>/dev/null && pwd -P)/../card.sh"
   [ -f "$card" ] || return 0
   why="$( cd "$REPO_REAL" 2>/dev/null && env CLAUDE_CODE_SESSION_ID="$SESSION_ID" UNITS_LIVE_HEAD="${UNITS_LIVE_HEAD:-}" \
-    UNITS_READINGS_STATE="${UNITS_READINGS_STATE:-}" "${BASH:-bash}" "$card" early "$SCHED_PLAN" 2>&1 >/dev/null )" && return 0
+    UNITS_READINGS_STATE="${UNITS_READINGS_STATE:-}" "${BASH:-bash}" "$card" early "$SCHED_PLAN" 2>&1 >/dev/null )"
+  # The card exits 0 when it is early too (an ordinary answer), so its line is read, never its exit.
   why="$(printf '%s\n' "$why" | head -1)"
   case "$why" in "CARD-EARLY — "*) say "$why" ;; esac
   return 0
@@ -1374,8 +1375,8 @@ EOF
     # firing on sessions that have nothing wrong with them, is worth less than nothing.
 
     # EXACTLY ONE verdict read over the whole roster (no name argument), run from the repo
-    # root exactly as landing-gate.sh runs it. `|| exit 9` keeps a failed `cd` out of the
-    # exit-1 band, which is NOTIFY's alone.
+    # root exactly as landing-gate.sh runs it. `|| exit 9` keeps a failed `cd` apart from
+    # every code the verdict read returns.
     VERDICT_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
                    CLAUDE_CODE_SESSION_ID="$SESSION_ID" bash "$SWEEPER" verdict 2>&1 )
     VERDICT_RC=$?
@@ -2853,7 +2854,8 @@ EOF
         if [ "$TICK_DECISION" = NOTIFY ]; then
           tick_gate_report
           tick_decision_line NOTIFY "$TOTAL" "$OPEN" "" "" "${SCHED_FILL:-}" "" "$TICK_GATE_FIELD"
-          exit 1
+          # A notice is the tick's answer, not a failure: it exits 0, and the decision line says NOTIFY.
+          exit "$(refuse_ordinary_exit tick 1)"
         fi
         if [ "$TICK_DECISION" = FILL ]; then
           tick_fill_sentence
@@ -2960,7 +2962,7 @@ EOF
     # the tick says the tree is standing and stops there.
     #
     # AND IT IS A NOTE, NOT A BAND (REQ-10 AC-10.3; D5). This walk used to feed NOTIFY, so a
-    # tree left standing after its row was discharged raised the exit-1 band on EVERY tick
+    # tree left standing after its row was discharged raised the NOTIFY band on EVERY tick
     # for the life of the tree — nothing here is remembered between ticks — and buried the
     # decision the roster had actually reached. A standing tree is a fact about disk: it
     # prints as `poker: note:` and it rides the decision line in a `trees=` field of its own,
@@ -3028,7 +3030,8 @@ EOF
       tick_decision_line NOTIFY "$TOTAL" "$OPEN" "$NOTIFY_ROWS" \
         "$(clean "${NOTIFY_DETAIL}${NOTIFY_DETAIL:+${QUIET_DETAIL:+; }}${QUIET_DETAIL}")" \
         "$SCHED_FILL" "$LEASE_TREES" "$TICK_GATE_FIELD"
-      exit 1
+      # The notice is an ordinary answer (lib/refuse.sh, the list): exit 0, read from the decision line.
+      exit "$(refuse_ordinary_exit tick 1)"
     fi
 
     # THE QUIET LINE HAS TWO READINGS NOW, and printing the wrong one is how this fix would
@@ -3081,7 +3084,8 @@ EOF
   # through, so a warning is still a warning.
   #
   # A TICK THAT REFUSED IS A REFUSED PASS, never a quiet one: a watcher that read a refusal as "nothing to do" would
-  # watch nothing and say so to no one. The tick's own exits are 0, and 1 for NOTIFY; any other is its refusal.
+  # watch nothing and say so to no one. The tick's own answers exit 0, a NOTIFY too (an
+  # older tick's 1 for it is still read as an answer); any other exit is its refusal.
   #
   # THE INTERVAL IS ASKED ON EVERY PASS THAT HAS NO ACT TO NAME, so a period above the ceiling is said by the watch
   # that would have taken it rather than by nothing: the pass wakes with the line that names the fix.
@@ -3262,6 +3266,14 @@ EOF
     tmp="$(mktemp "${TMPDIR:-/tmp}/bionic-watch-close.XXXXXX" 2>/dev/null)" || return 0
     ( cd "$root" && bash "$BIONIC_LIB/../close-out.sh" "$plan" run ) > "$tmp" 2>&1 < /dev/null
     co=$?
+    # THE CLOSE IS READ BY ITS WORDS, NOT ITS EXIT. A close held before the merge is an ordinary answer and exits 0, so a
+    # close whose last line is its refusal held, whatever it exited, and takes the code the list keeps for that hold
+    # (lib/refuse.sh): the key and the line say what they said when the hold exited 2.
+    case "$co|$(tail -1 "$tmp")" in
+      "0|bionic: close-out refused — "*)
+        co="$(refuse_ordinary 2>/dev/null | awk -F'|' '$1 == "close-out" { print $3; exit }')"
+        case "$co" in ''|0|*[!0-9]*) co=1 ;; esac ;;
+    esac
     key="watch-close/v1|commit=$(printf '%s' "$seen" | cut -f2)|rc=${co}|last=$(tail -1 "$tmp" | cksum | cut -d' ' -f1)"
     if [ "$co" -ne 0 ] && [ -f "$acct" ] && [ "$(head -1 "$acct" 2>/dev/null)" = "$key" ]; then rm -f "$tmp"; return 0; fi
     if [ -d "$root/.bionic/tmp" ] && [ ! -L "$root/.bionic/tmp" ] && [ ! -L "$acct" ]; then

@@ -194,7 +194,7 @@ R3N="$(make_repo s3-notify)"; new_roster "$R3N"
 add_row "$R3N" name=overdue-agent deliverable="$R3N/absent-overdue.md" \
   duration="1 minute" launched_at="$(iso_ago 120)"
 poke "$R3N" tick
-expect_eq "an UNACKED UNMET row past its duration signals NOTIFY (exit 1)" "1" "$RC"
+expect_eq "an UNACKED UNMET row past its duration signals NOTIFY (exit 0)" "0" "$RC"
 expect_contains "…decision=NOTIFY" "decision=NOTIFY" "$OUT"
 expect_contains "…naming the row" "rows=overdue-agent" "$OUT"
 expect_absent   "…never QUIET on the same tick" "decision=QUIET" "$OUT"
@@ -210,7 +210,7 @@ add_row "$R3SW" name=overdue-swept deliverable="$R3SW/absent-overdue-swept.md" \
   duration="1 minute" launched_at="$(iso_ago 120)"
 swept_marker_write "$(roster_of "$R3SW")" "$(iso_ago 1)" "$SID" overdue-swept a000 UNMET
 poke "$R3SW" tick
-expect_eq "a landing-swept marker after the row does not silence NOTIFY (exit 1)" "1" "$RC"
+expect_eq "a landing-swept marker after the row does not silence NOTIFY (exit 0)" "0" "$RC"
 expect_contains "…decision=NOTIFY survives the marker" "decision=NOTIFY" "$OUT"
 expect_contains "…naming the row" "rows=overdue-swept" "$OUT"
 
@@ -233,7 +233,7 @@ add_row "$R3M" name=already-landed deliverable="$DEL_M" duration="1 minute" \
 add_row "$R3M" name=overdue-agent-2 deliverable="$R3M/absent-2.md" \
   duration="1 minute" launched_at="$(iso_ago 120)"
 poke "$R3M" tick
-expect_eq "a mixed roster still resolves to NOTIFY (exit 1)" "1" "$RC"
+expect_eq "a mixed roster still resolves to NOTIFY (exit 0)" "0" "$RC"
 expect_contains "…names the overdue row" "rows=overdue-agent-2" "$OUT"
 # NARROWED TO THE NOTIFY SET (T22). The claim was always about NOTIFY — a landed row is not
 # overdue work — and it was written as a sweep of the whole tick output because nothing else
@@ -308,7 +308,7 @@ R3AP="$(make_repo s3-acked-pair)"; new_roster "$R3AP"
 add_row "$R3AP" name=acked-overdue deliverable="$R3AP/absent-acked-overdue.md" \
   duration="1 minute" launched_at="$(iso_ago 100000)"
 poke "$R3AP" tick
-expect_eq "the IDENTICAL row with no ack still signals NOTIFY (exit 1)" "1" "$RC"
+expect_eq "the IDENTICAL row with no ack still signals NOTIFY (exit 0)" "0" "$RC"
 expect_contains "…naming it" "rows=acked-overdue" "$OUT"
 
 # --- mixed roster: only UNACKED rows are counted open, and only they can notify ---
@@ -394,13 +394,13 @@ R5WT="$TMPROOT/s5-worktree-wt"
 ( cd "$R5" && git worktree add -q -b s5-r3-wt "$R5WT" ) >/dev/null 2>&1
 
 poke "$R5" tick
-expect_eq "from the main repo root, tick sees the open overdue row (NOTIFY, exit 1)" "1" "$RC"
+expect_eq "from the main repo root, tick sees the open overdue row (NOTIFY, exit 0)" "0" "$RC"
 expect_contains "…and names it" "rows=live-worker" "$OUT"
 
 forget_digest "$R5"
 poke "$R5WT" tick
-expect_eq "from the WORKTREE cwd, the SAME session's tick still reads the true roster (NOTIFY, exit 1)" \
-  "1" "$RC"
+expect_eq "from the WORKTREE cwd, the SAME session's tick still reads the true roster (NOTIFY, exit 0)" \
+  "0" "$RC"
 expect_contains "…still names the open row through the worktree cwd" "rows=live-worker" "$OUT"
 expect_absent "…never quietly DISARMs because the worktree cwd resolved the wrong root" \
   "decision=DISARM" "$OUT"

@@ -190,8 +190,8 @@ OM_TIP="$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
 expect_eq "ORDER-6 close-out published a part: the working branch moved past the tip the person merged" "yes" \
   "$([ -n "$OM_TIP" ] && [ "$OM_TIP" != "$OM_H" ] && fixture_git "$PMO" log -1 --format='%an <%ae>' "$OM_TIP" | /usr/bin/grep -qxF 'fixture <fixture@example.invalid>' && echo yes || echo no)"
 OM_ACT="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^merge: ')"
-expect_eq "ORDER-7 …so the readback, read on that branch, held: the run did not close, and its merge act never ran" "yes|0" \
-  "$([ "$CO_RC" -ne 0 ] && echo yes)|$OM_ACT"
+expect_eq "ORDER-7 …so the readback, read on that branch, held (exit 0): the run did not close, and its merge act never ran" "0|0" \
+  "$CO_RC|$OM_ACT"
 expect_contains "ORDER-7b …saying the working branch is not merged" "is not reachable from" "$CO_OUT"
 expect_contains "ORDER-7c …after the reviews line named the published commit" "reviews: " "$CO_OUT"
 expect_contains "ORDER-7d …which names the commit the branch is at" "$(printf '%.12s' "$OM_TIP")" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ')"

@@ -357,7 +357,7 @@ RS="$(nt_world nt-gate)"
 : > "$NT_CALLS"
 gate_line w99-T1 leaves-the-machine "git push origin wave/99-fx" >> "$(gate_of "$RS")"
 poke "$RS" tick
-expect_eq "S1 precondition: the tick decides NOTIFY on the gate request (exit 1)" "1" "$RC"
+expect_eq "S1 precondition: the tick decides NOTIFY on the gate request (exit 0)" "0" "$RC"
 expect_eq "S2 AC-2.3 the tick that raises the GATE sends one notification" "1" "$(nt_calls)"
 expect_contains "S2a …carrying the GATE line it printed" \
   "body=poker: GATE w99-T1 — leaves-the-machine: git push origin wave/99-fx" "$(nt_last)"
