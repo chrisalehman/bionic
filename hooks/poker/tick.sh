@@ -716,7 +716,7 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
   prog="$(adopt_abs "$(line_field "$row" progress)" "$REPO_REAL")"
   if [ -n "$prog" ] && [ -f "$prog" ]; then
     OBS_PROGRESS_STATE=present
-    pm="$(file_mtime "$prog")"
+    pm="$(file_mtime "$prog" || echo 0)"
     OBS_PROGRESS_AGE=$(( now - pm ))
     [ "$OBS_PROGRESS_AGE" -lt 0 ] && OBS_PROGRESS_AGE=0
   fi
@@ -739,7 +739,7 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
     tx=""
     [ -n "$proj" ] && { tx="$(agent_log_newest "$id" "$proj")" || tx=""; }
     if [ -n "$tx" ]; then
-      OBS_LOG_MTIME="$(file_mtime "$tx")"
+      OBS_LOG_MTIME="$(file_mtime "$tx" || echo 0)"
       lm="$OBS_LOG_MTIME"
       OBS_LOG_AGE=$(( now - OBS_LOG_MTIME ))
       [ "$OBS_LOG_AGE" -lt 0 ] && OBS_LOG_AGE=0

@@ -98,9 +98,9 @@ LINE_BAR_LOAD=0
 LINE_LANDING_BAR=15
 
 _line_now() { iso_now; }
-_line_pid() { exec sh -c 'echo "$PPID"'; }   # as `$(_line_pid)`: this (sub)shell's own pid, which `$$` is not
 _line_me() {  # sets LINE_ME to `<pid>:<start>` of the calling (sub)shell; never call it inside `$( )`
-  local p; p="$(_line_pid)"
+  local p=""   # this (sub)shell's own pid, which `$$` is not, as lib/root.sh `bionic_id` reads it
+  ! bionic_need root.sh bionic_id || ! bionic_id || p="${BIONIC_ID%%.*}"
   LINE_ME="${p}:$(_slots_since "$p")"
 }
 _line_alive() {  # <pid>:<start> -> 0 while that process lives and started then
@@ -325,12 +325,15 @@ line_ask_key() { printf '%s:%s' "$1" "$(printf '%s' "$2" | LC_ALL=C tr -c 'A-Za-
 line_merge_ask_key() { line_ask_key pr-closed "$1"; }   # <working branch>
 _line_merge_ask() {  # <plan> <root> <mode> <working branch> <open|close> [<address>] -> always 0; acts under --fetch alone
   [ "$3" = --fetch ] && bionic_need owed.sh owed_close || return 0
-  local key; key="$(line_merge_ask_key "$4")"
+  local key sid="${CLAUDE_CODE_SESSION_ID:-}"; key="$(line_merge_ask_key "$4")"
+  # With no session, the store's stand-in is an id of this process (lib/root.sh `bionic_id`, its dots written `-` as
+  # a session id's alphabet asks), so two landings in sibling subshells never write under one.
+  [ -n "$sid" ] || { bionic_need root.sh bionic_id && bionic_id && sid="merge-seen-${BIONIC_ID//./-}"; } || return 0
   case "$5" in
-    open) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${CLAUDE_CODE_SESSION_ID:-merge-seen-$$}" owed_open "$key" \
+    open) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="$sid" owed_open "$key" \
             "the pull request was closed unmerged" \
             "$6 of $4 was closed without a merge: reopen it, or park the run with a ## Wake Note" >/dev/null 2>&1 ;;
-    close) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${CLAUDE_CODE_SESSION_ID:-merge-seen-$$}" owed_close "$key" "merge-seen" >/dev/null 2>&1 ;;
+    close) OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="$sid" owed_close "$key" "merge-seen" >/dev/null 2>&1 ;;
   esac
   return 0
 }
@@ -2967,15 +2970,11 @@ _line_holds() {  # <root> <commit> <suite> -> 0 when <commit> is a commit holdin
 # the gate's own admission instant for the run (`at=`), which the verdict carries as admitted= (AC-6.4).
 # The ask is made in this shell and its id read back through a file: the gate's baseline (cpu0=) and gate_end both read
 # this shell's `times`, so an ask inside `$( )` would leave out what this shell had reaped and charge the subshell's own
-# polls to the run. Only when no file can be made is it asked in `$( )`.
+# polls to the run. Only when no file can be made is it asked in `$( )` (lib/gate.sh `gate_ask_here`).
 _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> <carrier pid> [<landing key>] [<record>]
-  local id="" rc p c f
-  if f="$(mktemp "${TMPDIR:-/tmp}/line-id.XXXXXX" 2>/dev/null)"; then
-    BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "$(_line_gate_key "$1")" ${2:+--within "$2"} > "$f"; rc=$?
-    { read -r id < "$f"; } 2>/dev/null; rm -f "$f"
-  else
-    id="$(BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "$(_line_gate_key "$1")" ${2:+--within "$2"})"; rc=$?
-  fi
+  local id="" rc p c
+  BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask_here line-id landing "$(_line_gate_key "$1")" ${2:+--within "$2"}; rc=$?
+  id="$GATE_ASK_ID"
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
   printf 'admitted=%s\nat=%s\npromised=%s\n' "$id" "$(_line_admitted_at "$id")" "$(_line_req_seconds "$id" promised)" > "$5"
   # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended

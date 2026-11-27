@@ -22,6 +22,10 @@
 #                        the run's handoff file: the pointer's path, else the default.
 #     handoff_line <file> <label>
 #                        the first `<label>: ` line of a written document, its fold joined back.
+#     handoff_is_one <file> <no-link|link-ok>
+#                        whether <file> is a handoff: a regular file whose first line is `bionic-handoff/v1`. `no-link`
+#                        also refuses a file that is a symlink; `link-ok` leaves the link to a caller that has already
+#                        answered for it. rc 0 when it is one, 1 when not (an empty path, no such file, a directory).
 #     handoff_compose
 #                        stdin, the sections a session composed, to `<section> TAB <item>` lines on stdout; see THE
 #                        COMPOSED HALF below.
@@ -182,4 +186,13 @@ handoff_line() {
     f { exit }
     index($0, k) == 1 { f = 1; l = $0 }
     END { if (f) print l }' "$1" 2>/dev/null
+}
+
+# handoff_is_one <file> <no-link|link-ok> -> rc 0 when <file> is a handoff. Four callers ask this, and two of them have
+# a link answered before they ask (the resume verb refuses it with its own words, close-out's writer returns), so the
+# caller names which it wants: a hook that reads a path it is handed refuses a link here, as it does everywhere in tmp.
+handoff_is_one() {
+  [ -f "${1:-}" ] || return 1
+  [ "${2:-}" = link-ok ] || [ ! -L "$1" ] || return 1
+  [ "$(head -n 1 "$1" 2>/dev/null)" = "bionic-handoff/v1" ]
 }

@@ -380,7 +380,7 @@ else
     dp="$(observe_abs_path "$d")"
     case "$dstate" in
       present)
-        echo "  ${d} — PRESENT, $(file_size "$dp") bytes, last write $(fmt_epoch "$(file_mtime "$dp")") (age $(fmt_age $((OBS_NOW - $(file_mtime "$dp")))))" ;;
+        echo "  ${d} — PRESENT, $(file_size "$dp") bytes, last write $(fmt_epoch "$(file_mtime "$dp" || echo 0)") (age $(fmt_age $((OBS_NOW - $(file_mtime "$dp" || echo 0)))))" ;;
       empty)
         echo "  ${d} — PRESENT but EMPTY, 0 bytes" ;;
       dir)

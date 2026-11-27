@@ -69,6 +69,7 @@ bionic_need root.sh project_root || :
 bionic_need run.sh session_plan || :
 bionic_need notify.sh notify_send || :
 bionic_need reader.sh reader_ask_rounds || :
+bionic_need time.sh _time_epoch || :
 
 # owed_register <root> <plan> -> the run's log, `<docs>/record/<run>/run.log`, where its asks are kept, on stdout; rc 1
 # when <plan> names no run: a name that does not end `.plan.md` (a scratch copy's does not), or a plan gone with no
@@ -133,12 +134,9 @@ _owed_key_ok() {  # <key>
   return 1
 }
 
-# owed_key <key> -> the key the store files it under: `approve:D<n>` is `decide:D<n>`, every other key itself.
+# owed_key <key> -> the key the store files it under, by the reader's `ask_key`: `approve:D<n>` is `decide:D<n>`.
 owed_key() {
-  case "${1:-}" in
-    approve:D[0-9]*) case "${1#approve:D}" in *[!0-9]*) printf '%s\n' "$1" ;; *) printf 'decide:%s\n' "${1#approve:}" ;; esac ;;
-    *) printf '%s\n' "${1:-}" ;;
-  esac
+  _OWED_KEY="${1:-}" awk "$_READER_KEY_AWK"'BEGIN { print ask_key(ENVIRON["_OWED_KEY"]) }'
 }
 
 _owed_clean() {  # <value> -> the value with | TAB CR LF folded to a space
@@ -148,12 +146,7 @@ _owed_clean() {  # <value> -> the value with | TAB CR LF folded to a space
 # owed_now -> the instant every line here is stamped with, ISO-UTC: BIONIC_NOW_EPOCH when it is a number (the clock
 # seam the poker's readers honour, so a suite fixes every instant it reads), else the clock. A verb that writes an
 # instant beside the log's own (the plan's approval) takes it from here, so the two agree to the second.
-owed_now() {
-  case "${BIONIC_NOW_EPOCH:-}" in
-    ''|*[!0-9]*) date -u +%Y-%m-%dT%H:%M:%SZ ;;
-    *) date -u -r "$BIONIC_NOW_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$BIONIC_NOW_EPOCH" +%Y-%m-%dT%H:%M:%SZ ;;
-  esac
-}
+owed_now() { epoch_iso "$(time_now)"; }
 
 # _owed_dir_ok <store path> -> 0 when its directory may be written: neither it nor the store is a
 # link. The worktree's `.bionic` link to the main checkout is the one link a tree carries, and it

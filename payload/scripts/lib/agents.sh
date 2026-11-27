@@ -65,17 +65,10 @@
 # may already be gone. Only the exit status ever says "do not act".
 #
 # BASH 3.2, jq, awk. Sourcing this file prints nothing, touches nothing and defines
-# only the functions below — it is sourced by hooks running under `set -u`.
+# only the functions below and the time library's — it is sourced by hooks running under `set -u`.
 
-# Now, in epoch seconds. `BIONIC_NOW_EPOCH` pins it so suites are arithmetic, not
-# clock readings — the same idiom resources.sh and run.sh use.
-_la_now_epoch() {
-  if [ -n "${BIONIC_NOW_EPOCH:-}" ]; then
-    printf '%s' "$BIONIC_NOW_EPOCH"
-  else
-    date -u +%s
-  fi
-}
+declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/loader.sh" ;; *) . ./loader.sh ;; esac
+bionic_need time.sh _time_epoch || :
 
 # <ISO-8601 with optional fraction> -> epoch seconds, empty when unreadable.
 _la_iso_epoch() {
@@ -86,9 +79,7 @@ _la_iso_epoch() {
     *Z) : ;;
     *)  ts="${ts}Z" ;;
   esac
-  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$ts" +%s 2>/dev/null \
-    || date -u -d "$ts" +%s 2>/dev/null \
-    || true
+  iso_epoch "$ts" || true
 }
 
 # Timestamps are compared as strings — lexicographic order IS chronological for UTC
@@ -361,7 +352,7 @@ _la_read() {  # <transcript.jsonl> -> sets _LA_CACHE_OUT / _LA_CACHE_ERR / _LA_C
     return 0
   fi
 
-  now="$(_la_now_epoch)" || now=""
+  now="$(time_now)" || now=""
   epoch="$(_la_iso_epoch "$ans_ts")" || epoch=""
   if [ -n "$epoch" ] && [ -n "$now" ]; then
     age=$(( now - epoch ))

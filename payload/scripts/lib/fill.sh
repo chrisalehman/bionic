@@ -494,8 +494,8 @@ fill_ready_tagged() {  # <plan>
 
 # ── THE ROWS THAT TAKE NO WRITER SLOT (wave-26 T13; D9) ───────────────────────
 #
-# fill_readonly_ids <plan> -> the ids, space-joined, of the rows whose kind is `verify` or
-# `review` and whose `Files` cell names no tracked path, in table order.
+# fill_readonly_ids <plan> -> the ids, space-joined, of the rows whose kind takes a read-only slot in
+# units.sh `UNITS_KINDS` (verify and review) and whose `Files` cell names no tracked path, in table order.
 #
 # THE RULE IS THE KIND, BECAUSE THE KIND IS WHAT THE TABLE CARRIES (A-T13.2). A writer slot is a
 # writer's: an agent that edits a worktree. The dispatch wall knows the role it is launching
@@ -513,8 +513,9 @@ fill_ready_tagged() {  # <plan>
 # row takes a writer place like any writer and, at a full budget, waits with the budget reason;
 # the test is units.sh `writes_head`, the predicate that decides which rows owe a tree.
 fill_readonly_ids() {  # <plan> -> ids, space-joined
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$(_units_files_awk)"'
-    ($3 == "verify" || $3 == "review") && !writes_head($9) { printf "%s%s", (n++ ? " " : ""), $1 }'
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' -v ro="$(units_kinds slot readonly)" "$(_units_files_awk)"'
+    BEGIN { m = split(ro, r, " "); for (i = 1; i <= m; i++) rk[r[i]] = 1 }
+    ($3 in rk) && !writes_head($9) { printf "%s%s", (n++ ? " " : ""), $1 }'
 }
 
 # ── THE NAME A ROW IS DISPATCHED UNDER ────────────────────────────────────────

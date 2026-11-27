@@ -610,13 +610,15 @@ expect_contains "VERDICT-1b: …saying it would advance" "current 6 --check: wou
 # §VERDICT-2 — an empty auditor cell on a non-T4 row is no verdict: refused, naming the row.
 ru_put 5 unit none
 ru_poke current 6 --check
-expect_eq "VERDICT-2: an empty auditor cell on a T1 row — current 6 --check refuses" "1" "$RU_RC"
+expect_eq "VERDICT-2: an empty auditor cell on a T1 row — current 6 --check refuses, an answer: exit 0, saying it would refuse" "0|1" \
+  "$RU_RC|$(printf '%s\n' "$RU_OUT" | /usr/bin/grep -c -- 'current 6 --check: would refuse')"
 expect_contains "VERDICT-2b: …naming the row" "the auditor has not confirmed AC-2" "$RU_OUT"
 
 # §RULED-1 — at 7, an unruled REFUTED row: the advance to 8 refuses naming it, and the judge opens its row item.
 ru_put 7 unit fail
 ru_poke current 8 --check
-expect_eq "RULED-1: an unruled REFUTED row — current 8 --check refuses" "1" "$RU_RC"
+expect_eq "RULED-1: an unruled REFUTED row — current 8 --check refuses, an answer: exit 0, saying it would refuse" "0|1" \
+  "$RU_RC|$(printf '%s\n' "$RU_OUT" | /usr/bin/grep -c -- 'current 8 --check: would refuse')"
 expect_contains "RULED-1b: …naming the row in the matrix arm's words" "the auditor has not confirmed AC-2" "$RU_OUT"
 expect_eq "RULED-1c: …and the check writes no item" "" "$(ru_owed)"
 ru_poke current 8
@@ -625,12 +627,14 @@ expect_eq "RULED-1e: …and the judge opens one row:AC-2 item for the card to se
 # §RULED-4 — a T4 row its approval confirms, with no auditor verdict, is ruled by that confirmation.
 ru_put 7 human none "$RU_AP"
 ru_poke current 8 --check
-expect_eq "RULED-4: a T4 row its approval confirms, its cell empty — current 8 --check passes" "0" "$RU_RC"
+expect_eq "RULED-4: a T4 row its approval confirms, its cell empty — current 8 --check passes, saying it would advance" "0|1" \
+  "$RU_RC|$(printf '%s\n' "$RU_OUT" | /usr/bin/grep -c -- 'current 8 --check: would advance')"
 # §RULED-2 — the REFUTED row waived: ruled, the advance to 8 takes it, and the judge closes the item it opened.
 ru_put 7 unit fail
 printf 'run/v1|ev=waiver|ac=AC-2|by=Dana|said=waive it|at=2026-10-20T00:00:00Z\n' >> "$RU_STEP_LOG"
 ru_poke current 8 --check
-expect_eq "RULED-2: the same row waived — current 8 --check passes" "0" "$RU_RC"
+expect_eq "RULED-2: the same row waived — current 8 --check passes, saying it would advance" "0|1" \
+  "$RU_RC|$(printf '%s\n' "$RU_OUT" | /usr/bin/grep -c -- 'current 8 --check: would advance')"
 ru_poke current 8
 expect_eq "RULED-2b: the advance appends step 8" "0|n=8" "$RU_RC|$(ru_step)"
 expect_eq "RULED-2c: …and the row:AC-2 item RULED-1e read open is closed" "" "$(ru_owed)"
@@ -734,13 +738,15 @@ AW_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$AW_LIB" "$AW_P" 2>/d
 expect_eq "AW-5-0: the bound session's asks are filed in its run's log, the one the reader reads" "$AW_LOG|yes" \
   "$(bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_file' _ "$AW_LIB" "$R_AW" "$SID" 2>/dev/null)|$([ -f "$AW_LOG" ] && echo yes)"
 aw_poke current 8 --check
-expect_eq "AW-5: at 7, the advance to 8 is refused for the criterion awaiting its person" "1" "$AW_RC"
+expect_eq "AW-5: at 7, the advance to 8 is refused for the criterion awaiting its person: the check exits 0, saying it would refuse" "0|1" \
+  "$AW_RC|$(printf '%s\n' "$AW_OUT" | /usr/bin/grep -c -- 'current 8 --check: would refuse')"
 expect_contains "AW-5b: …naming it" "AC-1.1" "$AW_OUT"
 aw_poke current 8
 expect_eq "AW-5c: the advance itself refuses, the run's step unchanged" "1|n=7" "$AW_RC|$(aw_step)"
 expect_eq "AW-5d: …and the judge opens the one row:AC-1.1 item the card settles" "row:AC-1.1" "$(aw_owed)"
 aw_approve; aw_poke current 8 --check
-expect_eq "AW-5e: the approval given after the proof, the advance to 8 would be taken" "0" "$AW_RC"
+expect_eq "AW-5e: the approval given after the proof, the advance to 8 would be taken" "0|1" \
+  "$AW_RC|$(printf '%s\n' "$AW_OUT" | /usr/bin/grep -c -- 'current 8 --check: would advance')"
 [ "$AW_RC" = 0 ] || printf '      the judge said: %s\n' "$AW_OUT" | head -3
 
 # ---------------------------------------------------------------------------

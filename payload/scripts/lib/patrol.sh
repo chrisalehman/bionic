@@ -608,9 +608,11 @@ _patrol_claim() {
   start="$(alive_since "$pid")"
   [ -n "$start" ] || return 2
   [ -d "${f%/*}" ] || mkdir -p "${f%/*}" 2>/dev/null || return 2
-  tmp="${f%/*}/.${f##*/}"; tmp="${tmp%.state}.$pid"
+  tmp="${f%/*}/.${f##*/}"
+  bionic_need root.sh bionic_new && bionic_new "${tmp%.state}" || return 2
+  tmp="$BIONIC_NEW"
   { [ -z "$head" ] || printf '%s\n' "$head"; printf 'pid=%s\nstart=%s\n' "$pid" "$start"; [ "$#" -eq 0 ] || printf '%s\n' "$@"; } \
-    > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 2; }
+    >| "$tmp" 2>/dev/null || { rm -f "$tmp"; return 2; }
   if [ ! -e "$f" ] && ln "$tmp" "$f" 2>/dev/null; then rm -f "$tmp"; return 0; fi
   if held="$("$ask" "$root" "$sid")"; then
     rm -f "$tmp"
@@ -874,10 +876,12 @@ _watch_read() {  # <record> — sets _WR_STATE _WR_PID _WR_START _WR_WHY _WR_AT 
   [ -n "$_WR_STATE" ]
 }
 
-_watch_write() {  # <record> <tmp name> <lines...> — the whole record beside it, then moved in; rc 1 not written
-  local f="$1" tmp="$2"; shift 2
+_watch_write() {  # <record> <tmp prefix> <lines...> — the whole record beside it, then moved in; rc 1 not written
+  local f="$1" tmp; shift
   [ -L "$f" ] && return 1
-  printf '%s\n' "$@" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  bionic_need root.sh bionic_new && bionic_new "$1" || return 1
+  tmp="$BIONIC_NEW"; shift
+  printf '%s\n' "$@" >| "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   [ -L "$f" ] && { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
 }
@@ -933,7 +937,7 @@ watch_rest() {
   local f
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
   watch_holds "$1" "$2" "${3:-}" || return 1
-  set -- "$f" "${f%/*}/.watch-$2.$3" "state=resting" "why=${4:-unsaid}" "at=$(iso_now)" \
+  set -- "$f" "${f%/*}/.watch-$2" "state=resting" "why=${4:-unsaid}" "at=$(iso_now)" \
     ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} ${_WR_SAID:+"said=$_WR_SAID"} ${_WR_WOKE:+"woke=$_WR_WOKE"}
   _watch_write "$@"
 }
@@ -952,7 +956,7 @@ watch_woke() {
 _watch_keep() {  # <root> <sid> <pid> -> the watching record rewritten from the _WR_ fields watch_holds read
   local f
   f="$(watch_record_path "$1" "$2")" || return 1
-  _watch_write "$f" "${f%/*}/.watch-$2.$3" "state=watching" "pid=$_WR_PID" "start=$_WR_START" \
+  _watch_write "$f" "${f%/*}/.watch-$2" "state=watching" "pid=$_WR_PID" "start=$_WR_START" \
     "at=$(iso_now)" ${_WR_TOLD:+"told=$_WR_TOLD"} ${_WR_LOST:+"lost=$_WR_LOST"} \
     ${_WR_SAID:+"said=$_WR_SAID"} ${_WR_WOKE:+"woke=$_WR_WOKE"}
 }
@@ -989,8 +993,9 @@ watch_lost_said() {
   f="$(watch_record_path "${1:-}" "${2:-}")" || return 1
   case "${3:-}" in ''|*[!0-9]*) return 1 ;; esac
   _watch_read "$f" || return 1
-  tmp="${f%/*}/.watch-$2.said.$$"
-  { /usr/bin/grep -v '^said=' "$f"; printf 'said=%s\n' "$3"; } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  bionic_need root.sh bionic_new && bionic_new "${f%/*}/.watch-$2.said" || return 1
+  tmp="$BIONIC_NEW"
+  { /usr/bin/grep -v '^said=' "$f"; printf 'said=%s\n' "$3"; } >| "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   [ -L "$f" ] && { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
 }

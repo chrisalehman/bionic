@@ -68,13 +68,6 @@ esac
 START_QUESTION="${1-}"
 [ -z "$START_QUESTION" ] || [ -n "$IS_START" ] || exit 0
 
-# ---------- portable file facts ----------
-# DELIBERATELY DUPLICATED from payload/scripts/lib/observe.sh, the copy hooks/stop-check.sh
-# and the stop guard load, byte for byte. A shared library is rejected by design (TDD §9): a sourced file the
-# installer misses is a silently inert wall. The copies are held together by the
-# agreement battery in tests/cross-gate-agreement.test.sh §C.
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
-
 # A value written onto a roster row is folded by lib/fields.sh's `line_field_clean`, the fold the dispatch wall
 # gives its own row through lib/brief.sh's `sanitize`: values are pipe-delimited on one line, so a `|` forges a field
 # and a newline forges a row, and one row normalised two ways by its two writers is the defect it prevents. Normalising
@@ -686,6 +679,8 @@ fi
 # cadence, waiver — off that row alone. A row that dropped a field would not
 # merely be terse; it would silently retract the contract it inherited.
 if [ -n "$IS_START" ]; then
+  # The clock's one home, asked by name and only here: every clock reading this hook makes is a start's.
+  bionic_need time.sh _time_epoch
   # ---------- SURVIVAL TERMS DELIVERY (wave-11 1c-b, design D2, probe P2) ----------
   #
   # D2 (spec §2, "Dispatcher ↔ agent"): this hook already reads `agent_type` on every
@@ -866,8 +861,7 @@ if [ -n "$IS_START" ]; then
   start_clock() {  # -> START_NOW, epoch seconds: one reading per start, shared by its registrations
     [ -z "$START_NOW" ] || return 0
     local _sc_f _sc_was _sc_tmp
-    START_NOW="${BIONIC_NOW_EPOCH:-}"
-    case "$START_NOW" in ''|*[!0-9]*) START_NOW=$(date -u +%s) ;; esac
+    START_NOW=$(time_now)
     _sc_f=$(start_clock_path) || return 0
     { [ -d "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ] && [ ! -L "$_sc_f" ]; } || return 0
     _sc_was=$(head -c 20 "$_sc_f" 2>/dev/null | tr -d '\n')
@@ -890,10 +884,8 @@ if [ -n "$IS_START" ]; then
     _tj_plan=$(line_field_clean "$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" 400)
     [ -n "$_tj_plan" ] || _tj_plan="none"
     start_clock
-    _tj_nowiso=$(date -u -r "$START_NOW" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-      || date -u -d "@$START_NOW" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
-    _tj_from=$(date -u -r "$((START_NOW - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-      || date -u -d "@$((START_NOW - START_JOIN_WINDOW_S))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+    _tj_nowiso=$(epoch_iso "$START_NOW")
+    _tj_from=$(epoch_iso "$((START_NOW - START_JOIN_WINDOW_S))")
     { [ -f "$_tj_ledger" ] && [ ! -L "$_tj_ledger" ] && [ -r "$_tj_ledger" ]; } || _tj_ledger=""
     TJ_LEDGER="$_tj_ledger" \
     awk -v sid="$BIONIC_SID" -v ty="$1" -v plan="$_tj_plan" -v from="$_tj_from" -v now="$_tj_nowiso" \
@@ -953,7 +945,7 @@ if [ -n "$IS_START" ]; then
   launch_claim() {  # <tool_use_id> -> one claim line for this start's agent id, appended to the roster
     case "$1" in ''|*'|'*) return 0 ;; esac
     printf 'start-claim/v1|at=%s|session=%s|launch=%s|claimed_by=%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BIONIC_SID" "$1" "$START_ID" >> "$ROSTER_FILE" 2>/dev/null
+      "$(iso_now)" "$BIONIC_SID" "$1" "$START_ID" >> "$ROSTER_FILE" 2>/dev/null
     return 0
   }
   type_join_pick() {  # <subagent type> -> what type_join_candidates prints, a group of one claimed first
@@ -990,7 +982,7 @@ if [ -n "$IS_START" ]; then
       _us_names="${_us_names:+$_us_names,}${_us_l//,/ }"
     done <<< "$1"
     printf 'start-unchecked/v1|event=start|at=%s|session=%s|agent_id=%s|role=%s|candidates=%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BIONIC_SID" "$START_ID" "$START_TYPE" "$_us_names" \
+      "$(iso_now)" "$BIONIC_SID" "$START_ID" "$START_TYPE" "$_us_names" \
       >> "$ROSTER_FILE" 2>/dev/null
     return 0
   }
@@ -1370,7 +1362,7 @@ if [ -n "$IS_START" ]; then
   TERMS_NAME=$(line_field "$ROW" name)
   [ -n "$TERMS_OWED" ] && [ -z "$TERMS_DELIVERED" ] && deliver_terms
   TERMS_AT=""
-  [ -n "$TERMS_DELIVERED" ] && TERMS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  [ -n "$TERMS_DELIVERED" ] && TERMS_AT=$(iso_now)
 
   # S6 (AC-5, R6): THE RESUME CASE. `agent_id` here is the transcript form, and
   # a resume delivers this same event again for an id the roster already
@@ -1403,7 +1395,7 @@ if [ -n "$IS_START" ]; then
   # every ordinary resume carries it, and the restart's own time rides `restarted_at=`, which
   # roster_open_names — the one close predicate — reads, and no contract reader does.
   RESTARTED_AT=""
-  [ -n "${RESTART_AFTER_ACK:-}" ] && RESTARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  [ -n "${RESTART_AFTER_ACK:-}" ] && RESTARTED_AT=$(iso_now)
 
   # `agent_id` is appended when the joined row has no such field and substituted
   # when it has one — ARM 2's rule for `teammate_id`, for ARM 2's reason: every

@@ -5,6 +5,9 @@
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
 
+# THE ONE ENGLISH LIST AND PLURAL (lib/english.sh): the sheet names its words as prose and counts them with the noun's number.
+bionic_need english.sh english_list
+
 # ---------------------------------------------------------------- the blind wall
 #
 # THE WALL THAT ROSTERS A DISPATCH IS REGISTERED ON THE SKILL CHANNEL, not in hooks.json:
@@ -450,8 +453,8 @@ decision_wait() {  # <plan> <D<n>> [<root>] [<rows the put names>] -> one senten
   waits="$(decision_waiters "$@")"
   if [ -z "$rows" ] && [ -z "$waits" ]; then printf 'Answered now or in an hour, no task moves: the plan has no task yet.\n'; return 0; fi
   chain="$(sitrep_chain "$1" "$rows")"; cids="${chain%%$'\t'*}"
-  printf '%s\n' "$waits" | awk -v c=",$cids," '
-    function list(a, m,   i, s) { for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m) ? " and " : ", ")) a[i]; return s }
+  printf '%s\n' "$waits" | awk -v c=",$cids," "$_ENGLISH_AWK"'
+    function list(a, m) { return english_join(a, m, m) }
     $0 == "release" || $0 == "merge" { hd[++hn] = "the " $0; next }
     NF { if (index(c, "," $0 ",")) on[++a] = $0; else off[++b] = $0 }
     END {
@@ -739,21 +742,6 @@ sitrep_task_label() {
 sitrep_dur() {
   awk -v m="$1" 'BEGIN { m = int(m + 0.5); h = int(m / 60); r = m - h * 60
     if (h == 0) printf "%d min\n", r; else if (r == 0) printf "%d h\n", h; else printf "%d h %d min\n", h, r }'
-}
-
-# sitrep_noun <n> <singular> <plural> -> the word that agrees with <n>: one task, two tasks
-sitrep_noun() { if [ "$1" = 1 ]; then printf '%s' "$2"; else printf '%s' "$3"; fi; }
-
-# sitrep_list <cap> <word>… -> the words as prose, `A`, `A and B`, `A, B and C`, the first <cap> named and the rest
-# counted (`A, B, C and 6 more`); nothing for no word
-sitrep_list() {
-  local cap="$1"; shift
-  awk -v cap="$cap" 'BEGIN {
-    n = ARGC - 1; if (n < 1) exit
-    m = (n > cap) ? cap : n
-    for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m && n == m) ? " and " : ", ")) ARGV[i]
-    if (n > m) s = s " and " (n - m) " more"
-    print s }' "$@"
 }
 
 # THE RUN'S FACTS ARE THE READER'S. Every fact of the run the sheet prints, the step, an approval, a landing, a row's
@@ -1051,14 +1039,14 @@ $out
 SITREP_WAITING
   m="${m:-0}"; u="${u:-0}"
   if [ "$u" -gt 0 ]; then
-    m="$m min partial, $u $(sitrep_noun "$u" ask asks) not timed"
+    m="$m min partial, $u $(english_noun "$u" ask asks) not timed"
   else
     m="$m min"
   fi
   if [ -z "$k" ]; then printf '%s\n' "$m"
   else
     # shellcheck disable=SC2086
-    printf '%s: %s\n' "$m" "$(sitrep_list 99 $k)"
+    printf '%s: %s\n' "$m" "$(english_list 99 $k)"
   fi
 }
 
@@ -1218,7 +1206,7 @@ sitrep_holds() {
   done <<SITREP_HOLDS
 $ids
 SITREP_HOLDS
-  if [ "${#words[@]}" -gt 0 ]; then sitrep_list 5 "${words[@]}"; else printf 'nothing\n'; fi
+  if [ "${#words[@]}" -gt 0 ]; then english_list 5 "${words[@]}"; else printf 'nothing\n'; fi
 }
 
 # sitrep_asks <plan> <root> <units_rows output> <plan_goals_read output> <now epoch> ->
@@ -1306,7 +1294,7 @@ sitrep_gather() {
               | while IFS='	' read -r id desc; do printf 'N\t%s\t%s\n' "$id" "$(plan_task_title "$desc")"; done
             sitrep_approval_waits "$plan" | awk -F'\t' '{ print "V\t" $1 "\t" $2 }'
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
-          } | LC_ALL=C awk -F'\t' "$(_sitrep_label_awk)"'
+          } | LC_ALL=C awk -F'\t' "$(_sitrep_label_awk)$_ENGLISH_AWK"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     function words(r,   t) {   # a read, in words: the step, the user'"'"'s approval, the reviews, the build, the merge
       sub(/^live:/, "", r); t = r; sub(/: .*$/, "", t)
@@ -1323,13 +1311,12 @@ sitrep_gather() {
       if ((i, e) in wseen) return
       wseen[i, e] = 1; wn[i]++; we[i, wn[i]] = e
     }
-    function waits(i,   k, e, s) {   # everything task i waits on, joined: "A", "A and B", "A, B and C"
-      s = ""
+    function waits(i,   k, e, t) {   # everything task i waits on, joined: "A", "A and B", "A, B and C"
       for (k = 1; k <= wn[i]; k++) {
         e = we[i, k]; if (substr(e, 1, 1) == "@") e = label(substr(e, 2))
-        s = s ((k == 1) ? "" : (k == wn[i]) ? " and " : ", ") e
+        t[k] = e
       }
-      return "waits on " s
+      return "waits on " english_join(t, wn[i], wn[i])
     }
     function row(i, kind, note,   d) {
       if (id[i] in red && st[i] != "landed") { kind = "s"; note = "red" }
@@ -1424,7 +1411,7 @@ sitrep_gather() {
   done <<SITREP_SIT
 $sit
 SITREP_SIT
-  SG_TASKCOUNT="$landed of $total $(sitrep_noun "$total" task tasks)"
+  SG_TASKCOUNT="$landed of $total $(english_noun "$total" task tasks)"
   SG_LAST="-"; [ -z "$last_id" ] || SG_LAST="$last_id at $(sitrep_clock "$last_at" "$now")"
 
   # ---- the steps: before current: done, current: and any later step a landed or active task stands at running
@@ -1478,19 +1465,19 @@ SITREP_SIT
   fi
   wk="$(sitrep_work "$plan" "$rec" "$root" "$rows" "$now" "$appr_at")"
   IFS='	' read -r pn pm an am dn dm ln lm live fn fm tn to ts nol wmed wpeak bn bo bs <<< "$wk"
-  SG_W_PLANNED="$pn $(sitrep_noun "$pn" task tasks), $pm min"
-  SG_W_ADDED="$an $(sitrep_noun "$an" task tasks), $am min"
-  SG_W_DROPPED="$dn $(sitrep_noun "$dn" task tasks), $dm min"
+  SG_W_PLANNED="$pn $(english_noun "$pn" task tasks), $pm min"
+  SG_W_ADDED="$an $(english_noun "$an" task tasks), $am min"
+  SG_W_DROPPED="$dn $(english_noun "$dn" task tasks), $dm min"
   SG_W_SHARE="-"; [ "${live:-0}" -le 0 ] || SG_W_SHARE="$(( (lm * 200 + live) / (live * 2) ))%"
-  SG_W_LANDED="$ln $(sitrep_noun "$ln" task tasks), $lm of $live min, $SG_W_SHARE"
-  SG_W_LEFT="$fn $(sitrep_noun "$fn" task tasks), $fm min"
+  SG_W_LANDED="$ln $(english_noun "$ln" task tasks), $lm of $live min, $SG_W_SHARE"
+  SG_W_LEFT="$fn $(english_noun "$fn" task tasks), $fm min"
   if [ "$wmed" = - ]; then SG_W_WIDTH="not measured: no launch of this plan on the rosters"
   else SG_W_WIDTH="median $wmed, peak $wpeak"; fi
   if [ "${ln:-0}" -eq 0 ]; then SG_W_TT="0 tasks: none has landed"
   elif [ "${tn:-0}" -eq 0 ]; then SG_W_TT="0 tasks: none of the $ln landed has both a launch and a landing on record"
   else
-    SG_W_TT="$tn $(sitrep_noun "$tn" task tasks), $to min against $ts sized min"
-    [ "${nol:-0}" -eq 0 ] || SG_W_TT="$SG_W_TT; $nol landed $(sitrep_noun "$nol" task tasks) with no launch or landing on record"
+    SG_W_TT="$tn $(english_noun "$tn" task tasks), $to min against $ts sized min"
+    [ "${nol:-0}" -eq 0 ] || SG_W_TT="$SG_W_TT; $nol landed $(english_noun "$nol" task tasks) with no launch or landing on record"
   fi
   # the chain: the open tasks that must run one after another, by label. Each is weighed by its kind and, running, by what
   # it has left (sitrep_close_weights), and the chain is the heaviest by that weight; its sized minutes are what the
@@ -1541,7 +1528,7 @@ SITREP_SIT
         for (i = 1; i <= m; i++) if ((w[i] in on) || w[i] == "release" || w[i] == "merge") hit = 1
         if (hit) printf "%s%s", (c++ ? " " : ""), $1 }')"
     # shellcheck disable=SC2086
-    [ -z "$k" ] || SG_K_WAITS="yes: $(sitrep_list 99 $k)"
+    [ -z "$k" ] || SG_K_WAITS="yes: $(english_list 99 $k)"
   fi
   SG_LINE_CLOSE="$SG_PREDICTED"; [ "$SG_PREDICTED" != - ] || SG_LINE_CLOSE="not forecast"
   SG_FORECAST="$SG_C_FC"
@@ -1635,7 +1622,7 @@ SITREP_RUNNING
   SG_X_WAIT="$(sitrep_waiting "$plan" "$root" "$rows" "$now" "$SG_ASKS")"
   # the scorecard's three lines at close, each from the measurements above, never a ratio of unlike units
   SG_PACE="$SG_P_WORK of the live work's sized minutes landed, in $SG_P_TIME of the forecast time"
-  SG_CORRECT="suites run $SG_T_RUN; whole run $SG_T_WHOLE; reviews $SG_T_REVIEWS; $SG_T_FINDINGS open $(sitrep_noun "$SG_T_FINDINGS" finding findings)"
+  SG_CORRECT="suites run $SG_T_RUN; whole run $SG_T_WHOLE; reviews $SG_T_REVIEWS; $SG_T_FINDINGS open $(english_noun "$SG_T_FINDINGS" finding findings)"
   SG_WASTE="dropped $SG_W_DROPPED; $SG_X_RUNS suite runs discarded; $SG_X_IDLE ready and unstarted; $SG_X_WAIT waiting on you"
   # the goals, each status the one function's
   SG_GOAL="$(plan_goal_paragraph "$plan")"
@@ -1684,7 +1671,7 @@ sitrep_so_far() {
   local h a
   h="$(_sitrep_ask "$1" reader_q_hands "$1")" && a="$(_sitrep_ask "$1" reader_q_asks "$1")" || return 2
   h="$(printf '%s' "$h" | grep -c .)"; a="$(printf '%s' "$a" | grep -c .)"
-  printf 'run.so-far: %s %s taken by hand · %s open %s\n' "$h" "$(sitrep_noun "$h" act acts)" "$a" "$(sitrep_noun "$a" ask asks)"
+  printf 'run.so-far: %s %s taken by hand · %s open %s\n' "$h" "$(english_noun "$h" act acts)" "$a" "$(english_noun "$a" ask asks)"
 }
 
 # sitrep_m <key> <value> <what it measures> <unit> <source: … or basis: …> -> one measured line of the sheet
@@ -1753,12 +1740,14 @@ sitrep_plan_real() { printf '%s/%s\n' "$(cd "${1%/*}" 2>/dev/null && pwd -P)" "$
 sitrep_save() {
   local f
   f="$(sitrep_saved "$1" "$2")"
+  BIONIC_NEW=""
   if tmp_dir_ok "$1/.bionic/tmp" && mkdir -p "${f%/*}" 2>/dev/null && [ ! -L "${f%/*}" ] \
-     && sitrep_sheet > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" \
+     && bionic_need root.sh bionic_new && bionic_new "$f" \
+     && sitrep_sheet >| "$BIONIC_NEW" 2>/dev/null && mv -f "$BIONIC_NEW" "$f" \
      && printf '%s\t%s\n' "$(sitrep_now)" "$(sitrep_plan_real "$2")" > "$f.at" 2>/dev/null; then
     cat "$f"
   else
-    rm -f "$f.$$" 2>/dev/null
+    [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW" 2>/dev/null
     sitrep_sheet
   fi
 }
@@ -1828,8 +1817,7 @@ sitrep_idle_minutes() {
   _lr_reader || return 2
   lines="$(_lr_events "$plan")" || return 2
   run_open "$plan" && FR_OPEN=yes
-  FR_NOW="${BIONIC_NOW_EPOCH:-}"
-  case "$FR_NOW" in ''|*[!0-9]*) FR_NOW="$(date -u +%s)" ;; esac
+  FR_NOW="$(time_now)"
   FR_IDLE_S="$(printf '%s\n' "$lines" | awk -F'|' -v open="$FR_OPEN" -v now="$FR_NOW" "$_PATROL_ISO_AWK$_READER_AWK"'
     ev() == "stop" {
       e = iso2epoch(line_kv("at"))
@@ -1939,7 +1927,7 @@ sitrep_tick_line() {
       HO_RUNWORD="$HO_SLUG"
     else
       HO_ROOT="$(project_root_or_refuse "$PWD")" || exit 2
-      trap 'rm -f "$HO_FILE.tmp.$$" "$HO_CF"' EXIT
+      HO_TMP=""; trap 'rm -f ${HO_TMP:+"$HO_TMP"} "$HO_CF"' EXIT
       HO_RUNWORD="no run bound"
     fi
     HO_PURPOSE="$(printf '%s' "$HO_ARG_PATH" | tr -d '[:cntrl:]' | handoff_redact /dev/null)"
@@ -2087,7 +2075,10 @@ sitrep_tick_line() {
     HO_TITLE="Handoff · $(clean "${HO_ROOT##*/}") · $(sitrep_date "$HO_E" '%A %-I:%M %p') · $HO_RUNWORD"
     [ -z "$HO_PURPOSE" ] || HO_TITLE="$HO_TITLE · for $(clean "$HO_PURPOSE")"
     if [ "$HO_MODE" = none ]; then HO_LAST="Read $HO_REL whole, then do Next 1."; else HO_LAST="/bionic:canonical-sdlc $HO_REL"; fi
-    HO_TMP="$HO_FILE.tmp.$$"; [ "$HO_MODE" = none ] || HO_TMP="$PV_NEW.2"
+    if [ "$HO_MODE" != none ]; then HO_TMP="$PV_NEW.2"
+    elif bionic_need root.sh bionic_new && bionic_new "$HO_FILE.tmp"; then HO_TMP="$BIONIC_NEW"
+    else die "REFUSED — no temporary file can be made beside $HO_FILE; nothing was written. Fix: make ${HO_FILE%/*} writable, then run the handoff again."; exit 2
+    fi
     ho_state() {  # -> the State section's lines, each with its fold indent
       printf '2\twritten: %s\n' "$(sitrep_clock "$HO_E" "$HO_E")"
       printf '2\tinstant: %s\n' "$HO_NOW"
@@ -2138,7 +2129,7 @@ sitrep_tick_line() {
         printf '0\tResume\n'
       } | handoff_redact "$HO_CF" | "${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" fold
       printf '%s\n' "$HO_LAST"
-    } > "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
+    } >| "$HO_TMP" 2>/dev/null || { die "REFUSED — the handoff cannot be written at $HO_FILE; nothing was written."; exit 2; }
     # WHAT IT SAYS IS HOW THE NEXT SESSION RESUMES, and nothing more: the resume line carries the file's path as its
     # operand, so no second line names it, and the counts, the redactions and the blocks left out are in the file
     # for whoever reads it. On success stdout is that one line and stderr is empty.
@@ -2324,7 +2315,7 @@ sitrep_tick_line() {
       f["d"] == d && f["verb"] == "put" { for (k in st) if (k != d && st[k] == "put") prev = ""; m = (prev == "") ? f["at"] : prev }
       { st[f["d"]] = f["verb"]; prev = f["at"] }
       END { print m }')"
-    user_said "$raw" "$plan" "${after:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; said=$?
+    user_said "$raw" "$plan" "${after:-$(iso_now)}"; said=$?
     case "$said" in
       0)
         who="$(git -C "$root" config user.name 2>/dev/null)"
@@ -2415,7 +2406,7 @@ sitrep_tick_line() {
       die "REFUSED — no handoff file at '$RS_SHOWN'; write one with: bash ${HOOK_DIR}/session-poker.sh handoff, and resume from the path its last line names. Nothing was bound."
       exit 2
     fi
-    if [ "$(sed -n 1p "$RS_FILE" 2>/dev/null)" != "bionic-handoff/v1" ]; then
+    if ! handoff_is_one "$RS_FILE" link-ok; then
       die "REFUSED — '$RS_SHOWN' is not a handoff file: its first line is not bionic-handoff/v1. Write one with: bash ${HOOK_DIR}/session-poker.sh handoff. Nothing was bound."
       exit 2
     fi

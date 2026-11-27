@@ -434,6 +434,11 @@ git_linked_dir() {
   printf '%s\n' "$gd"
 }
 
+# is_repo <dir> -> rc 0 when <dir> is a directory inside a git repository, rc 1 otherwise (a missing path, a file, an
+# empty or absent argument included). The ask runs in a subshell, so the caller's directory is never changed. The doctor
+# and the version line each ask it of the tree the registry names.
+is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
+
 # ─── THE AUDIT STREAM: where a project's findings land, and who writes one ───
 # docs_heads -> the directories a path is spelled from when it is written from the docs root.
 docs_heads() { printf '%s\n' record specs adrs plans; }

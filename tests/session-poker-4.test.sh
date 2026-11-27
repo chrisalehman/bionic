@@ -761,6 +761,12 @@ vg_mu() {  # [<head>] -> the person's merge-unproved word at <head> the run's on
   /usr/bin/grep -v '|ev=approval|key=merge-unproved|' "$VG_DIR/run.log" > "$VG_DIR/run.log.n"; mv "$VG_DIR/run.log.n" "$VG_DIR/run.log"
   [ -z "$1" ] || printf 'run/v1|ev=approval|key=merge-unproved|by=chris|head=%s|said=merge|at=2026-10-26T00:00:00Z\n' "$1" >> "$VG_DIR/run.log"
 }
+# ck_said <rc> <output> -> <rc>:<advance|refuse>: the checked advance's exit and the answer its verdict line gives. The
+# check exits 0 on either answer, so the answer is read from its words, never from the exit alone.
+ck_said() {
+  printf '%s:%s' "$1" "$(printf '%s\n' "$2" | awk 'index($0, "--check: would advance") { print "advance"; exit }
+    index($0, "--check: would refuse") { print "refuse"; exit }')"
+}
 vg_unproved() { printf '%s\n' "$OUT" | /usr/bin/grep -c 'regression.*unproved'; }
 # C3, code, lands green on its suite; the release is approved again at C3, as code past an approval is refused by it.
 VG_C3="$(s57_commit "$VG_WT" lib/b.sh C3)"
@@ -769,9 +775,9 @@ VG_C3="$(s57_commit "$VG_WT" lib/b.sh C3)"
 CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RVG" approve release 'ship C3'
 expect_eq "VG-5c precondition: the user approves the release at the code head C3 (exit 0)" "0|$VG_C3" "$RC|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
 poke "$RVG" current 8 --check
-expect_eq "VG-5c a code commit C3 past them, landed green on its own suite: covered, not green, refused as regression unproved, naming the reply" "1|1|1" "$RC|$(vg_unproved)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'reply .* on the release card')"
+expect_eq "VG-5c a code commit C3 past them, landed green on its own suite: covered, not green, refused as regression unproved, naming the reply" "0:refuse|1|1" "$(ck_said "$RC" "$OUT")|$(vg_unproved)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'reply .* on the release card')"
 vg_mu "$VG_C2"; poke "$RVG" current 8 --check
-expect_eq "VG-5d …the person's word at C2's head, not the working head, leaves the regression unproved" "1|1" "$RC|$(vg_unproved)"
+expect_eq "VG-5d …the person's word at C2's head, not the working head, leaves the regression unproved" "0:refuse|1" "$(ck_said "$RC" "$OUT")|$(vg_unproved)"
 vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
 expect_eq "VG-5e …and the word at the working head holds it: no regression line unproved (VG-5d read the same extractor)" "0" "$(vg_unproved)"
 vg_mu ""; /usr/bin/grep -v '|row=T10|' "$VG_DIR/run.log" > "$VG_DIR/run.log.n" && mv "$VG_DIR/run.log.n" "$VG_DIR/run.log"

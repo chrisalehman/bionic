@@ -6,13 +6,13 @@
 # then GNU `date -d`, which reads anything), lib/patrol.sh's awk `iso2epoch` (which read a no-Z instant and a
 # fractional `.5Z`), and lib/gate.sh's own days-from-civil awk in `_gate_row_done` (which range-checked nothing, so
 # month 13 converted). D18 rules strict `…Z`: lib/time.sh owns the grammar and the arithmetic (the patrol's), and
-# the three former callers read through it.
+# the three former callers read through it: the poker and the sweeper hold no reader of their own.
 #
-#   §AGREE   one table of instants, read three ways on each: lib/time.sh `iso_epoch`, the poker's `iso_epoch` (its
-#            own definition, lifted from the hook and run over the library the hook loads), and the gate
+#   §AGREE   the hooks that held a reader hold none (the poker and the sweeper, read by the extractor that lifts
+#            lib/time.sh's), then one table of instants, read two ways on each: lib/time.sh `iso_epoch` and the gate
 #            (`_gate_row_done`, over a landing record written by line.sh's `line_event`: the epoch is the last
 #            asked= the record's `published` line still finishes after, found by bisection). Each valid instant
-#            reads one epoch on all three; each refused one reads nothing on all three.
+#            reads one epoch on both; each refused one reads nothing on both.
 #   §STAMP   `iso_now`, the clock's instant: one instant, the clock's second, and the clock even with a pin set.
 #   §EPOCH   `epoch_iso`, an epoch as an instant: three epochs rendered and read back; a word, a sign, a blank
 #            and the empty argument print nothing and exit 1, the word with a file of its name beside it.
@@ -22,14 +22,14 @@
 #            path prints nothing and exits 1, and under a stand-in GNU stat the time comes from `stat -c`.
 #
 # FIXTURE FIDELITY. The instants are SYNTHESIZED, each valid one's epoch measured with macOS `date -u -j -f
-# '%Y-%m-%dT%H:%M:%SZ'` (the poker's former reader). The poker's reader is its own text in the hook, not a copy. The
+# '%Y-%m-%dT%H:%M:%SZ'` (the poker's former reader). The hooks are read as their own text, not a copy. The
 # gate's record is written by line.sh's real `line_event`, only its clock (`_line_now`) pinned to the instant under
 # test. The transcript lines have the shape Claude Code writes (`"timestamp":"…724Z"`, measured on this machine's
 # own session transcripts), cut to the fields the patrol's jq reads.
 #
 # ANTI-VACUITY. Every refused row (an empty reading) sits in the same table as valid rows read through the same
-# three extractors, and §AGREE first proves each extractor returns a number on a valid instant. In the four sections
-# after it each answer of nothing sits beside an answer of a number read through the same door, `lib_call`, which
+# two extractors, and §AGREE first proves each extractor returns a number on a valid instant; a hook that holds no
+# reader of its own is read by the extractor that first lifts the library's. In the four sections after it each answer of nothing sits beside an answer of a number read through the same door, `lib_call`, which
 # joins the exit code to the output so an absent function reads `|127`, never a pass. The epochs and modified times
 # are SYNTHESIZED from §AGREE's measured rows; the stand-in GNU stat answers `-f` with filesystem text, the shape
 # GNU's `stat -f` prints.
@@ -52,16 +52,21 @@ for f in time.sh patrol.sh gate.sh line.sh; do
   else no "subject present and parses: lib/$f" "missing or unparseable"; fi
 done
 
-# The poker's own definition, lifted as text: from its `iso_epoch()` line to the line that closes it (the same line
-# for a one-line body). The hook cannot be sourced, so its definition is run over the library the hook loads first
-# (lib/patrol.sh, which brings lib/time.sh).
-POKER_ISO="$(awk '
+# A file's own definition, lifted as text: from its `iso_epoch()` line to the line that closes it (the same line for
+# a one-line body). The library's is lifted first, so an empty lift out of a hook is a hook with no reader of its
+# own, never an extractor that reads nothing.
+lift_iso() { awk '
   !f && index($0, "iso_epoch()") == 1 { f = 1; print; l = $0; sub(/[ \t]*#.*$/, "", l); if (l ~ /\}[ \t]*$/) exit; next }
-  f { print; if ($0 == "}") exit }' "$POKER")"
-expect_regex "AG.0 the poker's iso_epoch definition is lifted from the hook" '^iso_epoch\(\)' "$POKER_ISO"
+  f { print; if ($0 == "}") exit }' "$1"; }
+SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
+expect_regex "AG.0 the extractor lifts lib/time.sh's iso_epoch definition" '^iso_epoch\(\)' "$(lift_iso "$LIB/time.sh")"
+for h in "$POKER" "$SWEEPER"; do
+  if [ -r "$h" ] && bash -n "$h" 2>/dev/null; then ok "AG.0a subject present and parses: ${h##*/}"
+  else no "AG.0a subject present and parses: ${h##*/}" "missing or unparseable"; fi
+  expect_eq "AG.0b ${h##*/} defines no iso_epoch of its own: it reads lib/time.sh's" "" "$(lift_iso "$h")"
+done
 
 via_lib() { bash -c '. "$1/time.sh" 2>/dev/null; iso_epoch "$2"' _ "$LIB" "$1" 2>/dev/null; }
-via_poker() { bash -c '. "$1/patrol.sh" 2>/dev/null; eval "$2"; iso_epoch "$3"' _ "$LIB" "$POKER_ISO" "$1" 2>/dev/null; }
 NOW_FAR=4000000000
 # The gate's record is written by line.sh's own writer, its clock pinned in its text: a variable is shadowed by its locals.
 git init -q "$TMP/p" 2>/dev/null
@@ -84,13 +89,13 @@ via_gate() {
     done
     echo "$hi"' _ "$LIB" "$REC" "$NOW_FAR" 2>/dev/null
 }
-three() { printf '%s|%s|%s' "$(via_lib "$1")" "$(via_poker "$1")" "$(via_gate "$1")"; }
+two() { printf '%s|%s' "$(via_lib "$1")" "$(via_gate "$1")"; }
 
-section "§AGREE — one instant, one epoch, on the library and two of its former callers (D18; AC-12.1)"
+section "§AGREE — one instant, one epoch, on the library and the gate; the hooks that held a reader hold none"
 # Valid instants, each with the epoch `date -u -j -f` gives it on macOS (and :60, Feb 30 normalised as it does).
 while IFS='|' read -r id s want why; do
   [ -n "$id" ] || continue
-  expect_eq "$id $why: $s reads $want on lib|poker|gate" "$want|$want|$want" "$(three "$s")"
+  expect_eq "$id $why: $s reads $want on lib|gate" "$want|$want" "$(two "$s")"
 done <<'ROWS'
 AG.1|2026-10-18T15:07:33Z|1792336053|the research fixture
 AG.2|1970-01-01T00:16:48Z|1008|near the epoch, as gate.test.sh's landings are
@@ -101,7 +106,7 @@ ROWS
 # Refused instants: nothing on every reader.
 while IFS='|' read -r id s why; do
   [ -n "$id" ] || continue
-  expect_eq "$id $why: '$s' reads nothing on lib|poker|gate" "||" "$(three "$s")"
+  expect_eq "$id $why: '$s' reads nothing on lib|gate" "|" "$(two "$s")"
 done <<'ROWS'
 AG.6|2026-10-18T15:07:33.5Z|a fractional second
 AG.7|2026-10-18T15:07:33|no Z
@@ -112,7 +117,7 @@ AG.11|2026-10-18 15:07:33Z|a blank for the T
 AG.12|2026-10-18T15:07:33+00:00|an offset for the Z
 AG.13| 2026-10-18T15:07:33Z|a leading blank
 ROWS
-expect_eq "AG.14 the empty string reads nothing on lib|poker|gate" "||" "$(three "")"
+expect_eq "AG.14 the empty string reads nothing on lib|gate" "|" "$(two "")"
 
 # The four answers below are read through one door each: the library sourced in a fresh shell, the function's
 # stdout and its exit code joined by a bar, so an answer of nothing is told from an answer that failed. The clock

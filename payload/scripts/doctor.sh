@@ -230,7 +230,7 @@ DOCTOR_REPO_ROOT="$(cd "${DOCTOR_LIB}/../../.." && pwd -P)"
 # same trace, one frame deeper — and they are part of what a complete payload
 # means for this script too.
 for _doctor_lib in detect.sh env.sh patrol.sh width.sh loader.sh root.sh run.sh \
-                   resources.sh checks.sh deps.sh shell.sh worktree.sh markers.sh; do
+                   resources.sh checks.sh deps.sh shell.sh worktree.sh markers.sh english.sh; do
   if [ ! -f "${DOCTOR_LIB}/${_doctor_lib}" ]; then
     echo "doctor.sh: cannot find ${DOCTOR_LIB}/${_doctor_lib} — the payload looks incomplete." >&2
     echo "           reinstall with: claude plugin install bionic@bionic" >&2
@@ -283,6 +283,9 @@ bionic_need fields.sh line_field_v
 # about to run on. All three are pure functions of disk and none of them writes.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/root.sh"
+# english.sh, for `english_noun`: a count and the noun that agrees with it, as every page spells them.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/english.sh"
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/run.sh"
 # shellcheck source=/dev/null
@@ -399,12 +402,11 @@ EOF
 # `installedAt`) is newer than the record, the line carries that instant: a session
 # reloaded after it already holds what is on disk, and the line says so rather than
 # going silent on a guess.
-_doctor_is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
 _doctor_resolve_install_path() {  # -> sets DOCTOR_INSTALL_PATH (the version row's tree, DOCTOR/5)
   DOCTOR_INSTALL_PATH="$(detect_plugin_install_path bionic 2>/dev/null)" || DOCTOR_INSTALL_PATH=""
-  if [ -z "$DOCTOR_INSTALL_PATH" ] || ! _doctor_is_repo "$DOCTOR_INSTALL_PATH"; then
+  if [ -z "$DOCTOR_INSTALL_PATH" ] || ! is_repo "$DOCTOR_INSTALL_PATH"; then
     _doctor_root_alt="$(plugin_root)"
-    if _doctor_is_repo "$_doctor_root_alt"; then DOCTOR_INSTALL_PATH="$_doctor_root_alt"; fi
+    if is_repo "$_doctor_root_alt"; then DOCTOR_INSTALL_PATH="$_doctor_root_alt"; fi
     [ -n "$DOCTOR_INSTALL_PATH" ] || DOCTOR_INSTALL_PATH="$_doctor_root_alt"
   fi
 }
@@ -697,10 +699,6 @@ _doctor_file_age() {  # <file> -> "12m old" | "3h old" | "2d old" | "age unknown
   elif [ "$delta" -lt 86400 ]; then echo "$(( delta / 3600 ))h old"
   else                              echo "$(( delta / 86400 ))d old"
   fi
-}
-
-_doctor_plural() {  # <count> <singular> <plural>
-  if [ "${1:-0}" = "1" ]; then echo "$2"; else echo "$3"; fi
 }
 
 # Why a value came back `unknown`. The mechanism decides: a cache has no
@@ -1415,7 +1413,7 @@ while IFS= read -r dep_name; do
       else
         ROSTER_ROWS="${ROSTER_ROWS}$(_doctor_rtrim "$(printf '  %s %-21s %-9s %s' \
           "$DOCTOR_OK" "$dep_name" "$roster_lines" \
-          "${n_skills} $(_doctor_plural "$n_skills" skill skills) + ${n_agents} $(_doctor_plural "$n_agents" agent agents)")")"$'\n'
+          "${n_skills} $(english_noun "$n_skills" skill skills) + ${n_agents} $(english_noun "$n_agents" agent agents)")")"$'\n'
       fi
       ROSTER_TOTAL=$((ROSTER_TOTAL + roster_lines))
     fi
@@ -1568,12 +1566,12 @@ _patrol_flush() {
   # (`blind`, the `patrol-wall/v1` record) reads as absent, and the fix line names the repair.
   if [ "$_p_present" = "yes" ] || [ "$blind" -eq 0 ]; then
     open="$_p_open"
-    _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches) · ${_p_engaged}"
+    _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(english_noun "$open" dispatch dispatches) · ${_p_engaged}"
   else
     _patrol_add "  ${DOCTOR_OK} session ${short} · roster absent — launches unrecorded · ${_p_engaged}"
   fi
   if [ "$blind" -gt 0 ]; then
-    fix "session ${short}: ${blind} $(_doctor_plural "$blind" launch launches) unrostered → re-invoke /bionic:canonical-sdlc"
+    fix "session ${short}: ${blind} $(english_noun "$blind" launch launches) unrostered → re-invoke /bionic:canonical-sdlc"
   fi
 }
 
@@ -1722,10 +1720,10 @@ EOF2
   # true fact about this project's state that names no action.
   if [ "$_dead_open" -gt 0 ]; then
     _run_add "$(_doctor_item "$DOCTOR_NIL" "predecessor ${_dead_sid%%-*}" \
-      "${_dead_files} leftover $(_doctor_plural "$_dead_files" file files) · ${_dead_open} open $(_doctor_plural "$_dead_open" row rows) — a /clear left them unclosed")"
+      "${_dead_files} leftover $(english_noun "$_dead_files" file files) · ${_dead_open} open $(english_noun "$_dead_open" row rows) — a /clear left them unclosed")"
   else
     _run_add "$(_doctor_item "$DOCTOR_NIL" "predecessor ${_dead_sid%%-*}" \
-      "${_dead_files} leftover $(_doctor_plural "$_dead_files" file files) — nothing open; the session is gone")"
+      "${_dead_files} leftover $(english_noun "$_dead_files" file files) — nothing open; the session is gone")"
   fi
 done <<EOF
 $(patrol_dead_sessions "$DOCTOR_ROOT" "${CLAUDE_CODE_SESSION_ID:-}")
@@ -1800,7 +1798,7 @@ if [ "$_doctor_link_n" -gt 0 ]; then
   # ELIDED rather than overflow — which is a worse answer than not putting it
   # here at all. The line carries the count and the command; the row above
   # carries the list, whole.
-  fix "${_doctor_link_n} legacy .bionic $(_doctor_plural "$_doctor_link_n" symlink symlinks) under .worktrees/ → spawn-worktree.sh remove"
+  fix "${_doctor_link_n} legacy .bionic $(english_noun "$_doctor_link_n" symlink symlinks) under .worktrees/ → spawn-worktree.sh remove"
 fi
 
 # RESTART NEEDED (AC-37, fold-in ratified 2026-09-03; the dead-wall incident,
@@ -1960,7 +1958,7 @@ done
 # and sends the reader to the section that names the repair.
 if [ "$_doctor_budgets" -eq 0 ] && [ "$_doctor_att_dead" -gt 0 ]; then
   _res_add "$(_doctor_item "$DOCTOR_NIL" "no live session" \
-    "${_doctor_att_dead} $(_doctor_plural "$_doctor_att_dead" attestation attestations) here, every one from a session that is gone — see PATROL")"
+    "${_doctor_att_dead} $(english_noun "$_doctor_att_dead" attestation attestations) here, every one from a session that is gone — see PATROL")"
 elif [ "$_doctor_budgets" -eq 0 ]; then
   _res_add "$(_doctor_item "$DOCTOR_NIL" "no session" "none has taken an attestation in this project")"
 fi
@@ -2041,10 +2039,10 @@ LEGACY_HOOKS_FIRES=no; bionic_check_fires legacy-hooks        && LEGACY_HOOKS_FI
 SKILL_COPY_FIRES=no;   bionic_check_fires legacy-skill-copy   && SKILL_COPY_FIRES=yes
 
 if [ "$HOOK_FILES_FIRES" = "yes" ]; then
-  fix "${HOOK_FILES_COUNT} legacy hook $(_doctor_plural "$HOOK_FILES_COUNT" file files) in the claude-home → run $(bionic_check_hint legacy-hook-files)"
+  fix "${HOOK_FILES_COUNT} legacy hook $(english_noun "$HOOK_FILES_COUNT" file files) in the claude-home → run $(bionic_check_hint legacy-hook-files)"
 fi
 if [ "$AGENT_COPIES_FIRES" = "yes" ]; then
-  fix "${INST_AGENT_DRIFT} installed agent $(_doctor_plural "$INST_AGENT_DRIFT" copy copies) differ from the payload → run $(bionic_check_hint legacy-agent-copies)"
+  fix "${INST_AGENT_DRIFT} installed agent $(english_noun "$INST_AGENT_DRIFT" copy copies) differ from the payload → run $(bionic_check_hint legacy-agent-copies)"
 fi
 
 # jq next: it gates several of the facts above, so acting on anything else while
@@ -2071,7 +2069,7 @@ if [ -n "$ABSENT_NAMES" ]; then
   # once, so there is no single row to ask; `bionic_check_route` is where the
   # party's own command is spelled, and it is the same string every one of those
   # rows carries.
-  fix "${N_ABSENT_ACTIONABLE} $(_doctor_plural "$N_ABSENT_ACTIONABLE" dependency dependencies) absent (${_doctor_absent_list}) → run $(bionic_check_route setup)" \
+  fix "${N_ABSENT_ACTIONABLE} $(english_noun "$N_ABSENT_ACTIONABLE" dependency dependencies) absent (${_doctor_absent_list}) → run $(bionic_check_route setup)" \
       "$N_ABSENT_ACTIONABLE"
 fi
 
@@ -2083,7 +2081,7 @@ fi
 # verdict instead of being folded into the collapsed setup list.
 if [ -n "$ABSENT_CORE_NAMES" ]; then
   _doctor_core_route="$(bionic_check_route cli)"
-  _doctor_core_head="${N_ABSENT_CORE} core $(_doctor_plural "$N_ABSENT_CORE" dependency dependencies) absent ("
+  _doctor_core_head="${N_ABSENT_CORE} core $(english_noun "$N_ABSENT_CORE" dependency dependencies) absent ("
   # THE BUDGET IS THIS LINE'S OWN, AND IT IS MEASURED (1.4.4 fixit phase 4,
   # review-a A-2 / review-c C-2). The first version of this block copied the 44
   # the line above uses, which is what `_doctor_third_row`'s state cell is worth
@@ -2122,7 +2120,7 @@ for _env_key in $ENV_KEYS; do
   bionic_check_fires "env:${_env_key}" && ENV_MISSING=$((ENV_MISSING + 1))
 done
 if [ "$ENV_MISSING" -gt 0 ]; then
-  fix "${ENV_MISSING} of bionic's environment settings $(_doctor_plural "$ENV_MISSING" is are) not what bionic sets → run $(bionic_check_route setup)" \
+  fix "${ENV_MISSING} of bionic's environment settings $(english_noun "$ENV_MISSING" is are) not what bionic sets → run $(bionic_check_route setup)" \
       "$ENV_MISSING"
 fi
 
@@ -2161,7 +2159,7 @@ fi
 
 [ "$LEGACY_ALIAS_FIRES" = "yes" ] && fix "the legacy .zshrc alias block is still there → run $(bionic_check_hint legacy-alias)"
 if [ "$LEGACY_HOOKS_FIRES" = "yes" ]; then
-  fix "${LEGACY_HOOK_COUNT} legacy-channel managed-hook $(_doctor_plural "$LEGACY_HOOK_COUNT" entry entries) in settings.json → run $(bionic_check_hint legacy-hooks)"
+  fix "${LEGACY_HOOK_COUNT} legacy-channel managed-hook $(english_noun "$LEGACY_HOOK_COUNT" entry entries) in settings.json → run $(bionic_check_hint legacy-hooks)"
 fi
 # The skill copy, and the hook files and agent copies beside it — all three now have a
 # consented removal in setup (steps 9, 10 and 11), so all three fix lines name a command that
@@ -2346,7 +2344,7 @@ fi
 if [ "$N_FIX" = "0" ]; then
   echo "→ Nothing to do. This machine is fully set up."
 else
-  _doctor_verdict="→ ${N_FIX} $(_doctor_plural "$N_FIX" problem problems)."
+  _doctor_verdict="→ ${N_FIX} $(english_noun "$N_FIX" problem problems)."
   if [ -n "$FIX_NAMES_SETUP" ]; then
     _doctor_verdict="${_doctor_verdict} Run ${DOCTOR_SETUP_ROUTE} to fix: ${FIX_NAMES_SETUP}"
     # TRUNCATED RATHER THAN WRAPPED. The names are what makes this line worth

@@ -77,6 +77,9 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${CARD_SELF_DIR}/lib/width.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/loader.sh"
+# THE ONE ENGLISH LIST AND PLURAL (lib/english.sh): a card names its rows as prose and counts them with the noun's own number.
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/english.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/root.sh"
 # THE TWO LIBRARIES THE STEP-3 CARD ASKS ITS LAST TWO QUESTIONS OF (epic-23
@@ -2210,20 +2213,16 @@ _card_task_rows() {  # sets CARD_ROWS[] from WCARD_TROW[]
   done
 }
 
-# THE ROLE A TASK ASKS FOR is the one its cell's complexity tag names, on a row a writer runs: the plan step tags every
-# step-four task `complexity: complex` or `complexity: standard`, and the agent column says who is asked, so the person
-# approving a plan sees it before anything launches. This is the one home of the kinds whose role the card prints,
-# build and test; a review, a verify, a document, the merge and the close draw the dash whatever their tag says. A
-# launch in the log names the writer that came, not the role, and is not read here. A cell with no tag, or a word the
-# step does not define, draws the dash: no role is guessed.
-# lib/fill.sh `fill_readonly_ids` answers a different question, who takes a writer's slot, so it is not asked here.
+# THE ROLE A TASK ASKS FOR is the one its cell's complexity tag names: the plan step tags every step-four task
+# `complexity: complex` or `complexity: standard`, and the agent column says who is asked, so the person approving a
+# plan sees it before anything launches. Which kinds draw a role from the tag, and the role each tag names, are
+# lib/units.sh `units_kind_role`'s, which the start verb reads too; every other kind, a cell with no tag, or a word
+# the step does not define draws the dash: no role is guessed. A launch in the log names the writer that came, not
+# the role, and is not read here.
 _card_task_role() {  # <kind> <Tasks cell> -> senior-implementor, implementor or —, on stdout
-  local re='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
-  case "${1:-}" in build|test) ;; *) printf '—'; return 0 ;; esac
-  if [[ "${2:-}" =~ $re ]]; then
-    case "${BASH_REMATCH[2]}" in complex) printf 'senior-implementor'; return 0 ;; standard) printf 'implementor'; return 0 ;; esac
-  fi
-  printf '—'
+  local r
+  r="$(units_kind_role "${1:-}" "${2:-}")"
+  printf '%s' "${r:-—}"
 }
 
 # Consecutive ids in a depends cell are one range: four ids in a row print as the first and the last
@@ -2430,8 +2429,8 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
 # registered, an owed reading unregistered at the working head
 # (lib/units.sh `_units_readings_state`, the tick's own reading), and the check-only advance to 6, 7 and 8, asked of the
 # advance's own judge once for the three (`session-poker.sh judge 6 7 8`, each answer what `current <N> --check` prints;
-# its exit is read and its verdict line is the reason, never a second judgment here). On the
-# first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
+# each step's code is read from the judge's closing line and its verdict line is the reason, never a second judgment
+# here). On the first that fails it prints `CARD-EARLY — <reason>` on stderr, exit 1. When all three hold it exits 0 and prints,
 # on stdout, one `settles: <key>` line per item a red check owes that the page settles with a decision of the
 # user's (`waive:<question>` or `row:<AC>`), so the page opens each on the person's ledger.
 #
@@ -2525,16 +2524,18 @@ CF_POST
   # hooks/poker/judge.sh `advance_judge`) answers the three in one process, each step's answer the lines its checked
   # advance prints, closed by `judged <N> exit <rc>`. A red check is early unless every refusal it prints is one the
   # page settles with a decision (`_card_settles`): its lines are read as the judge printed them, never judged again
-  # here. An answer the ask did not close is read as that step's check exiting with the ask's own exit.
+  # here. The card reads the judge's text alone, never its exit: the judge exits 0 for a step that would refuse, as
+  # that is an answer, so only the closing line carries the step's code. A step the ask did not close is no answer and
+  # reads as one the judge could not deal (2), its whole output the reason.
   CF_SETTLE=""
-  local judged jrc
-  judged="$(_card_poke judge 6 7 8)"; jrc=$?
+  local judged
+  judged="$(_card_poke judge 6 7 8)"
   for n in 6 7 8; do
     out="$(printf '%s\n' "$judged" | awk -v n="$n" '
       index($0, "poker: judged ") == 1 { if ($3 == n) { printf "%s", b; exit } b = ""; next }
       { b = b $0 "\n" }')"
     rc="$(printf '%s\n' "$judged" | awk -v n="$n" 'index($0, "poker: judged ") == 1 && $3 == n && $4 == "exit" { print $5; exit }')"
-    [ -n "$rc" ] || { out="$judged"; rc="$jrc"; [ "$rc" -ne 0 ] || rc=2; }
+    [ -n "$rc" ] || { out="$judged"; rc=2; }
     [ "$rc" -eq 0 ] && continue
     _card_settles "$out" && continue
     line="$(printf '%s\n' "$out" | awk 'NF { print; exit }')"; line="${line#poker: }"
@@ -2733,20 +2734,6 @@ _card_hang() {  # <hang> <text>
   printf '%s\n' "$line"
 }
 
-_card_list() {  # <cap> <word>... -> `A`, `A and B`, `A, B and C`, the first <cap> named and the rest counted
-  local cap="$1"; shift
-  awk -v cap="$cap" 'BEGIN {
-    n = ARGC - 1; if (n < 1) exit
-    m = (n > cap) ? cap : n
-    for (i = 1; i <= m; i++) s = s ((i == 1) ? "" : ((i == m && n == m) ? " and " : ", ")) ARGV[i]
-    if (n > m) s = s " and " (n - m) " more"
-    print s }' "$@"
-}
-
-_card_plural() {  # <n> <singular> <plural> -> `<n> <word>`
-  if [ "$1" -eq 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi
-}
-
 _card_release_dec_of() {  # <key> -> the decision number the card gives it; 1 when none
   local i=0
   while [ "$i" -lt "$RL_N" ]; do
@@ -2812,23 +2799,23 @@ _card_release_bottom() {
   if [ -n "$RL_EARLY" ]; then _card_hang 2 "- Not ready for your decisions: $RL_EARLY."
   elif [ "$RL_N" -gt 0 ]; then _card_hang 2 "- Ready for your decisions: every check holds at $RL_H8."
   else _card_hang 2 "- Every check holds at $RL_H8."; fi
-  [ "${#RL_CHK[@]}" -eq 0 ] || _card_hang 2 "- This release changes the release check: $(_card_list 6 "${RL_CHK[@]}")."
+  [ "${#RL_CHK[@]}" -eq 0 ] || _card_hang 2 "- This release changes the release check: $(english_list 6 "${RL_CHK[@]}")."
   if [ "${#RL_MISS[@]}" -gt 0 ]; then
-    l="$(_card_plural "${#RL_MISS[@]}" criterion criteria) not proved: $(_card_list 6 "${RL_MISS[@]}")"
+    l="$(english_plural "${#RL_MISS[@]}" criterion criteria) not proved: $(english_list 6 "${RL_MISS[@]}")"
     for p in "${RL_MISS[@]}"; do n="$(_card_release_dec_of "row:$p")" && nums[${#nums[@]}]="$n"; done
     # A run of decision numbers is said as a range.
     if [ "${#nums[@]}" -eq 1 ]; then l="$l (decision ${nums[0]})"
     elif [ "${#nums[@]}" -gt 1 ]; then
       n="${nums[$(( ${#nums[@]} - 1 ))]}"
       if [ "$(( n - nums[0] + 1 ))" -eq "${#nums[@]}" ]; then l="$l (decisions ${nums[0]} to $n)"
-      else l="$l (decisions $(_card_list 6 "${nums[@]}"))"; fi
+      else l="$l (decisions $(english_list 6 "${nums[@]}"))"; fi
     fi
     _card_hang 2 "- $l."
   fi
   # A CRITERION OWED BY THE CLOSE OR AT A LATER STEP IS PENDING: it is named as owed, and the line that says the
   # criteria are proved speaks of the others alone, so the card never says all are while the reader answers one pending.
-  [ "${#RL_OWC[@]}" -eq 0 ] || _card_hang 2 "- $(_card_plural "${#RL_OWC[@]}" criterion criteria) owed by the close: $(_card_list 6 "${RL_OWC[@]}")."
-  [ "${#RL_OWL[@]}" -eq 0 ] || _card_hang 2 "- $(_card_plural "${#RL_OWL[@]}" criterion criteria) owed at a later step: $(_card_list 6 "${RL_OWL[@]}")."
+  [ "${#RL_OWC[@]}" -eq 0 ] || _card_hang 2 "- $(english_plural "${#RL_OWC[@]}" criterion criteria) owed by the close: $(english_list 6 "${RL_OWC[@]}")."
+  [ "${#RL_OWL[@]}" -eq 0 ] || _card_hang 2 "- $(english_plural "${#RL_OWL[@]}" criterion criteria) owed at a later step: $(english_list 6 "${RL_OWL[@]}")."
   n=$(( ${#RL_OWC[@]} + ${#RL_OWL[@]} )); l=""; [ "$n" -eq 0 ] || l=" other"
   if [ "${#RL_MISS[@]}" -gt 0 ]; then :
   elif [ "$n" -gt 0 ] && [ "$RL_ACT" -le "$n" ]; then :
@@ -2838,9 +2825,9 @@ _card_release_bottom() {
   # An early run puts no decision: the acting render refuses it, so a preview says what the user will owe, never that
   # they owe it now, and the card says one thing.
   if [ "$RL_N" -gt 0 ] && [ -n "$RL_EARLY" ]; then
-    _card_hang 2 "- Once the run is ready, you will owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
+    _card_hang 2 "- Once the run is ready, you will owe $(english_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
   elif [ "$RL_N" -gt 0 ]; then
-    _card_hang 2 "- You owe $(_card_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
+    _card_hang 2 "- You owe $(english_plural "$RL_N" decision decisions), listed below. Everything else has a default the record supports."
   else
     _card_hang 2 "- You owe nothing: every approval and waiver is recorded."
   fi
@@ -2859,14 +2846,14 @@ _card_release_bottom() {
     elif [ "${RL_DPICK[$i]}" = default ]; then ph[${#ph[@]}]="${RL_DPH[$i]}"
     else ph[${#ph[@]}]="${RL_OPH[$i]}"; fi
     if [ "${RL_DKIND[$i]}" = row ] && { [ "$((i + 1))" -eq "$RL_N" ] || [ "${RL_DKIND[$((i + 1))]}" != row ]; }; then
-      [ "${#cf[@]}" -eq 0 ] || ph[${#ph[@]}]="confirm $(_card_list 6 "${cf[@]}")"
-      [ "${#wv[@]}" -eq 0 ] || ph[${#ph[@]}]="waive $(_card_list 6 "${wv[@]}")"
-      [ "${#rn[@]}" -eq 0 ] || ph[${#ph[@]}]="run $(_card_list 6 "${rn[@]}")"
+      [ "${#cf[@]}" -eq 0 ] || ph[${#ph[@]}]="confirm $(english_list 6 "${cf[@]}")"
+      [ "${#wv[@]}" -eq 0 ] || ph[${#ph[@]}]="waive $(english_list 6 "${wv[@]}")"
+      [ "${#rn[@]}" -eq 0 ] || ph[${#ph[@]}]="run $(english_list 6 "${rn[@]}")"
     fi
   done
   l=""
   for ((i = 0; i < ${#ph[@]}; i++)); do l="${l:+$l, }${ph[$i]}"; done
-  [ "${#ap[@]}" -eq 0 ] || l="${l:+$l, then }$(_card_list 6 "${ap[@]}")"
+  [ "${#ap[@]}" -eq 0 ] || l="${l:+$l, then }$(english_list 6 "${ap[@]}")"
   _card_hang 2 "- Recommended: $l."
 }
 
@@ -2918,11 +2905,11 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
       case "$g" in
         F) lab="Fixed"
            # shellcheck disable=SC2086  # the fixing rows, one word each
-           [ -z "$RL_FROWS" ] || lab="Fixed by $(_card_list 6 $RL_FROWS)" ;;
+           [ -z "$RL_FROWS" ] || lab="Fixed by $(english_list 6 $RL_FROWS)" ;;
         A) lab="Awaiting your decision" ;;
         C) lab="Carried as known limits" ;;
         # THE CARRIED COUNT IS THE LOG'S: the findings no deferral in the log holds are named in one line, apart.
-        R) lab="Carried by their records alone, with no deferral in the run's log: $(_card_list 6 "${RL_FUNL[@]}")" ;;
+        R) lab="Carried by their records alone, with no deferral in the run's log: $(english_list 6 "${RL_FUNL[@]}")" ;;
       esac
       _card_hang 0 "$lab"
       while IFS= read -r sent; do [ -z "$sent" ] || _card_hang 7 "$sent"; done <<< "$lines"
@@ -3254,17 +3241,16 @@ _card_sitrep_states() {
 # open tasks follow, one row each in the sheet's order. A run of one is the task's own row; a longer run lists its
 # descriptions as far as the width allows and counts the rest.
 _card_sitrep_tasklist() {
-  printf '%s\n' "$SR_RECS" | awk -F'\t' -v dash="–" -v width="$BIONIC_LINE_WIDTH" '
+  printf '%s\n' "$SR_RECS" | awk -F'\t' -v dash="–" -v width="$BIONIC_LINE_WIDTH" "$_ENGLISH_AWK"'
     function lab(id) { return (substr(id, 1, 1) == "T") ? substr(id, 2) : id }
     function cap(s) { return toupper(substr(s, 1, 1)) substr(s, 2) }
     function low(s) { return (substr(s, 2, 1) ~ /[a-z]/) ? tolower(substr(s, 1, 1)) substr(s, 2) : s }
     function own(j) { return cap(td[j]) ((tn[j] == "-" || tn[j] == "") ? "" : ", " tn[j]) }
     # the descriptions of run r, first to last, as many as fit in room, the rest counted
-    function listed(r, room,   k, x, s, c) {
+    function listed(r, room,   k, x, s, c, wd) {
+      for (x = 1; x <= rn[r]; x++) wd[x] = (x == 1) ? cap(td[ri[r, x]]) : low(td[ri[r, x]])
       for (k = rn[r]; k >= 1; k--) {
-        s = ""
-        for (x = 1; x <= k; x++) s = s ((x == 1) ? cap(td[ri[r, x]]) : ((x == k && k == rn[r]) ? " and " : ", ") low(td[ri[r, x]]))
-        if (k < rn[r]) s = s " and " (rn[r] - k) " more"
+        s = english_join(wd, rn[r], k)
         if (length(s) <= room || k == 1) return s
       }
     }
