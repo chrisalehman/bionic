@@ -202,10 +202,10 @@ What this release changed in the limits of 2.2.0, which stand as 2.2.0's entry w
 
 ### The landing numbers
 
-`landing-report --rows` at bcf99f2af83e5e4801dadabed3dab57a91ec3f7a on 2026-11-27T20:20:32Z:
+`landing-report --rows` at 621db2c6bb7bad50313c625bc3f9fc210bf50940 on 2026-11-27T20:52:51Z:
 
 ```
-landings: queue=89 hand=0 git=0 · ready-to-landed median=35.8m p75=156.4m max=4545.1m · runs: green=574 red=29 none=2 discarded=95 red-then-green=0 run=1359 reused=0 absent=0 · waited median=1267s · killed=34
+landings: queue=90 hand=0 git=0 · ready-to-landed median=35.1m p75=155.2m max=4545.1m · runs: green=577 red=29 none=2 discarded=95 red-then-green=0 run=1366 reused=0 absent=0 · waited median=1217s · killed=34
 T1 queue ready=2026-11-22T20:09:40Z landed=2026-11-22T20:34:36Z minutes=24.9 runs=6 waited=992s wait=16.5 prove=8.4 rework=0.0 width=1
   units.test.sh green promised=78s actual=81s ratio=1.04
   reader.test.sh green promised=43s actual=47s ratio=1.09
@@ -990,6 +990,10 @@ T99 queue ready=2026-11-27T19:27:14Z landed=2026-11-27T19:33:28Z minutes=6.2 run
   words.test.sh green promised=22s actual=28s ratio=1.27
   render.test.sh green promised=29s actual=31s ratio=1.07
   shell-lint.test.sh green promised=69s actual=65s ratio=0.94
+T98 queue ready=2026-11-27T20:15:46Z landed=2026-11-27T20:20:42Z minutes=4.9 runs=3 waited=25s wait=0.4 prove=4.5 rework=0.0 width=8
+  speed-counts.test.sh green promised=236s actual=269s ratio=1.14
+  proof-at-head.test.sh green promised=77s actual=118s ratio=1.53
+  shell-lint.test.sh green promised=33s actual=55s ratio=1.67
 ```
 
 ## 2.2.0 — 2026-11-21
