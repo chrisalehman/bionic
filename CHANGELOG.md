@@ -202,10 +202,10 @@ What this release changed in the limits of 2.2.0, which stand as 2.2.0's entry w
 
 ### The landing numbers
 
-`landing-report --rows` at 846abfb0a7fd6153cfa7e106585462e6487de55f on 2026-11-27T19:28:52Z:
+`landing-report --rows` at 491288370b6674a5e2d7e98baf5f0ae62cc2bc91 on 2026-11-27T19:31:36Z:
 
 ```
-landings: queue=86 hand=0 git=0 · ready-to-landed median=42.7m p75=159.9m max=4545.1m · runs: green=564 red=29 none=2 discarded=95 red-then-green=0 run=1354 reused=0 absent=0 · waited median=1325s · killed=34
+landings: queue=87 hand=0 git=0 · ready-to-landed median=40.5m p75=158.7m max=4545.1m · runs: green=568 red=29 none=2 discarded=95 red-then-green=0 run=1354 reused=0 absent=0 · waited median=1382s · killed=34
 T1 queue ready=2026-11-22T20:09:40Z landed=2026-11-22T20:34:36Z minutes=24.9 runs=6 waited=992s wait=16.5 prove=8.4 rework=0.0 width=1
   units.test.sh green promised=78s actual=81s ratio=1.04
   reader.test.sh green promised=43s actual=47s ratio=1.09
@@ -964,6 +964,9 @@ T56 queue ready=2026-11-27T17:28:23Z landed=2026-11-27T17:30:18Z minutes=1.9 run
 T69 queue ready=2026-11-27T19:24:24Z landed=2026-11-27T19:26:38Z minutes=2.2 runs=2 waited=28s wait=0.5 prove=1.8 rework=0.0 width=6
   release-check.test.sh green promised=133s actual=104s ratio=0.78
   name-scan.test.sh green promised=71s actual=83s ratio=1.17
+T96 queue ready=2026-11-27T18:57:51Z landed=2026-11-27T19:29:02Z minutes=31.2 runs=2 waited=1754s wait=29.2 prove=1.9 rework=0.0 width=4
+  shell-lint.test.sh green promised=58s actual=57s ratio=0.98
+  shell-lint.test.sh green promised=59s actual=59s ratio=1.00
 ```
 
 ## 2.2.0 — 2026-11-21
