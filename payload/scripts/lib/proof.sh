@@ -1869,10 +1869,14 @@ _proof_facts_held() {  # <plan> -> 0 with _PROOF_HELD_FOLD its fold's file (empt
 }
 # _proof_facts_libsum -> 0 with the code each kept key covers, decided here alone and summed once a process (counted
 # `libs`): _PROOF_FACTS_LIBSUM the reader's libraries, _PROOF_PLACE_LIBS proof.sh and those, _PROOF_DERIVE_LIBSUM
-# proof.sh and units.sh, which derive an answer; 1 when a reader library cannot be read. A sum whose file cannot be read
-# is empty, so what it keys is made at every ask. The reader's libraries are the loaded reader's, else the ones beside
-# this file; units.sh the loaded one, else the one beside. A sum leaves out the path, so a key is the same wherever a
-# process names the same bytes from, and costs the one cksum.
+# those and _PROOF_DERIVE_LIBS, every library a derived answer's code can read; 1 when a reader library cannot be read.
+# A sum whose file cannot be read is empty, so what it keys is made at every ask. The reader's libraries are the loaded
+# reader's, else the ones beside this file; units.sh the loaded one, else the one beside; the rest the ones beside. A
+# sum leaves out the path, so a key is the same wherever a process names the same bytes from, and costs the one cksum.
+# _PROOF_DERIVE_LIBS is the reach of the functions handed to `_proof_derive`, beyond the reader's libraries: each library
+# defining a function or awk text they name, transitively, proof.sh first. tests/speed-counts.test.sh §DERIVE-KEY
+# measures that reach from the code and is red while this list differs from it.
+_PROOF_DERIVE_LIBS="proof.sh units.sh alias.sh fields.sh loader.sh prose.sh root.sh roots.sh run.sh scale.sh seal.sh slots.sh time.sh worktree.sh"
 _PROOF_DERIVE_LIBSUM=""
 _proof_facts_libsum() {
   [ -z "$_PROOF_FACTS_LIBSUM" ] || return 0
@@ -1882,7 +1886,8 @@ _proof_facts_libsum() {
   own="$lib"
   ! declare -F reader_facts >/dev/null 2>&1 || lib="$_READER_LIB_DIR"
   for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
-  nr="${#deps[@]}"; deps+=("$own/proof.sh" "${_UNITS_DIR:-$own}/units.sh")
+  nr="${#deps[@]}"
+  for f in $_PROOF_DERIVE_LIBS; do case "$f" in units.sh) deps+=("${_UNITS_DIR:-$own}/$f") ;; *) deps+=("$own/$f") ;; esac; done
   _proof_count libs _proof_facts
   # cksum names each file it read, in the order handed, and none it could not: a file absent from its lines is unread.
   out="$(cksum "${deps[@]}" 2>/dev/null)" || :
@@ -1895,7 +1900,8 @@ PROOF_LIBSUM
   i=0; while [ "$i" -lt "$nr" ]; do [ -n "${sums[$i]:-}" ] || return 1; sum="$sum${sum:+ }${sums[$i]}"; i=$((i + 1)); done
   _PROOF_FACTS_LIBSUM="$sum"
   _PROOF_PLACE_LIBS="${sums[$nr]:+${sums[$nr]} $sum}"
-  _PROOF_DERIVE_LIBSUM=""; [ -z "${sums[$nr]:-}" ] || [ -z "${sums[$((nr + 1))]:-}" ] || _PROOF_DERIVE_LIBSUM="${sums[$nr]} ${sums[$((nr + 1))]}"
+  _PROOF_DERIVE_LIBSUM="$sum"
+  while [ "$i" -lt "${#deps[@]}" ]; do [ -n "${sums[$i]:-}" ] || { _PROOF_DERIVE_LIBSUM=""; break; }; _PROOF_DERIVE_LIBSUM="$_PROOF_DERIVE_LIBSUM ${sums[$i]}"; i=$((i + 1)); done
 }
 # _proof_held_take <dir> <id> <key> [fold] -> the fold under <key> held by this shell: its files named, its findings and
 # inherited proofs read in, with no process. A fold this shell did not make itself is counted (`held`).
