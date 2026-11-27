@@ -82,7 +82,7 @@ Tests grew in every family: the rows added agreement checks, plants and mutants,
   `regression-run --point <row>` runs every suite at the head the point stands at; `proof-add point <log>` records it; the
   tick starts a ready point and lands it on its proof. A plan with no point reads as it did. This run had two points: the
   first ran 136 suites green and 2 red, the second 129 green and 11 red, and each red suite became a fix row before the
-  build went on.
+  build went on. The whole run after the last build row, at `5074682017bb`, ran 142 suites, all green.
 - The landing bar is judged as if the machine were quiet (`LINE_BAR_LOAD=0`), so a suite gets the same verdict at any load,
   and the row's brief and its landing read that one answer.
 - A row's birth line, brief and landing name the same suites: one reader, `poker_row_suites`. The birth of a row born of
@@ -93,22 +93,25 @@ Tests grew in every family: the rows added agreement checks, plants and mutants,
   or a lookup of the library's folder call it, and it finds its own folder with builtins, so it works with only `bash` on
   the path. The eight-line stub each hook opens with stays, since it runs before any library, and a test holds the copies
   equal. This is the 24,921 characters above.
-- Time has one home: four functions in the time library (`time_now`, `file_mtime`, `iso_now`, `epoch_iso`), and the
-  libraries, hooks and scripts that read the clock call them.
+- Time has one home: four functions in the time library (`time_now`, `file_mtime`, `iso_now`, `epoch_iso`). `time_now`
+  follows the clock a test pins, and the code that should follow that clock calls it. Three `now_epoch` copies and a few
+  inline `date +%s` reads stay on purpose, because they must read the real clock even when a test pins it.
 - One reader each for: a field by key, the roster's path, a proof line, a plan's header, the git common directory, whether a
   session is judged (`bionic_judged`), a session's seal, the triple's intents, rigors and scales, the kinds and the roles
   of a task row (`UNITS_KINDS`), a pull request's two ask keys, the gate's small copies, a handoff file, and small helpers.
   Two lists that were copied, the situation report's measured keys and the debt kinds, are derived from their source.
 - A name the tool makes comes from `bionic_new` or `bionic_id`: the eleven `$RANDOM` sites and 44 lines that joined a
   process number to a name. Two sibling subshells under bash 3.2 draw different names.
-- A kept answer is served only to a process whose deriving libraries sum the same as the process that kept it.
+- A kept answer is served only to a process whose proof and units libraries sum the same as those of the process that
+  kept it.
 - Test suites borrow no function out of another suite's file: the builders live in libraries under `tests/lib` that both
   load. Six pairs that cannot be merged (a page against code) are held equal by a test, and so are the kept copies: the
   loader stub each hook opens with, and the remover's copies.
 - The one-reader check has twelve counts, and each refuses: parsers, plan writers, shared types, hook refusals, loader
   copies, unheard folds, names, load guards, git homes, field readers, writers of the log with no kind, and homes. Each reads
   zero in this tree, with the kept copies named. The release check runs it at every landing, and the landing's lint names
-  the home when a changed file holds a copy. The register holds no standing debt.
+  the home when a changed file holds a copy. The register's 54 earlier lines are burned; the review of the whole added
+  three, named under Known limits.
 
 **A failed command means something is wrong.**
 - The ordinary answers above exit 0. The dispatch page, the survival text and the six role files name no code for an
@@ -169,6 +172,24 @@ Stated first because they are what this release leaves on purpose.
 - The failed-command classifier reads text. A compound command is read by its last segment; a run of a workspace file by
   `bash` lands in other; a failing-first run typed without the meant-to-fail word counts as a red suite. A session with no
   loaded-state file is not counted.
+- The shell has two readers of a field by key in the fields library, `line_value` and `line_field`, which read a line
+  differently; the copy check names `line_value` as the home while the library names `line_field`, and no test holds the
+  two equal.
+- The English list has its home in `english.sh`, and one inline copy stands beside it in the poker's plan part, which
+  prints "a, b, c and N more" where the home prints "a, b and c".
+- A project that stands anywhere under a `.bionic` folder cannot be written by a dispatched writer.
+- In a fresh project, the first session cannot record an approval until Claude Code is restarted, because the session
+  writes its load record only when `.bionic/tmp/` exists at its start, and the refusal names a missing transcript where
+  the load record is what is missing.
+- `ready` runs each suite by its path (`bash tests/<suite>`), not through the project's door (`tests/run.sh --only`), so
+  a suite whose end line comes only from the door stalls the landing (`STALLED`, exit 70) although it is green through
+  the door.
+- The copy check searches by shape for 7 of the 54 concepts that have one home; a copy of any of the other 47 is
+  found only by a review, as the audit found the close's hand-spelt instant.
+- For nine of the release's criteria the first failing run was proved by reading the tests and not from a saved log,
+  because the logs were lost with two scratch folders when the machine was restarted.
+- The release's walk met no landing that had to wait, so the exit 0 of a `ready` that answers `WAITING` is held by the
+  hermetic checks alone.
 - Not in this release, and tentative for 2.4.0: the watcher's two issues (58 and 59, with an outside check that a run is
   alive), the cache's two edges (the tick's own whole run and a project's regression command), and Code Mode (issue 60).
 
@@ -181,10 +202,10 @@ What this release changed in the limits of 2.2.0, which stand as 2.2.0's entry w
 
 ### The landing numbers
 
-`landing-report --rows` at 0a1c81512c07d0e1cc9ef3910b7fe6c418521316 on 2026-11-27T17:22:49Z:
+`landing-report --rows` at 5074682017bbe69b97785c819052b291633a3060 on 2026-11-27T19:22:43Z:
 
 ```
-landings: queue=84 hand=0 git=0 · ready-to-landed median=45.1m p75=161.2m max=4545.1m · runs: green=551 red=29 none=2 discarded=85 red-then-green=0 run=1325 reused=0 absent=0 · waited median=1494s · killed=24
+landings: queue=85 hand=0 git=0 · ready-to-landed median=44.9m p75=161.1m max=4545.1m · runs: green=560 red=29 none=2 discarded=91 red-then-green=0 run=1348 reused=0 absent=0 · waited median=1382s · killed=30
 T1 queue ready=2026-11-22T20:09:40Z landed=2026-11-22T20:34:36Z minutes=24.9 runs=6 waited=992s wait=16.5 prove=8.4 rework=0.0 width=1
   units.test.sh green promised=78s actual=81s ratio=1.04
   reader.test.sh green promised=43s actual=47s ratio=1.09
@@ -934,6 +955,12 @@ T43 queue ready=2026-11-27T17:09:46Z landed=2026-11-27T17:17:00Z minutes=7.2 run
   session-poker.test.sh green promised=44s actual=29s ratio=0.66
   proof-at-head.test.sh green promised=109s actual=103s ratio=0.94
   shell-lint.test.sh green promised=37s actual=46s ratio=1.24
+T56 queue ready=2026-11-27T17:28:23Z landed=2026-11-27T17:30:18Z minutes=1.9 runs=5 waited=24s wait=0.4 prove=1.5 rework=0.0 width=8
+  release-check.test.sh green promised=107s actual=90s ratio=0.84
+  name-scan.test.sh green promised=0s actual=71s ratio=-
+  render.test.sh green promised=10s actual=20s ratio=2.00
+  doctor-version.test.sh green promised=176s actual=70s ratio=0.40
+  commands.test.sh green promised=9s actual=4s ratio=0.44
 ```
 
 ## 2.2.0 — 2026-11-21
