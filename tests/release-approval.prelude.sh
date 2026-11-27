@@ -105,8 +105,8 @@ fc_page15() {  # -> PFC, the run's page at 15
   printf 'base-sha: %s\nadrs: none — no decision this run\nintegration-branch: main\n---\n# plan\n\n## Tasks\n\n' "$FC_B"
   printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
   printf '| T1 | 4 | build | the x writer | — | 30 | REQ-1 | lib/x.sh | — |\n| T2 | 7 | doc | the release 1.0.0 | — | 30 | REQ-1 | CHANGELOG.md | — |\n'
-  printf '| T3 | 8 | integrate | merge into main | approval:merge | 10 | REQ-1 | — | — |\n\n## Eval design\n\n'
-  printf '| Requirement | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|\n'
+  printf '| T3 | 8 | integrate | merge into main | approval:merge | 10 | REQ-1 | — | — |\n\n## Test design\n\n'
+  printf '| Requirement | Criterion | Test type | Test | Fails when | Task |\n|---|---|---|---|---|---|\n'
   printf '| — | AC-1.1 | T1 | — | the planted defect this eval must go red on | — |\n| — | AC-1.2 | T1 | — | a second planted defect | 9 |\n\n'
 }
 fc_plan() {  # <events> [<sed edit>] [<edit function>] -> PFC at current: 8, bound to this session; the record and the ledger cleared

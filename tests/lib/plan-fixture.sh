@@ -60,7 +60,7 @@ plan_fixture() {  # [--current <step>] <path> <task|wave> [<row>...]
     fi
     printf '## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
     _plan_fixture_rows "$(plan_fixture_log "$path")" "$cur" "$@" || return 1
-    printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+    printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n'
     printf '| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |\n'
   } > "$path" || return 1
   seal_fixture "$path" "$(plan_fixture_log "$path")"
@@ -104,8 +104,8 @@ plan_fixture_themes() {  # <plan> [<status>...]
   { printf -- '---\nscale: wave\n---\n# requirements\n\n## The card reads true\n\nThe card says what was authored.\n\n### REQ-1 — goals\n\n'
     printf -- '- %s read. Fails when: not.\n' $r1
     printf '\n## The gate admits the work\n\nThe gate honours the word.\n\n### REQ-2 — the word\n\n- %s honoured. Fails when: not.\n' "$r2"; } > "$q"
-  { awk '/^## / { s = ($0 ~ /^## Eval design/) } !s' "$plan"
-    printf '## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+  { awk '/^## / { s = ($0 ~ /^## Test design/) } !s' "$plan"
+    printf '## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n'
     for a in $r1; do printf '| REQ-1 | x | %s | hermetic | `tests/a.test.sh` | %s is wrong |\n' "$a" "$a"; done
     printf '| REQ-2 | x | %s | hermetic | `tests/a.test.sh` | %s is wrong |\n' "$r2" "$r2"; } > "$plan.pft" && mv -f "$plan.pft" "$plan"
   log="$(plan_fixture_log "$plan")"; mkdir -p "${log%/*}"
@@ -152,7 +152,7 @@ sp_at15() {
       if (!none(cell(r, "worktree"))) ev("tree|row=" cell(r, "id") "|path=.worktrees/" cell(r, "worktree"))
       if (cell(r, "status") == "landed") ev("published|row=" cell(r, "id")); next }
     { print }
-    END { if (eval) { print "\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
+    END { if (eval) { print "\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|"
       print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p" || return
   seal_fixture "$p" "$d/record/$n/run.log"
 }

@@ -691,9 +691,9 @@ Answer the requirements with one function.
 
 - **D1 — one function** (D1; REQ-1)
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |$le
 SPEC
@@ -708,9 +708,9 @@ SPEC
 | T1 | 4 | build | a library change. One function and its suite. | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — |
 | T2 | 4 | doc | the release $DOOR_VERSION. Its changelog entry and version. | — | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | — |$lr
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |$th
+| Requirement | Approach | Criterion | Test type | Test | Fails when |$th
 |---|---|---|---|---|---|$ts
 | REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |$t1${le:+$le$lt}
 PLAN

@@ -317,7 +317,7 @@ expect_eq "ST-8 the ledger's findings over the one answer: the launched rows not
   "$( ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh"; o="$(units_findings "$D/plans/epic-x/sts.plan.md" "")"; rc=$?
       printf '%s|rc=%s' "$(printf '%s\n' "$o" | paste -sd, -)" "$rc" ) )"
 
-EVAL='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+EVAL='| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-7 | planted | AC-7.1 | unit | `cell` \| `row` | none |
 | REQ-7 | planted | AC-7.2 | unit | e2 | f2 |
@@ -336,7 +336,7 @@ scale-recommendation: 'one wave'
 
 release: none, said in prose.
 
-## Eval design
+## Test design
 
 $EVAL
 

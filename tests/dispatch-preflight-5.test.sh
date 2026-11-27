@@ -323,9 +323,9 @@ base-sha: abc1234
 | T12 | 4 | prototype | E1: refusal wording (attended) | — | 30 | E1 | record/x.md | — |
 | T13 | 4 | build | E1: hooks migrated | T12 | 60 | E1 | hooks/*.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |
+| Requirement | Approach | Criterion | Test type | Test | Fails when | Task |
 |---|---|---|---|---|---|---|
 | E1 | the wording, read | AC-1 | static | \`tests/a.test.sh\` | the wording is untested | $2 |
 EOF
