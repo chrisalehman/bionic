@@ -43,7 +43,7 @@ about doing the job well; they are about still being alive to report it.
   which the tool shell leaves empty; validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
   forbidden for evidence-producing commands** — a suite, a build, a drill — even under the
   fallback below: the harness's background-Bash output file is ephemeral and can vanish before
-  you read it back. These always run
+  you read it back, which is what cost a finished run's totals once already. These always run
   foreground with `tee` to the path your brief names as `Evidence log:`.
 - **Documented fallback, only when a brief says the ceiling is not in force AND the command is
   not evidence-producing:** **if** you were
@@ -55,7 +55,8 @@ about doing the job well; they are about still being alive to report it.
   path and stop; the orchestrator reads that line at its next tick and arms no watch on it.
 - **You do not set your test width.** Every suite asks the gate for its place, and the gate
   admits it when the machine has room under the share; a run it cannot admit in its time
-  prints the line to run again, and nothing ran, so run that line again. Set `BIONIC_TEST_JOBS_CEILING`
+  prints the line to run again, and nothing ran, so run that line again. There is
+  nothing here for you to compute or export. Set `BIONIC_TEST_JOBS_CEILING`
   only when your brief names a ceiling, and never above the one it names.
 
 **`/clear` does not kill agents.** A cleared session loses its own memory of a fleet, never
