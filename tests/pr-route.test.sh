@@ -421,7 +421,7 @@ prr_case8() { local b="$PRR_BASE"; PRR_BASE="$PRR_BASE8"; prr_case "$1"; PRR_BAS
 prr_case8 only-open
 OO_MAIN="$(prr_main)"; prr_approve "$(prr_head)"; prr_publish
 prr_close run
-expect_eq "OO-1 the request open: close-out's run holds (exit 2), saying the working branch is not reachable from origin/main" "2|yes" \
+expect_eq "OO-1 the request open: close-out's run holds (exit 0), saying the working branch is not reachable from origin/main" "0|yes" \
   "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -q 'is not reachable from origin/main' && echo yes)"
 expect_eq "OO-2 …the log holds no landing of the integrate row, and the local main is where it was" "0|$OO_MAIN" "$(prr_landed)|$(prr_main)"
 prr_close check
@@ -819,7 +819,8 @@ prr_pass
 expect_eq "TG-9 AC-21.2 the request open, the merge not seen: the pass is quiet and no tag is made, here or there" "$PRR_QUIET||" \
   "$PASS_RC|$(prr_tag_here)|$(prr_tag_there)"
 prr_close run
-expect_eq "TG-9b …close-out's run typed by hand holds the same way, and makes no tag" "2||" "$DOOR_RC|$(prr_tag_here)|$(prr_tag_there)"
+expect_eq "TG-9b …close-out's run typed by hand holds the same way (exit 0), and makes no tag" "0|1||" \
+  "$DOOR_RC|$(printf '%s\n' "$DOOR_OUT" | grep -c 'the tail runs once the merge is seen$')|$(prr_tag_here)|$(prr_tag_there)"
 prr_gh pr merge 1 --squash; TG_TIP="$(prr_bare_main)"
 prr_pass
 expect_eq "TG-10 AC-21.1 merged and approved: the pass closes the run, and the remote holds the release's tag at the merge commit" \

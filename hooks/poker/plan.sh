@@ -1551,8 +1551,9 @@ BRF_EOF
   #
   # `choices=` holds the word a reply names each choice by, the default's then the other's: the first word of its label.
   #
-  # Early, it prints `CARD-EARLY — <reason>` on stderr, exit 1, and writes nothing. `--preview` renders the page
-  # whatever the facts, the reason first when it is early, and records no page and opens no item. REFUSED (1),
+  # Early, it prints `CARD-EARLY — <reason>` on stderr, exits 0 (an ordinary answer, read by that line), and writes
+  # nothing. `--preview` renders the page whatever the facts, the reason first when it is early, and records no page
+  # and opens no item. REFUSED (1),
   # nothing written: a plan that is not the bound run, a branch naming no commit, an `--against` naming nothing the
   # page holds. A page written under the card's old name (`$RR_OLD_VERB`, set in session-poker.sh) is read all the same, by
   # `reply` and the situation report, and is never written again: only the new stem and tag are written.
@@ -1793,11 +1794,20 @@ RR_MATRIX
     RR_DIR="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")"
     # THE THREE FACTS ARE card.sh's (`early`), asked as this session in the run's root.
     RR_EOUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$(cd "$BIONIC_LIB/.." 2>/dev/null && pwd -P)/card.sh" early "$PV_PLAN" 2>&1 )"; RR_ERC=$?
+    # EARLY IS READ FROM THE CARD'S LINE, NOT ITS EXIT: `card.sh early` exits 0 on CARD-EARLY, an ordinary answer, and
+    # non-zero only when it could not ask, whose first line is then the reason.
     RR_EARLY=""
     if [ "$RR_ERC" -ne 0 ]; then
       RR_EARLY="$(printf '%s\n' "$RR_EOUT" | awk '!/^settles: / && NF { print; exit }')"
       RR_EARLY="${RR_EARLY:-card.sh early exited $RR_ERC}"
-      if [ "$RR_PREVIEW" != yes ]; then printf '%s\n' "$RR_EARLY" >&2; exit 1; fi
+    else
+      RR_EARLY="$(printf '%s\n' "$RR_EOUT" | awk 'index($0, "CARD-EARLY — ") == 1 { print; exit }')"
+    fi
+    if [ -n "$RR_EARLY" ] && [ "$RR_PREVIEW" != yes ]; then
+      printf '%s\n' "$RR_EARLY" >&2
+      # The page asked early is an ordinary answer (lib/refuse.sh, the list): exit 0; a card that could not ask refuses.
+      case "$RR_EARLY" in "CARD-EARLY — "*) exit "$(refuse_ordinary_exit release-approval 1)" ;; esac
+      exit 1
     fi
     RR_SETTLE="$(printf '%s\n' "$RR_EOUT" | sed -n 's/^settles: //p')"
     # A CARRY HOLDS ITS SENTENCE: every deferral the release entry's Known limits will list (`known_limits_part`, the

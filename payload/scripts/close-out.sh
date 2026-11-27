@@ -176,9 +176,13 @@ say() { printf '%s\n' "$*"; }
 # §Refuse(e), "Refuse refuse() is defined exactly once in the tree"), and the two are
 # not interchangeable — the renderer takes five arguments, this one takes a sentence.
 # Same rename spawn-worktree.sh's private helper took (`_wt_refuse`, ruling D-6).
+# A hold the list of ordinary answers holds (lib/refuse.sh: the close run before its merge is seen) names its key in
+# CO_ORDINARY and exits 0 with the same line, so its caller reads the line, never the exit; every other refusal exits 2.
+CO_ORDINARY=""
 _co_refuse() {
   printf 'bionic: close-out refused — %s\n' "$*"
   co_hold "${CO_HOLD_SAYS:-close-out stopped}" "bionic: close-out refused — $*"
+  if [ -n "$CO_ORDINARY" ] && bionic_need refuse.sh refuse_ordinary_exit; then exit "$(refuse_ordinary_exit "$CO_ORDINARY" 2)"; fi
   exit 2
 }
 # _co_held <what holds the merge, in a few words> <sentence> -> _co_refuse's line and exit 2, the words the ask's title
@@ -538,6 +542,9 @@ act_merge() {
     MERGE_LINE="$verdict"
     return 0
   fi
+  # A working branch not merged yet is the close asked before its merge, an ordinary answer; a request closed unmerged
+  # and a merge that cannot be read are refusals.
+  [ "$CO_MERGE_RC" != 1 ] || CO_ORDINARY=close-out
   _co_held "$(co_merge_holds)" "${verdict#WOULD REFUSE — } — the tail runs once the merge is seen"
 }
 

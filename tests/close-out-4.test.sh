@@ -536,7 +536,7 @@ for _pk in unparked none fenced; do
   expect_contains "PK-11.$_pk control: an $_pk plan whose branch main never took still reads merge: WOULD REFUSE" \
     "merge: WOULD REFUSE — wave/01-fixture @ " "$CO_OUT"
   run_close "$PPU" run
-  expect_eq "PK-11b.$_pk …and run refuses it, naming the merge, the plan unchanged" "2|yes|$PPU_CK" \
+  expect_eq "PK-11b.$_pk …and run holds on it (exit 0), naming the merge, the plan unchanged" "0|yes|$PPU_CK" \
     "$CO_RC|$(contains "$CO_OUT" "is not reachable from main")|$(cksum < "$PPU/$PLAN_REL")"
 done
 
@@ -826,8 +826,8 @@ expect_contains "RV-2 check says run would render the part on the working branch
 expect_eq "RV-3 …and writes nothing: the branch is where it was" "$RV_H2" "$(rv_tip "$PRV")"
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PRV" run
 # The part is published before the merge readback, so the readback reads the branch the part is on. The fixture's release
-# merge predates the part, so main does not hold the published tip and the run holds there (rc 2) until the person merges it.
-expect_eq "RV-4 run publishes the part, then holds at the merge readback: the branch it moved to is not merged (rc 2)" "2|yes" \
+# merge predates the part, so main does not hold the published tip and the run holds there (exit 0) until the person merges it.
+expect_eq "RV-4 run publishes the part, then holds at the merge readback: the branch it moved to is not merged (exit 0)" "0|yes" \
   "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q 'is not reachable from' && echo yes)"
 RV_TIP="$(rv_tip "$PRV")"
 RV_WANT="$(

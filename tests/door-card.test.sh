@@ -211,7 +211,7 @@ read -r DCM1_R _ <<EOF
 $(door_copy "$DC" "$WORLD_ROOT/door-unsettled")
 EOF
 dcm_card "$DCM1" "$DCM1_R"
-expect_eq "(m1b) with the settle deleted the card does not render" "1" "$DOOR_RC"
+expect_eq "(m1b) with the settle deleted the card does not render (exit 0, no page)" "0|" "$DOOR_RC|$(ls "$DCM1_R"/.bionic/docs/record/wave-x/release-approval-*.md 2>/dev/null)"
 expect_contains "(m1c) …it is early on the advance to 8" "CARD-EARLY — current 8 --check" "$DOOR_OUT"
 
 DCM2="$WORLD_ROOT/tree-reworded"; dcm_tree "$DCM2"

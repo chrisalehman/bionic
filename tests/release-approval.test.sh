@@ -235,13 +235,13 @@ expect_absent "NW-2c …and no table line" "regression" "$(fc_table)"
 fc_plan "$(fc_reads "$FC_C")" "" fc_owed_now
 poke "$RFC" current 7 --check
 fc_page
-expect_eq "NW-3b …and the page is early, not a waiver (exit 1, nothing rendered or written)" "1||" "$FC_RC|$FC_OUT|$(fc_pages)"
+expect_eq "NW-3b …and the page is early, not a waiver (exit 0, nothing rendered or written)" "0||" "$FC_RC|$FC_OUT|$(fc_pages)"
 expect_eq "NW-3c …saying CARD-EARLY on the advance to 7, which judges the whole run" "CARD-EARLY — current 7 --check: would refuse" "$FC_ERR"
 fc_plan "$(fc_floor "$FC_C" a.test.sh)
 $(fc_reads "$FC_C")" "" fc_owed_now
 fc_page
-expect_eq "NW-4 a whole run that left a suite red: early too, on the advance to 8 (exit 1, nothing written)" \
-  "1||CARD-EARLY — current 8 --check: would refuse" "$FC_RC|$(fc_pages)|$FC_ERR"
+expect_eq "NW-4 a whole run that left a suite red: early too, on the advance to 8 (exit 0, nothing written)" \
+  "0||CARD-EARLY — current 8 --check: would refuse" "$FC_RC|$(fc_pages)|$FC_ERR"
 expect_absent "NW-4b …offering no waiver" "waive regression" "$FC_OUT$FC_ERR"
 
 # ============================================================
@@ -253,11 +253,11 @@ fc_plan "$FC_GOOD"
 new_roster "$RFC"
 add_row "$RFC" name=w38-T13 agent_id=a013 subagent_type=bionic:critic
 fc_page
-expect_eq "EARLY-1 an open critic row on the roster: release-approval exits 1" "1" "$FC_RC"
+expect_eq "EARLY-1 an open critic row on the roster: release-approval exits 0" "0" "$FC_RC"
 expect_eq "EARLY-1b …saying CARD-EARLY and the reviewer, on stderr" "CARD-EARLY — reviewer w38-T13 open" "$FC_ERR"
 expect_eq "EARLY-1c …rendering nothing and writing no page" "|" "$FC_OUT|$(fc_pages)"
 fc_card early
-expect_eq "EARLY-1e card.sh early answers the same fact, the same words (exit 1)" "1|CARD-EARLY — reviewer w38-T13 open" "$FC_RC|$FC_ERR"
+expect_eq "EARLY-1e card.sh early answers the same fact, the same words (exit 0)" "0|CARD-EARLY — reviewer w38-T13 open" "$FC_RC|$FC_ERR"
 ack_rows "$RFC" w38-T13
 fc_page
 expect_eq "EARLY-2 the same critic acked: the page renders (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
@@ -268,7 +268,7 @@ fc_page
 expect_eq "EARLY-2b an open writer row is no reader: the page renders (exit 0)" "0|" "$FC_RC|$FC_ERR"
 fc_plan "$FC_GOOD" '/structure-whole/d'
 fc_page
-expect_eq "EARLY-3 the whole structure reading unregistered at the head: exit 1" "1" "$FC_RC"
+expect_eq "EARLY-3 the whole structure reading unregistered at the head: exit 0" "0" "$FC_RC"
 expect_eq "EARLY-3b …CARD-EARLY naming the question and the head" "CARD-EARLY — structure unregistered at $FC_H8" "$FC_ERR"
 expect_eq "EARLY-3c …nothing rendered, no page written" "|" "$FC_OUT|$(fc_pages)"
 # No Step-7 document: the header names none.
@@ -279,8 +279,8 @@ expect_eq "EARLY-4 precondition: the header names no Step-7 document, so current
   "0:refuse|poker: current 7 --check: would refuse" "$(ck_said "$RC" "$OUT")|$(printf '%s\n' "$OUT" | head -1)"
 expect_contains "EARLY-4a …in the Step-7 document's own words" "Step 7's document" "$OUT"
 fc_page
-expect_eq "EARLY-4b release-approval exits 1, CARD-EARLY with the check's own verdict line, nothing written" \
-  "1|CARD-EARLY — current 7 --check: would refuse|" "$FC_RC|$FC_ERR|$(fc_pages)"
+expect_eq "EARLY-4b release-approval exits 0, CARD-EARLY with the check's own verdict line, nothing written" \
+  "0|CARD-EARLY — current 7 --check: would refuse|" "$FC_RC|$FC_ERR|$(fc_pages)"
 new_roster "$RFC"; forget_digest "$RFC"
 poke "$RFC" tick
 expect_contains "EARLY-5 the tick, an integrate row open, says the same line as advice" \
@@ -313,8 +313,8 @@ expect_eq "EARLY-6g …after which current 8 --check is green" "0:advance" "$(ck
 fc_plan "$FC_FAILR"
 printf 'release-check: bash tests/a.test.sh\n' > "$RFC/.bionic/config.yaml"
 fc_page
-expect_eq "EARLY-7 the failing reading beside an unheld release check no default settles: CARD-EARLY (exit 1)" \
-  "1|CARD-EARLY — current 8 --check: would refuse|" "$FC_RC|$FC_ERR|$FC_OUT"
+expect_eq "EARLY-7 the failing reading beside an unheld release check no default settles: CARD-EARLY (exit 0)" \
+  "0|CARD-EARLY — current 8 --check: would refuse|" "$FC_RC|$FC_ERR|$FC_OUT"
 rm -f "$RFC/.bionic/config.yaml"
 # THREE ROWS THE AUDITOR DID NOT CONFIRM: each proof carries the auditor's UNVERIFIABLE, so the advance to 6 takes it as a
 # verdict and the advance to 8 refuses the first as unruled; the page offers all three as decisions. A proof that names
@@ -372,7 +372,7 @@ expect_eq "PREV-1 the early run previews (exit 0, nothing on stderr)" "0|" "$FC_
 expect_eq "PREV-3 …every section printed" "Bottom line|Goals|Tests|Reviews|Findings|Decisions" "$(fc_heads)"
 expect_eq "PREV-5 …no page written, no approval opened" "|" "$(fc_pages)|$(fc_owed | /usr/bin/grep '^approve:')"
 fc_page
-expect_eq "PREV-6 the same run without --preview is early (exit 1)" "1" "$FC_RC"
+expect_eq "PREV-6 the same run without --preview is early (exit 0, no page)" "0|" "$FC_RC|$(fc_pages)"
 fc_plan "$FC_FAILR"
 fc_page --preview
 expect_eq "PREV-7b …and opens no item on the person's ledger, the finding's nor the waiver's" "" "$(fc_owed)"
@@ -878,7 +878,7 @@ fc_born_plan
 fc_page
 expect_regex "BORN-3 the control: one code commit past the fixes that no row was born for is CARD-EARLY" \
   "^CARD-EARLY — (evidence|adversarial|structure) unregistered at ${FC_F3:0:8}\$" "$FC_ERR"
-expect_eq "BORN-3b …exit 1, nothing rendered, no page written" "1||" "$FC_RC|$FC_OUT|$(fc_pages)"
+expect_eq "BORN-3b …exit 0, nothing rendered, no page written" "0||" "$FC_RC|$FC_OUT|$(fc_pages)"
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md
 fc_record structure structure piece
@@ -923,17 +923,17 @@ expect_eq "POST-0 precondition: the working head is the fix's landing, and the r
   "$(git -C "$RFC" rev-parse wave/01-fixture)|$(for r in $(/usr/bin/grep -oE '^\| T[2456] ' "$PFC" | tr -d '| '); do
     printf '%s:%s\n' "$r" "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" status "$r" | sed -n 's/^state=//p')"; done | paste -sd' ' -)"
 fc_card early
-expect_eq "POST-1 the readers open and unread: card.sh early is CARD-EARLY naming the first reader row (exit 1)" \
-  "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
+expect_eq "POST-1 the readers open and unread: card.sh early is CARD-EARLY naming the first reader row (exit 0)" \
+  "0|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
 fc_page
 expect_eq "POST-1b …release-approval says the same, renders nothing and writes no page" \
-  "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered||" \
+  "0|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered||" \
   "$FC_RC|$FC_ERR|$FC_OUT|$(fc_pages)"
 fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)"
 fc_card early
-expect_eq "POST-1c the critic's two readings registered, the auditor's not: early, naming the auditor's row T6 (exit 1)" \
-  "1|CARD-EARLY — review row T6 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
+expect_eq "POST-1c the critic's two readings registered, the auditor's not: early, naming the auditor's row T6 (exit 0)" \
+  "0|CARD-EARLY — review row T6 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
 fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)
 $(fc_post_read evidence)"

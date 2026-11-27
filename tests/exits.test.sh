@@ -13,7 +13,8 @@
 # advance (`current <N> --check`) answering would refuse, beside its would-advance control and the advance itself, which
 # still refuses non-zero in the same words; the judge (`judge <N>...`) answering a step that would refuse, which exits 0
 # while its closing line keeps the step's code, the one a card reads; and the list's own exit for a code it does not
-# hold, which stays that code.
+# hold, which stays that code. Then the tick's notice, the two cards asked early, the close before the merge, and the
+# tick's merge look, which reads the close's last line.
 #
 # THE WORLD. A scratch git project carrying this tree's door, its framework, its payload libraries and the shim, with
 # three stub suites: x, green; f2, red; f1, whose output holds the shell's own refusal of a process, which the door counts as a
@@ -25,9 +26,12 @@
 # wave/01-fixture, that names no commit there: the advance to 8 is refused on it before any fact is read, and the
 # check of step 7, the step the run stands at, would advance with nothing to judge. The poker is this tree's own.
 #
+# O6 on, the branch is made at the base. The tick and the close run in their own suites' worlds (preludes, in subshells).
+#
 # FIXTURE FIDELITY. The door, the shim, the libraries, the tick's builder and the poker's reader are this tree's own
 # files, copied or sourced in place. The poker the tick's line calls is a STUB: it answers regression-run as the real
-# verb answers each of the three ends (not admitted, ran and logged, ran nothing), and logs a proof-add call.
+# verb answers each of the three ends (not admitted, ran and logged, ran nothing), and logs a proof-add call. So is the
+# close the merge look runs (held with exit 0, or delivered); O8 drives the real one.
 #
 # ANTI-VACUITY. Each "not run" reading sits beside a green control read by the same extractor in the same world.
 #
@@ -223,5 +227,52 @@ expect_eq "O3 the judge asked for a step that would advance and one that would r
   "0|poker: judged 7 exit 0|poker: judged 8 exit 1" \
   "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: judged ' | paste -sd'|' -)"
 expect_contains "O3b …the step that would refuse said so as the check does" "poker: current 8 --check: would refuse" "$OUT"
+
+expect_eq "O4 the list holds the tick's, the two cards' and the close's answers" \
+  "tick:1:decision=NOTIFY card-early:1:CARD-EARLY — release-approval:1:CARD-EARLY — close-out:2:the tail runs once the merge is seen" \
+  "$(ex_list '$1 ~ /^(tick|card-early|release-approval|close-out)$/ { printf "%s%s:%s:%s", (n++ ? " " : ""), $1, $3, $4 }')"
+expect_eq "O4b …each code exits 0, a refusal's beside it stays" "0 2 |0 2 |0 2 |0 1 " \
+  "$(ex_ordexit tick 1 2)|$(ex_ordexit card-early 1 2)|$(ex_ordexit release-approval 1 2)|$(ex_ordexit close-out 2 1)"
+EX_TK="$( POKER="$REPO/hooks/session-poker.sh"; . "$(dirname "$0")/lib/roster-row.sh" || exit 9
+  . "$(dirname "$0")/session-poker.prelude.sh" || exit 9
+  r="$(make_repo ex-notify)" && new_roster "$r" || exit 9
+  add_row "$r" name=late deliverable="$r/none.md" duration="1 minute" launched_at="$(iso_ago 120)"; poke "$r" tick
+  printf '%s\n%s\n' "$RC" "$OUT" )"
+expect_eq "O5 the tick that notifies exits 0, its decision line as before" "0|decision=NOTIFY|rows=late" \
+  "$(printf '%s\n' "$EX_TK" | head -n 1)|$(printf '%s\n' "$EX_TK" | tail -n 1 | tr '|' '\n' | /usr/bin/grep -e '^decision=' -e '^rows=' | paste -sd'|' -)"
+expect_contains "O5b …and says why above it, as before" "poker: NOTIFY — past declared duration: late" "$EX_TK"
+ex_poke release-approval "$OP"
+expect_eq "O7b control: the release card on a branch naming no commit still refuses (exit 1)" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | grep -c "REFUSED — the plan's working branch names no commit")"
+git -C "$O" branch wave/01-fixture
+OUT="$(cd "$O" && env "${EX_ENV[@]}" HOME="$TMPROOT/ohome" CLAUDE_CONFIG_DIR="$TMPROOT/ocfg" CLAUDE_PROJECT_DIR= \
+  CLAUDE_CODE_SESSION_ID="$EX_SID" bash "$REPO/payload/scripts/card.sh" early "$OP" 2>&1)"; RC=$?; EX_EARLY="$OUT"
+expect_eq "O6 the card asked early exits 0, its one line CARD-EARLY" "0|yes|1" \
+  "$RC|$([ "${OUT#CARD-EARLY — ?}" != "$OUT" ] && echo yes)|$(printf '%s\n' "$OUT" | awk 'END { print NR }')"
+ex_poke release-approval "$OP"
+expect_eq "O7 the release card asked early exits 0, the card's line, no page" "0|$EX_EARLY|" \
+  "$RC|$OUT|$(ls "$O"/.bionic/docs/record/*/release-approval-* 2>/dev/null)"
+EX_CO="$( . "$(dirname "$0")/lib/regression-fixture.sh" && . "$(dirname "$0")/lib/roster-row.sh" || exit 9
+  . "$(dirname "$0")/close-out.prelude.sh" || exit 9
+  p="$(mk_task_pr_fixture ex-hold fix/x)" || exit 9; run_close "$p" run; a="$CO_RC|$(printf '%s\n' "$CO_OUT" | tail -n 1)"
+  run_close "$p" run; printf '%s\n%s\n' "$a" "$CO_RC|$(printf '%s\n' "$CO_OUT" | tail -n 1)" )"
+expect_eq "O8 the close run before the merge exits 0, its last line the hold as before" "0|1" \
+  "$(printf '%s\n' "$EX_CO" | head -n 1 | cut -d'|' -f1)|$(printf '%s\n' "$EX_CO" | head -n 1 | grep -c '|bionic: close-out refused — fix/x @ .* is not reachable from main .* the tail runs once the merge is seen$')"
+expect_eq "O8b …and run again over the same hold, the same" "0|$(printf '%s\n' "$EX_CO" | head -n 1 | cut -d'|' -f2-)" "$(printf '%s\n' "$EX_CO" | tail -n 1)"
+# The tick's merge look over a stub close, the merge seen and nobody out.
+WX="$TMPROOT/wx"; mkdir -p "$WX/r/.bionic/tmp" "$WX/s/lib"; : > "$WX/r/p.md"
+printf '#!/bin/bash\ncase "$(cat "$EX_CLOSE")" in held) echo "bionic: close-out refused — w is not merged — the tail runs once the merge is seen" ;;\n refused) echo "bionic: close-out refused — the tag was not pushed"; exit 2 ;; *) echo "step9: delivered: w" ;; esac\n' > "$WX/s/close-out.sh"
+ex_look() {  # <held|refused|delivered> -> the line the tick's merge look gives
+  printf '%s\n' "$1" > "$WX/c"
+  ( . "$REPO/payload/scripts/lib/refuse.sh" >/dev/null 2>&1 && . "$REPO/hooks/poker/tick.sh" || exit 9
+    bionic_need() { return 0; }; line_merge_seen() { printf 'merged\tc0\n'; }; watch_rows_out() { return 1; }
+    BIONIC_LIB="$WX/s/lib" EX_CLOSE="$WX/c" CLAUDE_CODE_SESSION_ID=exw watch_merge_look "$WX/r" "$WX/r/p.md" ) 2>/dev/null
+}
+expect_eq "O9 the watch over the close held before the merge says held (the hold's code), once" \
+  "bionic watch: MERGED - close-out held (exit 2): mend what .bionic/tmp/close-exw.out names|" "$(ex_look held)|$(ex_look held)"
+expect_eq "O9b control: a close that refuses (exit 2) reads held as before" \
+  "bionic watch: MERGED - close-out held (exit 2): mend what .bionic/tmp/close-exw.out names" "$(ex_look refused)"
+expect_eq "O9c control: a close that delivered reads DELIVERED" \
+  "bionic watch: DELIVERED - merged; close-out closed the run: do the acts in .bionic/tmp/close-exw.out" "$(ex_look delivered)"
 
 finish
