@@ -51,6 +51,14 @@ FC_WD_OWED=no; [ -z "$(fc_unproved)" ] || FC_WD_OWED=yes   # the owed row of §W
 rm -f "$FC_REC"/release-approval-*.md
 # JUDGE-4: the whole run at R, one docs commit past it, so the head moved no code since the pass. fails-when: the printer
 # reads green only at the pass's own head, so the card asks the merge at a docs head and the defaults leave current 8 refusing.
+# ck_ans -> the checked advance's answer as its code, from RC and OUT as poke left them: 0 would advance, 1 would refuse.
+# The check exits 0 on either answer, so the answer is read from its words; a check that exited non-zero is x<its exit>.
+ck_ans() {
+  case "$RC:$(printf '%s\n' "$OUT" | awk 'index($0, "--check: would advance") { print "advance"; exit }
+      index($0, "--check: would refuse") { print "refuse"; exit }')" in
+    0:advance) printf 0 ;; 0:refuse) printf 1 ;; *) printf 'x%s' "$RC" ;;
+  esac
+}
 fc_mu() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_ask "$2" "$3" "$4"; echo "rc=$?"' _ "$FC_LIB" "$PFC" "$RFC" "$1" 2>/dev/null | paste -sd'|' -; }  # <head> -> its line, then rc=
 fc_plan "$FC_GOOD"
 FC_J4="$(s57_commit "$RFC" README.md 'prose past the whole run')"
@@ -64,9 +72,9 @@ $(fc_reads "$FC_C")"
 expect_eq "JUDGE-4d …proof_merge_ask exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C, naming the commit no run proved and T1, whose landing the log holds" "rc=1|red at ${FC_B:0:8}, 1 landing before this head; commit ${FC_C:0:12} (row T1) is not proved: no run of its row's suites is recorded at it|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
 fc_plan "$FC_GOOD"; fc_page; fc_typed "$FC_WD"
 poke "$RFC" reply "$FC_WD"; FC_J4_REPLY="$RC"
-poke "$RFC" current 8 --check; FC_WN_GREEN="$RC"
-expect_eq "JUDGE-4e …the reply that takes every default replays (exit 0), writing no merge-unproved line, and current 8 --check is admitted (exit 0)" "0||0" "$FC_J4_REPLY|$(fc_appr merge-unproved)|$RC"
-[ "$RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$OUT" | tail -4)"
+poke "$RFC" current 8 --check; FC_WN_GREEN="$(ck_ans)"
+expect_eq "JUDGE-4e …the reply that takes every default replays (exit 0), writing no merge-unproved line, and current 8 --check is admitted (exit 0)" "0||0" "$FC_J4_REPLY|$(fc_appr merge-unproved)|$(ck_ans)"
+[ "$(ck_ans)" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$OUT" | tail -4)"
 git -C "$RFC" reset -q --hard "$FC_R"; fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
 # JUDGE-3: the whole run at B, T1's code at C landed green on its suite, the release text at R: covered to the judge,
 # red at the head. The card renders (not early: the gate's one refusal is the card's own decision), the reply that waits
@@ -87,8 +95,8 @@ FC_J3W="${FC_J3N:-0} wait, rest default"
 fc_typed "$FC_J3W"
 poke "$RFC" reply "$FC_J3W"
 expect_eq "JUDGE-3d a reply that waits on it and takes every other default replays (exit 0), writing no merge-unproved line" "0|" "$RC|$(fc_appr merge-unproved)"
-poke "$RFC" current 8 --check; FC_WN_COV="$RC"
-expect_eq "JUDGE-3e …and current 8 --check still refuses (exit 1), on the regression alone" "1|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE '^regression	unproved	')"
+poke "$RFC" current 8 --check; FC_WN_COV="$(ck_ans)"
+expect_eq "JUDGE-3e …and current 8 --check still refuses (exit 0: would refuse), on the regression alone" "1|1" "$(ck_ans)|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE '^regression	unproved	')"
 expect_contains "JUDGE-3f …naming the person's exit" "or wait for the pass" "$OUT"
 fc_page
 FC_J3N="$(/usr/bin/grep -F '|key=approve:merge-unproved|' "$FC_REC/release-approval-$FC_H8-2.md" 2>/dev/null | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"
@@ -98,12 +106,12 @@ poke "$RFC" reply "$FC_J3M"
 expect_eq "JUDGE-3g the card put again holds the one decision, and reply ${FC_J3M} replays it (exit 0)" "1|0" "${FC_J3N:-}|$RC"
 expect_regex "JUDGE-3h …writing the approval at the working head with the user's words" "^run/v1\\|ev=approval\\|key=merge-unproved\\|by=Dana Fixture\\|head=$FC_R\\|said=$FC_J3M\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\$" "$(fc_appr merge-unproved)"
 expect_eq "JUDGE-3i …closing its ask on the person's ledger" "" "$(fc_owed | /usr/bin/grep -x 'approve:merge-unproved')"
-poke "$RFC" current 8 --check; FC_WY_COV="$RC"
-expect_eq "JUDGE-3j …after which current 8 --check passes (exit 0)" "0" "$RC"
-[ "$RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$OUT" | tail -4)"
+poke "$RFC" current 8 --check; FC_WY_COV="$(ck_ans)"
+expect_eq "JUDGE-3j …after which current 8 --check passes (exit 0)" "0" "$(ck_ans)"
+[ "$(ck_ans)" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$OUT" | tail -4)"
 s57_commit "$RFC" README.md 'prose past the approval' >/dev/null
 poke "$RFC" current 8 --check
-expect_eq "JUDGE-3k the head moves past it by prose: the release still holds, the merge-unproved line is stale, and current 8 --check refuses on the regression again" "1|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE '^regression	unproved	')"
+expect_eq "JUDGE-3k the head moves past it by prose: the release still holds, the merge-unproved line is stale, and current 8 --check refuses on the regression again" "1|1" "$(ck_ans)|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE '^regression	unproved	')"
 git -C "$RFC" reset -q --hard "$FC_R"
 fc_typed "$FC_WD" "$FC_WR"
 rm -f "$FC_REC"/release-approval-*.md
@@ -131,11 +139,11 @@ expect_contains "WORD-1b2 …and naming the commit no run proved and its landing
 FC_WDM="${FC_WDN:-0} merge, rest default"; fc_typed "$FC_WDM"
 poke "$RFC" reply "$FC_WDM"
 expect_regex "WORD-1c reply ${FC_WDM} replays (exit 0), writing the word at the head with the user's words" "^0\\|run/v1\\|ev=approval\\|key=merge-unproved\\|by=Dana Fixture\\|head=$FC_R\\|said=$FC_WDM\\|at=[0-9T:Z-]+\$" "$RC|$(fc_appr merge-unproved)"
-poke "$RFC" current 8 --check; FC_WY_UNC="$RC"
-expect_eq "WORD-1d …and current 8 --check is admitted (exit 0) over the uncovered floor" "0" "$RC"
+poke "$RFC" current 8 --check; FC_WY_UNC="$(ck_ans)"
+expect_eq "WORD-1d …and current 8 --check is admitted (exit 0) over the uncovered floor" "0" "$(ck_ans)"
 /usr/bin/grep -v '|ev=approval|key=merge-unproved|' "$FC_REC/run.log" > "$FC_REC/run.log.new"; mv "$FC_REC/run.log.new" "$FC_REC/run.log"
-poke "$RFC" current 8 --check; FC_WN_UNC="$RC"
-expect_eq "WORD-1e …the word taken out, the release approval kept: refused (exit 1) on the regression unproved, so the word is what admits" "1|unproved" "$RC|$(fc_regline | cut -f2)"
+poke "$RFC" current 8 --check; FC_WN_UNC="$(ck_ans)"
+expect_eq "WORD-1e …the word taken out, the release approval kept: refused (exit 0: would refuse) on the regression unproved, so the word is what admits" "1|unproved" "$(ck_ans)|$(fc_regline | cut -f2)"
 fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
 # (2) An owed head; the card's side is JUDGE-2's (the owed suite and its exit on the Tests line, no decision).
 fc_plan "$(fc_floor "$FC_C" a.test.sh)
@@ -144,19 +152,19 @@ expect_eq "WORD-2 precondition: the whole run at C left a.test.sh red and nothin
 poke "$RFC" approve release 'ship it'; FC_AU="$RC|$(fc_appr release | grep -c .)"; said_as sdk "$RFC" 'ship it'; poke "$RFC" approve release 'ship it'
 expect_eq "WORD-2a approve release on words no prompt holds, then on words only a program sent: refused (exit 1) each, nothing appended" "1|0|1|0" "$FC_AU|$RC|$(fc_appr release | grep -c .)"
 said_as typed "$RFC" 'ship it' 'merge it'; poke "$RFC" approve release 'ship it'
-poke "$RFC" current 8 --check; FC_WN_OWED="$RC"
-expect_eq "WORD-2e with the release approved at the head, current 8 --check refuses (exit 1) on the regression owed" "1|owed" "$RC|$(fc_regline | cut -f2)"
+poke "$RFC" current 8 --check; FC_WN_OWED="$(ck_ans)"
+expect_eq "WORD-2e with the release approved at the head, current 8 --check refuses (exit 0: would refuse) on the regression owed" "1|owed" "$(ck_ans)|$(fc_regline | cut -f2)"
 expect_contains "WORD-2f …the refusal names the pass as the exit" "needs: the pass — a fix row for a.test.sh, then the pass" "$(fc_regline)"
 expect_absent "WORD-2g …and names no reply" "reply" "$(fc_regline)"
 poke "$RFC" approve merge-unproved 'merge it'
-poke "$RFC" current 8 --check; FC_WY_OWED="$RC"
-expect_eq "WORD-2h the word recorded at the head over the owed floor: still refused (exit 1) on the regression owed" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(fc_appr merge-unproved | grep -c .)"
+poke "$RFC" current 8 --check; FC_WY_OWED="$(ck_ans)"
+expect_eq "WORD-2h the word recorded at the head over the owed floor: still refused (exit 0: would refuse) on the regression owed" "1|owed|1" "$(ck_ans)|$(fc_regline | cut -f2)|$(fc_appr merge-unproved | grep -c .)"
 # (3) The states table, each row the card's draw beside the gate's exits without and with the word.
 fc_wrow() { local h=no; [ "$3" = 0 ] || [ "$4" != 0 ] || h=yes; printf '%s:draw=%s:honour=%s ' "$1" "$2" "$h"; }  # <state> <draw> <exit without the word> <with it, or -> -> one cell
 FC_WT="$(fc_wrow covered "$FC_WD_COV" "$FC_WN_COV" "$FC_WY_COV")$(fc_wrow uncovered "$FC_WD_UNC" "$FC_WN_UNC" "$FC_WY_UNC")$(fc_wrow owed "$FC_WD_OWED" "$FC_WN_OWED" "$FC_WY_OWED")$(fc_wrow green "$FC_WD_GREEN" "$FC_WN_GREEN" -)"
 expect_eq "WORD-3 the table: the word drawn and honoured on covered and uncovered, neither on owed, needed on green by neither" \
   "covered:draw=yes:honour=yes uncovered:draw=yes:honour=yes owed:draw=no:honour=no green:draw=no:honour=no " "$FC_WT"
-expect_eq "WORD-3b …each row read from its exits: covered and uncovered refused without the word and admitted with it, owed refused with it, green admitted without it" \
+expect_eq "WORD-3b …each row read from the check's answers (1 would refuse, 0 would advance): covered and uncovered refused without the word and admitted with it, owed refused with it, green admitted without it" \
   "1/0|1/0|1/1|0" "$FC_WN_COV/$FC_WY_COV|$FC_WN_UNC/$FC_WY_UNC|$FC_WN_OWED/$FC_WY_OWED|$FC_WN_GREEN"
 expect_eq "WORD-3c one predicate: the ask defined in lib/proof.sh and called by the card; the old one gone from both" "1|1|0" \
   "$(/usr/bin/grep -c '^proof_merge_ask()' "$FC_LIB/proof.sh")|$(/usr/bin/grep -c 'proof_merge_ask "$PV_PLAN"' "$BIONIC_HOOKS_DIR/poker/plan.sh")|$(cat "$FC_LIB/proof.sh" "$BIONIC_HOOKS_DIR/poker/plan.sh" | /usr/bin/grep -c proof_merge_unproved)"
@@ -175,7 +183,7 @@ fc_page --preview
 expect_eq "OF-2 the card puts the release decision and no merge without a whole run, as JUDGE-2 at an owed head" "yes|" "$(fc_has "$(fc_under Decisions | fc_flat)" 'Release 1.0.0')|$(fc_unproved)"
 poke "$RFC" approve release 'ship it'; poke "$RFC" approve merge-unproved 'merge it'
 poke "$RFC" current 8 --check
-expect_eq "OF-3 the word recorded at the head: current 8 --check refuses (exit 1) on the regression owed, never covered" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(fc_appr merge-unproved | grep -c .)"
+expect_eq "OF-3 the word recorded at the head: current 8 --check refuses (exit 0: would refuse) on the regression owed, never covered" "1|owed|1" "$(ck_ans)|$(fc_regline | cut -f2)|$(fc_appr merge-unproved | grep -c .)"
 expect_contains "OF-3b …naming the pass or a fix row as the exit" "needs: the pass — a fix row for a.test.sh, then the pass" "$(fc_regline)"
 expect_absent "OF-3c …and no reply" "reply" "$(fc_regline)"
 FC_OFX="$(git -C "$RFC" commit-tree -p "$FC_B" -m 'a whole run off the head line' "$FC_C^{tree}")"
@@ -325,11 +333,11 @@ expect_eq "TASK-1 the card is drawn (exit 0) and puts the release approval" "0|y
 expect_eq "TASK-2 its owed rows are the gate's: at single the person's check alone, at double the auditor's row too" "AC-1.1|AC-1.1|AC-1.1 AC-1.2|AC-1.1 AC-1.2" "$(fc_owes)|$FC_TD"
 expect_contains "TASK-2b …and at single the row the evidence review did not confirm reads proved" "acceptance — 1 of 2 criteria proved; 1 awaiting your confirmation" "$(fc_under Tests)"
 poke "$RFC" current 8 --check
-expect_eq "TASK-3 with the card unanswered, current 8 --check refuses (exit 1), naming the approval" "1|yes" "$RC|$(fc_has "$OUT" 'carries no approved: release line')"
+expect_eq "TASK-3 with the card unanswered, current 8 --check refuses (exit 0: would refuse), naming the approval" "1|yes" "$(ck_ans)|$(fc_has "$OUT" 'carries no approved: release line')"
 expect_contains "TASK-4 …and the close refuses on it" "facts: WOULD REFUSE — no approved: release line names a head" "$(fc_close)"
 fc_typed "$FC_WD"; poke "$RFC" reply "$FC_WD"; FC_TR="$RC|$(fc_appr release | grep -c "|head=$FC_R|")"
 poke "$RFC" current 8 --check
-expect_eq "TASK-5 the person's typed reply approves the release at the head (exit 0), and current 8 --check is admitted" "0|1|0" "$FC_TR|$RC"
+expect_eq "TASK-5 the person's typed reply approves the release at the head (exit 0), and current 8 --check is admitted" "0|1|0" "$FC_TR|$(ck_ans)"
 expect_eq "TASK-6 …and the close reads every fact holding" "facts: every fact the run owes holds at $FC_R" "$(fc_close)"
 # A FIX PAST THE APPROVAL whose adversarial review fails: the advance refuses on that review, the card's to waive, before
 # the stale approval, and the card puts the release again all the same.
@@ -340,12 +348,12 @@ fc_plan "run/v1|ev=approval|key=release|by=Dana Fixture|head=$FC_R|said=$FC_WD|a
 $(for q in evidence adversarial structure; do fc_line review "$FC_TF" 2026-10-12T15:00:00Z "record/wave-x/$q$([ "$q" != adversarial ] || echo -fail).md" "$q" w-read "$([ "$q" = adversarial ] && echo fail || echo pass)" whole; done)" "" fc_task
 fc_page; FC_TK="$FC_RC|$(/usr/bin/grep -c '|key=approve:release|' "$FC_REC/release-approval-${FC_TF:0:8}.md" 2>/dev/null)"
 poke "$RFC" current 8 --check
-expect_eq "TASK-7 a fix past the approved head, its review failing: current 8 refuses on the review alone (exit 1), and the card drawn there puts the release again (exit 0)" \
-  "1|1|0|0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^review	adversarial	.*failing')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'approved for release')|$FC_TK"
+expect_eq "TASK-7 a fix past the approved head, its review failing: current 8 refuses on the review alone (exit 0: would refuse), and the card drawn there puts the release again (exit 0)" \
+  "1|1|0|0|1" "$(ck_ans)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^review	adversarial	.*failing')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'approved for release')|$FC_TK"
 expect_contains "TASK-8 …with no reply the close refuses, naming both heads" "the working head ${FC_TF:0:12} is not the head the user approved for release, ${FC_R:0:12}" "$(fc_close)"
 fc_typed "$FC_WD"; poke "$RFC" reply "$FC_WD"; FC_TR="$RC|$(fc_appr release | grep -c "|head=$FC_TF|")"; poke "$RFC" current 8 --check
 expect_eq "TASK-9 the typed reply renews the approval at the fix's head (exit 0); current 8 --check and the close pass" \
-  "0|1|0|facts: every fact the run owes holds at $FC_TF" "$FC_TR|$RC|$(fc_close)"
+  "0|1|0|facts: every fact the run owes holds at $FC_TF" "$FC_TR|$(ck_ans)|$(fc_close)"
 git -C "$RFC" reset -q --hard "$FC_R"
 fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
 

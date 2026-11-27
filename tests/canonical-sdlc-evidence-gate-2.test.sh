@@ -351,6 +351,12 @@ od_poke() {  # <args...> -> OD_OUT, OD_RC: session-poker.sh as this session, in 
   OD_OUT="$(cd "$OD" && env CLAUDE_CODE_SESSION_ID="$OD_SID" HOME="$OD_ROOT/home" CLAUDE_CONFIG_DIR="$OD_ROOT/config" BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_SWAP_PCT=0 \
     BIONIC_GATE_DIR="$OD_ROOT/gate" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" "$@" 2>&1)" || OD_RC=$?
 }
+# ck_said <rc> <output> -> <rc>:<advance|refuse>: the checked advance's exit and the answer its verdict line gives. The
+# check exits 0 on either answer, so the answer is read from its words, never from the exit alone.
+ck_said() {
+  printf '%s:%s' "$1" "$(printf '%s\n' "$2" | awk 'index($0, "--check: would advance") { print "advance"; exit }
+    index($0, "--check: would refuse") { print "refuse"; exit }')"
+}
 od_logs() { find "$OD_REC" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
 od_lrec() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$OD_LIB" "$OD_PLAN" || printf '%s/none' "$OD_ROOT"; }
 od_lall() { cat "$(od_lrec)" 2>/dev/null; }   # the record's lines: the run's log
@@ -529,13 +535,13 @@ od_s8 "$(od_appr "$OD_A")"
 expect_eq "AH-0 precondition: the plan is in the order, the regression row named" "T2" \
   "$(bash -c '. "$1/units.sh" && units_order "$2"' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null || :)"
 od_poke current 8 --check
-expect_eq "AH-1 approved head A, the working head A, the whole run at H with C fixed on its suites: refused as regression unproved, naming both exits" "1|yes" \
-  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
+expect_eq "AH-1 approved head A, the working head A, the whole run at H with C fixed on its suites: refused as regression unproved, naming both exits" "0:refuse|yes" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
 od_mu() { printf 'run/v1|ev=approval|key=merge-unproved|by=chris|head=%s|said=merge|at=2026-10-26T00:00:00Z' "$1"; }  # the merge approval, at the head it names
 od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_A")"; od_poke current 8 --check
-expect_eq "AH-1b …and with the person's merge-unproved word at head A beside it: passes" "0" "$OD_RC"
+expect_eq "AH-1b …and with the person's merge-unproved word at head A beside it: passes" "0:advance" "$(ck_said "$OD_RC" "$OD_OUT")"
 od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_C")"; od_poke current 8 --check
-expect_eq "AH-1c …the same word naming a head that is not A leaves it refused" "1" "$OD_RC"
+expect_eq "AH-1c …the same word naming a head that is not A leaves it refused" "0:refuse" "$(ck_said "$OD_RC" "$OD_OUT")"
 # §EXIT7: the unproved exit is the step's. At 7 no release card can exist yet, so the exit is the pass; at 8 it is the card's reply, and a
 # docs head past the whole run is admitted at 7. fails-when: current 7 over an unproved head names a reply or a release card, current 8
 # stops naming the reply, or a docs commit past the run draws a refusal at 7.
@@ -543,31 +549,31 @@ OD_N7='needs: the pass — wait for it (the tick starts it once no row is ready)
 od_x7() { OD_FL="$2" OD_S=$(($1 - 1)) od_s8 "$(od_appr "$OD_A")"; od_poke current "$1" --check; }  # <step> <floor line> -> the plan one step before it, asked for <step>
 od_rg() { printf '%s\n' "$OD_OUT" | /usr/bin/grep 'regression.*unproved' | awk -F'\t' '{ print $NF }'; }
 od_x7 7 "$OD_FL"
-expect_eq "X7-1 AC-2.1 current 7 over the unproved head A: refused, the exit is the pass and names no reply and no release card" "1|$OD_N7|0" \
-  "$OD_RC|$(od_rg)|$(od_rg | /usr/bin/grep -ciE 'reply|release card' || :)"
+expect_eq "X7-1 AC-2.1 current 7 over the unproved head A: refused, the exit is the pass and names no reply and no release card" "0:refuse|$OD_N7|0" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(od_rg)|$(od_rg | /usr/bin/grep -ciE 'reply|release card' || :)"
 od_x7 8 "$OD_FL"
 expect_eq "X7-2 AC-2.2 current 8 at the same head: refused, the exit is the card's reply, as before" \
-  "1|needs: the user — reply <n> on the release card (merge without a whole run at this head), or wait for the pass" "$OD_RC|$(od_rg)"
+  "0:refuse|needs: the user — reply <n> on the release card (merge without a whole run at this head), or wait for the pass" "$(ck_said "$OD_RC" "$OD_OUT")|$(od_rg)"
 printf 'notes\n' >> "$OD/README.md"; od_git commit -qam 'a docs commit past the pass'
 od_x7 7 "run/v1|ev=proof|kind=regression|head=$OD_A|evidence=$OD_RL/regression-run-$OD_H.log|at=2026-10-12T11:30:00Z"
-expect_eq "X7-3 AC-2.3 the pass at A and one docs commit past it: current 7 admitted (exit 0), no regression unproved" "0|" "$OD_RC|$(od_rg)"
+expect_eq "X7-3 AC-2.3 the pass at A and one docs commit past it: current 7 admitted (exit 0), no regression unproved" "0:advance|" "$(ck_said "$OD_RC" "$OD_OUT")|$(od_rg)"
 od_git reset -q --hard "$OD_A"
 
 od_s8 "$(od_appr "$OD_C")"
 od_poke current 8 --check
-expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 1)" "1" "$OD_RC"
+expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 0: would refuse)" "0:refuse" "$(ck_said "$OD_RC" "$OD_OUT")"
 od_s8 'run/v1|ev=approval|key=release|by=Dana Fixture|said=Ship it.|at=2026-10-12T14:00:00Z'$'\n'"$(od_mu "$OD_A")"
 od_poke current 8 --check
-expect_eq "AH-3 an approval line that names no head: refused (exit 1), saying so" "1|yes" \
-  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "names no head" && echo yes || echo no)"
+expect_eq "AH-3 an approval line that names no head: refused (exit 0: would refuse), saying so" "0:refuse|yes" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "names no head" && echo yes || echo no)"
 od_s8 ''
 od_poke current 8 --check
-expect_eq "AH-4a no approved: release line and the regression unproved: refused (exit 1) on the regression, the approval asked last" "1|yes|no" \
-  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && echo yes || echo no)|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
+expect_eq "AH-4a no approved: release line and the regression unproved: refused (exit 0: would refuse) on the regression, the approval asked last" "0:refuse|yes|no" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && echo yes || echo no)|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
 od_s8 "$(od_mu "$OD_A")"
 od_poke current 8 --check
-expect_eq "AH-4 no approved: release line, every other fact holding: refused (exit 1), naming the verb that writes it" "1|yes" \
-  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
+expect_eq "AH-4 no approved: release line, every other fact holding: refused (exit 0: would refuse), naming the verb that writes it" "0:refuse|yes" \
+  "$(ck_said "$OD_RC" "$OD_OUT")|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
 
 # A WHOLE RUN AT AN ANCESTOR IS CITED THROUGH proof-add AS THE JUDGE JUDGES IT: the verb accepts the log at the head A
 # where the judge says covered, and a later commit no run proves is refused by that commit, not by "a whole run".

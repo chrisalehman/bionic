@@ -265,9 +265,10 @@ current_admit() {
 # (`current <N> --check`), the judge asked for several steps at once (`judge <N>…`, which the release approval card's
 # early facts ask, and through them the tick and the release card). It runs current_admit, the advance's own path up to
 # its append, in a subshell, and prints its verdict above whatever that path printed: `current <N> --check: would
-# advance` on stdout, or `… would refuse` on stderr, then the path's lines on the same stream. Its rc is the advance's;
-# it appends nothing. The gate inside it is asked in this process (`plan_verb_dry`), so steps asked one after another in
-# one shell read the one fold this shell holds. Reads PV_* as `plan_verb_open` set them; PV_CHECK is set for it.
+# advance` on stdout, or `… would refuse` on stderr, then the path's lines on the same stream. Its rc is the advance's,
+# 1 for a step that would refuse, so a caller in this shell reads the answer from it; where the poker exits, that 1 is an
+# answer and the exit is 0 (lib/refuse.sh `refuse_ordinary_exit`). It appends nothing. The gate inside it is asked in
+# this process (`plan_verb_dry`), so steps asked one after another in one shell read the one fold this shell holds. Reads PV_* as `plan_verb_open` set them; PV_CHECK is set for it.
 advance_judge() {
   local out rc PV_KEY="$1" PV_CHECK=1
   out="$(current_admit 2>&1)"; rc=$?
@@ -296,11 +297,13 @@ advance_judge() {
       die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold), so the advance is judged from no step; nothing was appended. run again: session-poker.sh current $PV_KEY, once the fold's own line above is mended."
       exit 2
     fi
-    # THE CHECK-ONLY ADVANCE: `current <N> --check` is the judge's answer for that step (`advance_judge`); it exits as
-    # the advance would and appends nothing.
+    # THE CHECK-ONLY ADVANCE: `current <N> --check` is the judge's answer for that step (`advance_judge`) and appends
+    # nothing. Would advance and would refuse are both answers, so both exit 0, the verdict line saying which; a check
+    # that could not judge keeps the advance's other codes (lib/refuse.sh, the list of ordinary answers).
     if [ -n "$PV_CHECK" ]; then
-      advance_judge "$PV_KEY"
-      exit $?
+      local rc
+      advance_judge "$PV_KEY"; rc=$?
+      exit "$(refuse_ordinary_exit check "$rc")"
     fi
     current_admit
     if [ "$PV_CUR" = "$PV_KEY" ]; then
@@ -346,8 +349,10 @@ advance_judge() {
 
   # THE JUDGE ASKED DIRECTLY. `judge <N>…` asks advance_judge for each step in turn, in this one process, and closes each
   # step's answer with `judged <N> exit <rc>` on stdout, so a caller that asks several steps at once reads each answer
-  # as that step's checked advance prints it. It appends nothing; it exits 0 when every step would advance, else the
-  # highest exit a step gave.
+  # as that step's checked advance prints it; `<rc>` is the advance's code, 1 for a step that would refuse, and is what a
+  # caller reads. It appends nothing. It exits on the highest code a step gave, mapped through the list of ordinary
+  # answers (lib/refuse.sh): a step that would refuse is an answer and exits 0; any other code (2, the gate unable to
+  # run) stays.
   poker_verb_judge() {
     local n rc worst=0
     # Opened and refused as the checked advance of its first step is, in the same words, so a caller that asked the
@@ -365,6 +370,6 @@ advance_judge() {
       say "judged $n exit $rc"
       [ "$rc" -le "$worst" ] || worst="$rc"
     done
-    exit "$worst"
+    exit "$(refuse_ordinary_exit judge "$worst")"
   }
 

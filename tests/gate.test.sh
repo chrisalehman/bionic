@@ -41,6 +41,9 @@
 #   §COST              a booked run's cores ride its cost line's fourth field, capped at the machine and floored
 #                      at 0.1; kept cores promise the key's next ask by the rule its seconds use, three fields the prior
 #   §CLASS             a browser or whole ask on a fresh key is promised the room free; a work ask waits beside it
+#                      §NUMBER also holds the rows AF.1-AF.5 (`gate_ask_here`, over `gate_ask_into`: the one way to ask in
+#                      this shell with the id read back through a file) and SS.1-SS.3 (the names a suite does not inherit
+#                      are one list); §WIDTH holds GC.1-GC.3 (`_gate_cores`, the one count of usable cores)
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
@@ -324,6 +327,18 @@ expect_eq "WD.5 the cores are read, not assumed: share 92 on 64 cores is 58" "58
 expect_eq "WD.6 an unreadable share is the default's room: 92 on 8 cores, 7" "7" "$(gw_of bogus 8)"
 expect_eq "WD.7 share 92, reserve 1, 8 cores: 6 workers (6.36, floored)" "6" \
   "$(printf '1\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"; gw_of 92 8; printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve")"
+
+gc() {  # <planted cores> — _gate_cores over that planted count
+  env BIONIC_PROBE_CORES="$1" bash -c '. "$1" 2>/dev/null; _gate_cores' _ "$GATE_LIB"
+}
+expect_eq "GC.1 8, 0 and a word planted as the cores read 8, 1 and 1" "8 1 1" "$(gc 8) $(gc 0) $(gc many)"
+gr() {  # <cores> <reserve> — gate_reserve_ok over that planted count
+  env BIONIC_PROBE_CORES="$1" bash -c '. "$1" 2>/dev/null; gate_reserve_ok "$2" && echo ok || echo no' _ "$GATE_LIB" "$2"
+}
+expect_eq "GC.2 a reserve of 8 fits 8 cores and 9 does not; on 0 planted (read 1) 1 fits and 2 does not" "ok no ok no" \
+  "$(gr 8 8) $(gr 8 9) $(gr 0 1) $(gr 0 2)"
+expect_eq "GC.3 on 0 planted cores the share's room is 1, the floor" "1" \
+  "$(printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"; printf '100\n' > "$CLAUDE_CONFIG_DIR/bionic/share"; env BIONIC_PROBE_CORES=0 bash -c '. "$1" 2>/dev/null; _gate_share_cores' _ "$GATE_LIB")"
 
 # ── §WIDTH-ASK ───────────────────────────────────────────────────────────────
 # THE GATE ANSWERS A LANDING'S WIDTH (wave-38 T5; D21, D22; AC-6.1; ADR-060). `gate_width_ask
@@ -721,6 +736,48 @@ expect_false "N.12 the later number is still waiting" has nb.rc
 expect_eq "N.13 and holds no admitted line (asked|admitted)" "1008|" "$(field "$(req_of nb)" asked)|$(field "$(req_of nb)" admitted)"
 
 # ── §RESUME-KIND ─────────────────────────────────────────────────────────────
+AF_T="$WORLD_ROOT/af-tmp"; mkdir -p "$AF_T"
+af_stub() {  # <into|here> <tmpdir> — the verb over a stub gate_ask that answers an id and rc 3 and records what it saw
+  env TMPDIR="$2" AF_PROBE="$WORLD_ROOT/af-probe" bash -c '
+    . "$1"
+    gate_ask() { printf "ID-%s\n" "$*"; [ -f "$GATE_ASK_FILE" ] && echo file > "$AF_PROBE" || echo nofile > "$AF_PROBE"; return 3; }
+    case "$2" in
+      into) gate_ask_into "$3/f" work k --within 5; rc=$? ;;
+      here) gate_ask_here pfx work k --within 5; rc=$? ;;
+    esac
+    printf "%s|%s|%s|%s\n" "$rc" "$GATE_ASK_ID" "$GATE_ASK_FILE" "$(cat "$AF_PROBE")"
+  ' _ "$GATE_LIB" "$1" "$AF_T" 2>&1
+}
+expect_eq "AF.1 into: the ask's rc and id come back, its file existed while it waited, GATE_ASK_FILE is clear after" \
+  "3|ID-work k --within 5||file" "$(af_stub into "$AF_T")"
+expect_eq "AF.2 here: the same, over a file made under TMPDIR" "3|ID-work k --within 5||file" "$(af_stub here "$AF_T")"
+expect_eq "AF.3 neither leaves a file under TMPDIR (the answers above stand beside it)" "" "$(ls "$AF_T")"
+expect_eq "AF.4 here: with no file to be made the ask is made in a subshell, the id and the rc still come back" \
+  "3|ID-work k --within 5||nofile" "$(af_stub here "$AF_T/none")"
+fresh asf
+AF_HOLD="$(env BIONIC_GATE_DIR="$BIONIC_GATE_DIR" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" BIONIC_GATE_AGENT=afh bash -c '
+  . "$1"; gate_ask_here afr work af-real.test.sh --within 5; rc=$?
+  printf "%s|%s|%s\n" "$rc" "$GATE_ASK_ID" "$$"; gate_end "$GATE_ASK_ID" 0 >/dev/null' _ "$GATE_LIB" 2>/dev/null)"
+AF_ID="$(printf '%s' "$AF_HOLD" | cut -d'|' -f2)"
+expect_eq "AF.5 a real ask is admitted (rc 0), and the request it filed is held by the asking shell itself, not a subshell" \
+  "0|$(printf '%s' "$AF_HOLD" | cut -d'|' -f3)" "$(printf '%s' "$AF_HOLD" | cut -d'|' -f1)|$(field "$AF_ID" holder | sed 's/:.*//')"
+
+# SCRUB-SET: the library holds the names a suite does not inherit; the runner spells them once more for a tree without it.
+SS_HOME="$(env bash -c '. "$1" 2>/dev/null; printf "%s" "$BIONIC_SUITE_SCRUB"' _ "$REPO_ROOT/payload/scripts/lib/suite.sh")"
+SS_DOOR="$(sed -n 's/^  local _n _names="\([^"]*\)"$/\1/p' "$REPO_ROOT/tests/run.sh")"
+expect_regex "SS.1 the library names the set: four names, blank-separated" '^[A-Z_]+( [A-Z_]+){3}$' "$SS_HOME"
+expect_eq "SS.2 the runner's own spelling is the library's list, byte for byte" "$SS_HOME" "$SS_DOOR"
+mkdir -p "$WORLD_ROOT/ss"
+printf '%s\n' 'for n in "$@"; do printf "%s=%s " "$n" "${!n-unset}"; done' > "$WORLD_ROOT/ss/ss.test.sh"
+SS_ENV="BIONIC_GATE_DIR=a CLAUDE_PROJECT_DIR=b CLAUDE_PLUGIN_ROOT=c BIONIC_HELD=d"
+# shellcheck disable=SC2086
+SS_BARE="$(cd "$WORLD_ROOT/ss" && env $SS_ENV bash ss.test.sh $SS_HOME)"
+# shellcheck disable=SC2086
+SS_SEEN="$(env $SS_ENV bash -c '. "$1" 2>/dev/null; shift; bionic_suite_exec "$@"' _ "$REPO_ROOT/payload/scripts/lib/suite.sh" "$WORLD_ROOT/ss" ss.test.sh $SS_HOME 2>&1)"
+expect_eq "SS.3 bare, a suite sees every name of the list set; started through the library, unset" \
+  "BIONIC_GATE_DIR=a CLAUDE_PROJECT_DIR=b CLAUDE_PLUGIN_ROOT=c BIONIC_HELD=d |BIONIC_GATE_DIR=unset CLAUDE_PROJECT_DIR=unset CLAUDE_PLUGIN_ROOT=unset BIONIC_HELD=unset " \
+  "$SS_BARE|$SS_SEEN"
+
 section "§RESUME-KIND — the gate ends what it cannot resume (wave-36 T11; D8, AC-2.1; C2, C3)"
 # A request is resumed only by the same who, key AND kind, and only one whose holder handed it
 # back (holder=-, a 75). A never-admitted request whose holder died (a shim killed in its wait) is

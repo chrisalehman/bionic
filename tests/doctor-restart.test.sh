@@ -65,7 +65,7 @@ REC="${PROJ}/.bionic/tmp/loaded-${SID_LIVE}.state"
 # ---------- fixture builders ----------
 
 # A git repository standing in for "the plugin tree the CLI loads", holding one file of each of
-# the four loaded classes. doctor.sh's DOCTOR_INSTALL_PATH resolution (`_doctor_is_repo`)
+# the four loaded classes. doctor.sh's DOCTOR_INSTALL_PATH resolution (`is_repo`)
 # requires a real repository; `git init` with no commit already satisfies it.
 make_plugin_tree() {  # [<dir>] -> dir on stdout (physical)
   local dir="${1:-}"

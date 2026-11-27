@@ -170,6 +170,8 @@ bionic_need owed.sh owed_open
 bionic_need scale.sh scale_patrol
 # THE RECORD'S FIELD READER: a roster row's field is read by key, `line_kv_of` in awk (lib/fields.sh).
 bionic_need fields.sh line_field_v
+# The clock's one home, asked by name: no hook lists it among the libraries it wants.
+bionic_need time.sh _time_epoch
 
 if [ -n "$DP_ADMITTED_ONLY" ]; then
   for _dp_a in $ROLE_READONLY_SET; do printf '%s\n' "$_dp_a"; done
@@ -1985,7 +1987,7 @@ ROW=$(roster_row \
   "session=${BIONIC_SID}" \
   "name=${AGENT_NAME}" \
   agent_id= \
-  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "launched_at=$(iso_now)" \
   "subagent_type=${SUBAGENT_TYPE}" \
   "model=${AGENT_MODEL}" \
   "deliverable=${C_DELIVERABLE}" \

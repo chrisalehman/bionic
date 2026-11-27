@@ -12,6 +12,8 @@
 #                              carries no `## Tasks` table.
 #   units_questions <record>   the questions a review row declares, comma-joined, off its task cell's
 #                              ` · questions:` tag; nothing when it declares none.
+#   units_kinds [<col> <word>] the kinds of row (UNITS_KINDS), and those a writer's slot or a role column names;
+#                              units_kind_role and units_kind_offer, the role a kind draws from its tag or is offered.
 #   units_ready <plan> <step> [<roster> [<ack ledger> [<session id>]]]
 #                              the ids of rows whose status is `pending` and whose every read
 #                              is satisfied, whatever their step (wave-26 T2, D1: what a row
@@ -582,6 +584,52 @@ units_questions() {  # <units_rows record> -> the declared questions, or nothing
   esac
   return 0
 }
+
+# THE KINDS OF ROW, AND THE ROLE EACH TAKES: one line a kind, `<kind> <slot> <role>`, in the order the validator's
+# refusal names them. This is the one home of the kind words and of the two questions asked of a kind:
+# - <slot> is who takes a writer's place in the fill. A `readonly` kind runs a read-only role and takes none while its
+#   Files write no head (fill.sh `fill_readonly_ids`); every `writer` kind edits a tree.
+# - <role> is the role a row of the kind is run by when its agent cell names none. `tag` is the role its task cell's
+#   complexity tag names, which the Step-3 card prints and the start verb takes, and the implementor when no tag
+#   names one; `questions` is the role the plan's rigor deals the row's questions; any other word is that role,
+#   which start offers and never takes unasked. The card prints a role for a `tag` kind alone.
+# The two columns answer different questions, so a doc row takes a writer's place and still draws no role on the card.
+UNITS_KINDS='build writer tag
+test writer tag
+verify readonly implementor
+review readonly questions
+doc writer senior-implementor
+integrate writer implementor
+close writer implementor
+prototype writer implementor'
+
+# units_kinds [<slot|role> <word>] -> the kinds, space-joined, in the list's order; given a column and a word, only
+# the kinds whose column holds that word.
+units_kinds() {
+  printf '%s\n' "$UNITS_KINDS" | awk -v c="${1:-}" -v w="${2:-}" '
+    c == "" || (c == "slot" && $2 == w) || (c == "role" && $3 == w) { printf "%s%s", (n++ ? " " : ""), $1 }'
+}
+
+# units_kind_role <kind> <task cell> -> the role the row's complexity tag draws, `senior-implementor` for complex and
+# `implementor` for standard, on a kind whose role is `tag`; nothing for any other kind, for a cell with no tag, or a
+# word the plan step does not define: no role is guessed.
+units_kind_role() {
+  local re='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
+  [ "$(_units_kind_word "${1:-}")" = tag ] || return 0
+  [[ "${2:-}" =~ $re ]] || return 0
+  case "${BASH_REMATCH[2]}" in complex) printf 'senior-implementor' ;; standard) printf 'implementor' ;; esac
+}
+
+# units_kind_offer <kind> -> the role offered a row of the kind that names none: its <role> word, `implementor` for
+# a `tag` kind or a kind the list does not hold, and `questions` for a kind whose role is dealt by its questions.
+units_kind_offer() {
+  local o
+  o="$(_units_kind_word "${1:-}")"
+  case "$o" in ''|tag) printf 'implementor' ;; *) printf '%s' "$o" ;; esac
+}
+
+# _units_kind_word <kind> -> the kind's <role> word in the list, or nothing for a word the list does not hold.
+_units_kind_word() { printf '%s\n' "$UNITS_KINDS" | awk -v k="${1:-}" '$1 == k { print $3; exit }'; }
 
 # units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base·reads,
 #                      tab-separated, one line per row, in TABLE order. Exit 1 when there is
@@ -2228,7 +2276,7 @@ units_validate() {
     case "$rows" in *" · questions:"*) bionic_need proof.sh proof_question_ok ;; esac
   fi
   if [ -n "$rows" ]; then
-    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" \
+    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" -v kindw="$(units_kinds)" \
       -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
@@ -2237,7 +2285,7 @@ units_validate() {
         # one cell a raw pipe cannot move.
         m0 = split(over, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { sub(/=.*$/, "", o0[i0]); if (o0[i0] != "") skip[o0[i0]] = 1 }
-        split("build test verify review doc integrate close prototype", kk, " ")
+        split(kindw, kk, " ")
         for (i in kk) kinds[kk[i]] = 1
         m0 = split(st15, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { e0 = index(o0[i0], "="); if (e0 > 1) ost[substr(o0[i0], 1, e0 - 1)] = substr(o0[i0], e0 + 1) }
@@ -2261,8 +2309,8 @@ units_validate() {
             printf "%s: step %s is outside 3-9\n", id[i], (stp[i] == "" ? "(empty)" : stp[i])
 
           if (!(knd[i] in kinds))
-            printf "%s: kind %s is not one of build test verify review doc integrate close prototype\n", \
-              id[i], (knd[i] == "" ? "(empty)" : knd[i])
+            printf "%s: kind %s is not one of %s\n", \
+              id[i], (knd[i] == "" ? "(empty)" : knd[i]), kindw
 
           # A ROW AT 15 NAMES ITS QUESTIONS IN ITS TASK CELL, as the task-add verb writes the tag, and is held to the rule
           # the verb holds it to: a review row alone, each question one isq admits, once, comma-separated with no space.

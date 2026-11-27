@@ -8,10 +8,22 @@
 # built by the tick's own builder, records no run when regression-run was not admitted, and is told apart from a run
 # that wrote its log and from one that ran nothing; the poker's reader of the note gives the code of a run not run.
 #
+# §ORDINARY. The list of ordinary answers (lib/refuse.sh `refuse_ordinary`) is the one place that says which answers
+# exit 0, and each command of it exits 0 on its answer and prints what it printed before. Driven here: the checked
+# advance (`current <N> --check`) answering would refuse, beside its would-advance control and the advance itself, which
+# still refuses non-zero in the same words; the judge (`judge <N>...`) answering a step that would refuse, which exits 0
+# while its closing line keeps the step's code, the one a card reads; and the list's own exit for a code it does not
+# hold, which stays that code.
+#
 # THE WORLD. A scratch git project carrying this tree's door, its framework, its payload libraries and the shim, with
 # three stub suites: x, green; f2, red; f1, whose output holds the shell's own refusal of a process, which the door counts as a
 # suite the machine did not run (the same not-admitted end a budget refusal takes, with no budget to plant). The gate's
 # store, the share and every machine reading are pinned under this suite's own temp root.
+#
+# THE RUN §ORDINARY ASKS. A second scratch git project on main alone, its run bound to this suite's session through the
+# real binder (tests/lib/bound-marker.sh) at step 7 of a plan_fixture page, whose header names a working branch,
+# wave/01-fixture, that names no commit there: the advance to 8 is refused on it before any fact is read, and the
+# check of step 7, the step the run stands at, would advance with nothing to judge. The poker is this tree's own.
 #
 # FIXTURE FIDELITY. The door, the shim, the libraries, the tick's builder and the poker's reader are this tree's own
 # files, copied or sourced in place. The poker the tick's line calls is a STUB: it answers regression-run as the real
@@ -25,6 +37,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 REPO="$BIONIC_SCRIPTS_DIR"
 
@@ -161,5 +175,53 @@ ex_note_rc() {  # <suite> -> the reader's code for the door's run of it, given t
 }
 expect_eq "C7 the poker's reader: the door that ran nothing is read 75 (it exits 0) · a red run 1 · a green run 0" "75 1 0" \
   "$(ex_note_rc f1.test.sh) $(ex_note_rc f2.test.sh) $(ex_note_rc x.test.sh)"
+
+# ============================================================
+section "§ORDINARY: each answer the list holds exits 0 and prints what it printed before; the code it keeps stays in its words"
+# ============================================================
+# fails-when: the checked advance exits non-zero on would refuse, or prints other first words; the advance itself stops
+# refusing non-zero; the judge exits non-zero for a step that would refuse, or its closing line loses the step's code;
+# the list loses the check's or the judge's answer, or maps a code it does not hold to 0.
+ex_list() {  # <expression over the list's fields> -> what it prints, the library this tree's own
+  bash -c '. "$1/refuse.sh" >/dev/null 2>&1 || exit 9; refuse_ordinary | awk -F"|" "$2"' _ "$REPO/payload/scripts/lib" "$1" 2>/dev/null
+}
+ex_ordexit() {  # <key> <code>... -> the list's exit for each, space-joined
+  bash -c '. "$1/refuse.sh" >/dev/null 2>&1 || exit 9; k="$2"; shift 2; for c in "$@"; do printf "%s " "$(refuse_ordinary_exit "$k" "$c")"; done' \
+    _ "$REPO/payload/scripts/lib" "$@" 2>/dev/null
+}
+expect_eq "O0 the list holds the checked advance's answer and the judge's, each with the code it keeps and its words" \
+  "check:1:would refuse judge:1:would refuse" "$(ex_list '$1 == "check" || $1 == "judge" { printf "%s%s:%s:%s", (n++ ? " " : ""), $1, $3, $4 }')"
+expect_eq "O0b …every row of it five fields with a code, and the list not empty" "yes|0" \
+  "$([ "$(ex_list 'END { print NR }')" -gt 0 ] && echo yes)|$(ex_list 'NF != 5 || $3 !~ /^[0-9]+$/ { n++ } END { print n + 0 }')"
+expect_eq "O0c the list's exit: the check's 1 and the judge's 1 are 0, the landing's 75 is 0; a 2, a landing's 1 (RED) and a 0 stay" \
+  "0 2 0 |0 2 |0 1 " "$(ex_ordexit check 1 2 0)|$(ex_ordexit judge 1 2)|$(ex_ordexit ready 75 1)"
+
+EX_SID=0e1d2c3b-4a59-4687-9a6b-5c4d3e2f1a0b
+O="$TMPROOT/ordinary"; mkdir -p "$O/.bionic/tmp" "$TMPROOT/ohome" "$TMPROOT/ocfg"
+( cd "$O" && git init -q . && git config user.name "Dana Fixture" && git config user.email d@example.com \
+  && printf '.bionic/\n' > .gitignore && git add -A && git commit -qm base && git branch -M main ) >/dev/null 2>&1
+: > "$O/.bionic/tmp/engaged-$EX_SID.state"
+OP="$(plan_fixture --current 7 "$O/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)"
+bound_marker "$O" "$EX_SID" "$OP" >/dev/null 2>&1
+ex_poke() {  # <verb args...> -> OUT (both streams), RC: this tree's poker in the run's root, as the bound session
+  OUT="$(cd "$O" && env "${EX_ENV[@]}" HOME="$TMPROOT/ohome" CLAUDE_CONFIG_DIR="$TMPROOT/ocfg" CLAUDE_PROJECT_DIR= \
+    CLAUDE_CODE_SESSION_ID="$EX_SID" bash "$REPO/hooks/session-poker.sh" "$@" 2>&1)"; RC=$?
+}
+ex_poke current 7 --check
+expect_eq "O1 control: the check of the step the run stands at would advance (exit 0), saying so first" \
+  "0|poker: current 7 --check: would advance" "$RC|$(printf '%s\n' "$OUT" | head -n 1)"
+ex_poke current 8 --check; EX_CK="$OUT"
+expect_eq "O2 the check that would refuse exits 0, its first line the verdict it printed before" \
+  "0|poker: current 8 --check: would refuse" "$RC|$(printf '%s\n' "$EX_CK" | head -n 1)"
+[ "$RC" = 0 ] || printf '%s\n' "$EX_CK" | sed 's/^/      the check said: /'
+ex_poke current 8
+expect_eq "O2b …the advance itself still refuses (exit 1), in the words the check printed under its verdict" \
+  "1|$OUT" "$RC|$(printf '%s\n' "$EX_CK" | tail -n +2)"
+expect_contains "O2c …which name what refuses it: the working branch names no commit" "names no commit here" "$OUT"
+ex_poke judge 7 8
+expect_eq "O3 the judge asked for a step that would advance and one that would refuse exits 0, each block closed with its code" \
+  "0|poker: judged 7 exit 0|poker: judged 8 exit 1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: judged ' | paste -sd'|' -)"
+expect_contains "O3b …the step that would refuse said so as the check does" "poker: current 8 --check: would refuse" "$OUT"
 
 finish

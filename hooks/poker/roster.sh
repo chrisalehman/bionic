@@ -412,7 +412,8 @@ adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
   [ -n "$2" ] || return 0
   tmp_dir_ok "${f%/*}" || return 1
   [ -L "$f" ] && return 1
-  tmp="$f.$$"
+  bionic_need root.sh bionic_new && bionic_new "$f" || return 1
+  tmp="$BIONIC_NEW"
   { [ -f "$f" ] && cat "$f"; printf '%s\n' "$2"; } 2>/dev/null | awk -v now="$3" "$_LINE_FIELDS_AWK"'
     index($0, "adopt-read/v1|") == 1 {
       id = line_kv_of($0, "id"); e = line_kv_of($0, "epoch")
@@ -420,7 +421,7 @@ adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
       k = ++c[id]; r[id, k] = $0; if (!(id in seen)) { seen[id] = 1; ids[++n] = id }
     }
     END { for (i = 1; i <= n; i++) { id = ids[i]; for (k = (c[id] > 8 ? c[id] - 7 : 1); k <= c[id]; k++) print r[id, k] } }' \
-    > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null && return 0
+    >| "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null && return 0
   rm -f "$tmp" 2>/dev/null
   return 1
 }
@@ -1017,7 +1018,7 @@ ADOPT_READERS
         PROG_AGE=""
         PROG_MTIME=0
         if [ -n "$RPROG_ABS" ] && [ -f "$RPROG_ABS" ]; then
-          PROG_MTIME="$(file_mtime "$RPROG_ABS")"
+          PROG_MTIME="$(file_mtime "$RPROG_ABS" || echo 0)"
           PROG_AGE=$(( ADOPT_NOW - PROG_MTIME ))
         fi
         CAD_S="$(parse_seconds "$RCAD")" || CAD_S=""
@@ -1051,7 +1052,7 @@ ADOPT_READERS
             # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
             # the agent takes, so its mtime is a fact about the agent rather than a
             # promise the agent has to remember to keep.
-            TX_MTIME="$(file_mtime "$TX")"
+            TX_MTIME="$(file_mtime "$TX" || echo 0)"
             TX_AGE=$(( ADOPT_NOW - TX_MTIME ))
           elif [ -n "$OSUB" ]; then
             # NEITHER SESSION HAS SPOKEN TO THE AGENT YET — still name the launcher's path

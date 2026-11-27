@@ -581,6 +581,14 @@ engage.test.sh | §E8 (wave-session-bound-run, AC-7/AC-8/AC-9) | keep | payload/
 engage.test.sh | §E9 (AC-7) | keep | hooks/engage.sh: the leave-an-existing-binding arm deleted, so re-engagement re-runs the count rule and drops a live binding; ("…and the ORIGINAL binding is preserved, not the newest plan") goes red | none (searched 're-engag' and 'session_plan' in tests/)
 engage.test.sh | §E10 | keep | hooks/engage.sh: the resume line deleted, so a handoff argument on either path yields no command (E10a, E10b, E10c paired, E10d, E10e); the argument read off one path only (E10a or E10b); the file said as typed or the hooks folder unquoted, so the pasted line is not four whole words (E10a, E10d); the line given its own object beside the held sentence, so stdout is two lines (E10e); the door's three conditions loosened, so a symlink, a file with no kind line or a path to no file is said (E10c) | none (searched 'command_args', 'tool_input.args' and 'session-poker.sh resume' in tests/; handoff-file.test.sh §RESUME drives the verb itself, never engage)
 
+## english.test.sh
+
+english.test.sh | §LIST | keep | payload/scripts/lib/english.sh english_list: the `n == m` test dropped from the and-join, so a list that fits its cap ends `, F` instead of ` and F`, or the remainder count dropped so a seventh word vanishes (LS.4, LS.5) | none (searched 'english_list' in tests/: card.test.sh and sitrep.test.sh read it through whole pages)
+english.test.sh | §PLURAL | keep | payload/scripts/lib/english.sh english_plural: the `-eq 1` test turned into a string test, so a count of 01 reads the plural (PL.5), or the singular branch made the plural, so 1 criterion reads 1 criteria | none (searched 'english_plural' in tests/)
+english.test.sh | §NOUN | keep | payload/scripts/lib/english.sh english_noun: a newline added to the word, so a caller's `$n $(english_noun ...)` is two lines (NN.7), or the test made numeric so a blank count reads the singular | none (searched 'english_noun' in tests/)
+english.test.sh | §JOIN | keep | payload/scripts/lib/english.sh _ENGLISH_AWK: english_join made to join with commas only, so the awk program and the shell renderer disagree on the same words (JN.1-JN.6) | none (searched '_ENGLISH_AWK' in tests/)
+english.test.sh | §HOMES | keep | a retired copy put back into hooks/poker/sitrep.sh, hooks/poker/plan.sh or payload/scripts/card.sh, doctor.sh, version.sh or setup.sh, or the file's read of its home removed, so its row goes red (HM.1-HM.11) | none (searched 'sitrep_noun', 'rr_plural' and '_card_plural' in tests/)
+
 ## env.test.sh
 
 env.test.sh | §Group 1 | keep | payload/scripts/remove.sh: RM_ENV_KEYS loses CLAUDE_CODE_DISABLE_AUTO_MEMORY, so remove's standalone door leaves a name setup wrote and "remove.sh's RM_ENV_KEYS is byte-equal to env.sh's ENV_KEYS" goes red; or env_default's auto-memory value changed from 1. also: "ENV_KEYS is exactly the four names" pins the live roster, a tally | none (searched 'RM_ENV_KEYS' and 'env_default' in tests/)
@@ -595,6 +603,7 @@ env.test.sh | §Group 8 | keep | rule: lint — a second reader of .env (`.env.`
 ## exits.test.sh
 
 exits.test.sh | §CALLERS | keep | payload/scripts/booked.sh: the note dropped or not read, so a suite the door did not run is stamped rc=0 and the proof reader reads it green (C1b, C1c); the not-admitted end exiting 75 (C1, C3) or taken through the meant-to-fail inversion (C2, C2b); hooks/poker/tick.sh tick_run_cmd reading regression-run's exit instead of its note, so a run not admitted ends 69 or 0 (C5) and one that ran nothing 75 (C6); hooks/poker/proof.sh poker_note_said reading the exit, so the door that ran nothing reads 0 (C7) | none (searched 'BIONIC_NOT_ADMITTED' and 'not admitted' in tests/; session-poker-4.test.sh §STARTER drives the tick end to end over a stub runner, run.test.sh §FORK the door's note alone)
+exits.test.sh | §ORDINARY | keep | hooks/poker/judge.sh: the checked advance or the judge exiting the advance's code, so a step that would refuse exits 1 (O2, O3), or the judge's closing line losing the step's code the card reads (O3); payload/scripts/lib/refuse.sh refuse_ordinary_exit mapping a code the list does not hold to 0, or the list losing the check's or the judge's answer (O0, O0c) | none (searched 'refuse_ordinary' and 'would refuse' in tests/; session-poker-5.test.sh §CHECK and release-approval.test.sh §JUDGE read each answer through the check's words, not the list)
 
 ## execution-recorder.test.sh
 
@@ -939,6 +948,8 @@ name-scan.test.sh | §QUIET | keep | tests/lib/name-scan.sh:648 the EXIT trap's 
 
 names.test.sh | §SIBLINGS | keep | payload/scripts/lib/root.sh bionic_new: the noclobber create made plain, so two sibling children of a subshell that drew $RANDOM write one file; bionic_id: the pid read as $$, so the two siblings carry one id (the mutants, each with its own row) | speed-counts.test.sh §DERIVE DRV-4 (one caller, _proof_derive_file, through a held command)
 names.test.sh | §SITES | keep | payload/scripts and hooks: a name made from $$ and $RANDOM again outside lib/root.sh's maker, so two siblings share it | none (searched 'RANDOM' in tests/)
+names.test.sh | §PIDS | keep | payload/scripts and hooks: a temp file, id or session named from $$ (or $$ and a counter) outside lib/root.sh's makers, so two siblings share it; or a second copy of the own-pid read (`sh -c 'echo "$PPID"'`) outside bionic_id | none (searched '\$\$' and 'PPID' in tests/)
+names.test.sh | §SITE-SIBLINGS | keep | payload/scripts/lib/gate.sh `_gate_lease_put`: the lease's temp named `$f.tmp.$$` again, so two siblings move one file; payload/scripts/lib/line.sh `_line_merge_ask`: the stand-in session `merge-seen-$$` again, so two siblings open their asks under one session | gate.test.sh §LEASE (the lease's content, not its temp name)
 
 ## notify.test.sh
 
@@ -1381,6 +1392,7 @@ root.test.sh | §8 | keep | payload/scripts/lib/root.sh project_root: the bare-r
 root.test.sh | §10 | keep | payload/scripts/lib/root.sh project_root: BIONIC_WORKTREE published from the branch name instead of the directory, so a branch named apart from its directory publishes the branch (10b); also the single rev-parse split in two (10c) | none (searched 'BIONIC_WORKTREE' in tests/)
 root.test.sh | §11 | keep | payload/scripts/lib/root.sh path_normal: the `..` arm keeps its segment, set -f dropped so a star globs, or the caller's globbing left changed (11a-11e); or hooks/canonical-sdlc-governing-skill.sh fold_dots or hooks/dispatch-preflight.sh resolve_in_repo folds with a loop of its own (11g) | none (searched 'path_normal', 'fold_dots' and 'resolve_in_repo' in tests/)
 root.test.sh | §12 | keep | payload/scripts/lib/root.sh git_tree_lease and git_common_dir_and: the `.git`-is-a-file test or the root comparison dropped, so the main checkout or a tree that is its own project holds a lease; the main checkout taken as the common directory itself, so the tree names no main; a one-line answer read as a pair, so a tree reads as its own common directory; the two questions asked in two forks | none (searched 'git_tree_lease', 'git_common_dir_and' and 'BIONIC_LEASE_' in tests/: the governing-skill and dispatch-preflight suites drive the walls that call them, not the functions)
+root.test.sh | §13 | keep | payload/scripts/lib/root.sh is_repo: the `cd` run outside a subshell so the caller's directory moves, or `git rev-parse --git-dir` replaced by a test of `.git`, so a linked worktree (whose `.git` is a file) or a subdirectory reads as no repository (13) | none (searched 'is_repo' in tests/: doctor-version.test.sh and doctor-restart.test.sh read it through the doctor's install-path row)
 
 ## roots.test.sh
 
@@ -1851,7 +1863,7 @@ stop.test.sh | §RUNNING | keep | payload/scripts/lib/patrol.sh tick_running: th
 
 ## time.test.sh
 
-time.test.sh | §AGREE | keep | payload/scripts/lib/time.sh iso_epoch: the trailing-Z check loosened, so `2026-10-18T15:07:33Zx` reads an epoch on all three readers instead of nothing (AG.8) | none (searched 'iso_epoch' in tests/)
+time.test.sh | §AGREE | keep | payload/scripts/lib/time.sh iso_epoch: the trailing-Z check loosened, so `2026-10-18T15:07:33Zx` reads an epoch on both readers, the library and the gate, instead of nothing (AG.8). also: AG.0b goes red when hooks/session-poker.sh or hooks/session-sweeper.sh defines an iso_epoch of its own again | none (searched 'iso_epoch' in tests/)
 time.test.sh | §STAMP | keep | payload/scripts/lib/time.sh iso_now: made to render BIONIC_NOW_EPOCH when it is set, so a pin of 1008 stamps 1970-01-01T00:16:48Z and ST.3 goes red | none (searched 'iso_now' in tests/: inbox.test.sh defines its own and tests nothing of the library)
 time.test.sh | §EPOCH | keep | payload/scripts/lib/time.sh epoch_iso: the digits check deleted, so BSD `date -r abc` prints the time of the file named abc and EP.5 goes red | none (searched 'epoch_iso' in tests/)
 time.test.sh | §PIN | keep | payload/scripts/lib/time.sh time_now: the pin printed whenever it is set, so a pin of `abc` is handed on as now and PN.5 goes red | none (searched 'time_now' in tests/; handoff-file.test.sh pins the poker's own sitrep_now)

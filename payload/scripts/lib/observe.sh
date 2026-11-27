@@ -141,36 +141,75 @@ observe_claims_live() {  # <pattern> -> 0 if a process matches, 1 otherwise
   grep -qF -- "$pat" <<< "$procs"
 }
 
-# PROSE TO SECONDS. A third reading of the grammar `hooks/session-sweeper.sh` owns and
-# `hooks/session-poker.sh` copies (both at their own `parse_seconds`; §O of
-# tests/cross-gate-agreement.test.sh holds all three CODE-identical). It is restated rather
-# than shared for the reason run.sh's `live_runs` states: `parse_seconds` lives in two HOOKS
-# and a library cannot source a hook. The cadence a dispatch declares is prose — "~6m",
-# "5 min", "every 300 seconds" — and an unreadable one is the default rather than a guess.
+# PROSE TO SECONDS, the one reader of a duration a brief writes: the cadence a dispatch declares ("~6m", "5 min",
+# "every 300 seconds", "30–40 minutes"), which the tick, the sweeper and adopt read. An unreadable one is refused, never
+# guessed, and its caller takes its default. Deliberate limits, each one a refusal rather than a guess:
+#   * exactly one number-unit pair. "1h30m" and "10 min, checkpoint at 5m" are refused.
+#   * whole numbers only. "0.5h" is refused.
+#   * a range ("30–40 minutes") is read at its GENEROUS end: a promise is not broken until the longer bound passes.
+#   * zero is refused: a zero threshold would call every row late the instant it launched.
+# In builtins, so a caller reading a cadence per row starts no process. The pair walk is the reading `grep -oE` gave:
+# line by line, a match can only start where a digit run starts, so each run start is tried anchored and a run that
+# fails is skipped whole; a match resumes the walk at its end. Text outside ASCII keeps `tr` for the case fold, so the
+# locale's own case map is still the one read.
 parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be read
-  local raw="$1" s pairs count nums hi unit mult n allnums
+  local raw="$1" s pairs count nums hi unit mult n allnums line rest m k nl=$'\n'
+  local re='^[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)'
   [ -n "$raw" ] || return 1
-  s="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
-  s="${s//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
-  pairs="$(printf '%s' "$s" \
-    | grep -oE '[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)')"
-  count="$(printf '%s\n' "$pairs" | grep -c '[0-9]')"
+  s="${raw//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
+  case "$s" in
+    *[![:ascii:]]*) s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')" ;;
+    *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+      for n in Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz; do
+        s="${s//${n%?}/${n#?}}"
+      done ;;
+  esac
+  count=0; pairs=""; unit=""; rest="$s$nl"
+  while [ -n "$rest" ]; do
+    line="${rest%%"$nl"*}"; rest="${rest#*"$nl"}"
+    while :; do
+      case "$line" in *[0123456789]*) ;; *) break ;; esac
+      line="${line#"${line%%[0123456789]*}"}"
+      if [[ $line =~ $re ]]; then
+        m="${BASH_REMATCH[0]}"; count=$((count + 1)); pairs="$m"; unit="${BASH_REMATCH[2]}"
+        line="${line:${#m}}"
+      else
+        line="${line#"${line%%[!0123456789]*}"}"
+      fi
+    done
+  done
   [ "$count" -eq 1 ] || return 1
-  nums="$(printf '%s' "$pairs" | grep -oE '[0-9]+')"
+  nums=""; k=0; m="$pairs"
+  while :; do
+    case "$m" in *[0123456789]*) ;; *) break ;; esac
+    m="${m#"${m%%[0123456789]*}"}"; n="${m%%[!0123456789]*}"; m="${m#"$n"}"
+    nums="${nums}${nums:+$nl}$n"; k=$((k + 1))
+  done
   hi=0
   for n in $nums; do [ "$n" -gt "$hi" ] && hi="$n"; done
   [ "$hi" -gt 0 ] || return 1
-  unit="$(printf '%s' "$pairs" | grep -oE '[a-z]+' | tail -1)"
   case "$unit" in
     h|hr|hrs|hour|hours)         mult=3600 ;;
     m|min|mins|minute|minutes)   mult=60 ;;
     s|sec|secs|second|seconds)   mult=1 ;;
     *) return 1 ;;
   esac
-  grep -qE '[0-9]+\.[0-9]+' <<< "$s" && return 1
-  allnums="$(printf '%s' "$s" | grep -oE '[0-9]+')"
-  [ "$(printf '%s\n' "$allnums" | grep -c '[0-9]')" -eq "$(printf '%s\n' "$nums" | grep -c '[0-9]')" ] \
-    || return 1
+  # REFUSE what the pair walk silently skipped rather than matched. It keeps only what it
+  # matched, so two failure shapes above look identical to a single clean pair:
+  #   * a decimal point anywhere near a digit ("0.5h" matches the trailing "5h" and never
+  #     sees the "0."; the header's "whole numbers only" is a refusal, not a truncation).
+  #   * two pairs glued with no separator ("1h30m" — "1h" fails its own trailing-boundary
+  #     check and is silently skipped, leaving only "30m" for `pairs` to find).
+  # A decimal anywhere in the cleaned string fails outright; a mismatch between every digit
+  # run in the string and the digit run(s) actually captured inside the matched pair catches
+  # the glued case, because nothing legitimate is a digit run OUTSIDE the one pair.
+  case "$s" in *[0123456789].[0123456789]*) return 1 ;; esac
+  allnums=0; m="$s"
+  while :; do
+    case "$m" in *[0123456789]*) ;; *) break ;; esac
+    m="${m#"${m%%[0123456789]*}"}"; m="${m#"${m%%[!0123456789]*}"}"; allnums=$((allnums + 1))
+  done
+  [ "$allnums" -eq "$k" ] || return 1
   printf '%s' "$((hi * mult))"
 }
 

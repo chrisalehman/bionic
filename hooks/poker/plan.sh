@@ -5,6 +5,9 @@
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
 
+# THE ONE ENGLISH PLURAL (lib/english.sh): the release approval counts its commits and criteria with the noun's number.
+bionic_need english.sh english_plural
+
 # ---------------------------------------------------------------- the contract's reader
 #
 # `amend` widens a live contract and `task-add` judges a Files cell a brief is later rendered from; both
@@ -156,10 +159,11 @@ poker_review_records() {
 # poker_questions_dealt <plan> <questions> -> rc 0 when the declared questions (comma-joined) are one reader's at the
 # plan's rigor and scale, else rc 1 with PQD_SAID the reason. A review row is one reader's: at double the auditor
 # holds `evidence` and the critic the other two, so a declaration across them has no reader, and the reason names the
-# deal. At single the critic holds all three, so any subset is one reader's. Set: PQD_SAID.
+# deal. At single the critic holds all three, so any subset is one reader's. Set: PQD_SAID, and PQD_ROLE the one
+# role that holds them, unprefixed, when rc is 0.
 poker_questions_dealt() {
   local plan="$1" decl="$2" rigor scale lvl owed role q deal fix="" r qs first="" mixed=""
-  PQD_SAID=""
+  PQD_SAID=""; PQD_ROLE=""
   bionic_need proof.sh facts_owed
   rigor="$(plan_frontmatter_get "$plan" rigor)"; scale="$(plan_frontmatter_get "$plan" scale)"
   lvl="$(rigor_level "$rigor" 2>/dev/null)" || lvl="${rigor:-none}"
@@ -193,6 +197,7 @@ EOF
     PQD_SAID="${decl//,/ and } are dealt to different roles at $lvl rigor ($fix), and a review row is one role's"
     return 1
   fi
+  PQD_ROLE="$first"
   return 0
 }
 
@@ -1434,15 +1439,27 @@ BRF_EOF
     st_cell() { printf '%s\n' "$ST_ROW" | sed -n "s/^$1=//p" | head -1; }
     ST_KIND="$(st_cell kind)"; ST_TASK="$(st_cell task)"; ST_STEP="$(st_cell step)"; ST_FILES="$(st_cell files)"
     ST_TITLE="$(clean_whole "$(plan_task_title "$ST_TASK")")"
-    # THE ROLE: the one --role names, else the row's agent cell, else the one the complexity tag of a build or a test row
-    # names, as the Step-3 card draws it (card.sh `_card_task_role`); a role nothing names is not guessed.
+    # THE ROLE: the one --role names, else the row's agent cell, else the one the row's kind draws from its complexity
+    # tag, as the Step-3 card draws it (units.sh `units_kind_role`); a role nothing names is not guessed. The refusal
+    # offers the role the kind is run by (`units_kind_offer`): for a review row, the role the plan's rigor deals its
+    # declared questions, and the critic when no one role holds them; the implementor where the kind's role is the tag.
     [ -n "$ST_ROLE" ] || { ST_ROLE="$(st_cell agent)"; ! poker_brief_none "$ST_ROLE" || ST_ROLE=""; }
-    ST_RE='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
-    if [ -z "$ST_ROLE" ] && { [ "$ST_KIND" = build ] || [ "$ST_KIND" = test ]; } && [[ "$ST_TASK" =~ $ST_RE ]]; then
-      case "${BASH_REMATCH[2]}" in complex) ST_ROLE=senior-implementor ;; standard) ST_ROLE=implementor ;; esac
-    fi
+    [ -n "$ST_ROLE" ] || ST_ROLE="$(units_kind_role "$ST_KIND" "$ST_TASK")"
     if [ -z "$ST_ROLE" ]; then
-      die_run "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. Name one, bionic:implementor for a standard row or bionic:senior-implementor for a complex one." "$ST_AGAIN --role bionic:implementor"
+      ST_OFFER="$(units_kind_offer "$ST_KIND")"; ST_WHY="the role a $(clean "$ST_KIND") row is run by"
+      if [ "$ST_OFFER" = questions ]; then
+        ST_QS="$(units_questions "$(printf '%s\t%s\t%s\t%s' "$ST_ID" "$ST_STEP" "$ST_KIND" "$ST_TASK")")"
+        ST_OFFER=critic; ST_WHY="the role of a review row whose questions no one role holds"
+        if [ -n "$ST_QS" ] && poker_questions_dealt "$PV_PLAN" "$ST_QS"; then
+          ST_OFFER="$PQD_ROLE"; ST_WHY="the role the plan's rigor deals its questions (${ST_QS//,/, })"
+        fi
+      fi
+      if [ "$ST_OFFER" = implementor ]; then
+        ST_SAY="Name one, bionic:implementor for a standard row or bionic:senior-implementor for a complex one."
+      else
+        ST_SAY="Name one: bionic:$ST_OFFER, $ST_WHY."
+      fi
+      die_run "REFUSED — row $ST_ID names no role: no agent cell, and its kind ($(clean "$ST_KIND")) or its task cell names no complexity a role is drawn from. Nothing was done. $ST_SAY" "$ST_AGAIN --role bionic:$ST_OFFER"
       exit 1
     fi
     case "$ST_ROLE" in *:*) : ;; *) ST_ROLE="bionic:$ST_ROLE" ;; esac
@@ -1620,7 +1637,7 @@ RR_MATRIX
     rows="$(git -C "$PV_REPO" rev-list --first-parent "$1..$RR_HEAD" 2>/dev/null \
       | units_rows_in_range "$PV_PLAN" "$1..$RR_HEAD" "$(proof_debt_record "$PV_PLAN" "$PV_REPO" 2>/dev/null)" 2>/dev/null | cut -f1 | paste -sd' ' -)"
     printf 'approved at %s' "${1:0:8}"
-    [ -z "$n" ] || printf ', %s landed since' "$(rr_plural "$n" commit commits)"
+    [ -z "$n" ] || printf ', %s landed since' "$(english_plural "$n" commit commits)"
     [ -z "$rows" ] || printf ' (%s)' "$rows"
   }
 
@@ -1698,10 +1715,6 @@ RR_MATRIX
     printf '%s' "$w" | tr '[:upper:]' '[:lower:]'
   }
 
-  rr_plural() {  # <n> <singular> <plural> -> `<n> <word>`
-    if [ "$1" -eq 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "$3"; fi
-  }
-
   rr_fact() {  # <tag> <field>... -> one fact line, its fields tab-separated; a tab or newline inside a field is a space
     local f out="$1"; shift
     for f in "$@"; do f="${f//$'\t'/ }"; out="$out"$'\t'"${f//$'\n'/ }"; done
@@ -1754,6 +1767,7 @@ RR_MATRIX
     done
     mkdir -p "$RR_DIR" 2>/dev/null || return 0
     [ ! -L "$f" ] || return 0
+    bionic_need root.sh bionic_new && bionic_new "$f.new" || return 0
     {
       printf '%s\n\n## Replay\n\n' "$1"
       printf 'release-approval/v1|plan=%s|head=%s|at=%s|decisions=%s\n' "$PV_PLAN" "$RR_HEAD" "${RR_AT:-$(iso_now)}" "$RR_N"
@@ -1764,8 +1778,8 @@ RR_MATRIX
       done
       # THE CARRIES THE PAGE PUTS: every finding it shows deferred, so the reply that answers the page rules each.
       printf '%s' "$RR_CARRY" | while IFS= read -r i; do [ -z "$i" ] || printf 'carried: %s\n' "$i"; done
-    } > "$f.new.$$" 2>/dev/null && mv -f "$f.new.$$" "$f" 2>/dev/null
-    rm -f "$f.new.$$" 2>/dev/null
+    } >| "$BIONIC_NEW" 2>/dev/null && mv -f "$BIONIC_NEW" "$f" 2>/dev/null
+    rm -f "$BIONIC_NEW" 2>/dev/null
     return 0
   }
 
@@ -1899,7 +1913,7 @@ RR_ROWS_EOF
       [ "$RR_ACC" -eq 0 ] || line="${line:+$line, }$RR_ACC owed by the close"
       [ "$RR_ACL" -eq 0 ] || line="${line:+$line, }$RR_ACL owed at a later step"
       if [ -z "$RR_MISS" ]; then RR_TACC="✅"; else RR_TACC="✖️"; fi
-      RR_TACC="$RR_TACC acceptance — $RR_ACP of $(rr_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
+      RR_TACC="$RR_TACC acceptance — $RR_ACP of $(english_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
     fi
 
     # FINDINGS: the disposition's one reading, one sentence each; a decision only when recommended against. A FINDING'S
@@ -2106,7 +2120,7 @@ RR_AGAINST_EOF
       h="$(rr_proof_field "$line" head)"; r="$(rr_proof_field "$line" result)"
       behind="$(git -C "$PV_REPO" rev-list --count "$h..$RR_HEAD" 2>/dev/null)" || behind=""
       if [ "$h" = "$RR_HEAD" ] || [ "$behind" = 0 ]; then nm="$role at this head"
-      elif [ -n "$behind" ]; then nm="$role at ${h:0:8}, $(rr_plural "$behind" commit commits) behind"
+      elif [ -n "$behind" ]; then nm="$role at ${h:0:8}, $(english_plural "$behind" commit commits) behind"
       else nm="$role at ${h:0:8}"; fi
       IFS=$'\t' read -r _ _ cst clands <<< "$(printf '%s\n' "$RR_COV" | awk -F'\t' -v q="$q" '$1 == q { print; exit }')"
       case "${clands:--}" in
@@ -2550,8 +2564,10 @@ RP_TABLE
       say "promote — ${to#"$top"/} already holds ${src#"$root"/}; nothing changed.$([ "$top" = "$root" ] || printf ' The tree is %s.' "$top")"
       exit 0
     fi
-    if ! { mkdir -p "${to%/*}" && cp "$src" "$to.promote.$$" && mv -f "$to.promote.$$" "$to"; }; then
-      rm -f "$to.promote.$$"
+    BIONIC_NEW=""
+    if ! { mkdir -p "${to%/*}" && bionic_need root.sh bionic_new && bionic_new "$to.promote" \
+           && cp "$src" "$BIONIC_NEW" && mv -f "$BIONIC_NEW" "$to"; }; then
+      [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW"
       die "REFUSED — cannot write $to. Nothing was copied."
       exit 2
     fi

@@ -185,16 +185,16 @@ bionic_need gate.sh gate_room
 # verdict — ask it, so the fleet holds one staleness arithmetic (a row against its cadence)
 # where it held four: this verb used to multiply a cadence
 # by a second multiplier of its own and the tick measured no cadence at all.
-#
-# THIS FILE'S OWN `file_mtime`, `line_field` and `parse_seconds` are defined BELOW this line
-# and are CODE-IDENTICAL to the library's (tests/cross-gate-agreement.test.sh §C and §O hold
-# all three copies together), so the redefinitions that follow change nothing either caller
-# reads.
+# observe.sh also holds `parse_seconds`, the prose reader this file and its parts call.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/observe.sh"
-# THE RECORD'S FIELD READER, asked by name rather than reached through observe.sh: the awk programs of this file and
-# its parts read a roster row's field by `line_kv_of` (lib/fields.sh).
+# THE RECORD'S FIELD READER, asked by name rather than reached through observe.sh: this file and its parts read a
+# roster row's field by `line_field` in the shell and `line_kv_of` in awk (lib/fields.sh).
 bionic_need fields.sh line_field_v
+# The clock's one home, asked by name: no hook lists it among the libraries it wants. `iso_now`, `iso_epoch`,
+# `epoch_iso` and `file_mtime` are its; `file_mtime` prints nothing for a path it cannot stat, so a reader that
+# needs a number writes `file_mtime <path> || echo 0`.
+bionic_need time.sh _time_epoch
 # THE PASTED POKER PATH. The STANDDOWN line and the
 # refusals print this script's path for a reader to paste; it is ONE shell
 # word, so a plugin root with a space pastes whole. refuse.sh's `refuse_shell_word` owns the rule.
@@ -308,8 +308,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> [--born …]   record the birth of row <id>, which an edit of the bound plan wrote first: the row is read back and judged as a row born mid-run, one born event is appended, and the plan is not written; a short row is refused with the lines it would accept; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite; task-add <id> --drop '<the person's words>' says a pending row's work is no longer owed: one drop event, the plan not written"
   die "  bash ${HOOK_DIR}/session-poker.sh start <id> [<name>] [--role <role>]   start row <id>, written into the bound plan first: its birth (as task-add), its brief (as brief) and its tree (spawn-worktree.sh create --for the name), then the Agent call printed whole and the one task-list entry it owes; an act that stands is kept, and a tree the row recorded is marked for the name"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
-  die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
-  die "  bash ${HOOK_DIR}/session-poker.sh judge <N> [<N>…]   the advance's judgment for each step from 5 to 8 in one process: what current <N> --check prints for each, each closed by judged <N> exit <rc>; appends nothing; exits 0 when every step would advance"
+  die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and answers would advance or would refuse on its first line, exiting 0 on either answer"
+  die "  bash ${HOOK_DIR}/session-poker.sh judge <N> [<N>…]   the advance's judgment for each step from 5 to 8 in one process: what current <N> --check prints for each, each closed by judged <N> exit <rc>, the step's code (1 would refuse), which is what a caller reads; appends nothing; exits 0 when every step answered, else the highest code a step gave"
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order event with the words in the bound run's log, else a line in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>' ['<why>']   record the user's approval <name> as one approval in the run's log: a name a row reads, plan at Step 3, or a T4 criterion the user confirms on words they typed"
@@ -976,40 +976,11 @@ esac
 
 # ---------------------------------------------------------------- portable facts
 #
-# DELIBERATELY DUPLICATED from hooks/session-sweeper.sh, CODE-identical (not byte-identical —
-# each file's comments explain its own copy in its own terms, exactly as
-# tests/cross-gate-agreement.test.sh's §I.1 already treats signature comments for its own
-# duplicated family), for the reason that file's own header gives (§9 there): a sourced
-# library the installer misses is a silently inert consumer, and every duplicate here answers
-# the SAME question its sibling answers so the two cannot quietly drift into different
-# readings of one fact. `parse_seconds` is duplicated post-fix (epic-16 w2 S2, same commit
-# that fixed the original); `file_mtime` joined them for `adopt`, which reads a predecessor
-# agent's progress file the way the sweeper reads a live one. The six are held together by
-# tests/cross-gate-agreement.test.sh
-# §O, which compares executable text with every pure-comment line stripped from both sides —
-# epic-16 w2 Step-6 remediation R3, closing rd review D-1 (this claim used to name no test,
-# and was already false for parse_seconds before that fix).
+# The clock, a path's modified time, a field by key and the prose parser are the libraries' (lib/time.sh,
+# lib/fields.sh, lib/observe.sh), each loaded above before any verb runs. `now_epoch` stays here: it reads the
+# machine's clock, never a suite's pinned one, which lib/time.sh's `time_now` follows.
 
 now_epoch() { date -u +%s; }
-iso_now()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
-
-# iso_epoch LEFT THE FAMILY (wave-39 T17; D18, AC-12.1; burns debt iso-to-epoch): an instant has one reader,
-# lib/time.sh's (strict `…Z`, which `date -j -f` was not: it read `…Zx` with a warning), and this is the one-line call
-# to it. The sweeper keeps its own `date` copy, because it sources no library; §O no longer compares the two.
-iso_epoch() { _time_epoch "${1:-}"; }   # <ISO-8601 Z> -> epoch seconds, empty if unreadable
-
-# One field out of a versioned pipe-delimited line, BY KEY, never by position — same
-# rationale as hooks/session-sweeper.sh's copy: field order is not a contract.
-# In builtins since wave-34 T11 (D19); hooks/session-sweeper.sh's copy says how.
-line_field() {  # <line> <key>
-  local _lf_rest="${1//$'\n'/|}|" _lf_f
-  while [ -n "$_lf_rest" ]; do
-    _lf_f="${_lf_rest%%|*}"; _lf_rest="${_lf_rest#*|}"
-    case "$_lf_f" in "$2="*) printf '%s\n' "${_lf_f#"$2="}"; return 0 ;; esac
-  done
-  return 0
-}
 
 # Whether a versioned pipe-delimited line CARRIES a key at all — present-and-empty and absent
 # are different rows to a by-key reader, and `line_field` returns "" for both. This is a
@@ -1023,6 +994,8 @@ row_has_key() {  # <line> <key>
   return 1
 }
 
+# The fold is lib/fields.sh `line_field_clean`'s reading on a value of valid characters, and stays in builtins: the
+# library's pipeline starts three processes a value, and its `tr` drops what follows a byte the locale cannot read.
 clean() {  # <value> [<field name>]
   local out="${1//[[:cntrl:]|]/ }"
   while :; do case "$out" in *"  "*) out="${out//  / }" ;; *) break ;; esac; done
@@ -1066,66 +1039,9 @@ clean() {  # <value> [<field name>]
 # clean_whole <value> -> clean's fold with no 400-character cut. A LIBRARY'S OWN REFUSAL or a sentence
 # naming a list (wave-30 T13: `proof-add floor` names the suites a later change owes) is list-valued
 # like `files=`, and the cut would drop the very suites it names. clean() itself stays the sweeper's
-# copy, code for code (tests/cross-gate-agreement.test.sh §O; wave-30 T23), so this asks the uncut
-# arm clean already has for list fields rather than adding a field name only this copy knows.
+# body, code for code, so this asks the uncut arm clean already has for list fields rather than adding
+# a field name only this copy knows.
 clean_whole() { clean "$1" files; }
-
-# The prose duration/cadence parser. Deliberate limits, each a refusal rather than a guess —
-# see hooks/session-sweeper.sh's copy for the full rationale (its own comments there are
-# specific to ITS callers, e.g. `cadence=`, which this script never reads — that is why this
-# copy's comments are shorter, not why the code differs). This is that function's POST-FIX
-# body, CODE-identical (§O compares it with comments on both sides stripped).
-parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be read
-  local raw="$1" s pairs count nums hi unit mult n allnums line rest m k nl=$'\n'
-  local re='^[0-9]+([[:space:]]*-[[:space:]]*[0-9]+)?[[:space:]]*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)([^a-z0-9]|$)'
-  [ -n "$raw" ] || return 1
-  s="${raw//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
-  case "$s" in
-    *[![:ascii:]]*) s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')" ;;
-    *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
-      for n in Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz; do
-        s="${s//${n%?}/${n#?}}"
-      done ;;
-  esac
-  count=0; pairs=""; unit=""; rest="$s$nl"
-  while [ -n "$rest" ]; do
-    line="${rest%%"$nl"*}"; rest="${rest#*"$nl"}"
-    while :; do
-      case "$line" in *[0123456789]*) ;; *) break ;; esac
-      line="${line#"${line%%[0123456789]*}"}"
-      if [[ $line =~ $re ]]; then
-        m="${BASH_REMATCH[0]}"; count=$((count + 1)); pairs="$m"; unit="${BASH_REMATCH[2]}"
-        line="${line:${#m}}"
-      else
-        line="${line#"${line%%[!0123456789]*}"}"
-      fi
-    done
-  done
-  [ "$count" -eq 1 ] || return 1
-  nums=""; k=0; m="$pairs"
-  while :; do
-    case "$m" in *[0123456789]*) ;; *) break ;; esac
-    m="${m#"${m%%[0123456789]*}"}"; n="${m%%[!0123456789]*}"; m="${m#"$n"}"
-    nums="${nums}${nums:+$nl}$n"; k=$((k + 1))
-  done
-  hi=0
-  for n in $nums; do [ "$n" -gt "$hi" ] && hi="$n"; done
-  [ "$hi" -gt 0 ] || return 1
-  case "$unit" in
-    h|hr|hrs|hour|hours)         mult=3600 ;;
-    m|min|mins|minute|minutes)   mult=60 ;;
-    s|sec|secs|second|seconds)   mult=1 ;;
-    *) return 1 ;;
-  esac
-  case "$s" in *[0123456789].[0123456789]*) return 1 ;; esac
-  allnums=0; m="$s"
-  while :; do
-    case "$m" in *[0123456789]*) ;; *) break ;; esac
-    m="${m#"${m%%[0123456789]*}"}"; m="${m#"${m%%[!0123456789]*}"}"; allnums=$((allnums + 1))
-  done
-  [ "$allnums" -eq "$k" ] || return 1
-  printf '%s' "$((hi * mult))"
-}
 
 # ---------------------------------------------------------------- the pinned root
 #
@@ -1200,11 +1116,6 @@ tick_state_root() {  # -> absolute path, or rc 1
   real="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
   [ -n "$real" ] || return 1
   printf '%s' "$real"
-}
-
-epoch_iso() {  # <epoch seconds> -> UTC ISO-8601, the shape the CLI stamps entries with
-  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
 }
 
 # THE .bionic/tmp WRITE GUARD, one copy for both of this script's writers — the Patrol
@@ -1677,7 +1588,7 @@ run_read() {
   { read -r rc < "$RUN_OUT.rc"; } 2>/dev/null
   case "$rc" in ''|*[!0-9]*) : ;; *) RUN_STATE=FINISHED; RUN_RC="$rc"; return 0 ;; esac
   RUN_STATE=LOST
-  RUN_LAST_WRITTEN="$(epoch_iso "$(file_mtime "$RUN_OUT")")"
+  RUN_LAST_WRITTEN="$(epoch_iso "$(file_mtime "$RUN_OUT" || echo 0)")"
   [ -n "$RUN_LAST_WRITTEN" ] || RUN_LAST_WRITTEN=unknown
   return 0
 }
@@ -2130,7 +2041,7 @@ launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another writer ho
     bare=0
     pid="$(cat "$d/pid" 2>/dev/null)"
     if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } \
-      || [ $(( $(now_epoch) - $(file_mtime "$d") )) -gt "$LAUNCH_SYNC_STALE" ]; then
+      || [ $(( $(now_epoch) - $(file_mtime "$d" || echo 0) )) -gt "$LAUNCH_SYNC_STALE" ]; then
       rm -rf "$d" 2>/dev/null
       [ -e "$d" ] || continue
     fi
@@ -2147,9 +2058,7 @@ launch_sync_hand() {  # <verb> <operand>...
   printf '%s' "$out"
 }
 
-sitrep_now() {  # -> now, epoch seconds: BIONIC_NOW_EPOCH when it is a number, else the clock
-  case "${BIONIC_NOW_EPOCH:-}" in ''|*[!0-9]*) date -u +%s ;; *) printf '%s\n' "$BIONIC_NOW_EPOCH" ;; esac
-}
+sitrep_now() { time_now; }  # -> now, epoch seconds: lib/time.sh's pinned clock, under the name the poker's parts call
 sitrep_date() {  # <epoch> <strftime format> -> the local rendering: from the zone this command holds, else BSD date then GNU
   if _sitrep_local "$1" "$2"; then printf '%s\n' "$_SITREP_LOCAL"; return 0; fi
   date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2" 2>/dev/null
@@ -2288,8 +2197,14 @@ plan_verb_open() {
   # is no step, and PV_CUR_UNREAD says so: a verb that judges or writes at the step refuses on it, never on a guess.
   PV_CUR=""; PV_CUR_UNREAD=""
   if _fill_current_load "$PV_PLAN"; then PV_CUR="$_FILL_CURRENT_VALUE"; else PV_CUR_UNREAD=1; fi
-  PV_NEW="${PV_PLAN}.${verb}.$$"
-  PV_SID="planverb-$$"
+  # The working copy's name and the dry commit's session carry an id of this process (lib/root.sh `bionic_id`), so two
+  # verbs in sibling subshells never share either.
+  if ! { bionic_need root.sh bionic_id && bionic_id; }; then
+    die "REFUSED — $verb cannot make an id for its working copy (lib/root.sh bionic_id); the plan is unchanged. Fix: reinstall the plugin (claude plugin install bionic@bionic)."
+    exit 2
+  fi
+  PV_NEW="${PV_PLAN}.${verb}.$BIONIC_ID"
+  PV_SID="planverb-${BIONIC_ID//./-}"   # a session id's alphabet is letters, digits, _ and -
   PV_MARK="$(engaged_marker_path "$PV_REPO" "$PV_SID")" || PV_MARK=""
   trap 'run_last $?; rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"}' EXIT
 }
@@ -2460,11 +2375,12 @@ case "$VERB" in
     for SH_W in "share:$SH_SET:${SH_N:-}" "reserve:$SH_RSET:$SH_RES"; do
       IFS=: read -r SH_NAME SH_DO SH_VAL <<< "$SH_W"
       [ "$SH_DO" = yes ] || continue
-      SH_TMP="$SH_DIR/$SH_NAME.tmp.$$"
-      if printf '%s\n' "$SH_VAL" > "$SH_TMP" 2>/dev/null && mv -f "$SH_TMP" "$SH_DIR/$SH_NAME" 2>/dev/null; then
+      SH_TMP=""
+      if bionic_need root.sh bionic_new && bionic_new "$SH_DIR/$SH_NAME.tmp" && SH_TMP="$BIONIC_NEW" \
+         && printf '%s\n' "$SH_VAL" >| "$SH_TMP" 2>/dev/null && mv -f "$SH_TMP" "$SH_DIR/$SH_NAME" 2>/dev/null; then
         say "$SH_NAME set to $SH_VAL"
       else
-        rm -f "$SH_TMP" 2>/dev/null
+        [ -z "$SH_TMP" ] || rm -f "$SH_TMP" 2>/dev/null
         die "REFUSED — the $SH_NAME file could not be written; the $SH_NAME is unchanged."
         exit 1
       fi
