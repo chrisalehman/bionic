@@ -36,6 +36,12 @@
 # The loaded pages define test and eval once each, teach the Test design and the reply words the cards print, and call
 # no check an eval (§TEST-WORD-PAGES).
 #
+# EXITS ON THE PAGES. No rendered page or role file names a non-zero exit code beside an answer that now exits 0
+# (the landing's WAITING, a gate that did not admit a run, a checked advance or the judge that would refuse, the
+# tick's NOTIFY, an early card, a close held before the merge); the record's codes stay. The suite line carries the
+# meant-to-fail word as an assignment leading the suite segment (§EXIT-PAGES). The dispatch page and each of the six
+# role files hold the rule that a check expecting no match ends with `|| true` (§NONE-EXITS-0).
+#
 # FIXTURE FIDELITY (see .claude/rules/test-harness.md, "Fixture fidelity"). §TEXTS reads the
 # shipped files in place. §PLANT and §SENSE are SYNTHESIZED: each copies a shipped surface into
 # scratch and appends one line, so the lint reads the real file plus the plant; each copy proves
@@ -579,5 +585,51 @@ tw_card step3 "$TW/tw.plan.md"; TP_C3="$(printf '%s\n' "$TW_OUT" | tail -1)"
 TP_P3="$(/usr/bin/grep -E '^show [^`]*explain <decision>$' "$PG_DIR/steps/3.md" | head -1)"
 expect_nonempty "TP5 the Step 3 page's card mock ends on a reply line" "$TP_P3"
 expect_eq "TP5b …the line the Step 3 card prints" "$TP_C3" "$TP_P3"
+
+# ── §EXIT-PAGES ──────────────────────────────────────────────────────────────
+section "§EXIT-PAGES: no page or role file names a non-zero exit for an answer that exits 0; the suite line carries the meant-to-fail word"
+
+# A clause (cut at ; and at a full stop) that names an ordinary answer and a non-zero exit code is refused, and so is
+# "exits as the advance would". The record's codes (a stamp's 75, the landing's STALLED 70, a red landing's 1) sit in
+# clauses that name no ordinary answer, so they pass; the controls below prove that. The plants are put on copies.
+# fails-when: a page or role file says a WAITING, a run the gate did not admit, a checked advance or the judge, a
+# NOTIFY tick, an early card or a held close exits with a code other than 0; or the suite line loses the leading word.
+EX_ANS='WAITING|BUSY|NOTIFY|CARD-EARLY|admit|--check|judge|close-out refused|not merged'
+ex_hits() {  # <root> -> "<path>: <clause>" for each refused clause of the rendered pages and role files
+  local f
+  while IFS= read -r f; do
+    awk -v rel="$f" -v ans="$EX_ANS" '/^[ ]*(- |#|$)/ { t = t ";" } { t = t " " $0 }
+      END { n = split(t, c, /;|\. /)
+        for (i = 1; i <= n; i++) if ((c[i] ~ ans && c[i] ~ /exit(s|ed)?( code| status)? [1-9]/) || c[i] ~ /exits? as the advance/) printf "%s: %s\n", rel, c[i] }' "$1/$f"
+  done < <(words_surfaces "$1" | /usr/bin/grep -E '^(skills|agents|payload)/.*[.]md$')
+}
+EXP="$TMP/exp"
+for f in skills/canonical-sdlc/dispatch.md payload/context/survival.md; do mkdir -p "$EXP/${f%/*}" && cp "$REPO/$f" "$EXP/$f"; done
+printf '\nPLANT-1 `WAITING <row>` (exit 75, its place kept).\n' >> "$EXP/skills/canonical-sdlc/dispatch.md"
+printf '\nPLANT-2 a command the gate does not admit exits 75 with the line to run again.\n' >> "$EXP/payload/context/survival.md"
+expect_eq "EX0 the planted copies are refused at both plants (the control for EX1)" "2" "$(ex_hits "$EXP" | /usr/bin/grep -c 'PLANT-[12]' || true)"
+expect_empty "EX1 no shipped page or role file names a refused exit" "$(ex_hits "$REPO")"
+expect_nonempty "EX2 the pages are read: the dispatch page, every role file and the survival text are in the set" "$(words_surfaces "$REPO" | /usr/bin/grep -c -E '^(skills/canonical-sdlc/dispatch|payload/context/survival|agents/[a-z-]+)[.]md$' | /usr/bin/grep -x 8 || true)"
+expect_eq "EX3 the codes that are still true stay on the dispatch page: a red landing's 1 and a stall's 70" "1|1" \
+  "$(/usr/bin/grep -c -F '(exit 1, the row back' "$PG_DIR/dispatch.md" || true)|$(/usr/bin/grep -c -F '(exit 70)' "$PG_DIR/dispatch.md" || true)"
+EX_WORD='BIONIC_EXPECT=red tests/run.sh --only'
+for f in skills/canonical-sdlc/dispatch.md payload/context/survival.md agents/implementor.md agents/senior-implementor.md; do
+  expect_eq "EX4 $f teaches the word on the suite segment itself, never on the cd" "1|0" \
+    "$(/usr/bin/grep -c -F -- "$EX_WORD" "$REPO/$f" | awk '{print ($1>0)}')|$(/usr/bin/grep -c -E 'BIONIC_EXPECT=red +cd ' "$REPO/$f" || true)"
+done
+
+# ── §NONE-EXITS-0 ────────────────────────────────────────────────────────────
+section "§NONE-EXITS-0: the dispatch page and each of the six role files hold the rule that a check expecting no match ends with || true"
+
+# The rule is one line carrying both its words. The plant is a copy of each file with that line cut, so the count falls
+# from one to none, which proves the count reads the rule and not some other line.
+# fails-when: the dispatch page or a role file lacks the line.
+NE_FILES="skills/canonical-sdlc/dispatch.md agents/auditor.md agents/critic.md agents/implementor.md agents/researcher.md agents/senior-implementor.md agents/test-runner.md"
+ne_count() { /usr/bin/grep -c -E 'expects no match.*[|][|] true' "$1" || true; }   # <file>
+NEP="$TMP/nep"
+for f in $NE_FILES; do
+  mkdir -p "$NEP/${f%/*}"; /usr/bin/grep -v -E 'expects no match.*[|][|] true' "$REPO/$f" > "$NEP/$f"
+  expect_eq "NE $f holds the rule, and the copy with its line cut holds none" "1|0" "$(ne_count "$REPO/$f")|$(ne_count "$NEP/$f")"
+done
 
 finish
