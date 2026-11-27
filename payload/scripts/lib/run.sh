@@ -950,11 +950,14 @@ session_working_branch() {
   esac
   wb=$(plan_working_branch "$plan")
   if [ -z "$wb" ]; then
-    printf 'no-working-branch plan=%s\n' "$plan"
+    run_no_branch_why "$plan"; printf '\n'
     return 4
   fi
   printf '%s\n' "$wb"
 }
+
+# run_no_branch_why <plan> -> the no-working-branch reason, no newline, as the landing prints it too
+run_no_branch_why() { printf 'no-working-branch plan=%s' "$1"; }
 
 # plan_working_branch <plan> -> the plan's `working-branch:`, or nothing (wave-35 T7; REQ-5 AC-5.3, D14).
 # THE ONE READER OF THE WORKING BRANCH. The frontmatter key, which a plan written by Step 0 carries, read by the

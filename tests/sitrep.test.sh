@@ -1285,7 +1285,7 @@ expect_eq "G3 a record that passes flips its goal to met; a clause of none is le
 # id's, and the run's log a passing proof of each one discharged and a waiver of each one waived
 sr_criteria() {
   local e a r
-  { printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+  { printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n'
     for e in "$@"; do a="${e%%:*}"; r="${a#AC-}"; printf '| REQ-%s | x | %s | hermetic | `tests/a.test.sh` | not |\n' "${r%%.*}" "$a"; done; } >> "$SR_PLAN"
   for e in "$@"; do a="${e%%:*}"
     case "${e#*:}" in discharged) sr_ev "ev=proof|kind=eval|ac=$a|head=$SR_H|rc=0|at=2026-10-06T10:00:00Z" ;;

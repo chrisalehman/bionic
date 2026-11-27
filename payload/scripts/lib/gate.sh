@@ -233,7 +233,7 @@ bionic_need time.sh _time_epoch
 
 _GATE_KEEP_DEFAULT=86400   # seconds a request that is no longer open is kept (BIONIC_GATE_KEEP's default)
 _GD=""        # the store, set by each verb
-_GATE_ME=""   # the real pid of the shell taking the lock (a `$( )` subshell is not `$$`)
+_GATE_ME=""   # the real pid of the shell taking the lock, as lib/root.sh `bionic_id` reads it (a `$( )` subshell is not `$$`)
 
 gate_dir() {
   printf '%s\n' "${BIONIC_GATE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/gate}"
@@ -249,14 +249,22 @@ gate_share() {
   printf '%s\n' "$v"
 }
 
+# _gate_cores — the cores this process may use, a whole number of at least 1 (`_res_cores`, else 1): the one count the reserve's
+# bound and the share's room take.
+_gate_cores() {
+  local c
+  c="$(_res_cores)"
+  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  printf '%s\n' "$c"
+}
+
 # gate_reserve_ok <value> — rc 0 when <value> may be a reserve: a non-negative decimal of at most nine
 # characters, no larger than the cores this process may use. THE ONE SITE of that rule: gate_reserve
 # reads a refused file as 1, and the share verb refuses to write one, so the two cannot disagree.
 gate_reserve_ok() {
   local c
   case "${1:-}" in ''|.*|*.|*[!0-9.]*|*.*.*|??????????*) return 1 ;; esac
-  c="$(_res_cores)"
-  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  c="$(_gate_cores)"
   awk -v v="$1" -v c="$c" 'BEGIN { exit !(v + 0 <= c + 0) }'
 }
 
@@ -273,13 +281,12 @@ gate_reserve() {
 
 # _gate_share_cores — the processor room the share allows: share × cores ÷ 100 less the reserve,
 # never under 1 and otherwise unfloored (6.36 at share 92 and reserve 1 on 8 cores), the cores
-# being those this process may use (`_res_cores`). THE ONE SITE of that product: gate_width
+# being those this process may use (`_gate_cores`). THE ONE SITE of that product: gate_width
 # floors it, and the admission test (`_gate_decide`) and the room (`_gate_room_line`) compare
 # against it as it is, so they cannot drift apart and none keeps a formula of its own.
 _gate_share_cores() {
   local c
-  c="$(_res_cores)"
-  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  c="$(_gate_cores)"
   awk -v s="$(gate_share)" -v c="$c" -v r="$(gate_reserve)" \
     'BEGIN { x = s * c / 100 - r; if (x < 1) x = 1; printf "%.10g", x }'
 }
@@ -295,7 +302,7 @@ gate_width() {
 
 _gate_lock() {  # rc 0 holding $_GD/lock; rc 1 when it cannot be had in about ten seconds
   local lk="$_GD/lock" i=0
-  _GATE_ME="$(exec sh -c 'echo "$PPID"')"
+  _GATE_ME=""; ! bionic_need root.sh bionic_id || ! bionic_id || _GATE_ME="${BIONIC_ID%%.*}"
   while ! _slots_claim "$lk" "$_GATE_ME"; do
     i=$((i + 1))
     [ "$i" -lt 500 ] || return 1
@@ -1023,16 +1030,12 @@ _gate_budget_read() {  # <kind> <key> -> rc 0 admitted, 1 refused (_GATE_BUDGET_
     *) root="$_GATE_TREE"; [ -n "$root" ] || return 0 ;;
   esac
   # The roster library names the file; without it the roster reads as unreadable, and the call is admitted.
-  bionic_need roster.sh roster_path || return 0
+  bionic_need roster.sh roster_path && bionic_need fields.sh line_field_v || return 0
   roster="$(roster_path "$root" "$sid")"
   { [ -f "$roster" ] && [ ! -L "$roster" ] && [ -r "$roster" ]; } || return 0
-  row="$(GATE_BUDGET_WHO="$agent" awk '
+  row="$(GATE_BUDGET_WHO="$agent" awk "$_LINE_FIELDS_AWK"'
     index($0, "roster-state/") == 1 {
-      n = split($0, p, "|"); nm = ""; id = ""; hn = 0; hi = 0
-      for (i = 2; i <= n; i++) {
-        if (!hn && index(p[i], "name=") == 1) { nm = substr(p[i], 6); hn = 1 }
-        else if (!hi && index(p[i], "agent_id=") == 1) { id = substr(p[i], 10); hi = 1 }
-      }
+      nm = line_kv_of($0, "name"); id = line_kv_of($0, "agent_id")
       sn = nm; gsub(/[^A-Za-z0-9._+-]/, "_", sn)
       w = ENVIRON["GATE_BUDGET_WHO"]
       if ((nm != "" && (nm == w || sn == w)) || (id != "" && id == w)) last = $0
@@ -1174,7 +1177,7 @@ _gate_term_arm() {  # before gate_ask's wait: TERM noted, the disposition found 
   _GATE_TERMED=0 _GATE_TERM_ARMED=0 _GATE_TERM_WAS=""
   shown="$(trap -p TERM)"
   case "$shown" in "trap -- '' SIGTERM"|"trap -- '' TERM") return 0 ;; esac
-  me="$(exec sh -c 'echo "$PPID"')"
+  me=""; ! bionic_need root.sh bionic_id || ! bionic_id || me="${BIONIC_ID%%.*}"
   [ "$me" != "$$" ] || _GATE_TERM_WAS="$shown"
   _GATE_TERM_ARMED=1
   trap '_GATE_TERMED=1' TERM
@@ -1192,7 +1195,7 @@ _gate_term_end() {  # <id> <admitted: 0|1> — TERM came while gate_ask waited: 
     echo "gate: request $1 handed back on TERM; it keeps its turn, ask again" >&2
   fi
   _gate_term_disarm
-  kill -TERM "$(exec sh -c 'echo "$PPID"')" 2>/dev/null
+  bionic_need root.sh bionic_id && bionic_id && kill -TERM "${BIONIC_ID%%.*}" 2>/dev/null
 }
 
 # _gate_landing_ok <key> — rc 0 when <key> is a landing key: lib/line.sh `landing_key_ok`, the one alphabet
@@ -1499,9 +1502,10 @@ _gate_lease_carrier() {
 _gate_lease_put() {
   local f
   f="$(_gate_lease_file "$1")"
+  bionic_need root.sh bionic_new && bionic_new "$f.tmp" || return 1
   { printf 'landing=%s\ncarrier=%s\nfirst=%s\nseq=%s\nspan=%s\n' "$1" "$2" "$3" "$4" "$5"
     [ -z "${6:-}" ] || printf 'left=%s\n' "$6"
-  } > "$f.tmp.$$" && mv "$f.tmp.$$" "$f"
+  } >| "$BIONIC_NEW" && mv "$BIONIC_NEW" "$f" || { rm -f "$BIONIC_NEW"; return 1; }
 }
 
 # _gate_lease_args <verb> <landing> <carrier> — the shared checks: rc 0 with the store loaded,
@@ -1557,7 +1561,9 @@ gate_landing_open() {
       [ "$_G_NUM" -le "$n" ] || n="$_G_NUM"
     done
     first="$now" seq=$((n + 1))
-    printf '%s\n' "$seq" > "$_GD/leases/seq.tmp.$$" && mv "$_GD/leases/seq.tmp.$$" "$_GD/leases/seq"
+    if bionic_need root.sh bionic_new && bionic_new "$_GD/leases/seq.tmp"; then
+      printf '%s\n' "$seq" >| "$BIONIC_NEW" && mv "$BIONIC_NEW" "$_GD/leases/seq" || rm -f "$BIONIC_NEW"
+    fi
   fi
   _gate_lease_put "$1" "$_G_CARRIER" "$first" "$seq" "$span"; rc=$?
   _gate_unlock
@@ -1699,6 +1705,28 @@ _gate_width() {
       }
       print n, "-"
     }'
+}
+
+# gate_ask_into <idfile> <gate_ask args…> — gate_ask in THIS shell, its id read back through <idfile> into GATE_ASK_ID and the
+# file removed; rc is gate_ask's. In `$( )` a subshell would be the holder and the `times` gate gate_end reads would miss what this
+# shell reaped. GATE_ASK_FILE names the file while the ask waits, for a caller's exit trap.
+GATE_ASK_ID=""; GATE_ASK_FILE=""
+gate_ask_into() {
+  local _gaf="$1" _gar
+  shift
+  GATE_ASK_ID=""; GATE_ASK_FILE="$_gaf"
+  gate_ask "$@" > "$_gaf"; _gar=$?
+  { read -r GATE_ASK_ID < "$_gaf"; } 2>/dev/null
+  rm -f "$_gaf"; GATE_ASK_FILE=""
+  return "$_gar"
+}
+
+# gate_ask_here <prefix> <gate_ask args…> — gate_ask_into over ${TMPDIR:-/tmp}/<prefix>.XXXXXX; with no file to be made, asked in `$( )`.
+gate_ask_here() {
+  local _gap="$1" _gaf
+  shift
+  if _gaf="$(mktemp "${TMPDIR:-/tmp}/$_gap.XXXXXX" 2>/dev/null)"; then gate_ask_into "$_gaf" "$@"; return; fi
+  GATE_ASK_ID="$(gate_ask "$@")"
 }
 
 # gate_asked — names on stdin, one who per line: prints, in the order given, each that has an

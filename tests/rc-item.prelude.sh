@@ -74,14 +74,12 @@ trap 'rm -rf "$TMP"' EXIT
 command -v zsh >/dev/null 2>&1 || { echo "${0##*/}: zsh is required — the readback arm runs the rc"; exit 1; }
 command -v jq  >/dev/null 2>&1 || { echo "${0##*/}: jq is required"; exit 1; }
 
-# ---------------------------------------------------------------------------
 # The literals under test
 #
 # SPELLED HERE, AND PINNED TO THE PAYLOAD BELOW. The suite has to look for the
 # markers to find the block, so it carries them; the pins that follow are what
 # make that carriage a pin and not a second source of truth — env.sh's constants
 # must equal these, and remove.sh's standalone copies must equal env.sh's.
-# ---------------------------------------------------------------------------
 RC_START_LIT='# ─── bionic:rc:start ───'
 RC_END_LIT='# ─── bionic:rc:end ───'
 # The function, six lines (wave-36 T1): it launches the checkout it is typed in. Built line by
@@ -105,9 +103,7 @@ PROXY_UNALIAS='unalias claude 2>/dev/null || true'
 PROXY_BODY="$(printf '%s\n%s' "$PROXY_UNALIAS" "$PROXY_LINE")"
 DOCTOR_ROW_LABEL='claude() shell proxy'
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/claude" <<'STUB'
@@ -198,9 +194,7 @@ new_stale_sandbox() {  # -> a fresh $HOME whose .zshrc already holds a stale blo
   printf '%s' "$sb"
 }
 
-# ---------------------------------------------------------------------------
 # Extractors — every assertion below reads through one of these
-# ---------------------------------------------------------------------------
 
 # The lines BETWEEN bionic's markers, in order. Not "does the file contain the
 # proxy line": a proxy line outside the markers is a line bionic does not own
@@ -280,9 +274,7 @@ type_claude() {  # <sandbox>
     zsh -ic 'type claude' 2>&1
 }
 
-# ---------------------------------------------------------------------------
 # Drivers
-# ---------------------------------------------------------------------------
 
 setup_run() {  # <sandbox> <answer>
   local sb="$1" answer="$2"
@@ -331,58 +323,42 @@ env_eval() {  # <sandbox> <shell-path> <snippet>
 }
 
 
-# ---------------------------------------------------------------------------
 # From §detect:
-# ---------------------------------------------------------------------------
 detect_run() {  # <sandbox>
   HOME="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" BIONIC_CLAUDE_HOME="$1/.claude" \
     bash -c '. "$1" && detect_rc_claude_proxy' _ "$DETECT_SH" 2>&1
 }
 
-# ---------------------------------------------------------------------------
 # From §remove: the standalone door:
-# ---------------------------------------------------------------------------
 mkdir -p "$TMP/standalone"
 cp "$REMOVE_SH" "$TMP/standalone/remove.sh"
 
-# ---------------------------------------------------------------------------
 # From §T40:
-# ---------------------------------------------------------------------------
 t40_env() {  # <sandbox> <snippet> — env.sh sourced against the sandbox, then <snippet>
   HOME="$1" ZDOTDIR="$1" SHELL=/bin/zsh PATH="$TMP/bin:$PATH" \
     CLAUDE_CONFIG_DIR="$1/.claude" BIONIC_CLAUDE_HOME="$1/.claude" \
     bash -c '. "$1" || exit 90; eval "$2"' _ "$ENV_SH" "$2" 2>&1
 }
 
-# ---------------------------------------------------------------------------
 # From §T46:
-# ---------------------------------------------------------------------------
 ALIAS_START="$(const_from "$REMOVE_SH" RM_ALIAS_START)"; ALIAS_END="$(const_from "$REMOVE_SH" RM_ALIAS_END)"
 ENVB_START="$(const_from "$REMOVE_SH" RM_ENV_START)";    ENVB_END="$(const_from "$REMOVE_SH" RM_ENV_END)"
 
-# ---------------------------------------------------------------------------
 # From §T51:
-# ---------------------------------------------------------------------------
 T51_PATH="$TMP/bin:/usr/bin:/bin"
 command -v jq >/dev/null 2>&1 && T51_PATH="${T51_PATH}:$(dirname "$(command -v jq)")"
 
-# ---------------------------------------------------------------------------
 # From §T51:
-# ---------------------------------------------------------------------------
 # A PAGE ITEM OF ITS OWN (wave-27 T82). Each `--all` sandbox here carries the pre-plugin
 # skill copy `legacy-skill-copy` offers, so the page prints and the items run under its
 # consent as these rows mean them. The page used to be filled by the claude stub, whose exit 0
 # made every MCP tool row read present; tool rows are never on the page now.
 t51_page_item() { mkdir -p "$1/.claude/skills/canonical-sdlc"; printf -- '---\nname: canonical-sdlc\n---\n' > "$1/.claude/skills/canonical-sdlc/SKILL.md"; }
 
-# ---------------------------------------------------------------------------
 # From §T55:
-# ---------------------------------------------------------------------------
 T55_EXACT="alias claude='claude --dangerously-skip-permissions'"
 
-# ---------------------------------------------------------------------------
 # From §T55:
-# ---------------------------------------------------------------------------
 fn_text() {  # <file> <name> — the function's lines, `name() {` through the first `}` alone
   local line inside=0 defs=0 text=""
   while IFS= read -r line || [ -n "$line" ]; do
@@ -395,9 +371,7 @@ fn_text() {  # <file> <name> — the function's lines, `name() {` through the fi
   return 0
 }
 
-# ---------------------------------------------------------------------------
 # From §T66:
-# ---------------------------------------------------------------------------
 T66_ALIAS="$T55_EXACT"
 T66_TODO='export CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
 T66_SHELL=/bin/bash
@@ -410,9 +384,7 @@ t66_env() {  # <sandbox> <command...> — t51_env with this section's SHELL and 
 }
 t66_rc() { case "$T66_SHELL" in */zsh) printf '%s' "$1/.zshrc" ;; *) printf '%s' "$1/.bashrc" ;; esac; }
 
-# ---------------------------------------------------------------------------
 # From §T66:
-# ---------------------------------------------------------------------------
 t66_door() {  # <sandbox> <door> <answer> [item]
   local item="${4:-legacy-alias}"
   case "$2" in
@@ -425,7 +397,5 @@ t66_door() {  # <sandbox> <door> <answer> [item]
   esac
 }
 
-# ---------------------------------------------------------------------------
 # From §T66:
-# ---------------------------------------------------------------------------
 t66_pageblock() { printf '%s\n' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_LINE" "$RC_END_LIT"; }

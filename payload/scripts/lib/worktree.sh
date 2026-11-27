@@ -901,16 +901,14 @@ _wt_proofs_prove() {  # <record path> -> 0 writable, 1 not
   [ ! -L "$1" ] || return 1
   if [ -e "$1" ]; then [ -f "$1" ] && [ -w "$1" ] || return 1; fi
   mkdir -p "${1%/*}" 2>/dev/null || return 1
-  mine="$(_wt_proofs_private "$1")" || return 1
-  rm -f "$mine"
+  _wt_proofs_private "$1" || return 1
+  rm -f "$BIONIC_NEW"
 }
 
-# A private file beside the record, made by `mktemp` (exclusive, so never another's):
-# `.<record's name>.<this process's pid>.<random>`. One a killed append left is never read again.
-_wt_proofs_private() {  # <record path> -> the new file's path
-  local me
-  me="$(exec sh -c 'echo "$PPID"')"   # this process's own pid, which `$$` is not inside a subshell
-  mktemp "${1%/*}/.${1##*/}.${me}.XXXXXX" 2>/dev/null
+# A private file beside the record, made by the exclusive create (lib/root.sh `bionic_new`, so never another's):
+# `.<record's name>.<pid>.<draw>.<try>`. One a killed append left is never read again.
+_wt_proofs_private() {  # <record path> -> 0 with BIONIC_NEW naming the new empty file; 1 when none was made
+  bionic_need root.sh bionic_new && bionic_new "${1%/*}/.${1##*/}"
 }
 
 # THE APPEND IS ONE WRITE (wave-27 T69; review pass 48; A-orch-124, A-orch-132). The record had a
@@ -973,8 +971,9 @@ _wt_proofs_write() {  # <file> <text> -> 0 appended, 1 not (the proofs=unwritten
   _WT_PROOFS_SAW=""
   if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then _WT_PROOFS_SAW="the record's path is not a regular file"; return 1; fi
   ! _wt_proofs_cut "$1" || lead="$nl"
-  priv="$(_wt_proofs_private "$1")" || { _WT_PROOFS_SAW="no private file could be made beside the record"; return 1; }
-  { printf '%s%s\n' "$lead" "$block" > "$priv"; } 2>/dev/null || { rm -f "$priv"; _WT_PROOFS_SAW="the private file could not be written"; return 1; }
+  _wt_proofs_private "$1" || { _WT_PROOFS_SAW="no private file could be made beside the record"; return 1; }
+  priv="$BIONIC_NEW"
+  { printf '%s%s\n' "$lead" "$block" >| "$priv"; } 2>/dev/null || { rm -f "$priv"; _WT_PROOFS_SAW="the private file could not be written"; return 1; }
   size="$(wc -c < "$priv" 2>/dev/null)"; size="${size//[!0-9]/}"
   before=0; [ ! -e "$1" ] || { before="$(wc -c < "$1" 2>/dev/null)"; before="${before//[!0-9]/}"; }
   if [ -z "$size" ] || [ -z "$before" ]; then rm -f "$priv"; _WT_PROOFS_SAW="the block or the record could not be measured"; return 1; fi
@@ -1362,9 +1361,10 @@ worktree_mark() {  # <tree> <name>
   _wt_workspace_value_bad "$name" && { printf 'invalid-name'; return 1; }
   gd="$(git_linked_dir "$tree")"
   case $? in 0) ;; 2) printf 'not-a-linked-worktree'; return 1 ;; *) printf 'not-a-tree'; return 1 ;; esac
-  printf '%s\n' "$name" > "$gd/bionic-agent.$$" 2>/dev/null \
-    && mv -f "$gd/bionic-agent.$$" "$gd/bionic-agent" 2>/dev/null \
-    || { rm -f "$gd/bionic-agent.$$"; printf 'marker-unwritable'; return 1; }
+  BIONIC_NEW=""
+  { bionic_need root.sh bionic_new && bionic_new "$gd/bionic-agent" && printf '%s\n' "$name" >| "$BIONIC_NEW" \
+    && mv -f "$BIONIC_NEW" "$gd/bionic-agent"; } 2>/dev/null \
+    || { [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW"; printf 'marker-unwritable'; return 1; }
 }
 
 # worktree_marker <tree> -> the name the tree's marker holds; rc 1 and nothing when it carries none (wave-35
@@ -1416,10 +1416,12 @@ worktree_record_tree() {  # <root> <sid> <name> <abs tree>
   for v in "$tree" "$plan" "$row" "$name" "$sid"; do
     _wt_workspace_value_bad "$v" && { printf 'tree-field-unrecordable'; return 1; }
   done
-  printf '%s|path=%s|plan=%s|row=%s|worker=%s|spawned-by=%s|at=%s\n' "$TREE_RECORD_SCHEMA" \
-    "$tree" "$plan" "$row" "$name" "$sid" "$(iso_now)" > "$f.$$" 2>/dev/null \
-    && mv -f "$f.$$" "$f" 2>/dev/null \
-    || { rm -f "$f.$$"; printf 'tree-record-unwritable'; return 1; }
+  BIONIC_NEW=""
+  { bionic_need root.sh bionic_new && bionic_new "$f" \
+    && printf '%s|path=%s|plan=%s|row=%s|worker=%s|spawned-by=%s|at=%s\n' "$TREE_RECORD_SCHEMA" \
+       "$tree" "$plan" "$row" "$name" "$sid" "$(iso_now)" >| "$BIONIC_NEW" \
+    && mv -f "$BIONIC_NEW" "$f"; } 2>/dev/null \
+    || { [ -z "$BIONIC_NEW" ] || rm -f "$BIONIC_NEW"; printf 'tree-record-unwritable'; return 1; }
 }
 
 # A TREE MADE FOR A ROW IS ONE EVENT OF ITS RUN. The row is the one the name's brief was rendered from
@@ -1573,19 +1575,14 @@ _wt_workspace_paths() {  # <root> <sid> <name> <all: 1 or 0>
   _wt_workspaces_unlinked "$1" "$f" || return 2
   [ -e "$f" ] || return 1
   { [ -f "$f" ] && [ -r "$f" ]; } || return 2
-  out="$(WT_SID="$2" WT_NAME="$3" WT_ALL="$4" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
+  out="$(WT_SID="$2" WT_NAME="$3" WT_ALL="$4" awk -F'|' -v schema="$WORKSPACE_SCHEMA" "$_LINE_FIELDS_AWK"'
     BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; all = ENVIRON["WT_ALL"] }
     { sub(/\r$/, "") }
     $1 != schema { next }
     {
-      s = ""; n = ""; p = ""; hn = 0
-      for (i = 2; i <= NF; i++) {
-        if (index($i, "session=") == 1) s = substr($i, 9)
-        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
-        else if (index($i, "path=") == 1) p = substr($i, 6)
-      }
-      if (s != sid || substr(p, 1, 1) != "/") next
-      if (all == "1" || (hn && n == want)) print p
+      p = line_kv("path")
+      if (line_kv("session") != sid || substr(p, 1, 1) != "/") next
+      if (all == "1" || line_kv("name") == want) print p
     }' "$f" 2>/dev/null)" || return 2
   [ -n "$out" ] || return 1
   _wt_listed_trees "$1" "$out" "$4"

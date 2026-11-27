@@ -88,10 +88,9 @@ export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0
 
 # ---------- fixtures ----------
 
-# A FIXTURE'S PLAN AT 15 is the one the poker's prelude writes when asked: sp_at15, read from that file so the
-# rewrite of a page and its log has one source. A fixture here writes its page as before and then rewrites it.
-eval "$(sed -n '/^sp_at15() {/,/^}/p' "$(dirname "$0")/session-poker.prelude.sh")"
-declare -F sp_at15 >/dev/null || { echo "stop: sp_at15 not read from the poker's prelude — suite refuses to run"; exit 1; }
+# A FIXTURE'S PLAN AT 15 is the one the poker's prelude writes when asked: sp_at15, from tests/lib/plan-fixture.sh, so
+# the rewrite of a page and its log has one home. A fixture here writes its page as before and then rewrites it.
+. "$(dirname "$0")/lib/plan-fixture.sh" || { echo "stop: cannot load lib/plan-fixture.sh — suite refuses to run"; exit 1; }
 
 # RESOLVED (`pwd -P`): mktemp answers under /var, which is a symlink to /private/var
 # on this platform, and `project_root` answers with the physical path — so an
@@ -177,7 +176,6 @@ refusal_lines() {
 require_helpers roster_header roster_row_fixture mkfix unmet_row usage_tx fire reason_of \
                 refusal_lines verdict_of duty_ctx duty_path headline_of
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "1: a bound session's landing refusal at the turn end is one duty"
 
 D=$(mkfix); unmet_row "$D"
@@ -194,7 +192,6 @@ expect_eq "1e: it is ONE duty, and the person's stream carries no refusal line" 
 expect_absent "1g: a bound session's composed verdict carries no unbound advisory" \
   "session unbound" "$STOP_ERR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "2: one block and one advisory"
 
 # UNBOUND (wave-23-fixit-1810, REQ-1, D1): the landing sweep reads no plan, so it blocks as it
@@ -209,7 +206,6 @@ expect_eq "2e2: …which carries no refusal line" "0" "$(refusal_lines)"
 rm -f "$D/.bionic/tmp/engaged-$SID.state"; fire "$D"
 expect_eq "2f: …and the same fixture with no engagement marker: a bystander's turn end exits 0, saying nothing" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "4: SubagentStop — only the landing arm has anything to say there"
 
 # THE OTHER THREE READ THE EVENT AND RETURN. A subagent has no Patrol duties and
@@ -229,7 +225,6 @@ fire "$D3"
 expect_contains "4c: …which the SAME unbound fixture on a Stop does print" \
   "session unbound" "$STOP_ERR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "7: the real tick's turn, judged by the wall's own ready set (REQ-10 AC-10.2; D5; wave-20 Δ7)"
 
 # RE-POINTED AT WAVE-20 (REQ-5, Δ7; ADR-036 decision 3). The wall no longer reads the printed
@@ -351,7 +346,6 @@ expect_absent "7f: …and a turn that dispatched the named task is not refused f
 expect_absent "7g: …nor for the retired printed-FILL arm" "Patrol fill unanswered" "$(reason_of)$STOP_ERR"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "8: an amended Files: is the one the landing reads (wave-20 T9, REQ-4, AC-4.1)"
 
 # THE DEFECT (consumer report #4). A writer's brief declared its Files:, the work turned out to
@@ -460,7 +454,6 @@ expect_absent "8f: the stop wall counts lib/a.sh inside a contract declared as \
   "LANDING DIFF OUTSIDE" "$STOP_ERR$(reason_of)"
 expect_eq "8f: …and the stop is admitted" "0|" "$STOP_RC|$(verdict_of)"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "9: the fill refusal's headline names only the rows the turn left out (wave-20 T11b; review R4; wave-36 T32)"
 
 # THE DEFECT (review R4, T12 F7). The headline said "rows are ready and this turn dispatched
@@ -599,7 +592,6 @@ expect_contains "9t: the same fixture with room records state=ok (9q discriminat
   "$S9_LED0"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "PERSON: a refusal only the person can act on reaches the person, alone and beside a duty at the same turn end"
 if [ "$(id -u)" -ne 0 ]; then
   PS_LINE="bionic: stop refused — the bound plan cannot be read (restore read access to the plan)"
@@ -620,7 +612,6 @@ else
   printf 'SKIPPED: the unreadable-plan case needs a non-root uid (root reads mode 000)\n' >&2
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "GAP: one width fact and one refusal — the wall asks the gate as the tick does, and names every unanswered row once (wave-36 T32; D13, AC-7.1)"
 
 # THE DEFECT (found in wave-36's own run; record/wave-36-zero-machine-errors/fill-ledger.log from
@@ -749,7 +740,6 @@ expect_contains "GAP4d a gate read under a tab IFS counts the request waiting: i
 expect_eq "GAP4e …and leaves it open" "open" \
   "$(grep -q '^ended=' "$GAP4_GATE/requests/1" 2>/dev/null && echo ended || { [ -s "$GAP4_GATE/requests/1" ] && echo open; })"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "LOAD: over the line with no room, the tick stands down the newest writer whose row has not landed, one a tick; its row is pending and FILL offers it when the room opens; an admitted run is never ended"
 
 # A RUN THAT HAS OVERCOMMITTED THE MACHINE DIALS ITSELF DOWN. gap_fixture's plan with its first rows
@@ -826,7 +816,6 @@ expect_contains "LOAD4d AC-20.2 the next tick, its admitted run still open, says
 expect_eq "LOAD4e …and across the two ticks one writer was stood down" "1" "$(printf '%s\n%s\n' "$LOAD4_T" "$LOAD4_T2" | grep -c '^poker: STANDDOWN wl-')"
 kill "$LOAD4_HP" "$LOAD4_HA" 2>/dev/null
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "UB: unbound means no run — two plans, two sessions, the real Stop per session (wave-23-fixit-1810, REQ-1, AC-1.1/AC-1.2)"
 
 # THE SEED, REPRODUCED (record/wave-23-fixit-1810/seed-bug-fill-gate-acts-on-fallback-plan-
@@ -908,7 +897,6 @@ expect_contains "UB2b: …naming T5 as not launched" "ready with room: T5" "$(he
 expect_absent "UB2c: …and A hears no unbound advisory" "session unbound" "$STOP_ERR"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "WAIT: a row waits by a dependency, a read of a ruling or an order; the refusal names the three, and a waiting row is not ready, so the turn ends"
 
 # THE DEFECT. A ready row the run meant to hold was answered by a reason in prose, which the wall
@@ -1009,7 +997,6 @@ wait_fire "$W_D4L"
 expect_eq "WAIT4d the control: the order lifted, the row is ready and refused" "duty" "$(wait_decision)"
 expect_contains "WAIT4e …naming it" "ready with room: T13" "$(headline_of)"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "GONE: no verb records a wait in prose: decline is an unknown verb, and nothing writes a decline or a lapse"
 
 # THE HISTORY READER. A run's old fill ledger keeps its decline and lapse lines, and the hand-holds
@@ -1026,7 +1013,6 @@ GONE_RC=$?
 expect_eq "GONE2 the decline verb exits as any unknown verb does" "2" "$GONE_RC"
 expect_contains "GONE2b …and says it is unknown" "unknown verb: decline" "$GONE_OUT"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "LOG: the wall reads the run's step, approval and order from its facts, as the tick does, so a fact the log alone holds moves the ready-with-room verdict"
 
 # A run with a log is read from the log alone (lib/reader.sh), and its page at 15 holds no approval. LOG1: the log
@@ -1052,7 +1038,6 @@ s7_fire "$LOG_D1" "$LOG_TX"
 expect_eq "LOG4 a cancel the log appends after LOG1's approval leaves no row ready: the turn ends unrefused" "|" \
   "$(verdict_of)|$(s9_headline)"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "ONE: a stop is one event: the turn's end the hook records is the run's stop event, the reader's answer at 15, and a log it cannot write changes nothing the hook says"
 
 # A run at 15 is read from its log, so a turn's end recorded anywhere else is lost to the reader. Each Stop below is the
@@ -1098,7 +1083,6 @@ one_stop "$ONE_P" u-one-p
 expect_eq "ONE8 a plain directory: the same exit 0 and silence" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
 expect_eq "ONE8b …and no file is written in it (ONE6b reads the checkout's event)" "$ONE_PB" "$(cd "$ONE_P" && find . -type f | sort)"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "GUARD: the stop guard's words, its roster writes and the agent guard's check are the stop library's, each called in a shell of its own"
 
 # Every expected value below is what the stop guard printed or wrote before its fold.
@@ -1312,7 +1296,6 @@ for f in main-thread foreign-roster unengaged roster-link tmp-link bionic-link; 
   expect_eq "AGENT $f: the same stop is not this tool's to judge, exit 0 and silent" "0|" "$STOP_RC|$STOP_OUT$STOP_ERR"
 done
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "RUNNING: a tick of this session is running: its record is judged by the one alive rule, and a second tick exits at once"
 
 # THE RECORD. A tick writes `.bionic/tmp/tick-run-<sid>.state` (pid= and start=, the start as `ps -o lstart=` prints
@@ -1377,5 +1360,4 @@ expect_false "RUN6d …and removing it when it ends" test -e "$RN_REC"
 unset RN_REC
 { kill "$RN_LIVE"; wait "$RN_LIVE"; } 2>/dev/null; trap - EXIT
 
-# ─────────────────────────────────────────────────────────────────────────────
 finish

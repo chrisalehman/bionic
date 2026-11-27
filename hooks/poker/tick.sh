@@ -618,8 +618,7 @@ tick_unlanded_tree() {
   recs="$(printf '%s\n' "$3" | tr ',' '\n' | /usr/bin/grep 'record/' | paste -sd, -)"
   units_record_stands "$POKER_RUN_PLAN" "$id" "$recs" "$tree" "$(docs_root "$tree" 2>/dev/null)" || return 0
   th="$(git -C "$tree" rev-parse --verify -q HEAD 2>/dev/null)" || return 0
-  { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
-  declare -F proof_branch_head >/dev/null 2>&1 || return 0
+  bionic_need proof.sh proof_branch_head >/dev/null 2>&1 || return 0
   wh="$(proof_branch_head "$POKER_RUN_PLAN" "$REPO_REAL" 2>/dev/null)" && [ -n "$wh" ] || return 0
   n="$(git -C "$tree" rev-list --count "$wh..$th" 2>/dev/null)"
   case "$n" in ''|*[!0-9]*|0) return 0 ;; esac
@@ -717,7 +716,7 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
   prog="$(adopt_abs "$(line_field "$row" progress)" "$REPO_REAL")"
   if [ -n "$prog" ] && [ -f "$prog" ]; then
     OBS_PROGRESS_STATE=present
-    pm="$(file_mtime "$prog")"
+    pm="$(file_mtime "$prog" || echo 0)"
     OBS_PROGRESS_AGE=$(( now - pm ))
     [ "$OBS_PROGRESS_AGE" -lt 0 ] && OBS_PROGRESS_AGE=0
   fi
@@ -740,7 +739,7 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
     tx=""
     [ -n "$proj" ] && { tx="$(agent_log_newest "$id" "$proj")" || tx=""; }
     if [ -n "$tx" ]; then
-      OBS_LOG_MTIME="$(file_mtime "$tx")"
+      OBS_LOG_MTIME="$(file_mtime "$tx" || echo 0)"
       lm="$OBS_LOG_MTIME"
       OBS_LOG_AGE=$(( now - OBS_LOG_MTIME ))
       [ "$OBS_LOG_AGE" -lt 0 ] && OBS_LOG_AGE=0
@@ -842,7 +841,7 @@ tick_waits_only_on_person() {
 # readers' RUN_* globals are not moved under the tick.
 tick_runs_out() (
   [ -f "${ROSTER_FILE:-}" ] && [ ! -L "$ROSTER_FILE" ] || exit 1
-  for n in $(awk -F'|' '/[|]run_log=/ { for (i = 1; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6) }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
+  for n in $(awk -F'|' "$_LINE_FIELDS_AWK"'/[|]run_log=/ && (n = line_kv("name")) != "" { print n }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
     run_load_row "$(run_row_of "$ROSTER_FILE" "$n")" "$ROSTER_FILE" || continue
     run_read
     [ "$RUN_STATE" != RUNNING ] || exit 0
@@ -1124,16 +1123,8 @@ tick_watch_facts() {  # <file>
           [ -z "${TICK_RUNS_KEY:-}" ] || printf '%s\n' "$TICK_RUNS_KEY"
           # Which arm names each NOTIFY row: a second arm naming a row already named is news.
           [ -z "${TICK_NOTIFY_ARMS:-}" ] || printf 'arms=%s\n' "$TICK_NOTIFY_ARMS"
-          printf '%s\n' "$VERDICT_OUT" | awk -F'|' '
-            $1 == "landing-verdict/v1" {
-              n = ""; st = ""; ak = ""
-              for (i = 2; i <= NF; i++) {
-                if (index($i, "name=") == 1) n = substr($i, 6)
-                else if (index($i, "state=") == 1) st = substr($i, 7)
-                else if (index($i, "acked=") == 1) ak = substr($i, 7)
-              }
-              print n "|" st "|" ak
-            }' | LC_ALL=C sort
+          printf '%s\n' "$VERDICT_OUT" | awk -F'|' "$_LINE_FIELDS_AWK"'
+            $1 == "landing-verdict/v1" { print line_kv("name") "|" line_kv("state") "|" line_kv("acked") }' | LC_ALL=C sort
           # A reader started without its checks: the whole line, and the ids beside it (T37; S1).
           [ -z "${US_NOTIFY_IDS:-}" ] || printf 'unchecked=%s\n' "$US_NOTIFY_IDS"
           awk '
@@ -1266,7 +1257,7 @@ tick_watch_facts() {  # <file>
     # is news, so the tick after it prints in full, and an unchanged tick stays the one line it is.
     TICK_RUNS_LINES=""; TICK_RUNS_KEY=""
     if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
-      for TR_NAME in $(awk -F'|' '/[|]run_log=/ { for (i = 1; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6) }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
+      for TR_NAME in $(awk -F'|' "$_LINE_FIELDS_AWK"'/[|]run_log=/ && (n = line_kv("name")) != "" { print n }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
         run_load_row "$(run_row_of "$ROSTER_FILE" "$TR_NAME")" "$ROSTER_FILE" || continue
         run_read
         [ "$RUN_STATE" = RUNNING ] || continue

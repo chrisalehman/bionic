@@ -32,21 +32,23 @@
 #                 script is found beside it, and the checkout holds the reader's one.
 #   §DEAD         a planted name of a removed landing function is found by its line; the checkout names neither.
 #   §LOGPATH      the run log's path is joined in the reader alone: a planted second join is found by its line.
-#   §GITHOME      a second resolution of the common git directory planted in a hook is found by its file; the checkout holds
-#                 none beside the root library's `git_common_dir`.
 #   §DOCSPATH     adopt and the review proof read a record spelled from the project root or the docs root through lib/root.sh
 #                 `docs_path`; a join of the docs root to an operand planted in a script is found by its file.
 #   §LOADER      the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
 #                 tree; a copy planted in a hook file is listed and counted.
-#   §COPIES       a load-once guard, a self-dir, a common-directory lookup and a field-by-key reader planted under
-#                 payload/scripts/ are each listed by line with its home and counted, and refused by none; the one
-#                 bootstrap line, each idiom in its home's own file, a key spelt as a literal and a suite's line are not
-#                 counted. The tree's lookups are the carried list's. tests/lib/lint.sh over a changed file names a
-#                 copy and its home only once the check's list of refusing counts holds that idiom's count.
+#   §COPIES       a load-once guard, a self-dir, a common-directory lookup and a field-by-key reader, of a handed key
+#                 or of a literal one at a walked field, planted under payload/scripts/ are each listed by line with its
+#                 home, counted and refused; the one bootstrap line, a load that tests what it loaded, each idiom in its
+#                 home's own file, a key at a fixed place, in a walk from the first cell or only filtering, and a
+#                 suite's line are not counted. tests/lib/lint.sh over a changed file names a copy and its home only
+#                 while the check's list of refusing counts holds that idiom's count.
+#   §ONE-HOME     a merged concept's shape planted outside its home is listed with the home and counted; in the home it is not.
 #   §KEPT         each copy kept by name admits its line in the tree; an entry whose copy is gone is a finding and a
 #                 refusal, while a root that holds no file of an entry does not judge it.
-#   §REPORT       with the plants the check exits 1, refusing each finding of the five refusing kinds once; a loader
-#                 copy alone is refused by its file and line; it ends on the ten count lines, in their order.
+#   §UNRULED      a log writer of a type the log does not rule, by its call or a pass-through's, or spelt as no word, is refused.
+#   §TREE         every count reads 0 at the head, and every count is on the list of refusing counts.
+#   §REPORT       with the plants the check exits 1, refusing each finding of the refusing kinds once; a loader
+#                 copy alone is refused by its file and line; it ends on the twelve count lines, in their order.
 #   §READINGS     readings.sh prints the release's readings at a revision from git objects; reading 1 is the
 #                 check's own count over that tree, reading 7 the born events the reader lists for the record.
 #
@@ -322,22 +324,6 @@ mkdir -p "$S/dead/payload/scripts"; printf '%s\n' 'f() { :; }' '# worktree_land_
 expect_eq "a planted comment naming a removed landing function is found by its file and line" "payload/scripts/p.sh:2" "$(dead "$S/dead")"
 expect_eq "the checkout's code, hooks, skills and agents name neither removed landing function" "" "$(dead "$BIONIC_SCRIPTS_DIR")"
 
-section "GITHOME"
-# The common git directory is resolved by lib/root.sh's `git_common_dir` and by no other code. A line that is not a
-# comment and names `git-common-dir` is a resolution of its own, counted by file so that a line moving is no change.
-# The root library is the resolver's own file, and no other file resolves it: a lookup that also wants a second
-# answer asks the root library's paired lookup, and a lease of a tree asks its lease lookup.
-git_homes() { ( cd "$1" && /usr/bin/grep -rnE -- 'git-common-dir' payload/scripts hooks 2>/dev/null \
-  | awk -F: '{ t = $0; sub(/^[^:]*:[^:]*:/, "", t); if (t !~ /^[ \t]*#/) print $1 }' | /usr/bin/grep -vx 'payload/scripts/lib/root\.sh' \
-  | LC_ALL=C sort | uniq -c | awk '{ printf "%s:%s ", $2, $1 }' | sed 's/ $//' ); }
-CARRIED=""
-expect_eq "the checkout resolves the common git directory for itself in no file but the root library" "$CARRIED" "$(git_homes "$S")"
-printf '%s\n' '# asks --git-common-dir in a comment' 'f() { git_common_dir "$1"; }' > "$L/planted-home.sh"
-expect_eq "a comment naming the flag and a caller of the function are no resolution of their own" "$CARRIED" "$(git_homes "$S")"
-printf '%s\n' 'g() { git -C "$1" rev-parse --git-common-dir; }' >> "$L/planted-home.sh"
-expect_eq "a second resolution planted beyond them is found by its file" "$(printf '%s\n' $CARRIED payload/scripts/lib/planted-home.sh:1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')" "$(git_homes "$S")"
-rm -f "$L/planted-home.sh"
-
 section "LOADER"
 expect_eq "the loader block's mark is found in one file, the loader's own" "payload/scripts/lib/loader.sh" \
   "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl '^# --- bionic-loader/v2 BEGIN' hooks payload/scripts | sort | tr '\n' ' ' | sed 's/ $//')"
@@ -352,7 +338,9 @@ section "COPIES"
 CR="$S/lone-copies"; mkdir -p "$CR/hooks" "$CR/payload/scripts/lib" "$CR/tests"
 # 1 guard on its line · 2-5 an if above · 6 an unguarded load · 7-8 the line before · 9 the bootstrap line · 10 another
 # spelling of it · 11-14 a self-dir · 15 a directory function that reads no BASH_SOURCE · 16 a one-line self-dir · 17 a
-# lookup · 18 a comment naming the flag · 19 an awk reader · 20 a literal key · 21 a shell reader · 22 a word read by blank
+# lookup · 18 a comment naming the flag · 19 an awk reader · 20 a literal key at a fixed place · 21 a shell reader · 22 a
+# word read by blank · 23-24 a literal key at a walked field whose value the line takes · 25 a literal key that only filters
+# · 26-29 a merged concept's shape · 30 a load that tests what it loaded, and a key in a walk from the first cell
 cat > "$CR/payload/scripts/lib/c.sh" <<'EOF'
 declare -F foo_x >/dev/null 2>&1 || . "$d/foo.sh"
 if ! declare -F bar_x >/dev/null 2>&1; then
@@ -376,10 +364,18 @@ v() { awk -F'|' -v k="$2" '{ for (i = 2; i <= NF; i++) if (index($i, k "=") == 1
 r() { awk -F'|' 'index($2, "row=") == 1 { print }'; }
 _c_field() { local IFS='|' f; for f in $1; do case "$f" in "$2="*) printf '%s\n' "${f#"$2="}"; return 0 ;; esac; done; }
 w() { case " $1 " in *" $2="*) : ;; esac; }
+n() { awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "name=") == 1) { print substr($i, 6); exit } }'; }
+m() { awk '{ c = split($0, f, "|"); for (j = 2; j <= c; j++) if (index(f[j], "fails-when=") == 1) print substr(f[j], 12) }'; }
+d() { awk -F'|' '{ o = $1; for (i = 2; i <= NF; i++) { if (index($i, "reason=") == 1) continue; o = o "|" $i } print o }'; }
+o() { r="$R/.bionic/tmp/roster-${S}.state"; }
+t() { echo "${BIONIC_NOW_EPOCH:-}"; }
+p() { die "REFUSED — cannot resolve the working directory."; }
+q() { n="x.$RANDOM"; }
+x() { ( . "$d/walls.sh" && declare -F matrix_x ) && awk -F'\t' '{ for (i = 1; i <= NF; i++) if (index($i, "id=") == 1) print substr($i, 4) }'; }
 EOF
 # Each idiom in its home's own file, and a suite's guard, which the counts do not read.
 printf '%s\n' 'declare -F foo_x >/dev/null 2>&1 || . "$d/foo.sh"' > "$CR/payload/scripts/lib/loader.sh"
-printf '%s\n' 'git_common_dir() { git -C "$1" rev-parse --git-common-dir; }' > "$CR/payload/scripts/lib/root.sh"
+printf '%s\n' 'git_common_dir() { git -C "$1" rev-parse --git-common-dir; }' 'n="x.$RANDOM"' > "$CR/payload/scripts/lib/root.sh"
 printf '%s\n' "function line_kv(k,   i) { for (i = 2; i <= NF; i++) if (index(\$i, k \"=\") == 1) return substr(\$i, length(k) + 2); return \"\" }" \
   > "$CR/payload/scripts/lib/fields.sh"
 printf '%s\n' 'declare -F foo_x >/dev/null 2>&1 || . "$d/foo.sh"' > "$CR/tests/t.sh"
@@ -389,32 +385,33 @@ L1="payload/scripts/lib/c.sh"
 expect_eq "guards on their line, under an if and after the line before, a second spelling of the bootstrap line and the two self-dirs are listed by line" \
   "$L1:1 $L1:4 $L1:8 $L1:10 $L1:11 $L1:16" "$(copies load-guard)"
 expect_eq "the lookup is listed by its line, the comment naming the flag is not" "$L1:17" "$(copies git-home)"
-expect_eq "the awk reader and the shell reader are listed by line, a literal key and a word read by blank are not" "$L1:19 $L1:21" "$(copies field-reader)"
-expect_eq "each is counted, and none is refused: the check exits 0 and says nothing on stderr" "6 1 2 rc=0 ''" \
-  "$(count "$CO" load_guards) $(count "$CO" git_homes) $(count "$CO" field_readers) rc=$CRC '$(cat "$S/.cerr")'"
+expect_eq "the awk readers, by a handed key or a literal one at a walked field, and the shell reader are listed by line; a key at a fixed place, a key that only filters and a word read by blank are not" \
+  "$L1:19 $L1:21 $L1:23 $L1:24" "$(copies field-reader)"
+expect_eq "each is counted and refused: the check exits 1, one line on stderr for each" "6 1 4 rc=1 15" \
+  "$(count "$CO" load_guards) $(count "$CO" git_homes) $(count "$CO" field_readers) rc=$CRC $(grep -c ' refused — [a-z-]* payload/scripts/lib/c.sh:[0-9]*$' "$S/.cerr")"
 home() { printf '%s\n' "$CO" | awk -F'\t' -v w="$1" '$2 == w { print $3 }'; }
 expect_eq "a guard names its home" "guard: use bionic_need (payload/scripts/lib/loader.sh)" "$(home "$L1:1")"
 expect_eq "a self-dir names itself and its home" "self-dir _c_self_dir: use bionic_need (payload/scripts/lib/loader.sh)" "$(home "$L1:11")"
 expect_eq "a lookup names its home" "lookup: use git_common_dir (payload/scripts/lib/root.sh)" "$(home "$L1:17")"
-expect_eq "an awk reader and a shell reader name their homes" \
-  "awk reader: use line_kv (payload/scripts/lib/fields.sh)|shell reader: use line_value (payload/scripts/lib/fields.sh)" "$(home "$L1:19")|$(home "$L1:21")"
-expect_eq "the tree's lookups, counted by the check, are as many as the carried list's" \
-  "$(printf '%s\n' $CARRIED | awk -F: '{ n += $2 } END { print n + 0 }')" "$(count "$BEFORE" git_homes)"
-expect_regex "the tree's guards and readers are counted" "^[0-9]+ [0-9]+$" "$(count "$BEFORE" load_guards) $(count "$BEFORE" field_readers)"
-# The lint names a copy in a changed file with its home only once the check's list of refusing counts holds the idiom's
-# count; the same plant read by the check as it is, and by a copy whose list holds the three counts.
+expect_eq "an awk reader, a shell reader and a literal key's reader name their homes" \
+  "awk reader: use line_kv (payload/scripts/lib/fields.sh)|shell reader: use line_value (payload/scripts/lib/fields.sh)|awk reader: use line_kv (payload/scripts/lib/fields.sh)" \
+  "$(home "$L1:19")|$(home "$L1:21")|$(home "$L1:23")"
+# The lint names a copy in a changed file with its home only while the check's list of refusing counts holds the idiom's
+# count; the same plant read by the check as it is, and by a copy whose list holds none of them.
 OH="$S/onehome"; mkdir -p "$OH/payload"; cp -R "${BIONIC_SCRIPTS_DIR}/hooks" "$OH/hooks"; cp -R "${BIONIC_SCRIPTS_DIR}/payload/scripts" "$OH/payload/scripts"
 cp "$CR/payload/scripts/lib/c.sh" "$OH/payload/scripts/lib/planted-copies.sh"
 onehome() { printf '%s\n' payload/scripts/lib/planted-copies.sh | bash "$LINT_LIB" "$OH" 2>/dev/null | awk '$1 == "ONEHOME"'; }
-OH_OFF="$(onehome)"
-sed 's/^REFUSING="\(.*\)"$/REFUSING="\1 load_guards git_homes field_readers"/' "$CHECK" > "$OH/payload/scripts/one-reader-check.sh"
-expect_eq "setup: the copy's list of refusing counts is the only line changed" 1 "$(diff "$CHECK" "$OH/payload/scripts/one-reader-check.sh" | grep -c '^>')"
 OH_ON="$(onehome)"
-expect_eq "with the three counts refusing, the lint names each copy in the changed file by line" \
-  "planted-copies.sh:1 planted-copies.sh:4 planted-copies.sh:8 planted-copies.sh:10 planted-copies.sh:11 planted-copies.sh:16 planted-copies.sh:17 planted-copies.sh:19 planted-copies.sh:21" \
-  "$(printf '%s\n' "$OH_ON" | awk '{ sub(/.*\//, "", $2); print $2 }' | tr '\n' ' ' | sed 's/ $//')"
+sed 's/^REFUSING=.*/REFUSING="parsers"/' "$CHECK" > "$OH/payload/scripts/one-reader-check.sh"
+expect_eq "setup: the copy's list of refusing counts is the only line changed" 1 "$(diff "$CHECK" "$OH/payload/scripts/one-reader-check.sh" | grep -c '^>')"
+expect_eq "with the counts refusing, the lint names each copy in the changed file by line" \
+  "1 4 8 10 11 16 17 19 21 23 24 26 27 28 29" "$(printf '%s\n' "$OH_ON" | awk '{ sub(/.*:/, "", $2); print $2 }' | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "…naming the home beside the line" "ONEHOME payload/scripts/lib/planted-copies.sh:17 — lookup: use git_common_dir (payload/scripts/lib/root.sh)" "$OH_ON"
-expect_eq "with the list as the check holds it, the same changed file is named by none" "" "$OH_OFF"
+expect_eq "with none of them on the list, the same changed file is named by none" "" "$(onehome)"
+
+section "ONE-HOME"
+expect_eq "a merged concept's shape outside its home is listed by line, and not in the home's own file" "$L1:26 $L1:27 $L1:28 $L1:29" "$(copies home)"
+expect_eq "…naming the home, and counted" "roster path: use roster_path (payload/scripts/lib/roster.sh)|4" "$(home "$L1:26")|$(count "$CO" homes)"
 
 section "KEPT"
 KEPT="$(sed -n 's/^KEPT_COPIES="\(.*\)"$/\1/p' "$CHECK")"
@@ -422,7 +419,7 @@ expect_nonempty "the check keeps copies by name" "$KEPT"
 for e in $KEPT; do
   f="${e%%:*}"; fnn="${e#*:}"
   expect_eq "$e: the kept copy stands in its file and admits its line" "1|" \
-    "$(/usr/bin/grep -cE "^[[:space:]]*$fnn[[:space:]]*\(\)" "$S/$f")|$(printf '%s\n' "$BEFORE" | awk -F'\t' -v f="$f:" -v n="$fnn" '$1 == "load-guard" && index($2, f) == 1 && index($3, n ":")')"
+    "$(/usr/bin/grep -cE "^[[:space:]]*$fnn[[:space:]]*\(\)" "$S/$f")|$(printf '%s\n' "$BEFORE" | awk -F'\t' -v e="$e" '$1 == "kept" && $2 == e')"
 done
 expect_absent "no entry of the list stands unheld in the tree" "$(printf 'kept\t')" "$BEFORE"
 # The doctor's self-dir in a root of its own: kept as it is, and named twice once its name moves off the entry.
@@ -433,18 +430,29 @@ KO="$(bash "$CHECK" "$KR" 2>&1)"; KRC=$?
 expect_contains "renamed, the self-dir is listed" "$(printf 'load-guard\tpayload/scripts/doctor.sh:')" "$KO"
 expect_contains "…and the entry that admits no line is a finding" "$(printf 'kept\tpayload/scripts/doctor.sh:_doctor_self_dir\tadmits no line')" "$KO"
 expect_eq "…refused, by its entry, and counted with the names" "one-reader-check: refused — kept payload/scripts/doctor.sh:_doctor_self_dir|names=1|rc=1" \
-  "$(printf '%s\n' "$KO" | grep '^one-reader-check: refused — ')|$(printf '%s\n' "$KO" | grep '^names=')|rc=$KRC"
+  "$(printf '%s\n' "$KO" | grep '^one-reader-check: refused — kept')|$(printf '%s\n' "$KO" | grep '^names=')|rc=$KRC"
 expect_absent "a root holding none of the kept files judges no entry" "$(printf 'kept\t')" "$CO"
+
+section "UNRULED"
+expect_eq "a log writer of an unruled type, by its call, a pass-through's or spelt as no word, is refused by line; a message naming the appender is none" \
+  "$(printf 'one-reader-check: refused — unruled payload/scripts/lib/p.sh:%s|' 1 2 3)rc=1" \
+  "$(printf '%s\n' 'a() { log_append bogus; }' 'b() { p "$l" bogus; }' 'c() { log_append B; }' 'd() { echo "log_append bogus"; }' \
+    'p() { RUN_LOG="$1" log_append "$@"; }' | lone unruled payload/scripts/lib/p.sh | sort | paste -sd'|' -)"
+
+section "TREE"
+cn() { printf '%s\n' "$1" | sed -n "s/^\([a-z_]*\)=$2\$/\1/p" | sort | paste -sd' ' -; }
+expect_eq "every count reads 0 at the head, and the check exits 0" "$(cn "$TREE" '[0-9]*')|0" "$(cn "$TREE" 0)|$TRC"
+expect_eq "…and every count is on the list of refusing counts" "$(cn "$TREE" '[0-9]*')" "$(printf '%s\n' $(sed -n 's/^REFUSING="\(.*\)"$/\1/p' "$CHECK") | sort | paste -sd' ' -)"
 
 section "REPORT"
 expect_status "with the plants the check exits 1" 1 "$RC"
-expect_eq "it refuses each planted parser, plan writer, shared type, loader copy and name once, on stderr" \
-  "$(( $(count "$AFTER" parsers) + $(count "$AFTER" plan_writers) + $(count "$AFTER" shared_types) + $(count "$AFTER" loader_copies) + $(count "$AFTER" names) ))" "$(grep -c '^one-reader-check: refused — ' "$S/.err")"
+expect_eq "it refuses each finding of the refusing kinds once, on stderr" \
+  "$(( $(for c in $(sed -n 's/^REFUSING="\(.*\)"$/\1/p' "$CHECK"); do printf '%s+' "$(count "$AFTER" $c)"; done) 0 ))" "$(grep -c '^one-reader-check: refused — ' "$S/.err")"
 expect_eq "a loader copy planted alone is refused by its file and line" "one-reader-check: refused — loader hooks/p.sh:1 rc=1" \
   "$(echo '# --- bionic-loader/v2 BEGIN' | lone loader hooks/p.sh | tr '\n' ' ' | sed 's/ $//')"
-expect_eq "it ends on the ten count lines, in order" \
-  "parsers plan_writers shared_types hook_refusals loader_copies unheard_folds names load_guards git_homes field_readers" \
-  "$(printf '%s\n' "$AFTER" | tail -10 | sed -n 's/^\([a-z_]*\)=[0-9][0-9]*$/\1/p' | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "it ends on the twelve count lines, in order" \
+  "parsers plan_writers shared_types hook_refusals loader_copies unheard_folds names load_guards git_homes field_readers unruled homes" \
+  "$(printf '%s\n' "$AFTER" | tail -12 | sed -n 's/^\([a-z_]*\)=[0-9][0-9]*$/\1/p' | tr '\n' ' ' | sed 's/ $//')"
 bash "$CHECK" "$S/no-such" >/dev/null 2>&1; expect_status "a root that is not a checkout exits 2" 2 "$?"
 
 # §READINGS runs from the checkout; a scratch commit on a shared clone moves a count without touching it. The records

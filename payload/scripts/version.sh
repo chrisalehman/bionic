@@ -90,16 +90,14 @@ PLUGIN_VERSION="${PLUGIN_FACT#plugin: version=}"; PLUGIN_VERSION="${PLUGIN_VERSI
 # ─── The commit or the feed ──────────────────────────────────────────────────
 FEED_KIND="$(detect_marketplace_feed_kind)"
 
-_version_is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
-
 # THE TREE THE REGISTRY NAMES, NOT THIS PROCESS'S CWD — same reasoning as doctor.sh's
 # DOCTOR_INSTALL_PATH: `detect_registry_sha_lag` compares against a directory, and the
 # only directory that comparison means anything against is the one the CLI actually
 # installed to, never wherever this script happened to be invoked from.
 VERSION_INSTALL_PATH="$(detect_plugin_install_path bionic 2>/dev/null)" || VERSION_INSTALL_PATH=""
-if [ -z "$VERSION_INSTALL_PATH" ] || ! _version_is_repo "$VERSION_INSTALL_PATH"; then
+if [ -z "$VERSION_INSTALL_PATH" ] || ! is_repo "$VERSION_INSTALL_PATH"; then
   _version_root_alt="$(plugin_root)"
-  if _version_is_repo "$_version_root_alt"; then VERSION_INSTALL_PATH="$_version_root_alt"; fi
+  if is_repo "$_version_root_alt"; then VERSION_INSTALL_PATH="$_version_root_alt"; fi
   [ -n "$VERSION_INSTALL_PATH" ] || VERSION_INSTALL_PATH="$_version_root_alt"
 fi
 

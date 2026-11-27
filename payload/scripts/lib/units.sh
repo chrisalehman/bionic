@@ -12,6 +12,8 @@
 #                              carries no `## Tasks` table.
 #   units_questions <record>   the questions a review row declares, comma-joined, off its task cell's
 #                              ` · questions:` tag; nothing when it declares none.
+#   units_kinds [<col> <word>] the kinds of row (UNITS_KINDS), and those a writer's slot or a role column names;
+#                              units_kind_role and units_kind_offer, the role a kind draws from its tag or is offered.
 #   units_ready <plan> <step> [<roster> [<ack ledger> [<session id>]]]
 #                              the ids of rows whose status is `pending` and whose every read
 #                              is satisfied, whatever their step (wave-26 T2, D1: what a row
@@ -583,6 +585,52 @@ units_questions() {  # <units_rows record> -> the declared questions, or nothing
   return 0
 }
 
+# THE KINDS OF ROW, AND THE ROLE EACH TAKES: one line a kind, `<kind> <slot> <role>`, in the order the validator's
+# refusal names them. This is the one home of the kind words and of the two questions asked of a kind:
+# - <slot> is who takes a writer's place in the fill. A `readonly` kind runs a read-only role and takes none while its
+#   Files write no head (fill.sh `fill_readonly_ids`); every `writer` kind edits a tree.
+# - <role> is the role a row of the kind is run by when its agent cell names none. `tag` is the role its task cell's
+#   complexity tag names, which the Step-3 card prints and the start verb takes, and the implementor when no tag
+#   names one; `questions` is the role the plan's rigor deals the row's questions; any other word is that role,
+#   which start offers and never takes unasked. The card prints a role for a `tag` kind alone.
+# The two columns answer different questions, so a doc row takes a writer's place and still draws no role on the card.
+UNITS_KINDS='build writer tag
+test writer tag
+verify readonly implementor
+review readonly questions
+doc writer senior-implementor
+integrate writer implementor
+close writer implementor
+prototype writer implementor'
+
+# units_kinds [<slot|role> <word>] -> the kinds, space-joined, in the list's order; given a column and a word, only
+# the kinds whose column holds that word.
+units_kinds() {
+  printf '%s\n' "$UNITS_KINDS" | awk -v c="${1:-}" -v w="${2:-}" '
+    c == "" || (c == "slot" && $2 == w) || (c == "role" && $3 == w) { printf "%s%s", (n++ ? " " : ""), $1 }'
+}
+
+# units_kind_role <kind> <task cell> -> the role the row's complexity tag draws, `senior-implementor` for complex and
+# `implementor` for standard, on a kind whose role is `tag`; nothing for any other kind, for a cell with no tag, or a
+# word the plan step does not define: no role is guessed.
+units_kind_role() {
+  local re='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
+  [ "$(_units_kind_word "${1:-}")" = tag ] || return 0
+  [[ "${2:-}" =~ $re ]] || return 0
+  case "${BASH_REMATCH[2]}" in complex) printf 'senior-implementor' ;; standard) printf 'implementor' ;; esac
+}
+
+# units_kind_offer <kind> -> the role offered a row of the kind that names none: its <role> word, `implementor` for
+# a `tag` kind or a kind the list does not hold, and `questions` for a kind whose role is dealt by its questions.
+units_kind_offer() {
+  local o
+  o="$(_units_kind_word "${1:-}")"
+  case "$o" in ''|tag) printf 'implementor' ;; *) printf '%s' "$o" ;; esac
+}
+
+# _units_kind_word <kind> -> the kind's <role> word in the list, or nothing for a word the list does not hold.
+_units_kind_word() { printf '%s\n' "$UNITS_KINDS" | awk -v k="${1:-}" '$1 == k { print $3; exit }'; }
+
 # units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base·reads,
 #                      tab-separated, one line per row, in TABLE order. Exit 1 when there is
 #                      no table.
@@ -1070,10 +1118,10 @@ units_approval_names() {
   else
     rows="$(units_rows "${1:-}" 2>/dev/null)" && waits="$(_units_waits "${1:-}" 2>/dev/null)" || return 0
   fi
-  { printf '%s\n\034\n' "$rows"; printf '%s\n' "$waits"; } | awk -F'\t' -v all="${2:+0}" '
+  { printf '%s\n\034\n' "$rows"; printf '%s\n' "$waits"; } | awk -F'\t' -v all="${2:+0}" "$_PLAN_READ_RELEASE_AWK"'
     $0 == "\034" { w = 1; next }
     !w { s = tolower($10)
-      if ($3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && s != "dropped") hasrel = 1
+      if (release_row($3, $2, s, "standing")) hasrel = 1
       if (s == "pending" || s == "active") { open[$1] = $3; if ($3 == "integrate" && all != "0") print "release" }
       next }
     $2 == "wait" && ($1 in open) && $3 ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ {
@@ -1087,10 +1135,10 @@ units_approval_names() {
 # `units_validate` holds an open plan to the order itself. A test row marked as a whole-run point (`marked`) is a run
 # among the build, never the regression row, so the order skips it.
 units_order() {
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$(_units_cell_awk)"'
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$_PLAN_READ_RELEASE_AWK$(_units_cell_awk)"'
     tolower($10) == "dropped" || $2 !~ /^[0-9]+$/ { next }
     $3 == "test" && $2 + 0 <= 5 && reg == "" && !marked($4) { reg = $1 }
-    $3 == "doc" && $2 + 0 >= 7 { rel = 1 }
+    release_row($3, $2) { rel = 1 }
     END { if (reg == "" || !rel) exit 1; print reg }'
 }
 
@@ -1410,7 +1458,7 @@ _units_questions_awk() {
 # read, so a caller judging a copy of a plan hands the plan it was copied from: a copy's own name names no record.
 _units_publish_order() {
   local plan="${1:-}" rec
-  printf '%s\n' "${2:-}" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }' || return 0
+  printf '%s\n' "${2:-}" | awk -F'\t' "$_PLAN_READ_RELEASE_AWK"'release_row($3, $2, $10, "landed") { f = 1 } END { exit !f }' || return 0
   declare -F proof_debt_record >/dev/null 2>&1 || return 0
   rec="$(proof_debt_record "$plan" 2>/dev/null)" && _proof_fields && line_held "$rec" || return 0
   units_record_landings "$rec" | awk -F'\t' '
@@ -1495,14 +1543,14 @@ units_post_readers() {
   # The registered reviews are the run's proofs (`_units_proofs`), read from the origin a copy was made from.
   proofs="$(_units_proofs "${origin:-$plan}")" || return 1
   { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; [ -z "$waits" ] || printf '\035\n%s\n' "$waits"; } \
-    | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+    | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$_PLAN_READ_RELEASE_AWK$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
     $0 == "\034" { p = 1; next }
     $0 == "\035" { p = 2; next }
     p == 2 { post_wait(); next }
     !p { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10 }; next }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
     END {
-      for (r = 1; r <= n; r++) if (knd[r] == "doc" && stp[r] ~ /^[0-9]+$/ && stp[r] + 0 >= 7 && sta[r] == "landed") rel[r] = 1
+      for (r = 1; r <= n; r++) if (release_row(knd[r], stp[r], sta[r], "landed")) rel[r] = 1
       for (j = 1; j <= n; j++) {
         if (knd[j] != "review" || sta[j] == "dropped" || stp[j] !~ /^[0-9]+$/) continue
         ok = 0
@@ -1526,6 +1574,7 @@ units_post_readers() {
 # the question test it shares with the validator.
 _units_sched_awk() {
   _units_questions_awk
+  printf '%s' "$_PLAN_READ_RELEASE_AWK"
   printf '%s' '
     $0 == SUBSEP "rows" { part = 1; next }
     $0 == SUBSEP "facts" { part = 2; next }
@@ -1957,7 +2006,7 @@ _units_sched_awk() {
       readst = ENVIRON["_UNITS_READ_ST"]
       # A PLAN CARRIES A RELEASE when a doc row at Step 7 or later is not dropped (wave-35 T5; A-T5-1).
       hasrel = 0
-      for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && st[i] != "dropped") hasrel = 1
+      for (i = 1; i <= n; i++) if (release_row(knd[i], stp[i], st[i], "standing")) hasrel = 1
       for (i = 1; i <= n; i++) {
         # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
         # taken off and remembered for the unmergeable hold; code[] says the row writes the tracked tree.
@@ -2219,7 +2268,7 @@ units_validate() {
     live="$(_units_live "${origin:-$plan}")" || lrc=1
     st15="$(printf '%s\n' "$live" | awk -F'\t' '$2 != "" { printf "%s=%s ", $1, $2 }')"
     rows15="$(_units_overlay "$live" "$rows")"
-    if printf '%s\n' "$rows15" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }'; then
+    if printf '%s\n' "$rows15" | awk -F'\t' "$_PLAN_READ_RELEASE_AWK"'release_row($3, $2, $10, "landed") { f = 1 } END { exit !f }'; then
       waits="$(_units_waits "$plan")" || waits=""
     fi
   fi
@@ -2228,8 +2277,8 @@ units_validate() {
     case "$rows" in *" · questions:"*) bionic_need proof.sh proof_question_ok ;; esac
   fi
   if [ -n "$rows" ]; then
-    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" \
-      -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
+    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" -v kindw="$(units_kinds)" \
+      -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$_PLAN_READ_RELEASE_AWK$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -2237,7 +2286,7 @@ units_validate() {
         # one cell a raw pipe cannot move.
         m0 = split(over, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { sub(/=.*$/, "", o0[i0]); if (o0[i0] != "") skip[o0[i0]] = 1 }
-        split("build test verify review doc integrate close prototype", kk, " ")
+        split(kindw, kk, " ")
         for (i in kk) kinds[kk[i]] = 1
         m0 = split(st15, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { e0 = index(o0[i0], "="); if (e0 > 1) ost[substr(o0[i0], 1, e0 - 1)] = substr(o0[i0], e0 + 1) }
@@ -2261,8 +2310,8 @@ units_validate() {
             printf "%s: step %s is outside 3-9\n", id[i], (stp[i] == "" ? "(empty)" : stp[i])
 
           if (!(knd[i] in kinds))
-            printf "%s: kind %s is not one of build test verify review doc integrate close prototype\n", \
-              id[i], (knd[i] == "" ? "(empty)" : knd[i])
+            printf "%s: kind %s is not one of %s\n", \
+              id[i], (knd[i] == "" ? "(empty)" : knd[i]), kindw
 
           # A ROW AT 15 NAMES ITS QUESTIONS IN ITS TASK CELL, as the task-add verb writes the tag, and is held to the rule
           # the verb holds it to: a review row alone, each question one isq admits, once, comma-separated with no space.
@@ -2357,7 +2406,7 @@ units_validate() {
             if ((id[i] in skip) || stp[i] !~ /^[0-9]+$/ || sta[i] == "dropped") continue
             if (knd[i] == "test") ord[i] = 1
             else if (knd[i] == "review") ord[i] = 2
-            else if (knd[i] == "doc" && stp[i] + 0 >= 7) ord[i] = 3
+            else if (release_row(knd[i], stp[i])) ord[i] = 3
           }
           for (i = 1; i <= n; i++) {
             if (!(i in ord) || ord[i] == 2) continue

@@ -90,7 +90,6 @@ rt_check() {
   RT_RC=$?
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 1: the tree arm on this repo (AC-R1.1)"
 
 rt_check "$REPO" --check
@@ -103,7 +102,6 @@ expect_match "1b: …and says every final and the manifest match a fresh render"
 # pinning it against the live checkout would make this suite a function of the developer's
 # staging area. Sections 2-6 drive it against fixtures whose commit state the suite owns.
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 3: a gitignored render input — the tree arm cannot see it, the archive arm can (AC-R1.4)"
 
 # THE PLANT. A block file that is on disk and OUT of HEAD, injected by a template that IS
@@ -136,7 +134,6 @@ rt_check "$FIX_IGN" --check --archive
 expect_ne "3e: the ARCHIVE arm is RED on the same tree" "0" "$RT_RC"
 expect_match "3f: …and it names the render input HEAD is missing" "*planted*" "$RT_OUT"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 4: a source edit left out of the commit — the arm DIFFS, it does not only detect missing files"
 
 # A different failure mode of the same class, and the one that proves the arm compares
@@ -169,7 +166,6 @@ expect_match "4d: …and it names a rendered final that HEAD does not reproduce"
 expect_match "4e: …and prints the difference as a diff, not only a verdict" \
   "*UNCOMMITTED SOURCE SENTENCE*" "$RT_OUT"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 5: the manifest half, and that --archive never writes"
 
 FIX_MAN="$TMPROOT/manifest"
@@ -203,7 +199,6 @@ expect_ne "5f: the bare --archive form is a check too (red on the same doctored 
 expect_true "5g: …and it wrote nothing either" \
   grep -qF "$RT_ZEROS" "$FIX_MAN/payload/integrity/rendered.sha256"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 6: the arm refuses rather than passes when it cannot do its job"
 
 FIX_OK="$TMPROOT/control"
@@ -232,7 +227,6 @@ expect_match "6b: …and says what it needed" "*git work tree*" "$RT_OUT"
 expect_true "6c: the renderer documents the arm in its own usage block" \
   grep -qF 'THE ARCHIVE ARM' "$RENDER_SH"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 7: a stray template under the role unit never becomes a phantom role file (A15, S10, AC-R4.3)"
 
 # THE DEFECT THIS GUARDS AGAINST. `agents-src/templates` (the role unit) is a flat
@@ -280,7 +274,6 @@ bash "$FIX_A15R/agents-src/render.sh" >/dev/null 2>&1
 expect_true "7f: …a template naming a real role still renders (7c-7d discriminate on membership)" \
   test -f "$FIX_A15R/agents/auditor.md"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 8: render.sh itself is a render input the archive arm compares (A-18)"
 
 # THE GAP THIS CLOSES (A-18; s01-render-pipeline's A-S01-1). Every OTHER source under
@@ -311,7 +304,6 @@ rt_check "$FIX_OK" --check --archive
 expect_status "8e: …while an honestly-committed renderer keeps the archive arm green" \
   0 "$RT_RC"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "Section 9: browser-verify's frontmatter description is valid YAML (A19, AC-R4.3)"
 
 # THE DEFECT (A19). A `description:` scalar with an unquoted `: ` sequence deep inside its

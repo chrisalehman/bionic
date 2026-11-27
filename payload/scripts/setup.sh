@@ -640,12 +640,7 @@ _setup_say_declined() {  # <rc> <tail sentence, already worded for "declined —
 # `-L` ALONE STILL LIES ABOUT ONE INPUT (delta 2 N4): on a DANGLING link BSD
 # `stat -L` falls back to the link and exits 0, reporting 755. `[ -e ]` turns that
 # into the empty "unknowable" answer the callers already handle.
-_setup_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
-  local mode
-  mode="$(stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null)"
-  [ -e "$1" ] || mode=""
-  printf '%s' "$mode"
-}
+# The capture is lib/markers.sh's `_markers_file_mode`, the one reader of it.
 
 # ONE STAGING ORDER, AND THE CHMOD IS AT THE END OF IT (critic delta 2 N5).
 # Create the tmp under `umask 077`, let the caller write the content into it, and
@@ -656,17 +651,23 @@ _setup_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if
 # order S13 shipped (chmod, THEN write) had the tmp already wearing a 0644 rc's
 # mode while the rc's own contents, tokens and all, were being written into it,
 # which is what the header above says the order exists to prevent. remove.sh's
-# `_rm_stage_tmp`/`_rm_publish_tmp` carry the same pair, spelled the same way, so
-# the two doors cannot drift again.
+# `_rm_stage_tmp`/`_rm_publish_tmp` carry the same pair in the same order, so the
+# two doors cannot drift again; only the tmp's name is made differently here.
 #
-# A tmp left by an earlier interrupted run is REMOVED rather than truncated: `>`
-# on an existing file keeps that file's mode, so truncating one would carry a
-# stale width through the window `umask 077` exists to close.
-_setup_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then publishes
-  local tmp="$1"
-  rm -f "$tmp"
-  (umask 077; : > "$tmp") || return 1
-  return 0
+# The tmp is a NEW file, never one an earlier interrupted run left: `>` on an
+# existing file keeps that file's mode, so reusing one would carry a stale width
+# through the window `umask 077` exists to close. Its name is made by the exclusive
+# create (lib/root.sh `bionic_new`) under that umask, so two setups in sibling
+# subshells never stage into one file.
+_setup_stage_tmp() {  # <prefix> -> SETUP_TMP, a new empty file beside <prefix> at 0600; the caller writes, then publishes
+  local um rc
+  SETUP_TMP=""
+  bionic_need root.sh bionic_new || return 1
+  um="$(umask)"; umask 077
+  bionic_new "$1"; rc=$?
+  umask "$um"
+  [ "$rc" -eq 0 ] || return 1
+  SETUP_TMP="$BIONIC_NEW"
 }
 
 # The other half: widen <tmp> to <file>'s mode and rename it over <file>. <file>
@@ -674,7 +675,7 @@ _setup_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then
 # replaces it.
 _setup_publish_tmp() {  # <tmp> <file>
   local tmp="$1" file="$2" mode
-  mode="$(_setup_file_mode "$file")"
+  mode="$(_markers_file_mode "$file")"
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file"
 }
@@ -1981,11 +1982,11 @@ setup_notify() {
   consent "   Declare the channel, and send one test notification now?"; _setup_consent_rc=$?
   if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${file} is not written and nothing is sent."; action "declare the notification channel in ${file} and send one test notification — $(_setup_answer_yes notify)"; return 0; fi  # consent gate: notify item
 
-  local tmp="${file}.setup.$$"
-  if ! { mkdir -p "${file%/*}" && _setup_stage_tmp "$tmp" \
-         && printf 'topic-from=%s\ntitle-prefix=bionic\n' "$from" > "$tmp" \
-         && _setup_publish_tmp "$tmp" "$file"; } 2>/dev/null; then
-    rm -f "$tmp" 2>/dev/null
+  SETUP_TMP=""
+  if ! { mkdir -p "${file%/*}" && _setup_stage_tmp "${file}.setup" \
+         && printf 'topic-from=%s\ntitle-prefix=bionic\n' "$from" >| "$SETUP_TMP" \
+         && _setup_publish_tmp "$SETUP_TMP" "$file"; } 2>/dev/null; then
+    [ -z "$SETUP_TMP" ] || rm -f "$SETUP_TMP" 2>/dev/null
     item "$SETUP_BAD" "notifications" "could not write ${file} — it is as it was"
     action "declare the notification channel in ${file} (bionic could not write the file)"
     return 0

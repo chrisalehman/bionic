@@ -74,6 +74,8 @@
 #   §SETUP               a shared setup that loads a helper on a line with no stop is refused by file and line.
 #   §STOP                a maker that fails stops the suite that asked, its processes and nothing beside it, with one
 #                        line; a setup or a tests/lib file that calls maker_stop with no load of it is refused by line.
+#   §NO-BORROW           a suite that cuts a function by name out of another suite's file, on its line or through a
+#                        variable or a helper's argument, is refused by file and line; a product file's cut is no hit.
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The shipped tree is
 # read where it lies, never copied. Every mutant is SYNTHESIZED here, and each one is first
@@ -1960,5 +1962,126 @@ expect_eq "STOP-4 every real setup and library that calls maker_stop loads it" "
 cp "$ST/bad.prelude.sh" "$LT/tests/stopbad.prelude.sh" && mkdir -p "$LT/tests/lib" && cp "$ST/bad.prelude.sh" "$LT/tests/lib/stopbad.sh"
 expect_eq "STOP-5 the landing's run, told a setup and a library that call it unloaded, names each as a STOP hit" \
   "STOP tests/lib/stopbad.sh:4|STOP tests/stopbad.prelude.sh:4" "$(lint_at "$LT" tests/stopbad.prelude.sh tests/lib/stopbad.sh | tr '|' '\n' | LC_ALL=C sort | paste -sd'|' -)"
+
+# ============================================================
+section "NO-BORROW — a suite that reads a function by name out of another suite's file is refused by file and line"
+# ============================================================
+# A helper one suite reads out of another's file by name has two homes: the file it is written in and every file
+# that cuts it out, and a change to the first reaches the second unseen. A shared helper lives in tests/lib, and
+# every suite that needs it loads it. The reader is an awk or sed program that prints from `<name>() {`; its file is
+# named on its line, or reached through a variable it reads (an assignment) or a function argument (a call). A
+# product file read that way is a pin of that file's text, never a second home of a test helper, so it is no hit.
+# fails-when: a suite cuts a function out of another suite's file, directly or through a helper, and the sweep passes.
+cat > "$TMP/borrow.awk" <<'BORROW_AWK_EOF'
+# One file of tests/, heredoc bodies blanked. F is its path; ALL=1 prints every extraction, a borrow or not ("-").
+function strip(line,   i, n, c, st) {
+  n = length(line); st = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(line, i, 1)
+    if (st == "s") { if (c == "'") st = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (st == "d") { if (c == "\"") st = ""; continue }
+    if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) return substr(line, 1, i - 1)
+    if (c == "'") st = "s"; else if (c == "\"") st = "d"
+  }
+  return line
+}
+# The suite files a text names, its own and a load's operand left out.
+function names(line,   rest, m, pre, out) {
+  out = ""; rest = line
+  while (match(rest, /[A-Za-z0-9_.-]+\.(test|prelude)\.sh/)) {
+    m = substr(rest, RSTART, RLENGTH); pre = substr(rest, 1, RSTART - 1); rest = substr(rest, RSTART + RLENGTH)
+    if (m == OWN) continue
+    if (pre ~ /(^|[;&|({!][ \t]*|[ \t])(\.|source)[ \t]+[^;&|]*$/) continue
+    out = out (out == "" ? "" : " ") m
+  }
+  return out
+}
+# Every variable a text reads joins extraction e's set; a positional one stands for the calls of line i's function.
+function reads(e, i, text,   v, k) {
+  gsub(/'[^']*'/, "", text)
+  while (match(text, /\$\{?([A-Za-z_][A-Za-z0-9_]*|[1-9])/)) {
+    v = substr(text, RSTART, RLENGTH); text = substr(text, RSTART + RLENGTH); sub(/^\$\{?/, "", v)
+    k = (v ~ /^[1-9]$/) ? ("()" FN[i]) : v
+    if (k == "()" || (e, k) in S) continue
+    S[e, k] = 1; grew = 1
+  }
+}
+function add(e, n,   a, j, c) {
+  c = split(n, a, " ")
+  for (j = 1; j <= c; j++) if (index(" " HIT[e] " ", " " a[j] " ") == 0) HIT[e] = HIT[e] (HIT[e] == "" ? "" : " ") a[j]
+}
+BEGIN { OWN = F; sub(/.*\//, "", OWN) }
+{
+  L[NR] = strip($0)
+  if (match(L[NR], /^[ \t]*[A-Za-z_][A-Za-z0-9_]*\(\)[ \t]*\{/)) { fn = substr(L[NR], RSTART, RLENGTH); gsub(/[ \t(){]/, "", fn) }
+  FN[NR] = fn
+  if (L[NR] ~ /"\(\) \{"/ || L[NR] ~ /\/\^[ \t]*([A-Za-z_][A-Za-z0-9_]*|\$\{?[A-Za-z0-9_]+\}?)\(\) \{\/,/) E[++ne] = NR
+}
+END {
+  for (x = 1; x <= ne; x++) {
+    e = E[x]; HIT[e] = ""; add(e, names(L[e])); grew = 0; reads(e, e, L[e])
+    for (pass = 0; grew && pass < 8; pass++) {
+      grew = 0
+      for (i = 1; i <= NR; i++) {
+        if (i == e) continue
+        for (k in S) {
+          split(k, kk, SUBSEP); if (kk[1] != e) continue; v = kk[2]
+          if (v ~ /^\(\)/) {
+            f = substr(v, 3)
+            if (L[i] ~ ("(^|[ \t;&|(!])" f "[ \t]") && L[i] !~ ("^[ \t]*" f "\\(\\)")) { add(e, names(L[i])); reads(e, i, L[i]) }
+          } else if (match(L[i], "(^|[ \t;])" v "=")) {
+            t = substr(L[i], RSTART + RLENGTH); add(e, names(t)); reads(e, i, t)
+          }
+        }
+      }
+    }
+    if (HIT[e] != "") print F ":" e "\t" HIT[e]
+    else if (ALL) print F ":" e "\t-"
+  }
+}
+BORROW_AWK_EOF
+borrow_refusals() {  # [ALL=1] <file>... -> `<file>:<line> TAB <suite files>` per line that cuts a function out of another suite's file
+  local f; for f in "$@"; do awk -f "$LINT_TMP/census-blank.awk" "$f" | LC_ALL=C awk -v F="$f" -v ALL="${ALL:-}" -f "$TMP/borrow.awk"; done
+}
+NB="$TMP/borrow"; mkdir -p "$NB"
+# The plants are heredoc bodies, so the sweep of this suite's own file reads them as text.
+cat > "$NB/bad.test.sh" <<'NB_BAD'
+#!/bin/bash
+eval "$(sed -n '/^sp_at() {/,/^}/p' "$(dirname "$0")/poker.prelude.sh")"
+b="$(awk -v n=w 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$H/proof.test.sh")"
+imp() {  # <name> <file>
+  eval "$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$2")"
+}
+imp mk "$(dirname "$0")/close.prelude.sh"
+CO="$(dirname "$0")/walls.prelude.sh"
+imp2() { local body from="${2:-$CO}"
+  body="$(sed -n "/^$1() {/,/^}/p" "$from")"; eval "$body"; }
+imp2 eg
+NB_BAD
+cat > "$NB/good.test.sh" <<'NB_GOOD'
+#!/bin/bash
+. "$(dirname "$0")/close.prelude.sh" || exit 1
+GATE="$REPO/hooks/gate.sh"
+FN="$(sed -n '/^  budget() {/,/^  }$/p' "$GATE")"
+eval "$(sed -n '/^own() {/,/^}/p' "$(dirname "$0")/good.test.sh")"
+# eval "$(sed -n '/^x() {/,/^}/p' tests/close.prelude.sh)"
+cat > "$p/s.sh" <<'EOF'
+eval "$(sed -n '/^x() {/,/^}/p' "$H/close.prelude.sh")"
+EOF
+run_suite "a.test.sh"
+NB_GOOD
+for f in "$NB"/*.test.sh; do expect_true "the planted ${f##*/} parses under /bin/bash -n" /bin/bash -n "$f"; done
+expect_eq "NO-BORROW-1 each cut is refused by line, naming the file it reads: a sed range, an awk program, a helper's argument, a helper's default" \
+  "$NB/bad.test.sh:2 poker.prelude.sh|$NB/bad.test.sh:3 proof.test.sh|$NB/bad.test.sh:5 close.prelude.sh|$NB/bad.test.sh:10 walls.prelude.sh" \
+  "$(borrow_refusals "$NB/bad.test.sh" | tr '\t' ' ' | paste -sd'|' -)"
+expect_eq "…and the same reader finds the control's two live cuts, a product file's and its own file's, and no more" \
+  "$NB/good.test.sh:4 -|$NB/good.test.sh:5 -" "$(ALL=1 borrow_refusals "$NB/good.test.sh" | tr '\t' ' ' | paste -sd'|' -)"
+expect_eq "control: a setup's load, a product file's cut, a cut of its own file, a comment, a heredoc body and a bare name are refused for nothing" "" \
+  "$(borrow_refusals "$NB/good.test.sh")"
+NB_REAL="$(ALL=1 borrow_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh | wc -l | tr -d ' ')"
+expect_true "the real sweep reads cuts: ${NB_REAL} in the suites, setups and libraries under tests/" [ "${NB_REAL:-0}" -gt 0 ]
+expect_eq "NO-BORROW-2 no suite, setup or library under tests/ cuts a function out of another suite's file" "" \
+  "$(borrow_refusals "$TESTS_DIR"/*.test.sh "$TESTS_DIR"/*.prelude.sh "$TESTS_DIR"/lib/*.sh)"
 
 finish

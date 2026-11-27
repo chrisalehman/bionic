@@ -154,8 +154,9 @@ alive_note() {
   _alive_find "$sid" && [ -n "$_A_START" ] || return 1
   d="$(_alive_records)"
   mkdir -p "$d" 2>/dev/null || return 1
-  tmp="$d/.$sid.$$"
-  printf 'pid=%s\nstart=%s\ncwd=%s\n' "$_A_PID" "$_A_START" "${_A_CWD//$'\n'/ }" > "$tmp" 2>/dev/null \
+  bionic_need root.sh bionic_new && bionic_new "$d/.$sid" || return 1
+  tmp="$BIONIC_NEW"
+  printf 'pid=%s\nstart=%s\ncwd=%s\n' "$_A_PID" "$_A_START" "${_A_CWD//$'\n'/ }" >| "$tmp" 2>/dev/null \
     && mv -f "$tmp" "$d/$sid" 2>/dev/null || { rm -f "$tmp"; return 1; }
   for rec in "$d"/*; do
     [ -f "$rec" ] && [ ! -L "$rec" ] || continue

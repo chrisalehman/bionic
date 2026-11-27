@@ -422,7 +422,7 @@ booked_exit() {
 CHILD=""; RUN_RC=0
 # The request this shim asked for: its id, and whether this shim holds it (1) or runs under an
 # ancestor's admission the gate believed (0). Only a holder samples and ends it.
-BOOKED_ID=""; BOOKED_OWN=0; BOOKED_SAMPLE_TICKS=10; BOOKED_IDF=""
+BOOKED_ID=""; BOOKED_OWN=0; BOOKED_SAMPLE_TICKS=10
 
 booked_tree() {  # <pid> — the pid and its descendants, each stopped so none can fork
   local c
@@ -549,7 +549,7 @@ trap 'booked_on_signal 1' HUP
 trap 'booked_on_signal 2' INT
 trap 'booked_on_signal 3' QUIT
 trap 'booked_on_signal 15' TERM
-trap 'rm -f ${BOOKED_IDF:+"$BOOKED_IDF"} ${BOOKED_NOTE:+"$BOOKED_NOTE"}' EXIT
+trap 'rm -f ${GATE_ASK_FILE:+"$GATE_ASK_FILE"} ${BOOKED_NOTE:+"$BOOKED_NOTE"}' EXIT
 
 # booked_req_field <id> <field> — the request's last <field>= line (lib/gate.sh's request file).
 booked_req_field() {
@@ -595,16 +595,11 @@ BOOKED_ASK_DIR="$stamp_dir"
 # cannot write goes on unadmitted.
 booked_ask() {
   local rc here="$PWD" moved=0
-  BOOKED_IDF="$(mktemp "${TMPDIR:-/tmp}/booked-id.XXXXXX" 2>/dev/null)"
-  # Asked from the stamp's tree (THE TREE THE ASK NAMES), in this shell, then straight back.
+  # Asked from the stamp's tree (THE TREE THE ASK NAMES), in this shell, then straight back. The id comes back through a
+  # file (lib/gate.sh `gate_ask_here`), which the exit trap removes if the shim is ended while the ask waits.
   if [ -n "$BOOKED_ASK_DIR" ] && cd "$BOOKED_ASK_DIR" 2>/dev/null; then moved=1; fi
-  if [ -n "$BOOKED_IDF" ]; then
-    gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} ${cls:+--class "$cls"} > "$BOOKED_IDF"; rc=$?
-    { read -r BOOKED_ID < "$BOOKED_IDF"; } 2>/dev/null
-    rm -f "$BOOKED_IDF"; BOOKED_IDF=""
-  else
-    BOOKED_ID="$(gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} ${cls:+--class "$cls"})"; rc=$?
-  fi
+  gate_ask_here booked-id "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} ${cls:+--class "$cls"}; rc=$?
+  BOOKED_ID="$GATE_ASK_ID"
   [ "$moved" -eq 0 ] || cd "$here" 2>/dev/null
   case "$rc" in
     0)
@@ -889,7 +884,7 @@ booked_run_line() {
 }
 
 booked_run_close() {  # <rc> — the exit trap of the detached side
-  rm -f ${BOOKED_IDF:+"$BOOKED_IDF"} ${BOOKED_NOTE:+"$BOOKED_NOTE"}
+  rm -f ${GATE_ASK_FILE:+"$GATE_ASK_FILE"} ${BOOKED_NOTE:+"$BOOKED_NOTE"}
   if [ -n "$BOOKED_ROSTER" ]; then
     roster_mark_run "$BOOKED_ROSTER" "$agent" "$run_log" "run_rc=$1" \
       "run_ended_at=$(iso_now)" 2>/dev/null

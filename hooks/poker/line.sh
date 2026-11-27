@@ -823,10 +823,9 @@ poker_verb_reviews_part() {
 # prompt; it waits on the user (lib/owed.sh `ask_waits_on`'s default arm). A later publish that succeeds closes it.
 # Nothing here forces a push, sets an upstream, or touches the local integration branch.
 PUBLISH_EXIT_OUTWARD=4
-publish_ask_key() { printf 'pr:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"; }   # <working branch>
 publish_failed() {  # <working branch> <head> <what failed> <cause> -> the ask opened, the failure said, exit 4
   local key cause
-  key="$(publish_ask_key "$1")"
+  key="$(line_ask_key pr "$1")"
   cause="$(printf '%s' "$4" | tr '\n\r\t|' '    ' | sed 's/  */ /g; s/^ //; s/ $//')"
   proof_owed open "$key" "publish: the pull request" "publish of $1 at ${2:0:12} failed: $3: ${cause:-no cause given}"
   die "FAILED — $3: ${cause:-no cause given}. No pull request was recorded; the ask $key waits on the user. Run again once it is mended: bash $HOOK_DIR/session-poker.sh publish"
@@ -945,7 +944,7 @@ poker_verb_publish() {
     die "REFUSED — $wb at ${head:0:12} is on origin and its pull request is $url, and the run's log could not be written: append ev=published|part=pr|url=$url|branch=$wb|commit=$head|base=$base|by=publish to $(line_log "$PV_PLAN" 2>/dev/null || printf 'the log'). Fix: once the log takes a line, append it, or run again: bash $HOOK_DIR/session-poker.sh publish."
     exit 1
   fi
-  proof_owed close "$(publish_ask_key "$wb")" publish
+  proof_owed close "$(line_ask_key pr "$wb")" publish
   if [ -n "$pr_url" ]; then
     say "publish — $wb at ${head:0:12} pushed to origin; the pull request $url carries it against $base."
   else

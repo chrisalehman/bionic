@@ -1066,19 +1066,19 @@ section "§OWED-AT-CLOSE — close-out settles the matrix row its own last readi
 # continuation path, else nothing and the line quoted in the report. The plan is not written.
 # FIXTURE FIDELITY: mk_fixture at Step 8; the close row T4 in its nine cells, pending, as a planner writes it, and the
 # close's own session engaged and bound by the verb (lands_bind), so close-out lands T4 itself, as a run's close does;
-# the two criteria are rows of `## Eval design` naming their task in its Task column, one the close row's on the close's
+# the two criteria are rows of `## Test design` naming their task in its Task column, one the close row's on the close's
 # measure and one the close's step's on another eval. Where a criterion stands is the reader's answer (`reader cell`).
 # fails-when: the run refuses on the pending row (OC-1; OC-1c shows the refusal live with the deferral off), or no proof names it at zero, one does above zero, a row on another eval is proved, or the plan is written.
 OC_SID="closeout-owed-sid"
-oc_rows() {  # <project> -> the page gains T4 (step 9, close) and two Eval design rows with a Task column: one owed by T4 on the close's measure, one by step 9 on another eval
+oc_rows() {  # <project> -> the page gains T4 (step 9, close) and two Test design rows with a Task column: one owed by T4 on the close's measure, one by step 9 on another eval
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "oc_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   awk '
     /^## / { sec = substr($0, 4) }
     sec == "Tasks" && /^\| T2 \|/ { print; print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-2 | .bionic/docs/record/wave-01-fixture/continuation.md | — |"; next }
-    sec == "Eval design" && /^\| Requirement \|/ { print $0 " Task |"; next }
-    sec == "Eval design" && /^\|---/ { print $0 "---|"; next }
-    sec == "Eval design" && /^\| .* \| AC-1 \|/ { print $0 " — |"
+    sec == "Test design" && /^\| Requirement \|/ { print $0 " Task |"; next }
+    sec == "Test design" && /^\|---/ { print $0 "---|"; next }
+    sec == "Test design" && /^\| .* \| AC-1 \|/ { print $0 " — |"
       print "| — | fixture | AC-2 | T3 | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero | T4 |"
       print "| — | fixture | AC-3 | T0 | the continuation names the release | the continuation is missing | 9 |"; next }
     { print }' "$plan" > "$plan.o" && mv "$plan.o" "$plan" && seal_fixture "$plan" "$1/$LOG_REL" && lands_bind "$1" "$OC_SID"
@@ -1086,7 +1086,7 @@ oc_rows() {  # <project> -> the page gains T4 (step 9, close) and two Eval desig
 oc_after() { find "$1/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1; }   # the plan where the close left it
 oc_ask() { bash "$REPO_ROOT/payload/scripts/reader.sh" "$@" 2>/dev/null; }   # <plan> <question> [args] -> the reader's answer
 oc_cell() { oc_ask "$1" cell "$2" | awk -F= '{ v[$1] = $2 } END { print v["state"] "|" v["by"] }'; }   # <plan> <AC> -> `<state>|<the event that discharged it>`
-oc_eval() { awk '/^## / { s = ($0 == "## Eval design"); next } s' "$1"; }   # <plan> -> its Eval design section
+oc_eval() { awk '/^## / { s = ($0 == "## Test design"); next } s' "$1"; }   # <plan> -> its Test design section
 oc_proofs() {  # <project> -> `<AC> <evidence>` of each proof naming a criterion in the run's log, space-joined
   awk -F'|' '$2 == "ev=proof" { a = ""; e = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^ac=/) a = substr($i, 4); if ($i ~ /^evidence=/) e = substr($i, 10) }
     if (a != "") printf "%s%s %s", (n++ ? " " : ""), a, e }' "$1/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null
@@ -1115,7 +1115,7 @@ expect_contains "OC-2 precondition: the line read last reads zero" "hand-holds: 
 OC_P="$(oc_after "$POC")"
 expect_eq "OC-3 the run's log holds one proof naming AC-2, its evidence the continuation path, beside the page's AC-1, and none naming AC-3, on another measure" \
   "$OC_AC1 AC-2 $OC_CONT" "$(oc_proofs "$POC")"
-expect_eq "OC-3b …so the reader reads AC-2 discharged by that proof and AC-3 still pending, and the delivered page's Eval design is as it was" \
+expect_eq "OC-3b …so the reader reads AC-2 discharged by that proof and AC-3 still pending, and the delivered page's Test design is as it was" \
   "discharged|proof|pending||$OC_EV0" "$(oc_cell "$OC_P" AC-2)|$(oc_cell "$OC_P" AC-3)|$(oc_eval "$OC_P")"
 expect_contains "OC-3c …and the card names the row and the status it wrote" "matrix: AC-2 discharged" "$CO_OUT"
 expect_eq "OC-3e …and a run with no act by hand has no ## Hand acts section beside its ## Hand-holds" "1|0" \
@@ -1135,7 +1135,7 @@ expect_eq "OC-5 a measure above zero still delivers: run exits 0" "0" "$CO_RC"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -15 | sed 's/^/    | /'
 expect_contains "OC-5b precondition: the line read last counts the amend" "amends=1 " "$OB_LINE"
 OB_P="$(oc_after "$POB")"
-expect_eq "OC-6 above zero the log's one proof naming a criterion is the page's AC-1, the reader reads AC-2 pending, and the delivered page's Eval design is as it was" \
+expect_eq "OC-6 above zero the log's one proof naming a criterion is the page's AC-1, the reader reads AC-2 pending, and the delivered page's Test design is as it was" \
   "$OC_AC1|pending||$OB_EV0" "$(oc_proofs "$POB")|$(oc_cell "$OB_P" AC-2)|$(oc_eval "$OB_P")"
 expect_contains "OC-6c …and the card says it is blocked, naming the line" "matrix: AC-2 blocked — $OB_LINE" "$CO_OUT"
 

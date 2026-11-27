@@ -110,7 +110,7 @@ ow_page15() {  # <Task column: yes|no> -> the page at 15, T1 landed in its log
   [ "$1" = yes ] || { h=''; s=''; }
   printf -- '---\ncanonical_sdlc_version: 15\nrigor: double\nscale: wave\n---\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
   printf '| T1 | 4 | build | the build | — | 30 | REQ-1 | a.sh | — |\n| T7 | 7 | doc | the release | — | 10 | REQ-1 | CHANGELOG.md | — |\n| T9 | 9 | close | the close | — | 10 | REQ-1 | — | — |\n'
-  printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |%s\n|---|---|---|---|---|---|%s\n' "$h" "$s"
+  printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |%s\n|---|---|---|---|---|---|%s\n' "$h" "$s"
   for x in "AC-2|T9" "AC-3|T1" "AC-4|T7" "AC-5|9" "AC-6|T1, T9" "AC-7|—"; do c=" ${x#*|} |"; [ "$1" = yes ] || c=''
     printf '| REQ-1 | a suite | %s | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close | above zero |%s\n' "${x%%|*}" "$c"; done
 }

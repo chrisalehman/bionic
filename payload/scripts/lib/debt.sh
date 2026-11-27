@@ -17,8 +17,9 @@
 #
 # THE FIELDS, each one token with no blank, no `|` (the ledger's cell separator) and no `"`:
 #   concept    any such token: `tree_count`, `adopt-orphans`.
-#   kind       one of DEBT_KINDS: the debt table's three (severity.md, lib/proof.sh PROOF_DEBT_KINDS, what
-#              a reader may write) and `hole`, the kind a writer's or the orchestrator's record declares.
+#   kind       one of DEBT_KINDS: the debt table's three (severity.md; DEBT_TABLE_KINDS, what a reader may
+#              write, which lib/proof.sh takes as its PROOF_DEBT_KINDS) and `hole`, the kind a writer's or the
+#              orchestrator's record declares.
 #   sites      one or more `<path>:<line>`, joined by ", ", quoted: the dispatch wall's touch counter
 #              (proof_debt_hits) matches a site's path against a brief's Files, so a prose site is never
 #              touched and is no site.
@@ -27,10 +28,13 @@
 #   from       the wave that carried it.
 # A line of any other shape is refused where it is written and never carried.
 #
-# Sourced, never executed. Defines one list, one constant and one function; reads nothing at load time.
+# Sourced, never executed. Defines two lists, one constant and one function; reads nothing at load time.
 # bash 3.2: no associative arrays.
 
-DEBT_KINDS="duplicate unpinned-pair one-case-abstraction hole"
+# The kinds a reading may name, in the order the table in payload/context/severity.md lists them; lib/proof.sh
+# takes them as the kinds its reader accepts. DEBT_KINDS adds the one kind only a record's writer declares.
+DEBT_TABLE_KINDS="duplicate unpinned-pair one-case-abstraction"
+DEBT_KINDS="$DEBT_TABLE_KINDS hole"
 DEBT_LINE_ERE='^debt:[[:blank:]]+[^[:blank:]|"]+[[:blank:]]+('"${DEBT_KINDS// /|}"')[[:blank:]]+"[^[:blank:],|"]+:[0-9]+(, [^[:blank:],|"]+:[0-9]+)*"[[:blank:]]+touches=[0-9]+[[:blank:]]+raised-by=[^[:blank:]|"]+[[:blank:]]+from=[^[:blank:]|"]+[[:blank:]]*$'
 
 # debt_line_ok <line> -> 0 when the line is one carried debt in the grammar above, else 1. An awk reader

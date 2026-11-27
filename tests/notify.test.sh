@@ -166,9 +166,9 @@ Land the fixture's two requirements under the fixture spec's design.
 |---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | REQ-1: the first task. It makes the first requirement true. complexity: standard | approval:release | 30 | REQ-1 | lib/first.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | it does not hold |
 FIXEOF
@@ -227,9 +227,9 @@ Answer the fixture's requirement with a design small enough to read whole.
 |---|---|---|---|
 | first thing | `lib/first.sh` | `card.sh` rows | `tests/first.test.sh` |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | source pin | AC-1.1 the first criterion | static | `grep` | the pin is gone |
 FIXEOF
@@ -400,16 +400,10 @@ expect_eq "C4a …on the ledger again" "1" "$(nt_owed "$RG" owed_list | cut -f1 
 
 # ---- T12: CLOSE-OUT'S DELIVERY (AC-2.3, the close half). A run delivered at close sends one
 # notification, once. The fixture is close-out's own (a git project at Step 8 that `run`
-# takes to delivered): its builders are read by name out of tests/close-out.prelude.sh, which every
-# close-out part sources, so this suite holds no second copy of the fixture and a builder that
-# changes there changes here.
-CO_TESTS="$(dirname "$0")/close-out.prelude.sh"
-nt_import_fn() {  # <name> [<file>] -> the function, defined here, read out of <file> (close-out.prelude.sh)
-  local body from="${2:-$CO_TESTS}"
-  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$from")"
-  if [ -z "$body" ]; then echo "nt_import_fn: no $1 in $from" >&2; return 1; fi
-  eval "$body"
-}
+# takes to delivered): its builders are tests/lib/close-out-fixture.sh, which every close-out part
+# loads too, so this suite holds no second copy of the fixture and a builder that changes there
+# changes here.
+. "$(dirname "$0")/lib/close-out-fixture.sh" || { echo "notify.test.sh: cannot load lib/close-out-fixture.sh"; exit 1; }
 REPO_ROOT="$BIONIC_SCRIPTS_DIR"
 SCRIPT="$REPO_ROOT/payload/scripts/close-out.sh"
 PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"; LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
@@ -418,11 +412,6 @@ SANDBOX="$(cd "$(mktemp -d "$TMPROOT/co.XXXXXX")" && pwd -P)"
 SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
 export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
-NT_IMPORT_MISSING=""
-for _f in in_fixture fixture_own fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to run_close_as plant_tmp_session; do
-  nt_import_fn "$_f" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
-done
-expect_eq "D0 close-out.prelude.sh's fixture builders were all read out of it" "" "$NT_IMPORT_MISSING"
 CO_SIDA="nt-closeout-session-a1a1a1a1"
 channel_on "$SB_HOME/.claude"
 
@@ -561,15 +550,10 @@ expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval
 # refusal and hooks/bash-walls.sh, the hook that calls it, opens the item, keyed as the answer verb closes it:
 # `waive:<question>` and `waive:<AC>`, both closed by `waive`. A question with no reading at all asks the run for a
 # reading first, not the person, and opens nothing (the tick's own rule, T35's A-T35-4).
-# FIXTURE FIDELITY: bash-walls-egd.test.sh's §EG-DERIVE world, its prelude's builders read out of that file by name (the
+# FIXTURE FIDELITY: bash-walls-egd.test.sh's §EG-DERIVE world, built by its own builders, tests/lib/bash-walls-world.sh (the
 # run at 15 eg6_world builds from a plan's text, which the real gate admits at current: 6 bar the readings; the reading
 # lines in lib/proof.sh's writer's shape, written into the log as the events a run at 15 holds); the real hook.
-NT_BW_PRELUDE="$(dirname "$0")/bash-walls.prelude.sh"
-NT_IMPORT_MISSING=""
-for _f in mk_repo bw_door eg6_plan eg6_reading eg6_world; do
-  nt_import_fn "$_f" "$NT_BW_PRELUDE" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
-done
-expect_eq "AK-6 precondition: the §EG-6 builders were all read out of bash-walls.prelude.sh" "" "$NT_IMPORT_MISSING"
+. "$(dirname "$0")/lib/bash-walls-world.sh" || { echo "notify.test.sh: cannot load lib/bash-walls-world.sh"; exit 1; }
 EG6_LIB="$NT_LIB/proof.sh"
 CW_HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 RCW="$(mk_repo nt-ask-gate)"

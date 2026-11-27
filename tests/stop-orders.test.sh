@@ -106,9 +106,7 @@ run_orders() {  # <repo> <args…>
   return 0
 }
 
-# ============================================================
 section "Section 1: usage, session key, hostile paths"
-# ============================================================
 
 R1="$(make_repo usage)"
 
@@ -135,9 +133,7 @@ ln -s /tmp/elsewhere.state "$R2/.bionic/tmp/stop-orders-$SID.state"
 run_orders "$R2" order someone
 expect_status "a symlinked orders file is REFUSED" 2 "$ST"
 
-# ============================================================
 section "Section 2: the order verb records, reports, and never refuses (R3)"
-# ============================================================
 
 R3="$(make_repo ordering)"
 so_roster_row "$R3" "unlanded" ".bionic/docs/record/unlanded.md"
@@ -214,9 +210,7 @@ expect_contains "…and both land on the one line" "|epoch=1788000000|" \
 expect_contains "…in the order the reader parses" "|by=patrol|target=both" \
   "$(cat "$ORDERS_FILE_B" 2>/dev/null)"
 
-# ============================================================
 section "Section 3: standdown — the batch, and what it leaves alone (AC-11, R8)"
-# ============================================================
 
 R4="$(make_repo standdown)"
 
@@ -297,9 +291,7 @@ R6="$(make_repo emptyroster)"
 run_orders "$R6" standdown
 expect_status "an empty roster answers cleanly" 0 "$ST"
 
-# ============================================================
 section "Section 3b: standdown on an ADOPTED WAIVED row survives /clear (S17, AC-12)"
-# ============================================================
 #
 # THE CROSS-SCRIPT PROOF. §3 above plants a waived row by hand with `roster_row`; this plants
 # it on a PREDECESSOR's roster and runs the real hooks/session-poker.sh `adopt` verb to carry
@@ -332,9 +324,7 @@ expect_contains "the adopted row is in the stand-down batch" \
 expect_contains "…because its CARRIED waiver, not an ack or a fresh MET" \
   "waived — adopted-waived-row" "$SD3B_BLOCK"
 
-# ============================================================
 section "Section 4: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1)"
-# ============================================================
 #
 # ap review A-1: from a worktree cwd, `git rev-parse --show-toplevel` answers the WORKTREE
 # root, not the repository resolve_project_root maps onto (dispatch-preflight.sh's own
@@ -362,9 +352,7 @@ expect_contains "…still names the open row through the worktree cwd" "live-wor
 
 git -C "$R7" worktree remove --force "$R7WT" >/dev/null 2>&1
 
-# ============================================================
 section "Section 6: standdown LANDS NOTHING; a row is stoppable by its roster mark (wave-28 T6; REQ-3, D7)"
-# ============================================================
 #
 # THE LANDING IS THE LINE'S (wave-28 T6; D7). Until 1.13.0 standdown merged each discharged row's
 # tree itself. A row now lands through `ready`
@@ -423,9 +411,7 @@ run_orders "$R4" standdown
 expect_status "a session with no trees stands down unchanged" 0 "$ST"
 expect_absent "…and reports no landings" "LANDED branch=" "$OUT"
 
-# ============================================================
 section "Section 7: standdown reports LIVENESS beside a held row, and still writes nothing (S6)"
-# ============================================================
 #
 # WHAT THE ROSTER CANNOT SAY. A row whose contract has not landed is held either way, and
 # `UNMET` reads the same whether the agent is still working on it or finished without
@@ -578,9 +564,7 @@ expect_contains "…while a row the Subagents block does NOT name is still not l
   "[not live]" "$(printf '%s\n' "$R8_LA5" | grep -F 'walked-off')"
 
 
-# ============================================================
 section "Section 8: stopped <name> acks the row it stops; standdown drops a row only when acked AND gone (wave-19 T1; REQ-1 AC-1.2/1.3; D3; ADR-034)"
-# ============================================================
 #
 # THE ACK IS THE CLOSE (ADR-034 d1). A TaskStop ends a process; nothing in it closes the
 # name. `stopped <name>` is the verb that does, beside the stop: one verdict read decides
@@ -755,7 +739,6 @@ fi
 expect_eq "…and its work is NOT merged: standdown merges nothing" "1" \
   "$(git -C "$R11" rev-list --count "HEAD..acked-gone-lease" 2>/dev/null)"
 
-# ============================================================
 # AN ABANDONED ROW'S TREE STANDS (wave-19 T1f, review R2-1). T1b made standdown land the tree
 # of every acked-and-gone row; T1e made `stopped` ack an UNMET-and-gone row as `abandoned`.
 # Together, `stopped` then `standdown` merged an abandoned agent's partial work into whatever
@@ -763,7 +746,6 @@ expect_eq "…and its work is NOT merged: standdown merges nothing" "1" \
 # live everywhere else. So this fixture puts the main checkout on a NON-protected branch
 # (`integration`), the one shape where the refusal cannot mask the merge. The verdict, not
 # the ack's reason, decides: UNMET leaves tree and branch in place for a human to salvage.
-# ============================================================
 R12="$(make_repo standdown-abandoned-stands)"
 echo seed > "$R12/README.md"
 git -C "$R12" add README.md >/dev/null 2>&1
@@ -805,9 +787,7 @@ else
   no "…its tree stands, the partial work still in it"
 fi
 
-# ============================================================
 section "Section 9: stopped — STILL-LIVE is not a close on its own; a fresh, absent panel overrides the progress-artifact shape (wave-19 T1g, audit V2-1, critic C2-2)"
-# ============================================================
 #
 # STILL-LIVE used to refuse `stopped` unconditionally, whatever the panel showed: a writer
 # TaskStopped mid-work has, by construction, a progress artifact inside its cadence, so the
@@ -924,9 +904,7 @@ else
 fi
 
 
-# ============================================================
 section "§TREE: stopped finds a landed row's tree by its row's tree in the run's log when the session's record lacks it, removes it, and names it"
-# ============================================================
 #
 # THE TREE GOES AT THE STOP, WHOEVER SPAWNED IT. A row's tree is recorded under the session whose carrier made
 # it; after a `/clear` that is a predecessor, and the name's convention spelling (`.worktrees/w45-t1`) is never
@@ -977,9 +955,7 @@ expect_status "(tt3) stopped closes a landed row whose cell names no tree on dis
 expect_contains "(tt3b) …and says it found no tree, naming where it looked" \
   "stopped: w45-T2 — its tree is not found: ${RT_REAL}/.worktrees/45-T2" "$OUT"
 
-# ============================================================
 section "§BACK: stopped on an agent gone unlanded takes its row's launch back, so the row is offered again"
-# ============================================================
 # A row launched by the log reads running until a cancel of its launch stands.
 # FIXTURE FIDELITY: the launch is written by the one appender, the rows read through lib/units.sh, the panel planted.
 # fails-when: an abandoned agent's row reads running for good, or its launch is taken back twice.
@@ -1002,9 +978,7 @@ expect_eq "(bk1b) …its row reads pending and is offered, by exactly one cancel
 run_orders_cfg "$RB" stopped w-log
 expect_status "(bk3) once its row is back, a closed name is refused as ever (exit 2)" 2 "$ST"
 
-# ============================================================
 section "§LANDED: stopped on a landed row needs no panel reading (AC-15.2)"
-# ============================================================
 # The landing's mark is the landing's own fact, so no panel is read to close its row; a row without it still reads one.
 # FIXTURE FIDELITY: the mark by the roster's one marker (`so_mark`); a metadata root of its own holds no transcript, so
 # no panel reading exists (the shared root's planted ones answer for this session's id). The section is the suite's last.
@@ -1026,5 +1000,4 @@ expect_eq "(ld2) once closed, as the landing closes it, stopped still answers (e
   "$ST $(grep -c '|event=ack|.*|name=w-landed|' "$RL/.bionic/tmp/sweeper-$SID.state")"
 
 
-# ============================================================
 finish

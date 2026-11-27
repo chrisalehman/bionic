@@ -89,16 +89,12 @@ expect_all_lines_fit() {  # <label> <max-width> <text>
 # run, so isolation is unaffected.
 TMP="$(mktemp -d "/tmp/cr.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Group A — the relay contract demands a fenced code block
-# ═══════════════════════════════════════════════════════════════════════════
 
 expect_true "A5: render.sh --check finds no drift (templates, finals and manifest agree)" \
   bash "$RENDER_SH" --check
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Group B0 — the ruler and the truncator themselves (lib/width.sh)
-# ═══════════════════════════════════════════════════════════════════════════
 #
 # EVERY ASSERTION IN GROUP B IS MEASURED WITH `bionic_cols`, so a ruler that
 # always answered 0 would pass every all-lines-fit arm below with nothing under
@@ -127,9 +123,7 @@ expect_eq "B0f: an elided string measures exactly its budget in columns" \
 expect_eq "B0g: the budget setup and doctor share is 100 columns" \
   "100" "$BIONIC_LINE_WIDTH"
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Group B — width truncation on setup's free-form fields
-# ═══════════════════════════════════════════════════════════════════════════
 
 # A curated PATH: real jq/git/bash/coreutils, no claude/brew/npm/uv/pnpm/gh/node
 # (all of which live under /opt/homebrew/bin on the authoring machine) — see
@@ -215,9 +209,7 @@ ALL_OUT="$(run_setup BIONIC_SETTINGS_FILE="$TMP/${LONGSEG}/${LONGSEG}/settings.j
 expect_contains      "B13: --all plan reaches the environment/claude-proxy verb lines" "bionic would:" "$ALL_OUT"
 expect_all_lines_fit "B14: --all plan, long paths pending — every line fits 100 columns" "$BIONIC_LINE_WIDTH" "$ALL_OUT"
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Group C — the cut is a CHARACTER cut, under the locale the product runs in
-# ═══════════════════════════════════════════════════════════════════════════
 #
 # WHAT THIS GROUP EXISTS TO CATCH, and why nothing above it could. Group B runs
 # setup under `env -i` with no LANG — the C locale, where bash's `${#s}` counts

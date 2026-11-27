@@ -184,7 +184,8 @@ SS_LOADED_FILES
   # key it does not know (close-out.sh) has read root=, commit= and started= first.
   cwd="$(cd "${BIONIC_CWD:-$PWD}" 2>/dev/null && pwd -P)" || cwd=""
   rec="$TMP/loaded-$BIONIC_SID.state"
-  tmpf="$TMP/.loaded-$BIONIC_SID.$$"
+  bionic_need root.sh bionic_new && bionic_new "$TMP/.loaded-$BIONIC_SID" || return 0
+  tmpf="$BIONIC_NEW"
   {
     printf 'root=%s\n' "$root"
     [ -n "$commit" ] && printf 'commit=%s\n' "$commit"
@@ -194,7 +195,7 @@ SS_LOADED_FILES
       ( cd "$root" && if command -v shasum >/dev/null 2>&1; then shasum -a 256 -- "${files[@]}"; else sha256sum -- "${files[@]}"; fi ) 2>/dev/null \
         | while read -r h p; do printf '%s %s\n' "$h" "$p"; done
     fi
-  } > "$tmpf" 2>/dev/null && mv -f "$tmpf" "$rec" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
+  } >| "$tmpf" 2>/dev/null && mv -f "$tmpf" "$rec" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
   return 0
 }
 ss_load_record
@@ -375,8 +376,7 @@ case "${SOURCE:-}" in
         /*) SS_DOOR_FILE="$SS_DOOR_REL" ;;
         *)  SS_DOOR_FILE="$BIONIC_ROOT/$SS_DOOR_REL" ;;
       esac
-      if [ -n "$SS_DOOR_FILE" ] && [ -f "$SS_DOOR_FILE" ] && [ ! -L "$SS_DOOR_FILE" ] \
-         && [ "$(head -n 1 "$SS_DOOR_FILE" 2>/dev/null)" = "bionic-handoff/v1" ]; then
+      if [ -n "$SS_DOOR_FILE" ] && bionic_need handoff.sh handoff_is_one && handoff_is_one "$SS_DOOR_FILE" no-link; then
         SS_DOOR="bionic: resume with /bionic:canonical-sdlc $SS_DOOR_REL"
       fi
     fi ;;
@@ -627,8 +627,8 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> [sweep flag...] -> stdout; 
   local poker="$1" limit="$2" pid ticks=0 max_ticks rc out had_monitor
   shift 2
   max_ticks=$(( limit * SS_POLL_TICKS_PER_SEC ))
-  out="${TMPDIR:-/tmp}/bionic-sweep.$$.out"
-  : > "$out" 2>/dev/null || out="/dev/null"
+  out="/dev/null"
+  ! bionic_need root.sh bionic_new || ! bionic_new "${TMPDIR:-/tmp}/bionic-sweep" || out="$BIONIC_NEW"
   case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
   # THE FORK'S OWN DIAGNOSTICS ARE NOT THIS HOOK'S OUTPUT (T23, detect.sh's T22 fix
   # one layer up). `set -m` asks the kernel for a new process group, and where that
