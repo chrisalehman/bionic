@@ -48,6 +48,15 @@ declare -F bionic_need >/dev/null 2>&1 || case "${BASH_SOURCE[0]}" in */*) . "${
 
 PLAN_READ_CRITERIA='Test design|Eval design'
 
+# release_row(kind, step, state, counts): a doc row at step 7+ in a state <counts> admits (landed, standing, or any).
+_PLAN_READ_RELEASE_AWK='
+    function release_row(k, s, st, counts) {
+      if (k != "doc" || s !~ /^[0-9]+$/ || s + 0 < 7) return 0
+      if (counts == "landed") return st == "landed"
+      if (counts == "standing") return st != "dropped"
+      return 1
+    }'
+
 # A plan's line ends translated, never deleted: `eol(record, out)` splits one input record into the lines it
 # holds, a trailing CR dropped (CRLF) and each lone CR ending a line, and returns how many. Deleted, a
 # CR-only plan would be one line and every key in it would read as absent. An awk helper, embedded by each
@@ -247,7 +256,7 @@ plan_read_waits() {
   local rows
   rows="$(plan_read_rows "$1" Tasks)" || return 1
   bionic_need units.sh _units_cell_awk || return 2
-  printf '%s\n' "$rows" | awk -F'\t' -v want="${2:-}" -v regno="$(_units_regno "$1")" "$(_units_files_awk)$(_units_cell_awk)"'
+  printf '%s\n' "$rows" | awk -F'\t' -v want="${2:-}" -v regno="$(_units_regno "$1")" "$_PLAN_READ_RELEASE_AWK$(_units_files_awk)$(_units_cell_awk)"'
     function put(i, t,   j) { if (!((i, t) in said)) { said[i, t] = 1; printf "%s\t%s\n", id[i], t } }
     # row(j, o): row i waits on row j by its read o; a row named by two reads is one line naming both.
     function row(j, o) {
@@ -270,7 +279,7 @@ plan_read_waits() {
     }
     END {
       if (want != "" && !(want in at)) exit 1
-      for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7) hasrel = 1
+      for (i = 1; i <= n; i++) if (release_row(knd[i], stp[i])) hasrel = 1
       for (i = 1; i <= n; i++) {
         code[i] = writes_head(fil[i]); m = split(fil[i], a, ",")
         for (k = 1; k <= m; k++) {

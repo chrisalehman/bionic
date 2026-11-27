@@ -1118,10 +1118,10 @@ units_approval_names() {
   else
     rows="$(units_rows "${1:-}" 2>/dev/null)" && waits="$(_units_waits "${1:-}" 2>/dev/null)" || return 0
   fi
-  { printf '%s\n\034\n' "$rows"; printf '%s\n' "$waits"; } | awk -F'\t' -v all="${2:+0}" '
+  { printf '%s\n\034\n' "$rows"; printf '%s\n' "$waits"; } | awk -F'\t' -v all="${2:+0}" "$_PLAN_READ_RELEASE_AWK"'
     $0 == "\034" { w = 1; next }
     !w { s = tolower($10)
-      if ($3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && s != "dropped") hasrel = 1
+      if (release_row($3, $2, s, "standing")) hasrel = 1
       if (s == "pending" || s == "active") { open[$1] = $3; if ($3 == "integrate" && all != "0") print "release" }
       next }
     $2 == "wait" && ($1 in open) && $3 ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ {
@@ -1135,10 +1135,10 @@ units_approval_names() {
 # `units_validate` holds an open plan to the order itself. A test row marked as a whole-run point (`marked`) is a run
 # among the build, never the regression row, so the order skips it.
 units_order() {
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$(_units_cell_awk)"'
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' "$_PLAN_READ_RELEASE_AWK$(_units_cell_awk)"'
     tolower($10) == "dropped" || $2 !~ /^[0-9]+$/ { next }
     $3 == "test" && $2 + 0 <= 5 && reg == "" && !marked($4) { reg = $1 }
-    $3 == "doc" && $2 + 0 >= 7 { rel = 1 }
+    release_row($3, $2) { rel = 1 }
     END { if (reg == "" || !rel) exit 1; print reg }'
 }
 
@@ -1458,7 +1458,7 @@ _units_questions_awk() {
 # read, so a caller judging a copy of a plan hands the plan it was copied from: a copy's own name names no record.
 _units_publish_order() {
   local plan="${1:-}" rec
-  printf '%s\n' "${2:-}" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }' || return 0
+  printf '%s\n' "${2:-}" | awk -F'\t' "$_PLAN_READ_RELEASE_AWK"'release_row($3, $2, $10, "landed") { f = 1 } END { exit !f }' || return 0
   declare -F proof_debt_record >/dev/null 2>&1 || return 0
   rec="$(proof_debt_record "$plan" 2>/dev/null)" && _proof_fields && line_held "$rec" || return 0
   units_record_landings "$rec" | awk -F'\t' '
@@ -1543,14 +1543,14 @@ units_post_readers() {
   # The registered reviews are the run's proofs (`_units_proofs`), read from the origin a copy was made from.
   proofs="$(_units_proofs "${origin:-$plan}")" || return 1
   { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; [ -z "$waits" ] || printf '\035\n%s\n' "$waits"; } \
-    | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+    | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$_PLAN_READ_RELEASE_AWK$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
     $0 == "\034" { p = 1; next }
     $0 == "\035" { p = 2; next }
     p == 2 { post_wait(); next }
     !p { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10 }; next }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
     END {
-      for (r = 1; r <= n; r++) if (knd[r] == "doc" && stp[r] ~ /^[0-9]+$/ && stp[r] + 0 >= 7 && sta[r] == "landed") rel[r] = 1
+      for (r = 1; r <= n; r++) if (release_row(knd[r], stp[r], sta[r], "landed")) rel[r] = 1
       for (j = 1; j <= n; j++) {
         if (knd[j] != "review" || sta[j] == "dropped" || stp[j] !~ /^[0-9]+$/) continue
         ok = 0
@@ -1574,6 +1574,7 @@ units_post_readers() {
 # the question test it shares with the validator.
 _units_sched_awk() {
   _units_questions_awk
+  printf '%s' "$_PLAN_READ_RELEASE_AWK"
   printf '%s' '
     $0 == SUBSEP "rows" { part = 1; next }
     $0 == SUBSEP "facts" { part = 2; next }
@@ -2005,7 +2006,7 @@ _units_sched_awk() {
       readst = ENVIRON["_UNITS_READ_ST"]
       # A PLAN CARRIES A RELEASE when a doc row at Step 7 or later is not dropped (wave-35 T5; A-T5-1).
       hasrel = 0
-      for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && st[i] != "dropped") hasrel = 1
+      for (i = 1; i <= n; i++) if (release_row(knd[i], stp[i], st[i], "standing")) hasrel = 1
       for (i = 1; i <= n; i++) {
         # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
         # taken off and remembered for the unmergeable hold; code[] says the row writes the tracked tree.
@@ -2267,7 +2268,7 @@ units_validate() {
     live="$(_units_live "${origin:-$plan}")" || lrc=1
     st15="$(printf '%s\n' "$live" | awk -F'\t' '$2 != "" { printf "%s=%s ", $1, $2 }')"
     rows15="$(_units_overlay "$live" "$rows")"
-    if printf '%s\n' "$rows15" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }'; then
+    if printf '%s\n' "$rows15" | awk -F'\t' "$_PLAN_READ_RELEASE_AWK"'release_row($3, $2, $10, "landed") { f = 1 } END { exit !f }'; then
       waits="$(_units_waits "$plan")" || waits=""
     fi
   fi
@@ -2277,7 +2278,7 @@ units_validate() {
   fi
   if [ -n "$rows" ]; then
     violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" -v kindw="$(units_kinds)" \
-      -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
+      -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$_PLAN_READ_RELEASE_AWK$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -2405,7 +2406,7 @@ units_validate() {
             if ((id[i] in skip) || stp[i] !~ /^[0-9]+$/ || sta[i] == "dropped") continue
             if (knd[i] == "test") ord[i] = 1
             else if (knd[i] == "review") ord[i] = 2
-            else if (knd[i] == "doc" && stp[i] + 0 >= 7) ord[i] = 3
+            else if (release_row(knd[i], stp[i])) ord[i] = 3
           }
           for (i = 1; i <= n; i++) {
             if (!(i in ord) || ord[i] == 2) continue
