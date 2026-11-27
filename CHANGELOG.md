@@ -161,17 +161,57 @@ check's suite no longer prints an error and passes.
 
 ### Known limits
 
-Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
-
+Stated first because they are what this release leaves on purpose.
+- **The prune's 25,000 is met by one sweep.** Outside the loader sweep the prune rows removed 2,153 characters. Counted over
+  38 rows (the 32 and six more that moved code on purpose), the prune removed 17,460, which is 7,540 short of 25,000. The tree as a whole is
+  39,529 characters of code larger than 2.2.0's. The requirement that the code be 25,000 characters smaller is not met in
+  its plain sense. The person waived it for this release (D31, 2026-11-27), and the next wave opens with a target on the
+  size of the whole codebase.
+- **Seven commands are still over the 10-second bound, as 2.2.0 recorded them.** No record of this run times them again. The
+  failed-command count adds about 3.0 s to the situation report, which was already one of the seven (11.63 s in 2.2.0), and
+  to the scorecard.
+- The landing line can report a pass's width one core too high. One cause found: a runner that has called the gate's end and
+  not yet written its result is counted by the gate as ended and by the drain as running, so an ask made then counts it
+  twice. It moves only the line's `width=` field; every runner is still admitted.
+- A row's landing suites run three times and no run is reused (issue 70).
+- The library's field cleaner drops what follows a byte that is not valid UTF-8.
+- The failed-command classifier reads text. A compound command is read by its last segment; a run of a workspace file by
+  `bash` lands in other; a failing-first run typed without the meant-to-fail word counts as a red suite. A session with no
+  loaded-state file is not counted.
+- The shell has two readers of a field by key in the fields library, `line_value` and `line_field`, which read a line
+  differently; the copy check names `line_value` as the home while the library names `line_field`, and no test holds the
+  two equal.
+- The English list has its home in `english.sh`, and one inline copy stands beside it in the poker's plan part, which
+  prints "a, b, c and N more" where the home prints "a, b and c".
 - A project that stands anywhere under a `.bionic` folder cannot be written by a dispatched writer.
 - The key that a kept fold of the run's log is served under leaves out the proof library, so a copy of the tool whose proof library differs can be served another copy's kept findings until the log is next appended; no gate reads that kept file.
+- In a fresh project, the first session cannot record an approval until Claude Code is restarted, because the session
+  writes its load record only when `.bionic/tmp/` exists at its start, and the refusal names a missing transcript where
+  the load record is what is missing.
+- `ready` runs each suite by its path (`bash tests/<suite>`), not through the project's door (`tests/run.sh --only`), so
+  a suite whose end line comes only from the door stalls the landing (`STALLED`, exit 70) although it is green through
+  the door.
+- The copy check searches by shape for 8 of the 54 concepts that have one home; a copy of any of the other 46 is
+  found only by a review. The close's hand-spelt instant, which the audit found that way, now calls the time library's
+  `iso_now`, and the instant is one of the eight shapes the check searches.
+- For nine of the release's criteria the first failing run was proved by reading the tests and not from a saved log,
+  because the logs were lost with two scratch folders when the machine was restarted.
+- Not in this release, and tentative for 2.4.0: the watcher's two issues (58 and 59, with an outside check that a run is
+  alive), the cache's two edges (the tick's own whole run and a project's regression command), and Code Mode (issue 60).
+
+What this release changed in the limits of 2.2.0, which stand as 2.2.0's entry wrote them except where this says.
+- Gone: a writer that has written its record and committed but not landed is named by a line of the tick; a brief names the
+  landing script; a session logged in only by `CLAUDE_CODE_OAUTH_TOKEN` can dispatch; a sealed run no longer tells the person
+  to type a command behind `!` that is refused when typed; a landing that stalls on a missing summary line names the line;
+  the dispatch page teaches `start`; a derived answer is keyed by the code that derives it.
+- Every other 2.2.0 limit was not read again against this release's code and stands as 2.2.0 wrote it.
 
 ### The landing numbers
 
-`landing-report --rows` at 621db2c6bb7bad50313c625bc3f9fc210bf50940 on 2026-11-27T20:52:51Z:
+`landing-report --rows` at c9cf4301fc3c0b4259a9c6b31bdec3b1a8e310b4 on 2026-11-27T22:15:05Z:
 
 ```
-landings: queue=90 hand=0 git=0 · ready-to-landed median=35.1m p75=155.2m max=4545.1m · runs: green=577 red=29 none=2 discarded=95 red-then-green=0 run=1366 reused=0 absent=0 · waited median=1217s · killed=34
+landings: queue=92 hand=0 git=0 · ready-to-landed median=35.1m p75=152.9m max=4545.1m · runs: green=579 red=29 none=2 discarded=95 red-then-green=0 run=1368 reused=0 absent=0 · waited median=1217s · killed=34
 T1 queue ready=2026-11-22T20:09:40Z landed=2026-11-22T20:34:36Z minutes=24.9 runs=6 waited=992s wait=16.5 prove=8.4 rework=0.0 width=1
   units.test.sh green promised=78s actual=81s ratio=1.04
   reader.test.sh green promised=43s actual=47s ratio=1.09
@@ -960,6 +1000,13 @@ T98 queue ready=2026-11-27T20:15:46Z landed=2026-11-27T20:20:42Z minutes=4.9 run
   speed-counts.test.sh green promised=236s actual=269s ratio=1.14
   proof-at-head.test.sh green promised=77s actual=118s ratio=1.53
   shell-lint.test.sh green promised=33s actual=55s ratio=1.67
+T101 queue ready=2026-11-27T20:47:56Z landed=2026-11-27T20:53:01Z minutes=5.1 runs=3 waited=26s wait=0.4 prove=4.7 rework=0.0 width=8
+  speed-counts.test.sh green promised=215s actual=278s ratio=1.29
+  proof-at-head.test.sh green promised=111s actual=121s ratio=1.09
+  shell-lint.test.sh green promised=54s actual=55s ratio=1.02
+T100 queue ready=2026-11-27T20:59:09Z landed=2026-11-27T22:00:06Z minutes=61.0 runs=2 waited=3558s wait=59.3 prove=1.6 rework=0.0 width=7
+  release-check.test.sh green promised=67s actual=98s ratio=1.46
+  name-scan.test.sh green promised=83s actual=78s ratio=0.94
 ```
 
 ## 2.2.0 — 2026-11-21
