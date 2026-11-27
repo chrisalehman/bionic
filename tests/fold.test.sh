@@ -168,7 +168,6 @@ stub_witness() {  # <file> <name> <return code>
 
 require_helpers drive reason_of index_of stub_witness
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "1: nothing to say — silence, and the status of a turn that passes"
 
 drive "$STUB_QUIET" Stop q1 q2 q3
@@ -176,7 +175,6 @@ expect_status "1a: three quiet functions exit 0" "0" "$FOLD_RC"
 expect_empty "1b: …with nothing on stdout" "$FOLD_OUT"
 expect_empty "1c: …and nothing on stderr" "$FOLD_ERR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "3: blocks before advisories"
 
 drive "$STUB_ADVISE
@@ -191,7 +189,6 @@ expect_true "3c: the refusal line precedes the advisory on the user stream" \
   test "$(awk '/^bionic: /{print NR; exit}' <<<"$FOLD_ERR")" -lt \
        "$(awk '/ADVISORY-ONE/{print NR; exit}' <<<"$FOLD_ERR")"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "7: the return code is the verdict; staged text alone says nothing"
 
 drive 'liar() {
@@ -202,7 +199,6 @@ expect_status "7a: a function that stages a block and returns 0 blocks nothing" 
 expect_absent "7b: …and its staged text is discarded, not leaked into a later verdict" \
   "STAGED-BUT-UNCLAIMED" "$FOLD_OUT$FOLD_ERR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "9: mixed channels — the composed verdict rides the one that carries detail"
 
 # `exit2` has ONE wire and it is the user's: `model_only=no`, so what it gives the model it
@@ -268,7 +264,6 @@ expect_eq "9n: an exit2 beside a duty: the person's exit2 keeps its status and i
   "2|bionic: stop refused — the exit2 fact (fix the exit2)" "$FOLD_RC|$(fd_headline)"
 expect_contains "9o: …and the duty's line still reaches the one wire both readers read" "the duty fact" "$FOLD_ERR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "SAY: a line for the person on the quiet channel rides only a turn that blocked nothing"
 STUB_SAY='sayS() {
   fold_say "SAY-LINE for the person"
@@ -295,7 +290,6 @@ expect_absent "SAY3b …anywhere" "SAY-LINE" "$FOLD_OUT$FOLD_ERR"
 drive "$STUB_SAY_MUTE" Stop sayM
 expect_eq "SAY4: a function that stages a line and returns 0 has said nothing" "" "$FOLD_OUT$FOLD_ERR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "10: advisories alone — in order, on stderr, exit 0"
 
 drive "$STUB_ADVISE
@@ -308,7 +302,6 @@ expect_true "10e: …in the order the functions were named" \
   test "$(awk '/ADVISORY-ONE/{print NR; exit}' <<<"$FOLD_ERR")" -lt \
        "$(awk '/ADVISORY-TWO/{print NR; exit}' <<<"$FOLD_ERR")"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "11: the event is handed on, and the fold reads nothing in it"
 
 # EVENT-AGNOSTIC, ASSERTED (R3, and T23's precondition). The fold passes its first
@@ -323,7 +316,6 @@ drive "$STUB_BLOCK_A" SubagentStop blockA
 expect_contains "11c: a block on any event composes the same way" \
   "REASON-ALPHA" "$(reason_of)"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "12: the model-facing advisory — one hookSpecificOutput object, merged"
 #
 # THE SECOND ADVISORY CHANNEL, and the one T23 needs (ruling R3). `fold_advise`
@@ -412,7 +404,6 @@ expect_contains "12r: …and that document is the refusal" "REASON-ALPHA" "$(rea
 expect_contains "12s: …the displaced advisory is not lost, it degrades to stderr" \
   "CONTEXT-ONE" "$FOLD_ERR"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "13: two blockers on a channel that carries no detail — no reason is deleted"
 #
 # THE DEFECT THIS PINS, found by tests/bash-walls.test.sh section 3 and repaired here.
@@ -526,7 +517,6 @@ expect_contains "13n: …and the knob still shows the second blocker's sentence 
   "the second exit2 fact" "$FOLD_VERBOSE_ERR"
 expect_contains "13n2: …with its detail behind it" "REASON-EXIT2-B for the model" "$FOLD_VERBOSE_ERR"
 
-# ---------------------------------------------------------------------------
 section "14: the stderr capture is private — a planted symlink at its old name is not truncated (security F-2)"
 #
 # `bionic_fold` runs the ONE render in a subshell and captures its stderr to a file, because
@@ -568,7 +558,6 @@ expect_eq "14d: …and the capture the fold made for itself is cleaned up" "0" \
   "$(ls "$T20_TMPC" 2>/dev/null | /usr/bin/grep -c 'bionic-fold\.' || true)"
 rm -rf "$T20_TMPC"
 
-# ─────────────────────────────────────────────────────────────────────────────
 section "15: no capture file, no lost line — the user line reaches stderr when mktemp cannot run (wave-27 T71, S1)"
 #
 # §14's private capture needs a writable TMPDIR. When `mktemp` fails the fold used to point
