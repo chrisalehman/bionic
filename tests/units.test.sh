@@ -44,6 +44,7 @@
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
 #   §KINDS     one list holds the kinds of row, the read-only kinds, and the role each kind draws or is offered; the tag's
 #              rule and the kind words are spelt in that library alone
+#   §LISTS     the measured keys and the debt kinds follow their sources
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1227,5 +1228,15 @@ expect_eq "KD-5 the tag's rule is spelt in one file, the list's library" \
   "payload/scripts/lib/units.sh" "$(kd_spelt 'complexity:[[:space:]]*([[:alpha:]]+)')"
 expect_eq "KD-5b …and the kinds in one line nowhere, so the validator's words are the list's" \
   "" "$(kd_spelt 'build test verify review doc integrate close prototype')"
+
+section "§LISTS — the measured keys and the debt kinds follow their sources"
+LS_S="$BIONIC_HOOKS_DIR/poker/sitrep.sh"; LS_D="${LIB%/*}"; LS_K="duplicate unpinned-pair one-case-abstraction"
+ls_k() { (. "$REPO_ROOT/tests/lib/rehearsal-read.sh"; rt_measured_keys "$1"); }
+awk '1; /^  sitrep_m waste.waiting-on-you /{print "  sitrep_m zz.planted x"}' "$LS_S" > "$SANDBOX/ls.sh"
+expect_eq "LISTS-1 the keys hold tests.cap, and a measure planted in the sheet's calls ends them" "yes|$(ls_k "$LS_S") zz.planted" \
+  "$([[ " $(ls_k "$LS_S") " == *" tests.cap "* ]] && echo yes)|$(ls_k "$SANDBOX/ls.sh")"
+mkdir "$SANDBOX/ls"; sed 's/^\(DEBT_TABLE_KINDS=".*\)"$/\1 planted"/' "$LS_D/debt.sh" > "$SANDBOX/ls/debt.sh"
+expect_eq "LISTS-2 a kind planted in the debt table reaches both lists, hole last" "$LS_K planted|$LS_K planted hole" \
+  "$(BIONIC_LIB="$SANDBOX/ls"; . "$LS_D/proof.sh"; printf '%s|%s' "$PROOF_DEBT_KINDS" "$DEBT_KINDS")"
 
 finish
