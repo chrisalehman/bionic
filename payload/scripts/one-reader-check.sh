@@ -122,7 +122,8 @@ REFUSING="parsers plan_writers shared_types hook_refusals loader_copies unheard_
 HOME_SHAPES='payload/scripts/lib/roster.sh|roster path: use roster_path|tmp/roster-[$]
 payload/scripts/lib/time.sh|pinned clock: use time_now|BIONIC_NOW_EPOC[H]
 payload/scripts/lib/root.sh|preamble: use project_root_or_refuse|cannot resolve the working director[y]
-payload/scripts/lib/root.sh|random name: use bionic_new or bionic_id|[$][{]?RANDO[M]'
+payload/scripts/lib/root.sh|random name: use bionic_new or bionic_id|[$][{]?RANDO[M]
+payload/scripts/lib/time.sh|instant: use iso_now|date -u [+]%Y-%m-%dT%H:%M:%S[Z]'
 # Built by printf, so that no line of this file is the bootstrap line or reads as a guard: each `|` and `.` is an argument.
 BOOT_LINE="$(printf 'declare -F bionic_need >/dev/null 2>&1 %s%s case "${BASH_SOURCE[0]}" in */*) %s "${BASH_SOURCE[0]%%/*}/loader.sh" ;; *) %s ./loader.sh ;; esac' '|' '|' . .)"
 

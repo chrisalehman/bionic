@@ -42,7 +42,7 @@
 #                 home's own file, a key at a fixed place, in a walk from the first cell or only filtering, and a
 #                 suite's line are not counted. tests/lib/lint.sh over a changed file names a copy and its home only
 #                 while the check's list of refusing counts holds that idiom's count.
-#   §ONE-HOME     a merged concept's shape planted outside its home is listed with the home and counted; in the home it is not.
+#   §ONE-HOME     a merged concept's shape (the instant's too) planted outside its home is listed with the home and counted; in the home it is not.
 #   §KEPT         each copy kept by name admits its line in the tree; an entry whose copy is gone is a finding and a
 #                 refusal, while a root that holds no file of an entry does not judge it.
 #   §UNRULED      a log writer of a type the log does not rule, by its call or a pass-through's, or spelt as no word, is refused.
@@ -341,6 +341,7 @@ CR="$S/lone-copies"; mkdir -p "$CR/hooks" "$CR/payload/scripts/lib" "$CR/tests"
 # lookup · 18 a comment naming the flag · 19 an awk reader · 20 a literal key at a fixed place · 21 a shell reader · 22 a
 # word read by blank · 23-24 a literal key at a walked field whose value the line takes · 25 a literal key that only filters
 # · 26-29 a merged concept's shape · 30 a load that tests what it loaded, and a key in a walk from the first cell
+# · 31 a comment quoting the instant's shape · 32 the instant spelled by hand
 cat > "$CR/payload/scripts/lib/c.sh" <<'EOF'
 declare -F foo_x >/dev/null 2>&1 || . "$d/foo.sh"
 if ! declare -F bar_x >/dev/null 2>&1; then
@@ -372,10 +373,13 @@ t() { echo "${BIONIC_NOW_EPOCH:-}"; }
 p() { die "REFUSED — cannot resolve the working directory."; }
 q() { n="x.$RANDOM"; }
 x() { ( . "$d/walls.sh" && declare -F matrix_x ) && awk -F'\t' '{ for (i = 1; i <= NF; i++) if (index($i, "id=") == 1) print substr($i, 4) }'; }
+# the instant is date -u +%Y-%m-%dT%H:%M:%SZ
+z() { w="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; }
 EOF
 # Each idiom in its home's own file, and a suite's guard, which the counts do not read.
 printf '%s\n' 'declare -F foo_x >/dev/null 2>&1 || . "$d/foo.sh"' > "$CR/payload/scripts/lib/loader.sh"
 printf '%s\n' 'git_common_dir() { git -C "$1" rev-parse --git-common-dir; }' 'n="x.$RANDOM"' > "$CR/payload/scripts/lib/root.sh"
+printf '%s\n' 'iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }' > "$CR/payload/scripts/lib/time.sh"
 printf '%s\n' "function line_kv(k,   i) { for (i = 2; i <= NF; i++) if (index(\$i, k \"=\") == 1) return substr(\$i, length(k) + 2); return \"\" }" \
   > "$CR/payload/scripts/lib/fields.sh"
 printf '%s\n' 'declare -F foo_x >/dev/null 2>&1 || . "$d/foo.sh"' > "$CR/tests/t.sh"
@@ -387,7 +391,7 @@ expect_eq "guards on their line, under an if and after the line before, a second
 expect_eq "the lookup is listed by its line, the comment naming the flag is not" "$L1:17" "$(copies git-home)"
 expect_eq "the awk readers, by a handed key or a literal one at a walked field, and the shell reader are listed by line; a key at a fixed place, a key that only filters and a word read by blank are not" \
   "$L1:19 $L1:21 $L1:23 $L1:24" "$(copies field-reader)"
-expect_eq "each is counted and refused: the check exits 1, one line on stderr for each" "6 1 4 rc=1 15" \
+expect_eq "each is counted and refused: the check exits 1, one line on stderr for each" "6 1 4 rc=1 16" \
   "$(count "$CO" load_guards) $(count "$CO" git_homes) $(count "$CO" field_readers) rc=$CRC $(grep -c ' refused — [a-z-]* payload/scripts/lib/c.sh:[0-9]*$' "$S/.cerr")"
 home() { printf '%s\n' "$CO" | awk -F'\t' -v w="$1" '$2 == w { print $3 }'; }
 expect_eq "a guard names its home" "guard: use bionic_need (payload/scripts/lib/loader.sh)" "$(home "$L1:1")"
@@ -405,13 +409,14 @@ OH_ON="$(onehome)"
 sed 's/^REFUSING=.*/REFUSING="parsers"/' "$CHECK" > "$OH/payload/scripts/one-reader-check.sh"
 expect_eq "setup: the copy's list of refusing counts is the only line changed" 1 "$(diff "$CHECK" "$OH/payload/scripts/one-reader-check.sh" | grep -c '^>')"
 expect_eq "with the counts refusing, the lint names each copy in the changed file by line" \
-  "1 4 8 10 11 16 17 19 21 23 24 26 27 28 29" "$(printf '%s\n' "$OH_ON" | awk '{ sub(/.*:/, "", $2); print $2 }' | tr '\n' ' ' | sed 's/ $//')"
+  "1 4 8 10 11 16 17 19 21 23 24 26 27 28 29 32" "$(printf '%s\n' "$OH_ON" | awk '{ sub(/.*:/, "", $2); print $2 }' | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "…naming the home beside the line" "ONEHOME payload/scripts/lib/planted-copies.sh:17 — lookup: use git_common_dir (payload/scripts/lib/root.sh)" "$OH_ON"
 expect_eq "with none of them on the list, the same changed file is named by none" "" "$(onehome)"
 
 section "ONE-HOME"
-expect_eq "a merged concept's shape outside its home is listed by line, and not in the home's own file" "$L1:26 $L1:27 $L1:28 $L1:29" "$(copies home)"
-expect_eq "…naming the home, and counted" "roster path: use roster_path (payload/scripts/lib/roster.sh)|4" "$(home "$L1:26")|$(count "$CO" homes)"
+expect_eq "a merged concept's shape outside its home is listed by line, and not in the home's own file" "$L1:26 $L1:27 $L1:28 $L1:29 $L1:32" "$(copies home)"
+expect_eq "…naming the home, and counted" "roster path: use roster_path (payload/scripts/lib/roster.sh)|5" "$(home "$L1:26")|$(count "$CO" homes)"
+expect_eq "the instant spelled by hand names its home; the comment quoting it is not listed" "instant: use iso_now (payload/scripts/lib/time.sh)|" "$(home "$L1:32")|$(home "$L1:31")"
 
 section "KEPT"
 KEPT="$(sed -n 's/^KEPT_COPIES="\(.*\)"$/\1/p' "$CHECK")"

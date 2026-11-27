@@ -1965,7 +1965,7 @@ co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the def
   rel="$(co_ask reader_q_handoff 2>/dev/null | sed -n 's/^path=//p')"
   case "$rel" in '') CO_HO_FILE="$(handoff_default_of "$PLAN" "$ROOT")" ;; /*) CO_HO_FILE="$rel" ;; *) CO_HO_FILE="$ROOT/$rel" ;; esac
   CO_HO_REL="${CO_HO_FILE#"$ROOT"/}"
-  CO_HO_WRITTEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  CO_HO_WRITTEN="$(iso_now)"
   CO_HO_LOCAL="$(date '+%Y-%m-%d %H:%M %Z')"
   CO_HO_CLOCK="$(date '+%-I:%M %p')"
 }
