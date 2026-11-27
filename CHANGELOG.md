@@ -16,8 +16,8 @@ non-whitespace characters of code against a target of 25,000, by the release che
 sweep, the loader (six rows); the other 26 rows together removed 2,153. Four of the seven families of the prune added code,
 because a new home, its header and the reasons beside it cost more than the copies they replaced. Over the whole release
 the tree is larger than 2.2.0's. `bash tests/lib/release-check.sh --count <rev>` prints tests, then code: `5369032 4433936`
-at `v2.2.0` and `5549790 4472462` at `0a1c8151`, the head before this entry. That is 38,526 more characters of code and
-180,758 more of tests. The code growth sits in rows that were not prune rows, and no sum of them by row was taken. The
+at `v2.2.0` and `5558931 4473465` at `24ce9a53`, the head this entry was last trued at. That is 39,529 more characters of
+code and 189,899 more of tests. The code growth sits in rows that were not prune rows, and no sum of them by row was taken. The
 release makes no command faster. It is a minor release: the plan format stays at `canonical_sdlc_version: 15`, and a run
 begun under 2.2.0 continues under 2.3.0.
 
@@ -102,8 +102,11 @@ Tests grew in every family: the rows added agreement checks, plants and mutants,
   Two lists that were copied, the situation report's measured keys and the debt kinds, are derived from their source.
 - A name the tool makes comes from `bionic_new` or `bionic_id`: the eleven `$RANDOM` sites and 44 lines that joined a
   process number to a name. Two sibling subshells under bash 3.2 draw different names.
-- A kept answer is served only to a process whose proof and units libraries sum the same as those of the process that
-  kept it.
+- A kept answer is served only to a process whose libraries in that answer's key sum the same as those of the process
+  that kept it. A derived answer is keyed by the eighteen libraries its derivations reach, and a test measures that reach
+  from the code and is red while the key's list differs from it. The held facts and a step's kept place are keyed by the
+  reader's five libraries, `fields.sh` among them, and the place by the proof library as well; a test is red while a
+  library that the reader functions they run reach is missing from that list.
 - Test suites borrow no function out of another suite's file: the builders live in libraries under `tests/lib` that both
   load. Six pairs that cannot be merged (a page against code) are held equal by a test, and so are the kept copies: the
   loader stub each hook opens with, and the remover's copies.
@@ -116,7 +119,8 @@ Tests grew in every family: the rows added agreement checks, plants and mutants,
 **A failed command means something is wrong.**
 - The ordinary answers above exit 0. The dispatch page, the survival text and the six role files name no code for an
   answer that exits 0. They teach `BIONIC_EXPECT=red` for a run meant to fail, and that a check which expects no match ends
-  with `|| true`. The set of pages every session loads is 9 bytes smaller.
+  with `|| true`. The eight reason clauses a row of this release cut from the dispatch page, the survival text and the
+  role files are back word for word, and the set of pages every session loads is 739 bytes larger than 2.2.0's.
 - The scorecard counts the failed commands of the run's sessions by kind: refusal, killed, meant-to-fail, red-suite,
   ordinary, check, not-run, other. One table, `SITREP_RED_TABLE` in the situation report's code, classes them, and the first
   matching row wins; it reads the exit, the command's text and the output. On this run's own sessions it counted 304
@@ -160,7 +164,9 @@ check's suite no longer prints an error and passes.
 Stated first because they are what this release leaves on purpose.
 - **The prune's 25,000 is met by one sweep.** Outside the loader sweep the prune rows removed 2,153 characters. Counted over
   38 rows (the 32 and six more that moved code on purpose), the prune removed 17,460, which is 7,540 short of 25,000. The tree as a whole is
-  38,526 characters of code larger than 2.2.0's.
+  39,529 characters of code larger than 2.2.0's. The requirement that the code be 25,000 characters smaller is not met in
+  its plain sense. The person waived it for this release (D31, 2026-11-27), and the next wave opens with a target on the
+  size of the whole codebase.
 - **Seven commands are still over the 10-second bound, as 2.2.0 recorded them.** No record of this run times them again. The
   failed-command count adds about 3.0 s to the situation report, which was already one of the seven (11.63 s in 2.2.0), and
   to the scorecard.
@@ -184,12 +190,11 @@ Stated first because they are what this release leaves on purpose.
 - `ready` runs each suite by its path (`bash tests/<suite>`), not through the project's door (`tests/run.sh --only`), so
   a suite whose end line comes only from the door stalls the landing (`STALLED`, exit 70) although it is green through
   the door.
-- The copy check searches by shape for 7 of the 54 concepts that have one home; a copy of any of the other 47 is
-  found only by a review, as the audit found the close's hand-spelt instant.
+- The copy check searches by shape for 8 of the 54 concepts that have one home; a copy of any of the other 46 is
+  found only by a review. The close's hand-spelt instant, which the audit found that way, now calls the time library's
+  `iso_now`, and the instant is one of the eight shapes the check searches.
 - For nine of the release's criteria the first failing run was proved by reading the tests and not from a saved log,
   because the logs were lost with two scratch folders when the machine was restarted.
-- The release's walk met no landing that had to wait, so the exit 0 of a `ready` that answers `WAITING` is held by the
-  hermetic checks alone.
 - Not in this release, and tentative for 2.4.0: the watcher's two issues (58 and 59, with an outside check that a run is
   alive), the cache's two edges (the tick's own whole run and a project's regression command), and Code Mode (issue 60).
 
@@ -197,7 +202,7 @@ What this release changed in the limits of 2.2.0, which stand as 2.2.0's entry w
 - Gone: a writer that has written its record and committed but not landed is named by a line of the tick; a brief names the
   landing script; a session logged in only by `CLAUDE_CODE_OAUTH_TOKEN` can dispatch; a sealed run no longer tells the person
   to type a command behind `!` that is refused when typed; a landing that stalls on a missing summary line names the line;
-  the dispatch page teaches `start`.
+  the dispatch page teaches `start`; a derived answer is keyed by the code that derives it.
 - Every other 2.2.0 limit was not read again against this release's code and stands as 2.2.0 wrote it.
 
 ### The landing numbers
