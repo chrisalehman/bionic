@@ -202,10 +202,10 @@ What this release changed in the limits of 2.2.0, which stand as 2.2.0's entry w
 
 ### The landing numbers
 
-`landing-report --rows` at 491288370b6674a5e2d7e98baf5f0ae62cc2bc91 on 2026-11-27T19:31:36Z:
+`landing-report --rows` at 1281e76615749f5688514cbc8c8eeb31f7c851e5 on 2026-11-27T19:33:17Z:
 
 ```
-landings: queue=87 hand=0 git=0 · ready-to-landed median=40.5m p75=158.7m max=4545.1m · runs: green=568 red=29 none=2 discarded=95 red-then-green=0 run=1354 reused=0 absent=0 · waited median=1382s · killed=34
+landings: queue=88 hand=0 git=0 · ready-to-landed median=38.2m p75=157.5m max=4545.1m · runs: green=571 red=29 none=2 discarded=95 red-then-green=0 run=1354 reused=0 absent=0 · waited median=1325s · killed=34
 T1 queue ready=2026-11-22T20:09:40Z landed=2026-11-22T20:34:36Z minutes=24.9 runs=6 waited=992s wait=16.5 prove=8.4 rework=0.0 width=1
   units.test.sh green promised=78s actual=81s ratio=1.04
   reader.test.sh green promised=43s actual=47s ratio=1.09
@@ -967,6 +967,25 @@ T69 queue ready=2026-11-27T19:24:24Z landed=2026-11-27T19:26:38Z minutes=2.2 run
 T96 queue ready=2026-11-27T18:57:51Z landed=2026-11-27T19:29:02Z minutes=31.2 runs=2 waited=1754s wait=29.2 prove=1.9 rework=0.0 width=4
   shell-lint.test.sh green promised=58s actual=57s ratio=0.98
   shell-lint.test.sh green promised=59s actual=59s ratio=1.00
+T95 queue ready=2026-11-27T19:20:22Z landed=2026-11-27T19:31:47Z minutes=11.4 runs=18 waited=377s wait=6.3 prove=5.1 rework=0.0 width=5
+  one-reader.test.sh discarded promised=62s actual=- ratio=-
+  handoff-file.test.sh discarded promised=171s actual=- ratio=-
+  shell-lint.test.sh discarded promised=59s actual=- ratio=-
+  release-check.test.sh discarded promised=265s actual=- ratio=-
+  shell-lint.test.sh discarded promised=59s actual=- ratio=-
+  release-check.test.sh discarded promised=326s actual=- ratio=-
+  one-reader.test.sh green promised=62s actual=74s ratio=1.19
+  handoff-file.test.sh green promised=239s actual=97s ratio=0.41
+  shell-lint.test.sh green promised=59s actual=59s ratio=1.00
+  release-check.test.sh green promised=326s actual=133s ratio=0.41
+  one-reader.test.sh discarded promised=59s actual=- ratio=-
+  handoff-file.test.sh discarded promised=60s actual=- ratio=-
+  shell-lint.test.sh discarded promised=38s actual=- ratio=-
+  release-check.test.sh discarded promised=90s actual=- ratio=-
+  one-reader.test.sh green promised=69s actual=76s ratio=1.10
+  handoff-file.test.sh green promised=72s actual=99s ratio=1.38
+  shell-lint.test.sh green promised=41s actual=71s ratio=1.73
+  release-check.test.sh green promised=105s actual=132s ratio=1.26
 ```
 
 ## 2.2.0 — 2026-11-21
