@@ -1704,8 +1704,11 @@ _proof_count_fresh() { [ "${_PROOF_FRESH:-}" = 1 ] || return 0; _proof_count jud
 
 _proof_reader_load() { bionic_need reader.sh reader_facts; }  # -> 0 once lib/reader.sh is loaded
 
-# The files a fold depends on: the reader's libraries, then the run's log, and no other file of its record.
-_PROOF_FACTS_LIBS="reader.sh plan-read.sh log.sh line.sh"
+# The files a fold depends on: the reader's libraries, then the run's log, and no other file of its record. The list
+# holds every library the reader code of a kept fold of the log can read, the facts' and the place's: fields.sh is the
+# field reader the place's questions run (`_READER_AWK` begins with it). tests/speed-counts.test.sh §LIBS measures that
+# reach from the code and is red while a library of it is missing here.
+_PROOF_FACTS_LIBS="reader.sh plan-read.sh log.sh line.sh fields.sh"
 _PROOF_FACTS_LAYOUT="facts+findings+inherited"   # the kept fold's layout, named last in every key
 _PROOF_FACTS_KEY=""; _PROOF_FACTS_LOG=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""; _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""; _PROOF_HELD_FACTS=""
 # The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
@@ -1873,10 +1876,11 @@ _proof_facts_held() {  # <plan> -> 0 with _PROOF_HELD_FOLD its fold's file (empt
 # A sum whose file cannot be read is empty, so what it keys is made at every ask. The reader's libraries are the loaded
 # reader's, else the ones beside this file; units.sh the loaded one, else the one beside; the rest the ones beside. A
 # sum leaves out the path, so a key is the same wherever a process names the same bytes from, and costs the one cksum.
-# _PROOF_DERIVE_LIBS is the reach of the functions handed to `_proof_derive`, beyond the reader's libraries: each library
-# defining a function or awk text they name, transitively, proof.sh first. tests/speed-counts.test.sh §DERIVE-KEY
-# measures that reach from the code and is red while this list differs from it.
-_PROOF_DERIVE_LIBS="proof.sh units.sh alias.sh fields.sh loader.sh prose.sh root.sh roots.sh run.sh scale.sh seal.sh slots.sh time.sh worktree.sh"
+# _PROOF_DERIVE_LIBS is the reach of the functions handed to `_proof_derive`, beyond the reader's libraries (fields.sh
+# among those, summed from the reader's directory, where the reader sources it): each library defining a function or
+# awk text they name, transitively, proof.sh first. tests/speed-counts.test.sh §DERIVE-KEY measures that reach from the
+# code and is red while this list differs from it.
+_PROOF_DERIVE_LIBS="proof.sh units.sh alias.sh loader.sh prose.sh root.sh roots.sh run.sh scale.sh seal.sh slots.sh time.sh worktree.sh"
 _PROOF_DERIVE_LIBSUM=""
 _proof_facts_libsum() {
   [ -z "$_PROOF_FACTS_LIBSUM" ] || return 0

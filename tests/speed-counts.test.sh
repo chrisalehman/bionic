@@ -366,11 +366,16 @@ done
 section "§LIBS: a held fold is served only to a process whose reader's libraries made it"
 # fails-when: a process of a held command that loads another copy of the reader's libraries, one line apart, is served
 # the fold the first copy made instead of folding for itself; or a process of the same copy is not served it; or the
-# libraries are summed more than once a process.
-# The probe, on a copy of the n snapshot, with two copies of the libraries, B's reader.sh one comment line longer: one
-# shell opens the hold, and four processes it starts each ask twice: A, A again, B, and B with no hold (the control).
+# libraries are summed more than once a process; or a process outside a hold whose fields.sh is one line apart is
+# served the place another copy kept; or the facts key's list leaves out a library the folds' reader code reaches.
+# The probe, on a copy of the n snapshot, with three copies of the libraries, B's reader.sh one comment line longer and
+# C's fields.sh: one shell opens the hold, and five processes it starts each ask twice: A, A again, C, B, and B with no
+# hold (the control). C asks before B, while the hold's key is still A's. Then, with no hold, three processes ask the
+# place once: A, A again, C.
 SL_DIR="$TMPROOT/n/libs"; rm -rf "$SL_DIR" && cp -Rp "$TMPROOT/n/snap" "$SL_DIR"
-cp -R "$SC_LIB" "$SL_DIR/libA" && cp -R "$SC_LIB" "$SL_DIR/libB" && printf '\n# a reader one line apart\n' >> "$SL_DIR/libB/reader.sh"
+for SL_C in A B C; do cp -R "$SC_LIB" "$SL_DIR/lib$SL_C"; done
+printf '\n# a reader one line apart\n' >> "$SL_DIR/libB/reader.sh"
+printf '\n# a reader one line apart\n' >> "$SL_DIR/libC/fields.sh"
 SL_RC="$( cd "$SL_DIR/proj" && env TMPDIR="$SL_DIR/tmp" HOME="$SL_DIR/home" bash -c '
     . "$1/libA/proof.sh" || exit 2; proof_hold_begin || exit 2
     w="$1" p="$2"
@@ -378,17 +383,55 @@ SL_RC="$( cd "$SL_DIR/proj" && env TMPDIR="$SL_DIR/tmp" HOME="$SL_DIR/home" bash
       BIONIC_COUNT="$w/$2.count" bash -c ". \"\$1/proof.sh\" || exit 2; _proof_facts \"\$2\" >/dev/null && _proof_facts \"\$2\" >/dev/null" \
         _ "$w/$1" "$p"
     }
-    ask libA a && ask libA a2 && ask libB b && ( unset BIONIC_HELD; ask libB c ); r=$?
-    proof_hold_end; echo "$r"' _ "$SL_DIR" "$SL_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )"
+    ask libA a && ask libA a2 && ask libC d && ask libB b && ( unset BIONIC_HELD; ask libB c ); r=$?
+    proof_hold_end; unset BIONIC_HELD
+    place() {  # <library copy> <asker> -> the asker, a process of its own with no hold, asks the place once
+      BIONIC_COUNT="$w/$2.count" bash -c ". \"\$1/proof.sh\" || exit 2; proof_step_held \"\$2\" >/dev/null" _ "$w/$1" "$p"
+    }
+    [ "$r" -ne 0 ] || { place libA pa && place libA pa2 && place libC pc; r=$?; }
+    echo "$r"' _ "$SL_DIR" "$SL_DIR/proj/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md" 2>&1 )"
 sl_n() { awk -v k="$2" '$1 == k { n++ } END { print n + 0 }' "$SL_DIR/$1.count" 2>/dev/null || echo -; }   # <asker> <kind> -> its count
 sl_of() { printf '%s' "fold $(sl_n "$1" fold) held $(sl_n "$1" held) libs $(sl_n "$1" libs)"; }   # <asker> -> its three counts
-expect_eq "LIBS-0 the probe's four processes each asked twice and exited 0" 0 "$SL_RC"
+expect_eq "LIBS-0 the probe's eight processes each asked and exited 0" 0 "$SL_RC"
 expect_eq "LIBS-1 A, the first asker in the hold, folds the log and sums its libraries once" "fold 1 held 0 libs 1" "$(sl_of a)"
 expect_eq "LIBS-2 a second process of A is served A's fold, summing its own libraries once to know it may be" \
   "fold 0 held 1 libs 1" "$(sl_of a2)"
 expect_eq "LIBS-3 B, whose reader is one line apart, folds for itself in the same hold and is not served A's fold" \
   "fold 1 held 0 libs 1" "$(sl_of b)"
 expect_eq "LIBS-4 CONTROL B with no hold folds, as it does in the hold" 1 "$(sl_n c fold)"
+expect_eq "LIBS-5 C, whose fields.sh is one line apart, folds for itself in the same hold and is not served A's fold" \
+  "fold 1 held 0 libs 1" "$(sl_of d)"
+expect_eq "LIBS-6 with no hold, A reads the log for the place and a second A is served the place A kept, but C, whose fields.sh is one line apart, reads it for itself" \
+  "1 0 1" "$(sl_n pa log) $(sl_n pa2 log) $(sl_n pc log)"
+# dk_reach <lib dir> [root…] -> the libraries the roots' code can read, measured from the code: each defining a function
+# or a top-level `_NAME=` variable that a root names, transitively, comments left out. With no root named, the roots are
+# the functions handed to `_proof_derive`.
+dk_reach() {
+  ( cd "$1" && shift && LC_ALL=C awk -v roots="$*" '
+    BEGIN { nr = split(roots, w, " "); for (i = 1; i <= nr; i++) root[w[i]] = 1 }
+    FNR == 1 { fn = "" }
+    !nr && / _proof_derive [A-Za-z_]/ { n = split($0, w, /[[:space:]]+/); for (i = 1; i + 3 <= n; i++) if (w[i] == "_proof_derive") root[w[i + 3]] = 1 }
+    /^[A-Za-z_][A-Za-z0-9_]*\(\)/ { fn = $0; sub(/\(.*/, "", fn); def[fn] = FILENAME; b[fn] = $0; if ($0 !~ /\{[[:space:]]*(#.*)?$/) fn = ""; next }
+    fn != "" { c = $0; sub(/(^|[[:space:]])#.*/, "", c); b[fn] = b[fn] " " c; if ($0 ~ /^\}/) fn = ""; next }
+    /^_[A-Z][A-Z0-9_]*=/ { v = $0; sub(/=.*/, "", v); if (!(v in def)) { def[v] = FILENAME; b[v] = $0 } }
+    END {
+      for (r in root) if (r in def) { q[++t] = r; seen[r] = 1 }
+      for (h = 1; h <= t; h++) { lib[def[q[h]]] = 1; s = b[q[h]]
+        while (match(s, /[A-Za-z_][A-Za-z0-9_]*/)) { id = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+          if ((id in def) && !(id in seen)) { seen[id] = 1; q[++t] = id } } }
+      for (l in lib) print l }' *.sh | sort | tr '\n' ' ' )
+}
+# The folds' reader code: every reader function the makers of the two kept folds of the run's log name, the facts'
+# (`_proof_facts`, `_proof_facts_held`) and the place's (`proof_step_held`). Their own code is proof.sh's, which the
+# place's key sums beside the reader's libraries.
+SL_ROOTS="$(awk '/^(_proof_facts|_proof_facts_held|proof_step_held)\(\)/ { p = 1 } p { print } p && /^\}/ { p = 0 }' "$SC_LIB/proof.sh" \
+  | grep -oE '(^|[^A-Za-z0-9_])reader_[a-z_]+' | sed 's/^[^r]*//' | sort -u | tr '\n' ' ')"
+SL_REACH="$(dk_reach "$SC_LIB" $SL_ROOTS)"
+expect_contains "LIBS-7 the folds' reader code names the fold and the place's questions" "reader_facts reader_log reader_log_stamp reader_q_approved" "$SL_ROOTS"
+expect_contains "LIBS-8 the measure from them reaches the reader and the field reader its questions run" "fields.sh plan-read.sh reader.sh" "$SL_REACH"
+SL_KEY="$(bash -c '. "$1/proof.sh" && printf "%s\n" $_PROOF_FACTS_LIBS' _ "$SC_LIB" 2>/dev/null | sort | tr '\n' ' ')"
+expect_eq "LIBS-9 the facts key sums every library the folds' reader code can read (key: $SL_KEY)" "" \
+  "$(for l in $SL_REACH; do case " $SL_KEY" in (*" $l "*) ;; (*) printf '%s ' "$l" ;; esac; done)"
 
 section "§TRUST: the log's writer trusts a hold exactly where the facts' reader trusts one"
 # fails-when: lib/log.sh `_log_moved` and lib/proof.sh `_proof_held_dir` part on a directory: a hold the reader trusts
@@ -743,22 +786,6 @@ expect_eq "DK-4 C, whose units.sh is one line apart, computes its own answer in 
   "$(dk_n c) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/c.out" && echo same)"
 expect_eq "DK-5 D, whose fields.sh is one line apart, computes its own answer in the same hold" "1 same" \
   "$(dk_n d) $(cmp -s "$DK_DIR/a.out" "$DK_DIR/d.out" && echo same)"
-# dk_reach <lib dir> -> the libraries a derivation's code can read, measured from the code: each defining a function or
-# a top-level `_NAME=` variable that a function handed to `_proof_derive` names, transitively, comments left out
-dk_reach() {
-  ( cd "$1" && LC_ALL=C awk '
-    FNR == 1 { fn = "" }
-    / _proof_derive [A-Za-z_]/ { n = split($0, w, /[[:space:]]+/); for (i = 1; i + 3 <= n; i++) if (w[i] == "_proof_derive") root[w[i + 3]] = 1 }
-    /^[A-Za-z_][A-Za-z0-9_]*\(\)/ { fn = $0; sub(/\(.*/, "", fn); def[fn] = FILENAME; b[fn] = $0; if ($0 !~ /\{[[:space:]]*(#.*)?$/) fn = ""; next }
-    fn != "" { c = $0; sub(/(^|[[:space:]])#.*/, "", c); b[fn] = b[fn] " " c; if ($0 ~ /^\}/) fn = ""; next }
-    /^_[A-Z][A-Z0-9_]*=/ { v = $0; sub(/=.*/, "", v); if (!(v in def)) { def[v] = FILENAME; b[v] = $0 } }
-    END {
-      for (r in root) if (r in def) { q[++t] = r; seen[r] = 1 }
-      for (h = 1; h <= t; h++) { lib[def[q[h]]] = 1; s = b[q[h]]
-        while (match(s, /[A-Za-z_][A-Za-z0-9_]*/)) { id = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
-          if ((id in def) && !(id in seen)) { seen[id] = 1; q[++t] = id } } }
-      for (l in lib) print l }' *.sh | sort | tr '\n' ' ' )
-}
 DK_REACH="$(dk_reach "$SC_LIB")"
 expect_contains "DK-6 the measure reaches the deriving libraries themselves" "fields.sh line.sh" "$DK_REACH"
 expect_eq "DK-7 the key sums every library a derivation's code can read, the reader's and its own, and no other" "$DK_REACH" \
