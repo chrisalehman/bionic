@@ -90,7 +90,7 @@
 # Exit codes mirror hooks/session-sweeper.sh's verdict verb, because a caller already knows
 # how to branch on this shape:
 #   0 — DISARM or QUIET
-#   1 — NOTIFY (something needs surfacing)
+#   1 — not a decision: NOTIFY exits 0 and prints decision=NOTIFY; an older tick exited 1 on it
 #   2 — usage error, or a refusal (propagated from the sweeper read, or raised here)
 #   3 — no session key
 #
