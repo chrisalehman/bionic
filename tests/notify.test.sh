@@ -166,9 +166,9 @@ Land the fixture's two requirements under the fixture spec's design.
 |---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | REQ-1: the first task. It makes the first requirement true. complexity: standard | approval:release | 30 | REQ-1 | lib/first.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | it does not hold |
 FIXEOF
@@ -227,9 +227,9 @@ Answer the fixture's requirement with a design small enough to read whole.
 |---|---|---|---|
 | first thing | `lib/first.sh` | `card.sh` rows | `tests/first.test.sh` |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | source pin | AC-1.1 the first criterion | static | `grep` | the pin is gone |
 FIXEOF

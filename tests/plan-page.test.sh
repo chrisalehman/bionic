@@ -135,9 +135,9 @@ done
 section "TASK"
 # evp <cell|-> -> the Tasks table, then an Eval design whose one criterion names <cell> in its Task column; `-` writes no column.
 evp() {
-  local h='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |' s='|---|---|---|---|---|---|' r='| REQ-1 | a suite | AC-1 | hermetic | `a.test.sh` | a is red |'
+  local h='| Requirement | Approach | Criterion | Test type | Test | Fails when |' s='|---|---|---|---|---|---|' r='| REQ-1 | a suite | AC-1 | hermetic | `a.test.sh` | a is red |'
   [ "$1" = - ] || { h="$h Task |"; s="${s}---|"; r="$r $1 |"; }
-  printf '## Tasks\n\n%s\n\n## Eval design\n\n%s\n%s\n%s\n' "$NINE" "$h" "$s" "$r"
+  printf '## Tasks\n\n%s\n\n## Test design\n\n%s\n%s\n%s\n' "$NINE" "$h" "$s" "$r"
 }
 for v in T1 9 — '' -; do write_plan "$(evp "$v" | page 15)"; expect_status "a criterion whose Task is '$v' (- for no column) is admitted" 0 "$HOOK_EXIT"; done
 for v in "T99|T99" "T1, 9|9" "T1, T99|T99"; do write_plan "$(evp "${v%|*}" | page 15)"
@@ -168,7 +168,7 @@ done
 P2="$R/.bionic/docs/plans/epic-01-demo/wave-02-y.plan.md"; L2="$R/.bionic/docs/record/wave-02-y/run.log"; mkdir -p "$R/.bionic/docs/specs" "${L2%/*}"; : > "$R/.bionic/docs/specs/r.md"
 { printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nmulti_agent: true\ndeploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n\n## Tasks\n\n'
   printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | One. | — | 30 | REQ-1 | a.sh | — |\n\n'
-  printf '## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n| REQ-1 | x | AC-1 | unit | e | a planted defect |\n\n'
+  printf '## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n| REQ-1 | x | AC-1 | unit | e | a planted defect |\n\n'
 } > "$P2"; printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"
 printf 'run/v1|ev=%s|at=2026-11-01T00:00:00Z\n' 'step|n=1' 'step|n=5' 'step|n=6' 'approval|key=step3|by=f|said=approved' 'proof|ac=AC-1|evidence=record/generic-evidence.md' > "$L2"
 gate; expect_eq "at 15 with no review event, refused for the reviews" "2 bionic: commit refused — a review question is unanswered (record or waive each review)" "$GATE_EXIT ${GATE_SAID%%$'\n'*}"
@@ -352,7 +352,7 @@ epic() { page "$1" | sed -e '/^wave: /d' -e 's/^scale: wave/scale: epic/'; }
 EP14="$(printf '## Waves — shipped\n\n## SDLC State\n\ncurrent: 3\n\n- Step 0: configured at 2026-11-01T00:00:00Z via f "go"\n- Step 2: spec: specs/epic-01-demo/epic.spec.md\n- Step 3: plan: this file; approved-by: f 2026-11-01 "ok"\n\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| E-1 | T1 | discharged | see E-1 | self |\n' | epic 14)"
 printf '%s\n' "$EP14" > "$EP"; printf 'plan=%s\n' "$EP" > "$R/.bionic/tmp/engaged-$SID.state"; write_to "$EP" "$EP14"; gate
 expect_eq "an open epic at 14 is admitted at the write and at the commit" "0|0" "$HOOK_EXIT|$GATE_EXIT"
-printf '## Waves — shipped\n\n## Eval design\n\n| Requirement | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|\n| — | E-1 | T1 | — | — | — |\n' | epic 15 > "$EP"
+printf '## Waves — shipped\n\n## Test design\n\n| Requirement | Criterion | Test type | Test | Fails when | Task |\n|---|---|---|---|---|---|\n| — | E-1 | T1 | — | — | — |\n' | epic 15 > "$EP"
 printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%sZ\n' 'approval|key=step0|by=f|said=go' 0 'step|n=0' 0 'step|n=2' 1 'approval|key=step3|by=f|said=ok' 2 'step|n=3' 3 'proof|ac=E-1|auditor=self' 4 > "$EL"
 write_to "$EP" "$(cat "$EP")"; gate
 expect_eq "the epic at 15: the write is admitted; the commit owes Step 2's approval, which its older homes never held, and no requirements" "0|2|owed at 15: Step 2's approval|" \

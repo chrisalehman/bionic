@@ -178,9 +178,9 @@ canonical_sdlc_version: 15
 | T1 | 4 | build | a library change | — | 10 | REQ-1 | payload/scripts/lib/said.sh | — |
 | T2 | 4 | doc | the release $DOOR_VERSION | — | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | — |$lr
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture run | AC-1.1 | hermetic | \`tests/run.sh\` | the whole run is red |$le
 PLAN

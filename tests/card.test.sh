@@ -445,9 +445,9 @@ Answer the fixture's two requirements with a design small enough to read whole.
 
 - ADR-099 — the fixture ruling: `adrs/epic-99/adr-099-fixture.md` (D1).
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | a source pin and a fixture run | AC-1.1 the first criterion | static | `grep` | the pin is gone |
 | REQ-1 | a source pin and a fixture run | AC-1.2 the second criterion | hermetic | `bash tests/first.test.sh` | it reds |
@@ -481,9 +481,9 @@ fixture branch, with one floor at the integration head.
 | T1 | 4 | build | REQ-1: the first task. The fixture's first task has its own sentence. It also has a detail the card does not show. complexity: standard | — | 30 | REQ-1 | lib/first.sh | — |
 | T2 | 4 | test | REQ-2: the second task. The fixture's second task has one too. complexity: complex | T1 | 45 | REQ-2 | lib/second.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | static | `tests/a.test.sh` | it is wrong |
 | REQ-1 | fixture | AC-1.2 | hermetic | `tests/a.test.sh` | it is wrong |
@@ -954,9 +954,9 @@ Who owns what:
 
 - `adrs/epic-23-bionic-tech-debt/adr-071-code-draws-the-facts-the-model-judges.md` (D6; D7; D8; REQ-1, REQ-3, REQ-4): the card's three owners and the check's rule; written at Step 7.
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | a register with one ask of each kind, one answered | AC-1.1 | hermetic | `asks.test.sh` §WAITS: `ask_waits_on` says user for a decision, an approval and an unanswered waiver, event for a waiver answered no and a finding answered carry; the sheet's `ask:` lines carry `waits=` | the refused waiver reads user, or a line lacks the field |
 | REQ-1 | a register with one ask of each kind, one answered | AC-1.2 | hermetic | `asks.test.sh` §ANSWER: the item stays open with `answer=no`; the finding stays open with `answer=carry event=T9 lands` and closes when T9's landing is recorded | the item closes at the answer, or reads no answer |
@@ -1397,9 +1397,9 @@ Land the flock app's six tasks so the Step-3 card has a ledger to read.
 | T5 | 5 | test | Prove the join. The join is proved after the four. DETAIL-EPSILON runs after the four. complexity: standard | T1, T2, T3, T4 | 45 | REQ-2 | tests/d.test.sh | — |
 | T6 | 4 | build | Prove the pair. The pair is proved after two. DETAIL-ZETA runs after two. complexity: standard | T1, T2 | 45 | REQ-1 | tests/e.test.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | hermetic | \`tests/a.test.sh\` | the fixture is wrong |
 FIXEOF
@@ -1729,9 +1729,9 @@ The sync first, then the view.
 - ${RISK_LONG}
 - A short one.
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture run | AC-1.1 the sync | unit | \`bash tests/sync.test.sh\` | it reds |
 FIXEOF
@@ -1816,9 +1816,9 @@ The flock syncs two phones and draws one list.
 
 - ADR-001 — the sync ruling: \`adrs/epic-99/adr-001-sync.md\` (D1).
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | two phones meet and compare lists | AC-1.1 the sync | unit | \`bash tests/sync.test.sh\` | it reds |
 | REQ-1 | two phones meet and compare lists | AC-1.2 the merge | hermetic | \`bash tests/merge.test.sh\` | it reds |
@@ -1965,9 +1965,9 @@ Land the flock app's three tasks so the Step-3 card has sentences to read.
 | T2 | 4 | build | Join the rows. ${TS_LONG} TS-DETAIL-TWO the join keeps table order. complexity: complex | T1 | 45 | REQ-1, REQ-2 | lib/b.sh | — |
 | T3 | 5 | test | Prove the join. The join is proved on two rows · complexity: standard | T2 | 30 | REQ-2 | tests/b.test.sh | — |
 
-## Eval design
+## Test design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+| Requirement | Approach | Criterion | Test type | Test | Fails when |
 |---|---|---|---|---|---|
 | REQ-1 | fixture | AC-1.1 | hermetic | \`tests/a.test.sh\` | the fixture is wrong |
 FIXEOF
@@ -2264,7 +2264,7 @@ ur_world() {  # <label> [<edit> [<last step>]] -> UR_P: the fixture at 15, its S
   for n in $(seq 6 "${3:-8}"); do ur_poke "$p" current "$n"; [ "$UR_RC" = 0 ] || { printf '      current %s said: %s\n' "$n" "$UR_OUT"; return 1; }; done
   UR_P="$p"
 }
-ur_born() {  # <root> -> the person's edit: a second criterion joins the Eval design, under the first, naming no task
+ur_born() {  # <root> -> the person's edit: a second criterion joins the Test design, under the first, naming no task
   awk '{ print } /^\| — \| fixture \| AC-1 \|/ { print "| — | fixture | AC-2 | unit | `bash tests/x.test.sh` | a second planted defect |" }' \
     "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
   seal_fixture "$1/$PLAN_REL" "$1/$LOG_REL"

@@ -1077,7 +1077,7 @@ or_plan() {  # <discharged|pending: the second theme's one criterion> -> the pag
     printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
     printf '| T1 | 4 | build | The release row: 1.27.0. It names the release it cuts · complexity: standard | — | 30 | REQ-1 | lib/t1.sh | — |\n'
     printf '| T2 | 4 | build | Fix vs. the old path. It does the second thing · complexity: standard | — | 30 | REQ-2 | lib/t2.sh | — |\n'
-    printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+    printf '\n## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|\n'
     printf '| REQ-1 | x | AC-1.1 | hermetic | `tests/a.test.sh` | b |\n| REQ-1 | x | AC-1.2 | hermetic | `tests/a.test.sh` | b |\n| REQ-2 | x | AC-2.1 | hermetic | `tests/a.test.sh` | b |\n'
     printf '\n## Not Doing\n\n- nothing\n'
   } > "$OR_P"

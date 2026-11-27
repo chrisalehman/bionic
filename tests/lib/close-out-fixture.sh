@@ -238,7 +238,7 @@ co_page15() {
     pass == 1 { next }
     FNR == 1 { for (i = 1; i <= cur; i++) ev("step|n=" i); if (by != "") ev("approval|key=step3|by=" by "|said=" said) }
     FNR == 1 || hd { if ($0 == "---" && hd) printf "%s", hk; hd = ($0 != "---" || FNR == 1); sub(/^canonical_sdlc_version: 14$/, "canonical_sdlc_version: 15"); print; next }
-    /^## / && sec == "Verification Matrix" { print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
+    /^## / && sec == "Verification Matrix" { print "## Test design\n\n| Requirement | Approach | Criterion | Test type | Test | Fails when |\n|---|---|---|---|---|---|"
       for (i = 1; i <= na; i++) { a = ac[i]; e = k[a, "tier-run:"]; printf "| — | fixture | %s | %s | %s | %s |\n", a, tr[a], (e == "" ? "—" : "`" e "`"), k[a, "fails-when:"]
         if (st[a] == "discharged") ev("proof|ac=" a "|evidence=" k[a, "evidence:"] "|auditor=" au[a]) }
       print ""; next }
