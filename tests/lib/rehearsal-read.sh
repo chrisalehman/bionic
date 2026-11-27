@@ -101,13 +101,12 @@ rt_elapsed_min() {  # <sheet> -> the minutes clock.elapsed says have passed sinc
 }
 rt_taskline() { printf '%s\n' "$1" | /usr/bin/grep "^task: id=$2 "; }   # <sheet> <id> -> its task line
 
-# rt_measured_keys <sitrep.sh> -> the sheet's measured keys, space-joined, in the order the sheet's own gather calls
-# `sitrep_m` for them: the sheet and this list cannot disagree, because the list is read from the calls.
+# rt_measured_keys <sitrep.sh> -> the keys of its sitrep_m calls, in order
 rt_measured_keys() { sed -n 's/^[[:space:]]*sitrep_m \([a-z][a-z.-]*\) .*/\1/p' "$1" | paste -sd' ' -; }
 RT_MEASURED="$(rt_measured_keys "$BIONIC_HOOKS_DIR/poker/sitrep.sh")"
 rt_unlabelled() {  # <sheet> -> each measured key with no line, or whose line names no measure, unit and source (or basis)
   local k l
-  [ -n "$RT_MEASURED" ] || { printf 'no-measured-keys '; return 0; }   # an empty list would pass every sheet
+  [ -n "$RT_MEASURED" ] || { printf 'no-measured-keys '; return 0; }
   for k in $RT_MEASURED; do
     l="$(printf '%s\n' "$1" | /usr/bin/grep -F "$k: " | head -1)"
     case "$l" in "$k: "?*' — '?*' · unit: '*' · source: '?*|"$k: "?*' — '?*' · unit: '*' · basis: '?*) ;; *) printf '%s ' "$k" ;; esac

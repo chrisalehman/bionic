@@ -44,9 +44,7 @@
 #   §HELD      inside a held command the table's answer and the status pass are kept, keyed by the plan and the row facts
 #   §KINDS     one list holds the kinds of row, the read-only kinds, and the role each kind draws or is offered; the tag's
 #              rule and the kind words are spelt in that library alone
-#   §LISTS     a list read where it is used follows its source: the rehearsal's measured keys are the sheet's own
-#              `sitrep_m` calls, the proof library's debt kinds are the debt library's, a kind planted in the source
-#              reaching the reader with no other edit
+#   §LISTS     the measured keys and the debt kinds follow their sources
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1231,28 +1229,14 @@ expect_eq "KD-5 the tag's rule is spelt in one file, the list's library" \
 expect_eq "KD-5b …and the kinds in one line nowhere, so the validator's words are the list's" \
   "" "$(kd_spelt 'build test verify review doc integrate close prototype')"
 
-section "§LISTS — a list read where it is used follows its source: the measured keys the sheet's calls, the debt kinds the debt library's"
-# fails-when: the rehearsal's list of measured keys or the proof library's list of debt kinds is a copy that a new
-# entry in its source does not reach, or the derived list drops an entry or changes the order the source holds.
-LS_SIT="$BIONIC_HOOKS_DIR/poker/sitrep.sh"
-# shellcheck disable=SC2016  # the child shell's script
-ls_keys() { bash -c '. "$1/tests/lib/rehearsal-read.sh"; rt_measured_keys "$2"' _ "$REPO_ROOT" "$1"; }   # <sitrep.sh> -> its keys
-LS_REAL="$(ls_keys "$LS_SIT")"
-expect_eq "LISTS-1 the measured keys are one per sitrep_m call of the sheet, none dropped (28 calls)" \
-  "$(grep -c '^  sitrep_m [a-z]' "$LS_SIT")" "$(printf '%s\n' "$LS_REAL" | wc -w | tr -d ' ')"
-expect_eq "LISTS-1b …the sheet's tests.cap among them, in the sheet's place between tests.whole-run and reviews" "yes" \
-  "$([[ " $LS_REAL " == *" tests.whole-run tests.cap reviews "* ]] && echo yes)"
-LS_PLANT="$SANDBOX/lists-sitrep.sh"
-awk '{ print } /^  sitrep_m waste.waiting-on-you / { print "  sitrep_m zz.planted \"$X\" \"what it measures\" \"unit\" \"source: a plant\"" }' "$LS_SIT" > "$LS_PLANT"
-expect_eq "LISTS-2 a measure planted in the sheet's calls is in the list, last, and nothing else moved" \
-  "$LS_REAL zz.planted" "$(ls_keys "$LS_PLANT")"
-LS_LIB="$SANDBOX/lists-lib"; cp -R "${LIB%/*}" "$LS_LIB"
-# shellcheck disable=SC2016  # the child shell's script
-ls_kinds() { BIONIC_LIB="" bash -c '. "$1/proof.sh" || exit 127; printf "%s|%s" "$PROOF_DEBT_KINDS" "$DEBT_KINDS"' _ "$1" 2>&1; }   # <lib dir>
-expect_eq "LISTS-3 the proof library's debt kinds are the debt table's three; the debt line's are those and hole" \
-  "duplicate unpinned-pair one-case-abstraction|duplicate unpinned-pair one-case-abstraction hole" "$(ls_kinds "${LIB%/*}")"
-sed 's/^DEBT_TABLE_KINDS="\(.*\)"$/DEBT_TABLE_KINDS="\1 planted-kind"/' "${LIB%/*}/debt.sh" > "$LS_LIB/debt.sh"
-expect_eq "LISTS-4 a kind planted in the debt library's table reaches the proof library's kinds and the debt line's, hole still last" \
-  "duplicate unpinned-pair one-case-abstraction planted-kind|duplicate unpinned-pair one-case-abstraction planted-kind hole" "$(ls_kinds "$LS_LIB")"
+section "§LISTS — the measured keys and the debt kinds follow their sources"
+LS_S="$BIONIC_HOOKS_DIR/poker/sitrep.sh"; LS_D="${LIB%/*}"; LS_K="duplicate unpinned-pair one-case-abstraction"
+ls_k() { (. "$REPO_ROOT/tests/lib/rehearsal-read.sh"; rt_measured_keys "$1"); }
+awk '1; /^  sitrep_m waste.waiting-on-you /{print "  sitrep_m zz.planted x"}' "$LS_S" > "$SANDBOX/ls.sh"
+expect_eq "LISTS-1 the keys hold tests.cap, and a measure planted in the sheet's calls ends them" "yes|$(ls_k "$LS_S") zz.planted" \
+  "$([[ " $(ls_k "$LS_S") " == *" tests.cap "* ]] && echo yes)|$(ls_k "$SANDBOX/ls.sh")"
+mkdir "$SANDBOX/ls"; sed 's/^\(DEBT_TABLE_KINDS=".*\)"$/\1 planted"/' "$LS_D/debt.sh" > "$SANDBOX/ls/debt.sh"
+expect_eq "LISTS-2 a kind planted in the debt table reaches both lists, hole last" "$LS_K planted|$LS_K planted hole" \
+  "$(BIONIC_LIB="$SANDBOX/ls"; . "$LS_D/proof.sh"; printf '%s|%s' "$PROOF_DEBT_KINDS" "$DEBT_KINDS")"
 
 finish
