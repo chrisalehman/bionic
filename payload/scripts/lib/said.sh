@@ -289,3 +289,51 @@ SAID_SIDS
   [ "$short" -eq 0 ] || return 3
   return 1
 }
+
+# THE RUN'S FAILED COMMANDS, read from the same transcripts (hooks/poker/sitrep.sh `sitrep_red_count` classes them):
+#     said_transcripts [<plan>]   the transcript of each session user_said reads for <plan>, witnessed the same way, and
+#                                 after each the transcripts of the agents it dispatched, in its own subagents directory
+#                                 (lib/stop.sh `_sg_subagents_dir`, that path's one home); one path per line
+#     said_failed <transcript>... one record per Bash call whose result the CLI marked an error, NUL-terminated, its four
+#                                 fields joined by 0x1f: the exit (N of the result's `Exit code N`, else -), 1 when the
+#                                 call was interrupted else 0, the command, the result's text
+# A result is joined to its call by tool_use_id, so a Bash call that passed and a failed call of another tool are no
+# records. One pass over each file: grep keeps the lines that can hold a Bash call or a failed result, which the CLI
+# writes compact, and jq parses only those, so the cost is one read of the bytes.
+said_transcripts() {
+  local sid tx f
+  command -v jq >/dev/null 2>&1 && _said_need_slug && bionic_need stop.sh _sg_subagents_dir || return 2
+  _SAID_ROOT="$(_said_root)" || _SAID_ROOT=""
+  while IFS= read -r sid; do
+    case "$sid" in ''|*' '*) continue ;; esac
+    tx="$(_said_transcript "$sid" "$_SAID_ROOT")" && [ -r "$tx" ] || continue
+    printf '%s\n' "$tx"
+    for f in "$(_sg_subagents_dir "$tx")"/*.jsonl; do
+      if [ -f "$f" ] && [ ! -L "$f" ]; then printf '%s\n' "$f"; fi
+    done
+  done <<SAID_RUN
+$(_said_sessions "${1:-}")
+SAID_RUN
+  return 0
+}
+
+said_failed() {
+  [ "$#" -gt 0 ] || return 0
+  command -v jq >/dev/null 2>&1 || return 2
+  LC_ALL=C grep -hF -e '"name":"Bash"' -e '"is_error":true' -- "$@" 2>/dev/null | jq -njR '
+    def text: if type == "string" then . elif type == "array" then [.[] | objects | .text? | strings] | join("\n") else "" end;
+    foreach (inputs | fromjson? | objects) as $e ({};
+      if $e.type == "assistant" then
+        reduce ($e.message.content[]? | objects | select(.type == "tool_use" and .name == "Bash")) as $u
+          (.; .[($u.id // "") | tostring] = (($u.input.command // "") | tostring))
+      else . end;
+      . as $ids
+      | if $e.type == "user" then
+          $e.message.content[]? | objects | select(.type == "tool_result" and .is_error == true)
+          | (.tool_use_id // "" | tostring) as $id | select($ids | has($id))
+          | (.content | text) as $t
+          | [(($t | capture("^Exit code (?<c>[0-9]+)") | .c) // "-"),
+             (if ($t | test("^\\[(Request|Tool call) interrupted")) or ([$e.toolUseResult | objects | .interrupted == true] | any) then "1" else "0" end),
+             $ids[$id], $t] | join("\u001f") + "\u0000"
+        else empty end)'
+}

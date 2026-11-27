@@ -3,7 +3,8 @@
 One file per kind of entry a session transcript (`<config>/projects/<slug>/<session-id>.jsonl`)
 carries, cut to the keys that tell the kinds apart. The key sets were measured on CLI 2.1.291
 transcripts on 2026-10-07; every value — ids, paths, names and every word of text — is invented.
-`tests/session-poker.test.sh` §MOVE assembles a transcript from these files.
+`tests/session-poker.test.sh` §MOVE assembles a transcript from these files; `tests/sitrep.test.sh` §RED-KINDS reads
+`failed-bash.jsonl`, whose result text follows the CLI's `Exit code N` first line (CLI 2.1.332).
 
 | file | kind | what marks it |
 |---|---|---|
@@ -23,6 +24,7 @@ transcripts on 2026-10-07; every value — ids, paths, names and every word of t
 | `slash-bare.jsonl` | a slash command typed WITHOUT arguments | `type: user`, no `origin`, empty `<command-args>`; refused, as a prompt with no origin is |
 | `sdk.jsonl` | a prompt a program sent (print mode, the SDK) | `type: user`, `promptSource: sdk`, `turnOrigin: sdk`, `entrypoint: sdk-cli`, no `origin`; refused, as a prompt with no origin is |
 | `sidechain.jsonl` | a dispatched agent's prompt | `isSidechain: true`, no `origin` |
+| `failed-bash.jsonl` | Bash calls and their results, as `said_failed` reads them | each pair a `tool_use` named `Bash` and its `tool_result` with `is_error: true`, its id `toolu_<kind>` naming the kind of the red table (hooks/poker/sitrep.sh `SITREP_RED_TABLE`) it is counted under, one per kind in the table's order; then `toolu_decoy-passed`, a Bash call that passed, and `toolu_decoy-edit`, a failed Edit, neither a failed command |
 
 Put line (added at T35): the shape of a live put read from this project's own transcript (CLI 2.1.291): an
 `assistant` entry, `isSidechain: false`, one `tool_use` content block with `name: Bash` and `input` holding

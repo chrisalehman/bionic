@@ -551,6 +551,97 @@ decisions_all() {
     done
   } | LC_ALL=C sort -t "$tab" -k1,1 -k2,2n -k3,3 | cut -f4-
 }
+# ---------------------------------------------------------------- the failed commands, by kind
+#
+# THE RED TABLE. A failed command is a Bash call of the run's sessions or their agents whose result the CLI marked an
+# error (lib/said.sh `said_failed` over `said_transcripts`), and it counts under the kind of the FIRST row whose test it
+# meets: the classifier walks the rows as they stand, so their order is the rule, each test may take every row above it
+# as not met, and tests/sitrep.test.sh §RED-KINDS reads this same table. A row is `<kind>|<the value its test reads>|<the
+# test>`. A test reads the command's text, its exit, whether it was interrupted and the result's text, nothing else;
+# which segment of a compound set the exit cannot be told without pipefail, so a pipe is read by its last segment.
+SITREP_RED_TABLE='refusal|PreToolUse:Bash hook error;bionic: |the failure came from a hook: the result text starts PreToolUse:Bash hook error, or with the bionic: words a hook denies with
+killed|128|exit 128+n (137, 143, 130), or the call interrupted
+meant-to-fail|red|the text runs the door with a meant-to-fail declaration (BIONIC_EXPECT=red), and the exit says the suite passed (1, through the shim)
+red-suite|suite|the text runs the door or a suite without a declaration, and the exit is 1
+ordinary|BIONIC_ORDINARY_TABLE|the last segment is a bionic verb and the exit is in the ordinary set of that verb, with its word in the output: a row of BIONIC_ORDINARY_TABLE, its command, code and words
+check|grep diff cmp test [ ls find ps pgrep|the last segment of the pipeline or list is a check: grep, diff, cmp, test/[, ls, find, ps, pgrep, and the exit is 1
+not-run|126 127 128|git exit 128, command not found 127, not executable 126
+other|-|anything else'
+
+# _sitrep_red_segs -> SR_FLAST, the last segment of the command in SR_FX, and SR_FCLASS, its class by lib/cmd-class.sh's
+# reading; read once a command, when a test first needs them.
+_sitrep_red_segs() {
+  local l
+  [ "$SR_FSEG" = no ] || return 0
+  l="$(cmd_class_lines "$SR_FX" 2>/dev/null)"
+  cmd_class_pick "$l"; SR_FCLASS="$CMD_CLASS_PICKED"
+  l="${l##*$'\n'}"; SR_FLAST="${l#*	}"; SR_FSEG=yes
+}
+
+# _sitrep_red_runs <the ordinary table's command> <segment> -> 0 when the segment runs it: its fixed words in order, a
+# word met by a token that is it or ends in /<it>; <…>, […] and ... stand for what the caller typed.
+_sitrep_red_runs() {
+  local w t i=0 ws toks
+  [ -n "$2" ] || return 1
+  read -r -a ws <<< "$1"; read -r -a toks <<< "$2"
+  for w in "${ws[@]}"; do
+    case "$w" in '<'*|'['*|'...') continue ;; esac
+    while [ "$i" -lt "${#toks[@]}" ]; do
+      t="${toks[$i]}"; i=$((i + 1))
+      case "$t" in "$w"|*/"$w") continue 2 ;; esac
+    done
+    return 1
+  done
+}
+
+# _sitrep_red_meets <kind> <value> -> 0 when the failed command in SR_FC (exit, or -), SR_FI (interrupted), SR_FX (text)
+# and SR_FT (result) meets that row's test.
+_sitrep_red_meets() {
+  local v c w ws
+  case "$1" in
+    refusal) ws="$2"; while [ -n "$ws" ]; do v="${ws%%;*}"; case "$SR_FT" in "$v"*) return 0 ;; esac
+               [ "$ws" != "$v" ] || break; ws="${ws#*;}"; done ;;
+    killed) [ "$SR_FI" = 1 ] || { [ "$SR_FC" != - ] && [ "$SR_FC" -gt "$2" ]; }; return ;;
+    meant-to-fail) [ "$SR_FC" = 1 ] && [ "$(cmd_expect "$SR_FX")" = "$2" ]; return ;;
+    red-suite) [ "$SR_FC" = 1 ] && _sitrep_red_segs && [ "$SR_FCLASS" = "$2" ]; return ;;
+    ordinary)
+      while IFS='|' read -r _ v c w _; do
+        [ "$c" = "$SR_FC" ] && [ -n "$w" ] && case "$SR_FT" in *"$w"*) _sitrep_red_segs; _sitrep_red_runs "$v" "$SR_FLAST" && return 0 ;; esac
+      done <<< "${!2}" ;;
+    check) [ "$SR_FC" = 1 ] && _sitrep_red_segs && [ -n "$SR_FLAST" ] || return 1
+      read -r -a ws <<< "$SR_FLAST"
+      for v in "${ws[@]}"; do case "$v" in [A-Za-z_]*=*|'!'|'{'|'('|then|do|else) continue ;; esac; break; done
+      case " $2 " in *" ${v##*/} "*) return 0 ;; esac ;;
+    not-run) case " $2 " in *" $SR_FC "*) return 0 ;; esac ;;
+    other) return 0 ;;
+  esac
+  return 1
+}
+
+# sitrep_red_count <plan> -> `<n>: <kind> <n>, …`, every kind of SITREP_RED_TABLE in its order, over the run's failed
+# commands; `not measured: …` when no transcript of the run's sessions can be read. A command no row claims counts in
+# <n> alone, so a table that lost its last row says so in the sum.
+sitrep_red_count() {
+  local rec i m=0 n=0 k v out="" line plan="$1"
+  local -a kinds vals counts
+  if ! bionic_need said.sh said_failed || ! bionic_need cmd-class.sh cmd_expect || ! bionic_need refuse.sh refuse_ordinary; then
+    printf 'not measured: lib/said.sh, lib/cmd-class.sh or lib/refuse.sh cannot be loaded'; return 0
+  fi
+  # the transcripts are the positional parameters: an empty array is unbound under set -u in bash 3.2, "$@" is not
+  set --
+  while IFS= read -r line; do [ -z "$line" ] || set -- "$@" "$line"; done <<< "$(said_transcripts "$plan" 2>/dev/null)"
+  if [ "$#" -eq 0 ]; then printf "not measured: no transcript of the run's sessions can be read"; return 0; fi
+  while IFS='|' read -r k v _; do kinds[$m]="$k"; vals[$m]="$v"; counts[$m]=0; m=$((m + 1)); done <<< "$SITREP_RED_TABLE"
+  while IFS= read -r -d '' rec; do
+    SR_FC="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"; SR_FI="${rec%%$'\x1f'*}"; rec="${rec#*$'\x1f'}"
+    SR_FX="${rec%%$'\x1f'*}"; SR_FT="${rec#*$'\x1f'}"; SR_FSEG=no; n=$((n + 1))
+    for ((i = 0; i < m; i++)); do
+      if _sitrep_red_meets "${kinds[$i]}" "${vals[$i]}"; then counts[$i]=$((counts[$i] + 1)); break; fi
+    done
+  done < <(said_failed "$@")
+  for ((i = 0; i < m; i++)); do out="${out:+$out, }${kinds[$i]} ${counts[$i]}"; done
+  printf '%s: %s' "$n" "$out"
+}
 # ---------------------------------------------------------------- the run's scorecard
 #
 # THE SCORECARD (wave-38 T15; D26 "a release's efficiency claim is a printed scorecard; human time is always its own
@@ -649,7 +740,7 @@ scorecard_report() {  # <plan> <project root> -> the eight lines; rc 0
 #   work.planned · work.added · work.dropped · work.landed · work.left · work.width · work.task-time
 #   pace.time-used · pace.work-landed · close.chain · close.predicted · close.unscaled · close.waits-on-you
 #   tests.suites-run · tests.suites-total · tests.whole-run · tests.cap · reviews · findings.open
-#   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
+#   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.failed-commands · waste.waiting-on-you
 #   run.so-far: <n> acts taken by hand · <m> open asks      the release card's line too (`sitrep_so_far`)
 #   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
 #   mapped by id: <n> criteria name no requirement in the Requirement cell, read by their dotted id ·
@@ -1620,10 +1711,11 @@ SITREP_RUNNING
   SG_X_RUNS="$((rd + rk)) of $((rg + rr + rn + rd + rk))"
   if [ -n "$idle_min" ]; then SG_X_IDLE="$idle_min min"; else SG_X_IDLE="not measured: the fill record gave no idle minutes"; fi
   SG_X_WAIT="$(sitrep_waiting "$plan" "$root" "$rows" "$now" "$SG_ASKS")"
+  SG_X_FAILED="$(sitrep_red_count "$plan")"
   # the scorecard's three lines at close, each from the measurements above, never a ratio of unlike units
   SG_PACE="$SG_P_WORK of the live work's sized minutes landed, in $SG_P_TIME of the forecast time"
   SG_CORRECT="suites run $SG_T_RUN; whole run $SG_T_WHOLE; reviews $SG_T_REVIEWS; $SG_T_FINDINGS open $(english_noun "$SG_T_FINDINGS" finding findings)"
-  SG_WASTE="dropped $SG_W_DROPPED; $SG_X_RUNS suite runs discarded; $SG_X_IDLE ready and unstarted; $SG_X_WAIT waiting on you"
+  SG_WASTE="dropped $SG_W_DROPPED; $SG_X_RUNS suite runs discarded; $SG_X_IDLE ready and unstarted; $SG_X_WAIT waiting on you; failed commands $SG_X_FAILED"
   # the goals, each status the one function's
   SG_GOAL="$(plan_goal_paragraph "$plan")"
   SG_GOAL_LINES=""; SG_GOAL_MAP=""; g=0; m=0; k=0; u=0
@@ -1712,6 +1804,7 @@ sitrep_sheet() {
   sitrep_m waste.dropped "$SG_W_DROPPED" "the tasks dropped, as work.dropped" "count, sized minutes" "source: the rows with status dropped"
   sitrep_m waste.runs-discarded "$SG_X_RUNS" "the suite runs thrown away" "count of all suite runs" "source: the landing record and the gate"
   sitrep_m waste.ready-unstarted "$SG_X_IDLE" "the minutes a ready task sat while the machine had room" "minutes" "source: the fill record"
+  sitrep_m waste.failed-commands "$SG_X_FAILED" "the run's Bash commands that failed, each under the first test of the red table it meets" "count, then a count per kind in the table's order" "source: the transcripts of the run's sessions and of their agents"
   sitrep_m waste.waiting-on-you "$SG_X_WAIT" "the minutes a task waited on an ask, overlaps counted once" "minutes, and which asks" "source: the register's opened and closed times; a decision with no opened time, its first put in the design ledger"
   [ -z "${SG_SO_FAR:-}" ] || printf '%s\n' "$SG_SO_FAR"
   printf '%s' "$SG_GOAL_LINES"
