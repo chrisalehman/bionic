@@ -159,6 +159,20 @@ the readers in a UTF-8 locale. Several suite checks that bounded a wait by a sto
 a slow machine or a busy one. Two records of the tests are trued: the census cites only rows its suites hold, and the release
 check's suite no longer prints an error and passes.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: flag at 50746820 by T68, 2026-11-27T18:42:45Z (`critic-adversarial.md`)
+- structure review, whole: flag at 50746820 by T68, 2026-11-27T18:42:48Z (`critic-structure.md`)
+- evidence review, whole: fail at 50746820 by T67, 2026-11-27T18:50:06Z (`auditor-evidence.md`)
+- adversarial review, piece: flag at c0ecca8c by T68-r2, 2026-11-27T20:52:07Z (`critic-adversarial-r2.md`)
+- structure review, piece: flag at c0ecca8c by T68-r2, 2026-11-27T20:52:20Z (`critic-structure-r2.md`)
+- adversarial review, piece: flag at c9cf4301 by T68-r3, 2026-11-27T22:08:56Z (`critic-adversarial-r3.md`)
+- structure review, piece: flag at c9cf4301 by T68-r3, 2026-11-27T22:09:09Z (`critic-structure-r3.md`)
+- evidence review, piece: fail at c9cf4301 by T67-r2, 2026-11-27T22:13:12Z (`auditor-evidence-r2.md`)
+- evidence review, piece: pass at b9c4f1c3 by T67-r3, 2026-11-27T23:13:28Z (`auditor-evidence-r3.md`)
+
 ### Known limits
 
 Stated first because they are what this release leaves on purpose.
